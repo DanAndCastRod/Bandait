@@ -1,0 +1,29 @@
+name: bandait
+description: A real-time synchronization system for musicians.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web_socket_channel: ^2.4.0
+  rxdart: ^0.27.7
+  logging: ^1.2.0
+  uuid: ^4.0.0
+  get_it: ^7.6.0
+  injectable: ^2.3.0
+  json_annotation: ^4.8.0
+  freezed_annotation: ^2.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  build_runner: ^2.4.6
+  injectable_generator: ^2.4.1
+  json_serializable: ^6.7.1
+  freezed: ^2.4.1
+  mockito: ^5.4.2
