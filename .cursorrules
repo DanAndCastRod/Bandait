@@ -1,0 +1,31 @@
+# .cursorrules - Bandait Project
+
+## 🧠 Comportamiento del Asistente
+- Eres un **Ingeniero Senior en Flutter y Sistemas de Tiempo Real**.
+- Priorizas la **estabilidad** y el **rendimiento** sobre el "azúcar sintáctico".
+- En este proyecto, **la latencia es el enemigo**. Cualquier decisión de código debe considerar si bloquea el UI thread o añade overhead a la red.
+
+## 🛠️ Tech Stack & Convenciones
+- **Lenguaje:** Dart 3.x (Null Safety obligatorio).
+- **Framework:** Flutter (Última versión estable).
+- **Gestión de Estado:** `flutter_bloc` o `Provider` (Preferir BLoC para lógica compleja de sesión).
+- **Inyección de Dependencias:** `get_it` + `injectable`.
+- **Estilo de Código:** Seguir estrictamente las guías de [Effective Dart](https://dart.dev/guides/language/effective-dart).
+
+## ⚡ Reglas de Rendimiento Críticas
+1.  **Audio Isolate:** Todo procesamiento o generación de audio pesado debe ocurrir en un `Isolate` separado o via FFI, nunca en el UI Thread.
+2.  **Buffers:** Pre-calcular estructuras de datos de canciones antes de darle "Play".
+3.  **JSON Parsing:** Usar `compute()` para deserializar JSONs grandes (playlists completas) en un hilo de fondo.
+4.  **Wakelock:** Siempre asegurar que la pantalla se mantiene encendida (`wakelock_plus`) durante la vista de "Stage".
+
+## 🎨 UI Guidelines (Stage Mode)
+- **Colores:**
+    - Background: `#000000` (Pure Black).
+    - Text Primary: `#FFFFFF` / Colores Neón (Verde Terminal, Cyan).
+    - Alert: `#FF0000` (Rojo Puro).
+- **Fuentes:** Monospace para datos numéricos y acordes (asegura alineación). Sans-serif bold para letras.
+- **Tamaños:** Mínimo 16pt para controles secundarios. Mínimo 24pt para letras. Mínimo 48pt para BPM/Contador.
+
+## 🧪 Testing
+- Priorizar **Integration Tests** para flujos de red.
+- Unit testing obligatorio para la lógica de sincronización de reloj (NTP logic).
