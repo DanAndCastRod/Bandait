@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Leader Tablet Dashboard V2</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Noto+Sans:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#00aaff",
+              "background-light": "#f5f7f8",
+              "background-dark": "#0f1c23", // Keeping config but overriding in inline styles for specific 'Matte Charcoal' request
+              "gear-black": "#0A0A0A",
+              "gear-panel": "#1A1A1A",
+              "gear-border": "#333333",
+              "alert-red": "#FF0000",
+            },
+            fontFamily: {
+              "display": ["Space Grotesk", "sans-serif"],
+              "body": ["Noto Sans", "sans-serif"],
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "9999px", "sm": "4px"},
+            boxShadow: {
+                'led-glow': '0 0 10px rgba(0, 170, 255, 0.5)',
+                'inner-panel': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.6)',
+                'btn-press': 'inset 0 4px 8px rgba(0,0,0,0.5)',
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        /* Custom scrollbar for setlist */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        /* Waveform Animation Simulation */
+        @keyframes pulse-wave {
+            0%, 100% { height: 40%; opacity: 0.5; }
+            50% { height: 90%; opacity: 1; }
+        }
+        .wave-bar {
+            animation: pulse-wave 2s infinite ease-in-out;
+        }
+        .wave-bar:nth-child(odd) { animation-duration: 1.5s; }
+        .wave-bar:nth-child(3n) { animation-duration: 1.2s; }
+        .wave-bar:nth-child(4n) { animation-duration: 2.2s; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-gear-black text-[#CCCCCC] font-display min-h-screen flex flex-col overflow-hidden selection:bg-primary selection:text-black">
+<!-- Top Status Bar -->
+<header class="flex items-center justify-between px-4 py-2 border-b border-gear-border bg-gear-black h-12 shrink-0 z-10">
+<div class="flex items-center gap-4">
+<div class="flex items-center text-primary gap-2">
+<span class="material-symbols-outlined text-[20px]">graphic_eq</span>
+<span class="text-xs font-bold tracking-[0.2em] uppercase text-white">Live Link <span class="text-primary">Pro</span></span>
+</div>
+<div class="h-4 w-px bg-gear-border"></div>
+<h1 class="text-white text-sm font-bold tracking-wide uppercase">Neon Lights - 120 BPM</h1>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-bold tracking-widest text-neutral-500 uppercase">Master Clock</span>
+<span class="text-primary font-mono text-sm font-bold bg-[#0f1d24] px-2 py-0.5 rounded border border-gear-border shadow-inner-panel">21:45:03</span>
+</div>
+<div class="flex items-center gap-3 text-neutral-400">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">wifi</span>
+<span class="text-[10px] font-bold">5G</span>
+</div>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-green-500">battery_full</span>
+<span class="text-[10px] font-bold">98%</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Dashboard Grid -->
+<main class="flex-1 grid grid-cols-12 grid-rows-[1fr_auto] gap-3 p-3 h-[calc(100vh-3rem)]">
+<!-- Central Waveform Module (Top Left) -->
+<section class="col-span-8 row-span-1 bg-gear-panel rounded-sm border border-gear-border flex flex-col relative overflow-hidden group shadow-inner-panel">
+<div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50"></div>
+<!-- Header overlay -->
+<div class="flex justify-between items-center p-4 z-10">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse shadow-led-glow"></span>
+<span class="text-xs font-bold tracking-widest text-neutral-400">WAVEFORM OUT 1/2</span>
+</div>
+<div class="flex gap-4">
+<div class="text-right">
+<span class="block text-[10px] text-neutral-500 uppercase tracking-wider">Elapsed</span>
+<span class="text-xl font-bold text-white leading-none font-mono">03:42</span>
+</div>
+<div class="text-right">
+<span class="block text-[10px] text-neutral-500 uppercase tracking-wider">Remaining</span>
+<span class="text-xl font-bold text-neutral-500 leading-none font-mono">-00:33</span>
+</div>
+</div>
+</div>
+<!-- Visualizer Area -->
+<div aria-label="Audio waveform visualization showing amplitude over time" class="flex-1 relative flex items-center px-4 w-full">
+<!-- Grid lines -->
+<div class="absolute inset-0 w-full h-full" style="background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px); background-size: 40px 40px;"></div>
+<!-- The Waveform (simulated with CSS flex) -->
+<div class="flex items-end justify-between w-full h-32 gap-[2px] opacity-80 z-0 mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);">
+<!-- Generating bars -->
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[20%]"></div>
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[40%]"></div>
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[30%]"></div>
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[60%]"></div>
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[45%]"></div>
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[80%]"></div>
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[50%]"></div>
+<div class="w-1 bg-neutral-600 rounded-t-sm h-[30%]"></div>
+<div class="w-1 bg-primary rounded-t-sm h-[60%] shadow-led-glow"></div>
+<div class="w-1 bg-primary rounded-t-sm h-[90%] shadow-led-glow"></div>
+<div class="w-1 bg-primary rounded-t-sm h-[75%] shadow-led-glow"></div>
+<div class="w-1 bg-primary rounded-t-sm h-[85%] shadow-led-glow"></div>
+<div class="w-1 bg-primary rounded-t-sm h-[50%] shadow-led-glow"></div> <!-- Playhead area -->
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[40%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[30%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[20%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[60%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[40%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[25%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[10%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[15%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[35%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[45%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[60%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[30%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[20%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[25%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[40%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[50%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[60%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[30%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[20%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[15%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[40%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[55%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[35%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[20%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[40%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[60%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[30%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[20%]"></div>
+<div class="w-1 bg-neutral-700 rounded-t-sm h-[25%]"></div>
+</div>
+<!-- Playhead & Markers -->
+<div class="absolute top-0 bottom-0 left-[35%] w-0.5 bg-primary z-10 shadow-[0_0_15px_rgba(0,170,255,1)]">
+<div class="absolute -top-1 -translate-x-1/2 text-primary">
+<span class="material-symbols-outlined text-[16px] rotate-180">arrow_drop_down</span>
+</div>
+</div>
+<!-- Loop Marker Start -->
+<div class="absolute top-8 bottom-8 left-[15%] w-0 border-l border-dashed border-neutral-500 z-10 opacity-70 group-hover:opacity-100 transition-opacity">
+<div class="absolute -top-6 -left-3 bg-neutral-800 border border-neutral-600 px-1 py-0.5 rounded text-[10px] font-bold text-neutral-300">LOOP A</div>
+</div>
+<!-- Loop Marker End -->
+<div class="absolute top-8 bottom-8 left-[65%] w-0 border-l border-dashed border-neutral-500 z-10 opacity-70 group-hover:opacity-100 transition-opacity">
+<div class="absolute -top-6 -left-3 bg-neutral-800 border border-neutral-600 px-1 py-0.5 rounded text-[10px] font-bold text-neutral-300">LOOP B</div>
+</div>
+</div>
+<!-- Song Structure Hint -->
+<div class="h-8 bg-[#0f1518] border-t border-gear-border flex items-center px-4 relative">
+<div class="flex-1 flex h-2 bg-neutral-800 rounded-sm overflow-hidden">
+<div class="bg-neutral-600 w-[15%] border-r border-black"></div> <!-- Intro -->
+<div class="bg-primary/20 w-[20%] border-r border-black relative"><span class="absolute inset-0 bg-primary/20 animate-pulse"></span></div> <!-- Verse 1 -->
+<div class="bg-neutral-600 w-[15%] border-r border-black"></div> <!-- Chorus -->
+<div class="bg-neutral-700 w-[20%] border-r border-black"></div> <!-- Verse 2 -->
+<div class="bg-neutral-600 w-[15%] border-r border-black"></div> <!-- Chorus -->
+<div class="bg-neutral-800 w-[15%]"></div> <!-- Outro -->
+</div>
+<div class="ml-4 text-[10px] font-bold text-neutral-500 uppercase">Verse 1</div>
+</div>
+</section>
+<!-- Right Sidebar Stack -->
+<aside class="col-span-4 row-span-1 flex flex-col gap-3">
+<!-- Sync Health Module -->
+<div class="bg-gear-panel rounded-sm border border-gear-border flex flex-col p-4 shadow-inner-panel h-1/2 overflow-y-auto">
+<div class="flex items-center justify-between mb-3 border-b border-neutral-800 pb-2">
+<span class="text-xs font-bold tracking-widest text-neutral-400">SYNC HEALTH</span>
+<span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+</div>
+<div class="flex flex-col gap-2">
+<!-- Member Item -->
+<div class="flex items-center justify-between p-2 bg-[#121212] rounded border border-transparent hover:border-neutral-700 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-neutral-500 text-[18px]">music_note</span>
+<div>
+<p class="text-xs font-bold text-white leading-none">DRUMS</p>
+<p class="text-[10px] text-neutral-500 font-mono mt-0.5">IP: 192.168.1.102</p>
+</div>
+</div>
+<div class="text-right">
+<span class="text-xs font-mono font-bold text-green-400">2ms</span>
+<div class="w-12 h-1 bg-neutral-800 rounded-full mt-1 overflow-hidden">
+<div class="bg-green-500 h-full w-[10%]"></div>
+</div>
+</div>
+</div>
+<!-- Member Item -->
+<div class="flex items-center justify-between p-2 bg-[#121212] rounded border border-transparent hover:border-neutral-700 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-neutral-500 text-[18px]">piano</span>
+<div>
+<p class="text-xs font-bold text-white leading-none">KEYS</p>
+<p class="text-[10px] text-neutral-500 font-mono mt-0.5">IP: 192.168.1.104</p>
+</div>
+</div>
+<div class="text-right">
+<span class="text-xs font-mono font-bold text-yellow-500">48ms</span>
+<div class="w-12 h-1 bg-neutral-800 rounded-full mt-1 overflow-hidden">
+<div class="bg-yellow-500 h-full w-[60%]"></div>
+</div>
+</div>
+</div>
+<!-- Member Item -->
+<div class="flex items-center justify-between p-2 bg-[#2a1a1a] rounded border border-red-900/30">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-red-500 text-[18px] animate-pulse">warning</span>
+<div>
+<p class="text-xs font-bold text-red-100 leading-none">BASS</p>
+<p class="text-[10px] text-red-400/70 font-mono mt-0.5">Connection unstable</p>
+</div>
+</div>
+<div class="text-right">
+<span class="text-xs font-mono font-bold text-red-500">120ms</span>
+<div class="w-12 h-1 bg-neutral-800 rounded-full mt-1 overflow-hidden">
+<div class="bg-red-500 h-full w-full"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Quick Controls Module -->
+<div class="bg-gear-panel rounded-sm border border-gear-border flex flex-col p-4 shadow-inner-panel h-1/2 relative">
+<span class="text-xs font-bold tracking-widest text-neutral-400 mb-3 block">QUICK CONTROLS</span>
+<div class="grid grid-cols-2 gap-3 h-full pb-2">
+<!-- Play Button -->
+<button class="col-span-1 bg-[#222] hover:bg-[#2a2a2a] active:bg-[#1a1a1a] active:translate-y-0.5 active:shadow-inner rounded border-b-4 border-black border-t border-l border-r border-neutral-700 flex flex-col items-center justify-center gap-2 group transition-all">
+<span class="material-symbols-outlined text-4xl text-green-500 group-active:text-green-400 shadow-led-glow rounded-full">play_arrow</span>
+<span class="text-xs font-bold text-white tracking-wider">PLAY</span>
+</button>
+<!-- Stop Button -->
+<button class="col-span-1 bg-[#222] hover:bg-[#2a2a2a] active:bg-[#1a1a1a] active:translate-y-0.5 active:shadow-inner rounded border-b-4 border-black border-t border-l border-r border-neutral-700 flex flex-col items-center justify-center gap-2 group transition-all">
+<span class="material-symbols-outlined text-4xl text-neutral-400 group-hover:text-white group-active:text-white">stop</span>
+<span class="text-xs font-bold text-neutral-400 tracking-wider">STOP</span>
+</button>
+<!-- Next Track (Full Width) -->
+<button class="col-span-2 bg-[#222] hover:bg-[#2a2a2a] active:bg-[#1a1a1a] active:translate-y-0.5 active:shadow-inner rounded border-b-4 border-black border-t border-l border-r border-neutral-700 flex items-center justify-center gap-2 group transition-all h-14">
+<span class="text-sm font-bold text-white tracking-wider">NEXT TRACK</span>
+<span class="material-symbols-outlined text-xl text-primary group-hover:translate-x-1 transition-transform">skip_next</span>
+</button>
+</div>
+</div>
+</aside>
+<!-- Bottom Setlist Carousel -->
+<section class="col-span-12 h-24 bg-[#121212] rounded-sm border border-gear-border flex items-center px-2 relative">
+<div class="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-gear-black to-transparent z-10 pointer-events-none"></div>
+<div class="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gear-black to-transparent z-10 pointer-events-none"></div>
+<div class="flex gap-3 overflow-x-auto hide-scrollbar w-full px-2 snap-x">
+<!-- Passed Song -->
+<div class="snap-start shrink-0 w-48 h-16 bg-[#1a1a1a] border border-neutral-800 rounded flex flex-col justify-center px-4 opacity-50 select-none">
+<p class="text-[10px] font-bold text-neutral-500">01 — 110 BPM</p>
+<p class="text-sm font-bold text-neutral-400 truncate">Intro / Soundcheck</p>
+<p class="text-[10px] text-neutral-600 font-mono">Cm</p>
+</div>
+<!-- Active Song -->
+<div class="snap-start shrink-0 w-56 h-16 bg-gradient-to-br from-[#1a1a1a] to-[#222] border-l-4 border-primary border-y border-r border-neutral-700 rounded flex flex-col justify-center px-4 relative shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+<div class="absolute right-2 top-2 w-2 h-2 bg-primary rounded-full shadow-led-glow animate-pulse"></div>
+<p class="text-[10px] font-bold text-primary">02 — 120 BPM</p>
+<p class="text-lg font-bold text-white truncate">Neon Lights</p>
+<p class="text-[10px] text-neutral-400 font-mono">F# Minor</p>
+</div>
+<!-- Upcoming Song -->
+<div class="snap-start shrink-0 w-48 h-16 bg-[#1a1a1a] border border-neutral-700 hover:border-neutral-500 rounded flex flex-col justify-center px-4 cursor-pointer transition-colors group">
+<p class="text-[10px] font-bold text-neutral-500 group-hover:text-neutral-400">03 — 95 BPM</p>
+<p class="text-sm font-bold text-neutral-300 truncate group-hover:text-white">Deep Dive</p>
+<p class="text-[10px] text-neutral-600 font-mono group-hover:text-neutral-500">Am</p>
+</div>
+<!-- Upcoming Song -->
+<div class="snap-start shrink-0 w-48 h-16 bg-[#1a1a1a] border border-neutral-800 hover:border-neutral-600 rounded flex flex-col justify-center px-4 cursor-pointer transition-colors">
+<p class="text-[10px] font-bold text-neutral-500">04 — 128 BPM</p>
+<p class="text-sm font-bold text-neutral-400 truncate">Electric Soul</p>
+<p class="text-[10px] text-neutral-600 font-mono">Em</p>
+</div>
+<!-- Upcoming Song -->
+<div class="snap-start shrink-0 w-48 h-16 bg-[#1a1a1a] border border-neutral-800 hover:border-neutral-600 rounded flex flex-col justify-center px-4 cursor-pointer transition-colors">
+<p class="text-[10px] font-bold text-neutral-500">05 — 80 BPM</p>
+<p class="text-sm font-bold text-neutral-400 truncate">Slow Burn</p>
+<p class="text-[10px] text-neutral-600 font-mono">G Maj</p>
+</div>
+</div>
+</section>
+</main>
+<!-- Panic Button Overlay -->
+<div class="fixed bottom-6 right-6 z-50">
+<button class="w-20 h-20 rounded-full bg-alert-red border-[6px] border-[#3a0000] shadow-[0_10px_30px_rgba(255,0,0,0.4)] flex items-center justify-center group active:scale-95 active:shadow-none transition-all cursor-pointer relative overflow-hidden">
+<!-- Gloss Effect -->
+<div class="absolute top-0 left-0 w-full h-1/2 bg-white opacity-10 rounded-t-full pointer-events-none"></div>
+<div class="flex flex-col items-center">
+<span class="material-symbols-outlined text-3xl text-white font-bold drop-shadow-md">emergency_home</span>
+<span class="text-[8px] font-black text-[#5e0000] uppercase tracking-tighter mt-[-2px]">PANIC</span>
+</div>
+</button>
+</div>
+</body></html>

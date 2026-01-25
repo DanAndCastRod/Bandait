@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#40ff1a",
+                        "background-light": "#f2f2f2",
+                        "background-dark": "#0c0c0d",
+                        "surface-dark": "#1a1a1c",
+                        "border-dark": "#2d2d2f",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        .waveform-bar {
+            width: 3px;
+            background-color: #2d2d2f;
+            border-radius: 1px;
+        }
+        .waveform-bar.active {
+            background-color: #40ff1a;
+            box-shadow: 0 0 8px rgba(64, 255, 26, 0.6);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 2px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0c0c0d;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #2d2d2f;
+        }
+        .glow-border {
+            box-shadow: inset 0 0 10px rgba(64, 255, 26, 0.1);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display text-white selection:bg-primary selection:text-black">
+<div class="flex flex-col h-screen max-w-md mx-auto border-x border-border-dark overflow-hidden">
+<!-- TopAppBar -->
+<header class="flex items-center bg-background-light dark:bg-background-dark p-4 border-b border-border-dark justify-between z-10">
+<div class="text-white flex size-10 shrink-0 items-center justify-center hover:bg-white/10 rounded-full transition-colors">
+<span class="material-symbols-outlined">chevron_left</span>
+</div>
+<div class="flex flex-col items-center">
+<h2 class="text-white text-sm font-bold leading-tight tracking-tight uppercase">Neon Dreams</h2>
+<span class="text-[10px] text-primary tracking-[0.2em] font-medium">STUDIO MIX V2</span>
+</div>
+<button class="bg-primary px-3 py-1.5 rounded-sm text-black text-xs font-bold leading-normal tracking-wider hover:opacity-90 transition-opacity">
+                EXPORT LRC
+            </button>
+</header>
+<!-- Editor Mode Header -->
+<div class="bg-surface-dark/50 border-b border-border-dark flex items-center justify-between px-4 py-1.5">
+<span class="text-primary text-[10px] font-bold tracking-[0.3em]">REC MODE: ACTIVE</span>
+<span class="text-white/40 text-[10px] font-mono uppercase tracking-widest">Buffer: 12ms</span>
+</div>
+<!-- Main Split-View Editor -->
+<main class="flex-1 flex overflow-hidden">
+<!-- Left Pane: Lyrics List -->
+<section class="w-1/2 border-r border-border-dark flex flex-col overflow-hidden">
+<div class="bg-background-dark p-2 border-b border-border-dark">
+<span class="text-[10px] text-white/50 uppercase font-bold tracking-tighter">Source Text</span>
+</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-0">
+<!-- Synced Item -->
+<div class="flex items-start gap-3 bg-primary/10 px-3 py-3 border-b border-primary/20 relative group">
+<div class="absolute left-0 top-0 bottom-0 w-0.5 bg-primary"></div>
+<div class="flex flex-col gap-1">
+<p class="text-primary text-xs font-bold font-mono">[00:12.45]</p>
+<p class="text-white text-sm font-medium leading-snug">I'm walking on the edge</p>
+</div>
+</div>
+<!-- Next to sync -->
+<div class="flex items-start gap-3 bg-surface-dark/30 px-3 py-3 border-b border-border-dark">
+<div class="flex flex-col gap-1 opacity-100">
+<p class="text-white/20 text-xs font-bold font-mono">[--:--.--]</p>
+<p class="text-white text-sm font-medium leading-snug">Beneath the city lights</p>
+</div>
+</div>
+<!-- Upcoming -->
+<div class="flex items-start gap-3 bg-transparent px-3 py-3 border-b border-border-dark/50">
+<div class="flex flex-col gap-1 opacity-40">
+<p class="text-white/10 text-xs font-bold font-mono">[--:--.--]</p>
+<p class="text-white text-sm font-medium leading-snug">Searching for a sign</p>
+</div>
+</div>
+<div class="flex items-start gap-3 bg-transparent px-3 py-3 border-b border-border-dark/50">
+<div class="flex flex-col gap-1 opacity-40">
+<p class="text-white/10 text-xs font-bold font-mono">[--:--.--]</p>
+<p class="text-white text-sm font-medium leading-snug">Through the digital haze</p>
+</div>
+</div>
+<div class="flex items-start gap-3 bg-transparent px-3 py-3 border-b border-border-dark/50">
+<div class="flex flex-col gap-1 opacity-40">
+<p class="text-white/10 text-xs font-bold font-mono">[--:--.--]</p>
+<p class="text-white text-sm font-medium leading-snug">Broken echoes fade</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Pane: Timestamping Tool -->
+<section class="w-1/2 flex flex-col bg-background-dark items-center justify-between p-4">
+<div class="w-full text-center">
+<span class="text-[10px] text-white/50 uppercase font-bold tracking-widest block mb-4">Current Target</span>
+<div class="bg-surface-dark border border-border-dark p-3 rounded-sm mb-4">
+<p class="text-primary text-xs font-mono mb-1">WAITING...</p>
+<p class="text-white text-sm font-medium italic">"Beneath the city lights"</p>
+</div>
+</div>
+<!-- Mark Beat Button -->
+<button class="group relative flex flex-col items-center justify-center size-32 rounded-full border-2 border-primary/20 hover:border-primary transition-all duration-300 active:scale-95 bg-primary/5">
+<div class="absolute inset-0 rounded-full bg-primary/10 blur-xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<span class="material-symbols-outlined text-primary text-4xl mb-1">timer</span>
+<span class="text-primary text-xs font-bold tracking-[0.2em] uppercase">Mark Beat</span>
+</button>
+<div class="w-full space-y-2 mt-4">
+<div class="flex justify-between items-center text-[10px] font-mono text-white/40 border-t border-border-dark pt-4">
+<span>LAST STAMP</span>
+<span class="text-primary">00:12.45</span>
+</div>
+<div class="flex justify-between items-center text-[10px] font-mono text-white/40">
+<span>CONFIDENCE</span>
+<span>98%</span>
+</div>
+</div>
+</section>
+</main>
+<!-- Audio Section -->
+<footer class="bg-background-dark border-t border-border-dark pb-8">
+<!-- Waveform View -->
+<div class="h-16 w-full px-4 flex items-center justify-center gap-[2px] mb-4 overflow-hidden relative">
+<div class="absolute inset-y-0 left-1/2 w-[1px] bg-primary/50 z-10 shadow-[0_0_8px_#40ff1a]"></div>
+<!-- Simulated Waveform Bars -->
+<div class="waveform-bar h-4"></div><div class="waveform-bar h-6"></div><div class="waveform-bar h-10"></div><div class="waveform-bar h-12"></div>
+<div class="waveform-bar h-8"></div><div class="waveform-bar h-10"></div><div class="waveform-bar h-6"></div><div class="waveform-bar h-4"></div>
+<div class="waveform-bar h-10 active"></div><div class="waveform-bar h-14 active"></div><div class="waveform-bar h-12 active"></div><div class="waveform-bar h-8 active"></div>
+<div class="waveform-bar h-10 active"></div><div class="waveform-bar h-16 active"></div><div class="waveform-bar h-12 active"></div><div class="waveform-bar h-8 active"></div>
+<div class="waveform-bar h-6 active"></div><div class="waveform-bar h-4"></div><div class="waveform-bar h-10"></div><div class="waveform-bar h-12"></div>
+<div class="waveform-bar h-8"></div><div class="waveform-bar h-10"></div><div class="waveform-bar h-6"></div><div class="waveform-bar h-4"></div>
+<div class="waveform-bar h-8"></div><div class="waveform-bar h-10"></div><div class="waveform-bar h-6"></div><div class="waveform-bar h-4"></div>
+</div>
+<!-- Playback Timer -->
+<div class="flex justify-between px-6 mb-4">
+<span class="text-primary font-mono text-lg font-bold">00:15.32</span>
+<span class="text-white/30 font-mono text-lg">03:42.12</span>
+</div>
+<!-- Precision Transport Controls -->
+<div class="flex items-center justify-center gap-8">
+<button class="text-white/60 hover:text-white flex flex-col items-center gap-1 active:text-primary">
+<span class="material-symbols-outlined text-2xl">replay_5</span>
+<span class="text-[8px] font-bold tracking-widest uppercase">-5S</span>
+</button>
+<button class="size-16 rounded-sm bg-white flex items-center justify-center text-black hover:bg-primary transition-colors active:scale-95 shadow-[0_0_15px_rgba(255,255,255,0.2)]">
+<span class="material-symbols-outlined text-4xl fill-1">pause</span>
+</button>
+<button class="text-white/60 hover:text-white flex flex-col items-center gap-1 active:text-primary">
+<span class="material-symbols-outlined text-2xl">forward_5</span>
+<span class="text-[8px] font-bold tracking-widest uppercase">+5S</span>
+</button>
+</div>
+</footer>
+<!-- iOS Home Indicator Area -->
+<div class="h-6 bg-background-dark"></div>
+</div>
+</body></html>

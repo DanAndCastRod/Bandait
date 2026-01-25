@@ -9,7 +9,7 @@ El despliegue no es el final, es el comienzo del soporte. Bandait debe ser distr
 
 ## 📅 Desglose de Sprints
 
-### Sprint 11: Infraestructura de CI/CD y Compliance
+### Sprint 13: Infraestructura de CI/CD y Compliance
 **Objetivo:** Automatizar la construcción y cumplir con los requisitos legales/técnicos de las tiendas.
 
 #### Tareas
@@ -27,7 +27,7 @@ El despliegue no es el final, es el comienzo del soporte. Bandait debe ser distr
     - Definir "Data Safety Form" (Google) y "App Privacy Details" (Apple).
     - Justificación de permisos sensibles (Red local, Micrófono, Background Audio).
 
-### Sprint 12: Beta Testing y Public Launch
+### Sprint 14: Beta Testing y Public Launch
 **Objetivo:** Validar con usuarios reales y liberar la versión 1.0.
 
 #### Tareas

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#40ff1a",
+                        "background-light": "#f2f2f2",
+                        "background-dark": "#000000","surface-dark": "#121212",
+                        "border-dark": "#27272a",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"]
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        .waveform-bar {
+            width: 3px;
+            background-color: #333;
+            border-radius: 1px;
+        }
+        .waveform-bar.active {
+            background-color: #40ff1a;
+            box-shadow: 0 0 8px rgba(64, 255, 26, 0.6);
+        }.custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #000;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 2px;
+        }.neon-text {
+            text-shadow: 0 0 10px rgba(64, 255, 26, 0.5), 0 0 20px rgba(64, 255, 26, 0.3);
+        }.wheel-container {
+            background: linear-gradient(180deg, 
+                rgba(0,0,0,1) 0%, 
+                rgba(26,26,28,0) 20%, 
+                rgba(26,26,28,0) 80%, 
+                rgba(0,0,0,1) 100%);
+        }
+        .wheel-tick {
+            width: 1px;
+            background-color: #444;
+        }
+        .wheel-tick.major {
+            width: 2px;
+            height: 16px;
+            background-color: #666;
+        }
+        .wheel-tick.center {
+            width: 2px;
+            height: 24px;
+            background-color: #40ff1a;
+            box-shadow: 0 0 8px #40ff1a;
+        }
+    </style>
+<style>
+        body {
+          min-height: max(667px, 100dvh);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-dark font-display text-white selection:bg-primary selection:text-black overflow-hidden">
+<div class="flex flex-col h-[100dvh] max-w-md mx-auto border-x border-border-dark relative">
+<header class="flex items-center bg-background-dark p-4 border-b border-border-dark justify-between z-20 shrink-0">
+<div class="flex items-center gap-3">
+<button class="text-white flex size-8 items-center justify-center hover:bg-white/10 rounded-full transition-colors">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<h2 class="text-white text-sm font-bold uppercase tracking-wide">Neon Dreams</h2>
+<span class="bg-primary/20 text-primary text-[9px] px-1.5 py-0.5 rounded font-bold">128 BPM</span>
+</div>
+<span class="text-[10px] text-zinc-500 font-mono tracking-wider">PROJECT: SYNTHWAVE_V2.LRC</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="bg-surface-dark border border-border-dark px-3 py-1.5 rounded text-white text-[10px] font-bold tracking-wider hover:bg-white/5 transition-colors">
+                    SAVE
+                </button>
+<button class="bg-primary px-3 py-1.5 rounded text-black text-[10px] font-bold tracking-wider hover:opacity-90 transition-opacity flex items-center gap-1">
+                    EXPORT <span class="material-symbols-outlined text-[14px]">upload</span>
+</button>
+</div>
+</header>
+<main class="flex-1 flex overflow-hidden relative">
+<section class="w-7/12 border-r border-border-dark flex flex-col bg-background-dark relative">
+<div class="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-background-dark to-transparent z-10 pointer-events-none"></div>
+<div class="flex-1 overflow-y-auto custom-scrollbar px-4 py-6 space-y-6">
+<div class="opacity-30 transition-opacity hover:opacity-50 select-none group">
+<p class="text-[10px] font-mono text-zinc-500 mb-0.5 group-hover:text-primary transition-colors">[00:04.20]</p>
+<p class="text-sm font-medium leading-snug">Static in the air tonight</p>
+</div>
+<div class="opacity-30 transition-opacity hover:opacity-50 select-none group">
+<p class="text-[10px] font-mono text-zinc-500 mb-0.5 group-hover:text-primary transition-colors">[00:08.15]</p>
+<p class="text-sm font-medium leading-snug">Signals fading out of sight</p>
+</div>
+<div class="relative py-2 my-2 -mx-2 px-2 rounded bg-white/5 border-l-2 border-primary">
+<div class="flex justify-between items-baseline mb-1">
+<span class="text-primary text-xs font-bold font-mono">[00:12.45]</span>
+<span class="text-[9px] text-primary/60 font-bold uppercase tracking-widest">Active</span>
+</div>
+<p class="text-white text-lg font-bold leading-tight neon-text">I'm walking on the edge</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Beneath the city lights</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Searching for a sign</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Through the digital haze</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Broken echoes fade</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Into the mainframe maze</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Where we lost our days</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Running from the past</p>
+</div>
+<div class="opacity-60 select-none">
+<p class="text-base font-medium leading-snug">Nothing's built to last</p>
+</div>
+</div>
+<div class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background-dark to-transparent pointer-events-none"></div>
+</section>
+<section class="w-5/12 flex flex-col bg-surface-dark border-l border-white/5">
+<div class="flex-1 flex flex-col items-center justify-start pt-6 px-2 border-b border-border-dark relative overflow-hidden">
+<span class="text-[9px] text-zinc-500 uppercase font-bold tracking-widest mb-3">Fine Tune</span>
+<div class="w-full bg-black/40 rounded-lg border border-white/5 p-2 flex flex-col items-center gap-3">
+<span class="text-primary font-mono text-xl font-bold tracking-tight">
+                            +00<span class="text-sm text-primary/70">ms</span>
+</span>
+<div class="h-16 w-full relative flex items-center justify-center overflow-hidden wheel-container">
+<div class="flex items-end justify-center gap-1.5 h-full pb-2 opacity-50">
+<div class="w-[1px] h-3 bg-zinc-600"></div>
+<div class="w-[1px] h-5 bg-zinc-600"></div>
+<div class="w-[1px] h-3 bg-zinc-600"></div>
+<div class="w-[1px] h-3 bg-zinc-600"></div>
+<div class="w-[1px] h-5 bg-zinc-600"></div>
+<div class="w-[2px] h-8 bg-primary shadow-[0_0_8px_#40ff1a]"></div>
+<div class="w-[1px] h-5 bg-zinc-600"></div>
+<div class="w-[1px] h-3 bg-zinc-600"></div>
+<div class="w-[1px] h-3 bg-zinc-600"></div>
+<div class="w-[1px] h-5 bg-zinc-600"></div>
+<div class="w-[1px] h-3 bg-zinc-600"></div>
+</div>
+<div class="absolute inset-0 bg-gradient-to-r from-surface-dark via-transparent to-surface-dark"></div>
+</div>
+<div class="flex w-full gap-2">
+<button class="flex-1 bg-white/5 hover:bg-white/10 active:bg-white/20 h-8 rounded flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-white text-sm">remove</span>
+</button>
+<button class="flex-1 bg-white/5 hover:bg-white/10 active:bg-white/20 h-8 rounded flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-white text-sm">add</span>
+</button>
+</div>
+<span class="text-[9px] text-zinc-600 font-mono">STEP: 10MS</span>
+</div>
+<div class="mt-auto w-full pb-4 space-y-2">
+<div class="flex justify-between items-center px-1">
+<span class="text-[9px] text-zinc-500 font-mono">NEXT LINE</span>
+<span class="text-[9px] text-white/40 font-mono">--:--.--</span>
+</div>
+<div class="h-px bg-white/5 w-full"></div>
+<div class="bg-primary/5 border border-primary/10 p-2 rounded">
+<p class="text-white/60 text-[10px] leading-tight italic line-clamp-2 text-center">"Beneath the city lights"</p>
+</div>
+</div>
+</div>
+<button class="h-32 bg-primary flex flex-col items-center justify-center relative overflow-hidden group active:bg-primary/90 transition-colors">
+<div class="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
+<div class="absolute size-40 bg-white/20 rounded-full blur-2xl opacity-0 group-active:opacity-100 group-active:scale-150 transition-all duration-300"></div>
+<span class="material-symbols-outlined text-black text-5xl mb-1 relative z-10">touch_app</span>
+<span class="text-black text-sm font-black tracking-widest uppercase relative z-10">TAP TO SYNC</span>
+</button>
+</section>
+</main>
+<footer class="bg-background-dark border-t border-border-dark shrink-0 pb-6 pt-2 z-20">
+<div class="h-12 w-full flex items-center justify-center gap-[2px] mb-2 overflow-hidden relative opacity-80">
+<div class="absolute inset-y-0 left-1/2 w-[1px] bg-primary z-10 shadow-[0_0_8px_#40ff1a]"></div>
+<div class="waveform-bar h-3"></div><div class="waveform-bar h-5"></div><div class="waveform-bar h-2"></div><div class="waveform-bar h-6"></div>
+<div class="waveform-bar h-4"></div><div class="waveform-bar h-8"></div><div class="waveform-bar h-5"></div><div class="waveform-bar h-3"></div>
+<div class="waveform-bar h-6 active"></div><div class="waveform-bar h-10 active"></div><div class="waveform-bar h-7 active"></div><div class="waveform-bar h-4 active"></div>
+<div class="waveform-bar h-8 active"></div><div class="waveform-bar h-12 active"></div><div class="waveform-bar h-9 active"></div><div class="waveform-bar h-5 active"></div>
+<div class="waveform-bar h-4 active"></div><div class="waveform-bar h-8 active"></div><div class="waveform-bar h-6 active"></div><div class="waveform-bar h-3"></div>
+<div class="waveform-bar h-5"></div><div class="waveform-bar h-2"></div><div class="waveform-bar h-6"></div><div class="waveform-bar h-4"></div>
+<div class="waveform-bar h-3"></div><div class="waveform-bar h-5"></div><div class="waveform-bar h-2"></div><div class="waveform-bar h-4"></div>
+<div class="waveform-bar h-3"></div><div class="waveform-bar h-5"></div><div class="waveform-bar h-2"></div><div class="waveform-bar h-6"></div>
+<div class="waveform-bar h-4"></div><div class="waveform-bar h-8"></div><div class="waveform-bar h-5"></div><div class="waveform-bar h-3"></div>
+</div>
+<div class="flex items-center justify-between px-6">
+<div class="flex flex-col">
+<span class="text-primary font-mono text-xl font-bold tracking-tight">00:15.32</span>
+<span class="text-zinc-600 font-mono text-[10px] tracking-wide">TOTAL: 03:42.12</span>
+</div>
+<div class="flex items-center gap-6">
+<button class="text-zinc-400 hover:text-white transition-colors active:scale-95">
+<span class="material-symbols-outlined text-3xl">replay_5</span>
+</button>
+<button class="size-14 bg-white rounded-full flex items-center justify-center hover:bg-zinc-200 transition-colors shadow-lg active:scale-95">
+<span class="material-symbols-outlined text-black text-3xl fill-1">pause</span>
+</button>
+<button class="text-zinc-400 hover:text-white transition-colors active:scale-95">
+<span class="material-symbols-outlined text-3xl">forward_5</span>
+</button>
+</div>
+</div>
+</footer>
+<div class="h-4 bg-background-dark"></div>
+</div>
+
+</body></html>

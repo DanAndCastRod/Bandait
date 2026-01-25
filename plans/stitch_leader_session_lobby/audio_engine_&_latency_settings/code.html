@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Audio Engine &amp; Latency Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#ff6600",
+                        "background-light": "#fafafa",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background-color: #000000;
+            color: #ffffff;
+        }
+        .glow-primary {
+            box-shadow: 0 0 15px rgba(255, 102, 0, 0.3);
+        }
+        .border-technical {
+            border: 1px solid #1a1a1a;
+        }
+        .bg-card {
+            background-color: #0c0c0c;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark min-h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="flex items-center justify-between px-6 py-6 border-b border-[#1a1a1a] sticky top-0 bg-background-dark z-50">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" style="font-size: 20px;">chevron_left</span>
+<span class="text-xs font-bold tracking-widest uppercase text-[#666]">SYSTEM</span>
+</div>
+<h1 class="text-lg font-bold tracking-tight text-white">AUDIO ENGINE</h1>
+<div class="flex items-center">
+<span class="material-symbols-outlined text-white" style="font-size: 24px;">settings_input_component</span>
+</div>
+</header>
+<main class="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+<!-- Latency Test Module -->
+<section class="bg-card border-technical rounded-lg p-5">
+<div class="flex items-center justify-between mb-6">
+<div>
+<h2 class="text-xs font-bold text-primary tracking-widest uppercase mb-1">Live Calibration</h2>
+<p class="text-white text-xl font-bold">Latency Test</p>
+</div>
+<div class="text-right">
+<p class="text-[10px] text-[#666] font-medium uppercase tracking-tighter">Round-trip Delay</p>
+<p class="text-3xl font-bold text-primary tabular-nums">12.4<span class="text-xs ml-1">MS</span></p>
+</div>
+</div>
+<button class="w-full bg-primary hover:bg-primary/90 text-white py-4 rounded-lg flex items-center justify-center gap-3 active:scale-[0.98] transition-all glow-primary">
+<span class="material-symbols-outlined font-bold">sensors</span>
+<span class="font-bold tracking-widest text-sm">INITIATE PING</span>
+</button>
+</section>
+<!-- Buffer Size Selection -->
+<section class="space-y-4">
+<div class="flex items-center justify-between px-1">
+<h3 class="text-xs font-bold text-[#666] uppercase tracking-widest">Buffer Size</h3>
+<span class="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">256 SAMPLES</span>
+</div>
+<div class="bg-card border-technical rounded-lg p-5">
+<div class="relative flex w-full flex-col items-start gap-3">
+<div class="flex h-1.5 w-full items-center gap-4">
+<div class="flex h-1.5 flex-1 rounded-full bg-[#1a1a1a]">
+<div class="h-full w-[32%] rounded-full bg-primary relative">
+<div class="absolute -right-2 -top-1.5 size-4 rounded-full bg-primary border-2 border-black"></div>
+</div>
+</div>
+</div>
+<div class="flex w-full justify-between text-[10px] font-bold text-[#444] tracking-tighter mt-1">
+<span>64 SAMPLES</span>
+<span>1024 SAMPLES</span>
+</div>
+</div>
+<div class="mt-6 flex items-start gap-3 bg-red-950/20 p-3 rounded border border-red-900/30">
+<span class="material-symbols-outlined text-red-500 text-sm mt-0.5">warning</span>
+<p class="text-[11px] text-red-200/70 leading-relaxed">
+                        Lower buffer sizes reduce latency but significantly increase CPU stress. Recommended: 128-256 for live performance.
+                    </p>
+</div>
+</div>
+</section>
+<!-- Audio Engine Selector -->
+<section class="space-y-4">
+<h3 class="text-xs font-bold text-[#666] uppercase tracking-widest px-1">Driver Architecture</h3>
+<div class="grid grid-cols-2 gap-3">
+<div class="bg-card border-2 border-primary rounded-lg p-4 relative overflow-hidden">
+<div class="absolute top-0 right-0 bg-primary px-2 py-0.5 text-[8px] font-bold text-black uppercase">Active</div>
+<p class="text-white font-bold mb-1 text-sm">CoreAudio</p>
+<p class="text-[10px] text-[#666]">Optimized iOS Logic</p>
+</div>
+<div class="bg-card border-technical rounded-lg p-4 opacity-50">
+<p class="text-white font-bold mb-1 text-sm">Standard IO</p>
+<p class="text-[10px] text-[#666]">Compatibility Mode</p>
+</div>
+</div>
+</section>
+<!-- Visual Offset Calibration -->
+<section class="space-y-4">
+<div class="flex items-center justify-between px-1">
+<h3 class="text-xs font-bold text-[#666] uppercase tracking-widest">Visual Offset</h3>
+<span class="text-xs font-bold text-white">+15 MS</span>
+</div>
+<div class="bg-card border-technical rounded-lg p-5">
+<div class="flex items-center gap-4 mb-4">
+<div class="h-8 w-8 bg-white/10 rounded flex items-center justify-center animate-pulse">
+<div class="size-3 bg-white rounded-sm"></div>
+</div>
+<p class="text-[11px] text-[#888] flex-1 italic">Align the flash with the audio click</p>
+</div>
+<div class="relative flex w-full flex-col items-start gap-3">
+<div class="flex h-1.5 w-full items-center gap-4">
+<div class="flex h-1.5 flex-1 rounded-full bg-[#1a1a1a]">
+<div class="h-full w-[58%] rounded-full bg-white/20 relative">
+<div class="absolute -right-2 -top-1.5 size-4 rounded-full bg-white border-2 border-black"></div>
+</div>
+</div>
+</div>
+<div class="flex w-full justify-between text-[10px] font-bold text-[#444] tracking-tighter mt-1">
+<span>-100 MS</span>
+<span>0 MS</span>
+<span>+100 MS</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Performance Footer Metrics -->
+<footer class="bg-black border-t border-[#1a1a1a] p-5 pb-8">
+<div class="grid grid-cols-2 gap-6">
+<div class="space-y-2">
+<div class="flex justify-between items-end">
+<span class="text-[10px] font-bold text-[#666] uppercase tracking-widest">CPU LOAD</span>
+<span class="text-xs font-bold text-primary tabular-nums">42%</span>
+</div>
+<div class="h-1 w-full bg-[#111] rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[42%]"></div>
+</div>
+</div>
+<div class="space-y-2">
+<div class="flex justify-between items-end">
+<span class="text-[10px] font-bold text-[#666] uppercase tracking-widest">MEM UTIL</span>
+<span class="text-xs font-bold text-white tabular-nums">18%</span>
+</div>
+<div class="h-1 w-full bg-[#111] rounded-full overflow-hidden">
+<div class="h-full bg-white w-[18%]"></div>
+</div>
+</div>
+</div>
+</footer>
+</body></html>

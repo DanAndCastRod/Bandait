@@ -2,6 +2,14 @@
 
 **Objetivo Crítico:** Generar sonido sintético localmente con latencia de scheduling "sample-accurate". El audio NO viaja por la red.
 
+> [!IMPORTANT]
+> **Diseño Visual (Stitch):**
+> Todas las interfaces de esta fase (Metrónomo, Debug, Settings) deben seguir el **Stitch Design System**:
+> *   **Fondo:** OLED Black (`#000000` / `#0c0c0c`)
+> *   **Acento:** Safety Orange (`#ff6600`)
+> *   **Tipografía:** Space Grotesk (Técnica, legible)
+> *   **Estilo:** Industrial, alto contraste, controles grandes.
+
 ## 🧠 Estrategia de Audio
 Usar archivos de audio (mp3/wav) introduce latencia de lectura de disco y decodificación impredecible.
 **Solución:** Síntesis de ondas en tiempo real o uso de buffers pre-cargados PCM muy pequeños gestionados por el motor de audio nativo.
@@ -20,27 +28,28 @@ Usar archivos de audio (mp3/wav) introduce latencia de lectura de disco y decodi
 - **Decisión:** Empezar con **`flutter_soloud`** por balance rendimiento/dev-time.
 
 #### Tareas
-- [ ] Integrar `flutter_soloud`.
-- [ ] Crear sintetizador de Click:
+- [x] Integrar `flutter_soloud`.
+- [x] Crear sintetizador de Click:
     - Sonido "Tick" (Frecuencia alta, ej. 1200Hz, duración corta 50ms).
     - Sonido "Tock" (Frecuencia media, ej. 800Hz, para tiempos débiles).
-- [ ] Implementar un "One-Shot" player y medir la latencia input-to-sound (tap en pantalla -> sonido).
+- [x] Implementar un "One-Shot" player y medir la latencia input-to-sound (tap en pantalla -> sonido).
+- [ ] **Componente Stitch:** Ver `audio_engine_&_latency_settings` para diseño de configuración de buffer y latencia.
 
 ### Sprint 4: El Scheduler del Futuro
 **Objetivo:** Programar el sonido para que suene en un timestamp exacto del reloj sincronizado.
 
 #### Tareas
-- [ ] **Conversión Tiempo Global -> Tiempo de Audio:**
-    - Mapear el timestamp NTP al timestamp del sistema de audio si es necesario.
-- [ ] **Buffer de Eventos (Lookahead):**
-    - No intentar triggerear el sonido *exactamente* en el milisegundo.
-    - Estrategia: "Schedulear" el sonido para que el motor de audio lo toque en T.
-    - Si el motor no soporta scheduling preciso, usar un `Timer` de alta precisión en Dart que dispare el sonido `AudioLatency` ms *antes* del target.
-    - *Nota:* Dart `Timer` no es 100% preciso. Se prefiere usar loops nativos del engine de audio.
-- [ ] **Lógica de Transporte:**
-    - `Play`: El líder envía `{ "action": "START", "startTime": Now + 500ms, "bpm": 120 }`.
-    - Cliente calcula el primer beat y los subsiguientes.
-    - **Drift Correction musical:** Si el reloj del sistema se ajusta (NTP resync), el scheduler de audio debe corregir suavemente (pitch bend imperceptible o micro-ajuste de silencio) para no perder el bit.
+- [x] **Conversión Tiempo Global -> Tiempo de Audio:**
+    - Implementado usando `AudioClock` sincronizado con NTP.
+- [x] **Buffer de Eventos (Lookahead):**
+    - Implementado en `AudioEngine` usando `AudioSource.load` con `flutter_soloud`.
+- [x] **Lógica de Transporte:**
+    - `Play`: Implementado en `MetronomeController`.
+    - **Drift Correction:** Implementado re-calculo de `tick` en cada frame del `Ticker` si la desviación > threshold.
+
+## 🚧 Integración UI (Stitch)
+- [x] **Debug Audio Page:** Implementada (`DebugAudioPage`) siguiendo el diseño OLED/Black de Stitch.
+- [x] **Audio Settings:** Implementada (`AudioSettingsScreen`) para configuración de buffer y latencia.
 
 ## 🧪 Criterios de Aceptación
 1.  Metrónomo estable a 120 BPM durante 10 minutos sin "tartamudear".

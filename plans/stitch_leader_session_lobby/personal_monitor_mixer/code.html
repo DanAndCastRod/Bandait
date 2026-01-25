@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Personal Monitor Mixer</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Theme Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#33ddff",
+                        "background-light": "#ffffff",
+                        "background-dark": "#000000",
+                        "track-blue": "#337BFF",
+                        "track-green": "#33FF88",
+                        "track-purple": "#9933FF",
+                        "track-white": "#FFFFFF",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                    boxShadow: {
+                        'neon-blue': '0 0 10px rgba(51, 123, 255, 0.5), 0 0 20px rgba(51, 123, 255, 0.3)',
+                        'neon-green': '0 0 10px rgba(51, 255, 136, 0.5), 0 0 20px rgba(51, 255, 136, 0.3)',
+                        'neon-purple': '0 0 10px rgba(153, 51, 255, 0.5), 0 0 20px rgba(153, 51, 255, 0.3)',
+                        'neon-white': '0 0 10px rgba(255, 255, 255, 0.5), 0 0 20px rgba(255, 255, 255, 0.3)',
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        /* Custom scrollbar hiding for cleaner UI */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        /* Neon text effect */
+        .text-glow {
+            text-shadow: 0 0 5px currentColor;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-dark text-white font-display overflow-hidden h-screen flex flex-col antialiased selection:bg-primary selection:text-black">
+<!-- Header Section -->
+<header class="flex items-center justify-between px-6 pt-6 pb-2 shrink-0 z-10 bg-background-dark">
+<div class="flex flex-col">
+<h1 class="text-sm font-bold tracking-[0.2em] text-gray-400">STAGE CONTROL</h1>
+<h2 class="text-xl font-bold leading-tight tracking-wider text-white">PERSONAL MIX</h2>
+</div>
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-800">
+<div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e] animate-pulse"></div>
+<span class="text-xs font-bold tracking-widest text-green-500">LINK: GOOD</span>
+</div>
+</header>
+<!-- Main Mixer Area -->
+<main class="flex-1 flex w-full h-full px-2 py-4 gap-2 overflow-hidden">
+<!-- Channel 1: METRONOME (Blue) -->
+<div class="flex-1 flex flex-col items-center gap-3 h-full group">
+<!-- Label -->
+<div class="flex flex-col items-center gap-1 shrink-0">
+<span class="text-xs font-bold tracking-widest text-track-blue">CLICK</span>
+<span class="text-sm font-mono text-track-blue opacity-80">75</span>
+</div>
+<!-- Fader Track -->
+<div class="relative flex-1 w-full max-w-[80px] bg-gray-900 rounded-xl border border-gray-800 overflow-visible flex justify-center">
+<!-- Background Ruler Lines -->
+<div class="absolute inset-y-4 w-full flex flex-col justify-between items-center opacity-20 pointer-events-none px-4">
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+</div>
+<!-- Fill Level -->
+<div class="absolute bottom-0 w-3 h-[75%] bg-track-blue/30 rounded-full blur-[2px]"></div>
+<div class="absolute bottom-0 w-1.5 h-[75%] bg-track-blue rounded-full shadow-neon-blue"></div>
+<!-- Thumb / Handle -->
+<div class="absolute bottom-[75%] w-full px-1 translate-y-1/2 cursor-pointer z-20">
+<div class="h-12 w-full bg-gray-800 rounded-md border-y-2 border-track-blue shadow-[0_4px_20px_rgba(0,0,0,0.8)] flex items-center justify-center relative active:scale-95 transition-transform">
+<!-- Tactile Grip Lines -->
+<div class="flex flex-col gap-1 opacity-50">
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+</div>
+<!-- Glow Effect on Handle -->
+<div class="absolute inset-x-0 -top-2 h-px bg-track-blue shadow-neon-blue"></div>
+</div>
+</div>
+</div>
+<!-- Mute Toggle -->
+<button class="shrink-0 w-full max-w-[80px] h-16 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 flex flex-col items-center justify-center gap-1 active:bg-gray-800 transition-colors">
+<span class="material-symbols-outlined text-[24px]">notifications_off</span>
+<span class="text-[10px] font-bold tracking-widest">MUTE</span>
+</button>
+</div>
+<!-- Channel 2: VOICE CUES (Green) -->
+<div class="flex-1 flex flex-col items-center gap-3 h-full group">
+<div class="flex flex-col items-center gap-1 shrink-0">
+<span class="text-xs font-bold tracking-widest text-track-green">CUES</span>
+<span class="text-sm font-mono text-track-green opacity-80">60</span>
+</div>
+<div class="relative flex-1 w-full max-w-[80px] bg-gray-900 rounded-xl border border-gray-800 overflow-visible flex justify-center">
+<div class="absolute inset-y-4 w-full flex flex-col justify-between items-center opacity-20 pointer-events-none px-4">
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+</div>
+<div class="absolute bottom-0 w-3 h-[60%] bg-track-green/30 rounded-full blur-[2px]"></div>
+<div class="absolute bottom-0 w-1.5 h-[60%] bg-track-green rounded-full shadow-neon-green"></div>
+<div class="absolute bottom-[60%] w-full px-1 translate-y-1/2 cursor-pointer z-20">
+<div class="h-12 w-full bg-gray-800 rounded-md border-y-2 border-track-green shadow-[0_4px_20px_rgba(0,0,0,0.8)] flex items-center justify-center relative active:scale-95 transition-transform">
+<div class="flex flex-col gap-1 opacity-50">
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+</div>
+<div class="absolute inset-x-0 -top-2 h-px bg-track-green shadow-neon-green"></div>
+</div>
+</div>
+</div>
+<button class="shrink-0 w-full max-w-[80px] h-16 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 flex flex-col items-center justify-center gap-1 active:bg-gray-800 transition-colors">
+<span class="material-symbols-outlined text-[24px]">mic_off</span>
+<span class="text-[10px] font-bold tracking-widest">MUTE</span>
+</button>
+</div>
+<!-- Channel 3: MAIN TRACK (Purple) -->
+<div class="flex-1 flex flex-col items-center gap-3 h-full group">
+<div class="flex flex-col items-center gap-1 shrink-0">
+<span class="text-xs font-bold tracking-widest text-track-purple">TRACK</span>
+<span class="text-sm font-mono text-track-purple opacity-80">85</span>
+</div>
+<div class="relative flex-1 w-full max-w-[80px] bg-gray-900 rounded-xl border border-gray-800 overflow-visible flex justify-center">
+<div class="absolute inset-y-4 w-full flex flex-col justify-between items-center opacity-20 pointer-events-none px-4">
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+</div>
+<div class="absolute bottom-0 w-3 h-[85%] bg-track-purple/30 rounded-full blur-[2px]"></div>
+<div class="absolute bottom-0 w-1.5 h-[85%] bg-track-purple rounded-full shadow-neon-purple"></div>
+<div class="absolute bottom-[85%] w-full px-1 translate-y-1/2 cursor-pointer z-20">
+<div class="h-12 w-full bg-gray-800 rounded-md border-y-2 border-track-purple shadow-[0_4px_20px_rgba(0,0,0,0.8)] flex items-center justify-center relative active:scale-95 transition-transform">
+<div class="flex flex-col gap-1 opacity-50">
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+</div>
+<div class="absolute inset-x-0 -top-2 h-px bg-track-purple shadow-neon-purple"></div>
+</div>
+</div>
+</div>
+<!-- Muted State Example -->
+<button class="shrink-0 w-full max-w-[80px] h-16 rounded-xl bg-gray-800 border border-track-purple/50 text-track-purple shadow-[inset_0_0_10px_rgba(153,51,255,0.2)] flex flex-col items-center justify-center gap-1 active:bg-gray-800 transition-colors">
+<span class="material-symbols-outlined text-[24px]">music_off</span>
+<span class="text-[10px] font-bold tracking-widest">MUTED</span>
+</button>
+</div>
+<!-- Channel 4: MASTER (White) -->
+<div class="flex-1 flex flex-col items-center gap-3 h-full group">
+<div class="flex flex-col items-center gap-1 shrink-0">
+<span class="text-xs font-bold tracking-widest text-track-white">MASTER</span>
+<span class="text-sm font-mono text-track-white opacity-80">90</span>
+</div>
+<div class="relative flex-1 w-full max-w-[80px] bg-gray-900 rounded-xl border border-gray-800 overflow-visible flex justify-center">
+<div class="absolute inset-y-4 w-full flex flex-col justify-between items-center opacity-20 pointer-events-none px-4">
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+<div class="w-1/2 h-px bg-gray-600"></div>
+<div class="w-full h-px bg-gray-500"></div>
+</div>
+<div class="absolute bottom-0 w-3 h-[90%] bg-track-white/30 rounded-full blur-[2px]"></div>
+<div class="absolute bottom-0 w-1.5 h-[90%] bg-track-white rounded-full shadow-neon-white"></div>
+<div class="absolute bottom-[90%] w-full px-1 translate-y-1/2 cursor-pointer z-20">
+<div class="h-12 w-full bg-gray-800 rounded-md border-y-2 border-track-white shadow-[0_4px_20px_rgba(0,0,0,0.8)] flex items-center justify-center relative active:scale-95 transition-transform">
+<div class="flex flex-col gap-1 opacity-50">
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+<div class="w-6 h-0.5 bg-gray-500"></div>
+</div>
+<div class="absolute inset-x-0 -top-2 h-px bg-track-white shadow-neon-white"></div>
+</div>
+</div>
+</div>
+<button class="shrink-0 w-full max-w-[80px] h-16 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 flex flex-col items-center justify-center gap-1 active:bg-gray-800 transition-colors">
+<span class="material-symbols-outlined text-[24px]">volume_off</span>
+<span class="text-[10px] font-bold tracking-widest">MUTE</span>
+</button>
+</div>
+</main>
+<!-- Footer Action -->
+<footer class="px-4 pb-8 pt-2 shrink-0 bg-background-dark">
+<button class="w-full h-14 rounded-lg bg-gray-900/50 border border-primary/50 text-primary flex items-center justify-center gap-3 active:bg-primary/10 transition-colors group">
+<span class="material-symbols-outlined group-hover:animate-ping text-[20px]">graphic_eq</span>
+<span class="text-base font-bold tracking-[0.15em]">TEST OUTPUT</span>
+</button>
+</footer>
+</body></html>

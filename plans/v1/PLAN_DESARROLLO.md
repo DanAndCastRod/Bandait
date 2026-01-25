@@ -28,6 +28,7 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 - [ ] Implementar Servidor WebSocket simple (en el dispositivo "Líder" o PC Server mock).
 - [ ] Implementar Cliente WebSocket (en dispositivo "Seguidor").
 - [ ] Definir protocolo de mensajes JSON básico (`HANDSHAKE`, `PING`, `PONG`).
+- [ ] **Componente Stitch:** Ver `network_&_sync_diagnostic` para herramientas de debug visual.
 - [ ] **Prueba de Concepto:** Lograr conexión bidireccional entre PC y Android/iOS.
 
 #### Sprint 2: Algoritmo de Sincronización (NTP Simplificado)
@@ -42,14 +43,15 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 *Objetivo: Audio de latencia ultra-baja y precisión rítmica.*
 
 #### Sprint 3: Generación de Audio Nativo
-- [ ] Integrar motor de audio de baja latencia (e.g., `flutter_soloud` o `dart_az` / Platform Channels a Oboe/CoreAudio).
-- [ ] Crear sintetizador de ondas simple (Senoidal/Cuadrada) para el "Bip".
-- [ ] Evitar carga de archivos MP3/WAV para el click (reducir latencia de decodificación).
+- [x] Integrar motor de audio de baja latencia (e.g., `flutter_soloud` o `dart_az` / Platform Channels a Oboe/CoreAudio).
+- [x] Crear sintetizador de ondas simple (Senoidal/Cuadrada) para el "Bip".
+- [x] Evitar carga de archivos MP3/WAV para el click (reducir latencia de decodificación).
+- [ ] **Componente Stitch:** Ver `audio_engine_&_latency_settings` para settings de buffer/offset.
 
 #### Sprint 4: Programación de Eventos Futuros
-- [ ] Implementar lógica `Play(atTime: futureTimestamp)`.
-- [ ] Manejar el *scheduling* del audio en el hilo nativo.
-- [ ] **Prueba de Fuego:** Poner dos dispositivos lado a lado, iniciar el metrónomo y grabar el audio para verificar el *phasing* (que suenen al unísono).
+- [x] Implementar lógica `Play(atTime: futureTimestamp)`.
+- [x] Manejar el *scheduling* del audio en el hilo nativo.
+- [x] **Prueba de Fuego:** Poner dos dispositivos lado a lado, iniciar el metrónomo y grabar el audio para verificar el *phasing* (que suenen al unísono).
 
 ---
 
@@ -57,46 +59,55 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 *Objetivo: Que la banda sepa qué tocar y cantar.*
 
 #### Sprint 5: Motor de Letras (.LRC)
-- [ ] Crear parser de archivos LRC (letras con timestamps).
-- [ ] Implementar UI de scroll automático basado en el tiempo de la canción.
-- [ ] Lógica de interpolación: Si la canción va por el segundo 30, mostrar línea X.
+- [x] Crear parser de archivos LRC (letras con timestamps).
+- [x] **Componente Stitch:** `synchronized_lrc_editor_1` & `_2` (UI Implementada).
+- [x] Implementar UI de scroll automático basado en el tiempo de la canción.
+- [x] Lógica de interpolación y renderizado.
 
-#### Sprint 6: Gestión de Playlists (JSON)
-- [ ] Definir estructura de datos `Song`, `Setlist`.
-- [ ] UI de Líder: Crear/Editar Setlist, Reordenar (Drag & Drop).
-- [ ] UI de Seguidor: Recepción de Setlist activo.
-- [ ] Persistencia local (guardar repertorio en dispositivo).
+#### Sprint 6: Gestión de Canciones
+- [x] Definir estructura de datos `Song` con Hive.
+- [x] **Componente Stitch:** `song_library_manager` (Lista y Filtro).
+- [x] UI de Librería: Listado, búsqueda, filtrado por tags.
+- [x] UI de Editor de Letras: Sincronización básica.
+
+#### Sprint 7: Gestión de Setlists (Sprint Extra)
+- [x] **Componente Stitch:** `dynamic_setlist_manager`.
+- [x] Modelo `Setlist` y Repositorio.
+- [x] UI de Librería de Setlists.
+- [x] UI de Editor de Setlist (Reordenar, Agregar/Quitar canciones).
 
 ---
 
 ### 🌐 Fase 3: Conectividad y UX "Zero-Stress"
 *Objetivo: Que conectarse sea mágico y a prueba de fallos.*
 
-#### Sprint 7: Discovery y QR
-- [ ] Implementar mDNS/Bonjour para autodescubrimiento en LAN ("Bandait Server found").
-- [ ] Generador de QR en Líder con payload de conexión (IP, Puerto, Token).
-- [ ] Escáner de QR en Seguidor que auto-conecta al socket.
+#### Sprint 8: Session Lobby & Roles
+- [ ] Implementar pantalla "¿Quién eres?" (Líder/Músico).
+- [ ] **Componente Stitch:** `leader_session_lobby` y `instrument_&_profile_selection`.
+- [ ] Líder: Pantalla de creación de sesión (IP, Puerto).
+- [ ] Generador de QR para conexión rápida.
+- [ ] Músico: Escáner QR y selección de Instrumento/Perfil.
 
-#### Sprint 8: Network Health Monitor
-- [ ] Implementar "Heartbeat" continuo de red.
+#### Sprint 9: Network Health & Diagnostics
+- [ ] **Componente Stitch:** `network_&_sync_diagnostic`.
+- [ ] Monitor de latencia (Ping/RTT) en tiempo real.
 - [ ] UI Semáforo: Verde (<10ms), Amarillo (Jitter), Rojo (Desconexión).
-- [ ] Manejo de reconexión automática transparente.
-- [ ] Alertas pasivas: "Tu red es inestable".
+- [ ] Alertas pasivas inteligentes ("Mala conexión WiFi").
 
 ---
 
 ### 🎸 Fase 4: Stage Experience & Polish
-*Objetivo: Usabilidad en condiciones de escenario (oscuridad, nervios).*
+*Objetivo: Usabilidad en condiciones de escenario.*
 
-#### Sprint 9: Stage UI (OLED Black)
-- [ ] Implementar Tema "Stage Mode" (Fondo #000000, Texto Alto Contraste).
-- [ ] Tipografía gigante dinámica (la línea actual ocupa 30% pantalla).
-- [ ] Bloqueo de reposo de pantalla (Wakelock).
+#### Sprint 10: Dashboards de Control
+- [ ] **Componente Stitch:** `leader_tablet_dashboard_v1` / `v2`.
+- [ ] Unificar controles de Transporte, Setlist y Librería en una sola pantalla para el Líder.
+- [ ] **Componente Stitch:** `musician_stage_view` (Mejoras Visuales).
+- [ ] Tema "OLED Black" verdadero para ahorro de batería.
 
-#### Sprint 10: Feedback Visual y Pánico
+#### Sprint 11: Feedback Visual y Pánico
 - [ ] **Metrónomo Visual:** Bordes de pantalla parpadeando con el beat.
-- [ ] **Feedback Háptico:** Vibración al recibir comandos de transporte (Start/Stop).
-- [ ] **Panic Button:** Implementar comando de "Fade Out / Stop All" seguro.
+- [ ] **Panic Button:** Stop All seguro.
 
 ---
 
@@ -110,13 +121,13 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 ### 📦 Fase 6: Despliegue y Distribución
 *Objetivo: Poner la app en las manos de los músicos.*
 
-#### Sprint 11: CI/CD & Beta Testing
+#### Sprint 13: CI/CD & Beta Testing
 - [ ] Configurar GitHub Actions / Codemagic para builds automáticos (Android APK / iOS IPA).
 - [ ] Setup de Google Play Console (Internal Testing Track).
 - [ ] Setup de Apple TestFlight.
 - [ ] Implementar verificación de versiones obligatorias (Force Update).
 
-#### Sprint 12: Public Release
+#### Sprint 14: Public Release
 - [ ] Generación de Screenshots y Assets de tienda.
 - [ ] Redacción de políticas de privacidad (permisos de Audio/Microphone).
 - [ ] Lanzamiento en Producción.

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Leader Tablet Dashboard V1</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#00bfff", // Electric Cyan
+              "secondary": "#00ff88", // Neon Green
+              "danger": "#ff0000", // Warning Red
+              "oled-black": "#000000",
+              "panel-dark": "#141415",
+              "panel-light": "#1e1e20",
+            },
+            fontFamily: {
+              "display": ["Space Grotesk", "sans-serif"]
+            },
+            borderRadius: {
+              "sm": "4px",
+              "DEFAULT": "0.125rem",
+            },
+          },
+        },
+      }
+    </script>
+<style>
+        /* Custom scrollbar for lyrics */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #141415;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 2px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* Neon glow effect for active elements */
+        .neon-border {
+            box-shadow: 0 0 5px rgba(0, 191, 255, 0.2), inset 0 0 5px rgba(0, 191, 255, 0.1);
+        }
+        
+        /* Vertical slider track styling */
+        input[type=range][orient=vertical] {
+            writing-mode: bt-lr; /* IE */
+            -webkit-appearance: slider-vertical; /* WebKit */
+            width: 100%;
+            height: 100%;
+            padding: 0 5px;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-oled-black text-white font-display h-screen w-screen overflow-hidden flex flex-col select-none">
+<!-- Top Header -->
+<header class="h-14 shrink-0 flex items-center justify-between px-4 border-b border-white/10 bg-oled-black z-10">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" style="font-size: 28px;">equalizer</span>
+<h1 class="text-2xl font-bold tracking-tight uppercase leading-none">World Tour 2024</h1>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2">
+<div class="flex flex-col items-end">
+<span class="text-[10px] text-gray-500 uppercase tracking-widest leading-none">Session</span>
+<span class="text-sm font-bold text-gray-300">LIVE_SET_01</span>
+</div>
+</div>
+<div class="h-8 w-px bg-white/10"></div>
+<div class="flex items-center gap-3 bg-panel-dark px-3 py-1.5 rounded-sm border border-white/5">
+<span class="material-symbols-outlined text-primary animate-pulse" style="font-size: 20px;">ssid_chart</span>
+<div class="flex flex-col">
+<span class="text-[10px] text-primary uppercase font-bold tracking-wider leading-none">Latency</span>
+<span class="text-sm font-bold leading-none">4ms</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Area: 4-Column Layout -->
+<main class="flex-1 flex gap-2 p-2 min-h-0">
+<!-- Column 1: Active Setlist (25%) -->
+<section class="w-1/4 flex flex-col gap-0 bg-panel-dark rounded-sm border border-white/10 overflow-hidden relative group">
+<div class="h-10 shrink-0 flex items-center px-4 bg-white/5 border-b border-white/5 justify-between">
+<h3 class="text-gray-400 text-xs font-bold tracking-[0.15em] uppercase">Active Setlist</h3>
+<span class="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-gray-400 font-mono">03/12</span>
+</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-2 flex flex-col gap-1">
+<!-- Played Song -->
+<div class="flex items-center gap-3 p-3 rounded-sm bg-black/20 opacity-50 border border-transparent">
+<span class="material-symbols-outlined text-gray-600 cursor-grab active:cursor-grabbing" style="font-size: 20px;">drag_indicator</span>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-bold truncate line-through decoration-white/30">1. Neon Lights</p>
+<p class="text-[10px] text-gray-500 font-mono">3:45 • 120 BPM</p>
+</div>
+<span class="material-symbols-outlined text-secondary" style="font-size: 18px;">check_circle</span>
+</div>
+<!-- Active Song -->
+<div class="flex items-center gap-3 p-3 rounded-sm bg-primary/10 border border-primary/40 neon-border relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<span class="material-symbols-outlined text-primary cursor-grab active:cursor-grabbing" style="font-size: 20px;">drag_indicator</span>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary animate-pulse" style="font-size: 14px; font-variation-settings: 'FILL' 1;">play_arrow</span>
+<p class="text-sm font-bold text-white truncate">2. Cyber Heart</p>
+</div>
+<p class="text-[10px] text-primary/80 font-mono mt-0.5">PLAYING • 128 BPM</p>
+</div>
+<div class="flex gap-1">
+<span class="h-1.5 w-1.5 rounded-full bg-primary animate-ping"></span>
+</div>
+</div>
+<!-- Upcoming Songs -->
+<div class="flex items-center gap-3 p-3 rounded-sm hover:bg-white/5 border border-transparent hover:border-white/10 transition-colors">
+<span class="material-symbols-outlined text-gray-500 cursor-grab active:cursor-grabbing" style="font-size: 20px;">drag_indicator</span>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-bold text-gray-300 truncate">3. Digital Rain</p>
+<p class="text-[10px] text-gray-500 font-mono">4:12 • 130 BPM</p>
+</div>
+</div>
+<div class="flex items-center gap-3 p-3 rounded-sm hover:bg-white/5 border border-transparent hover:border-white/10 transition-colors">
+<span class="material-symbols-outlined text-gray-500 cursor-grab active:cursor-grabbing" style="font-size: 20px;">drag_indicator</span>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-bold text-gray-300 truncate">4. Encore</p>
+<p class="text-[10px] text-gray-500 font-mono">5:00 • 95 BPM</p>
+</div>
+</div>
+<div class="flex items-center gap-3 p-3 rounded-sm hover:bg-white/5 border border-transparent hover:border-white/10 transition-colors">
+<span class="material-symbols-outlined text-gray-500 cursor-grab active:cursor-grabbing" style="font-size: 20px;">drag_indicator</span>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-bold text-gray-300 truncate">5. Midnight City</p>
+<p class="text-[10px] text-gray-500 font-mono">3:55 • 108 BPM</p>
+</div>
+</div>
+<div class="flex items-center gap-3 p-3 rounded-sm hover:bg-white/5 border border-transparent hover:border-white/10 transition-colors">
+<span class="material-symbols-outlined text-gray-500 cursor-grab active:cursor-grabbing" style="font-size: 20px;">drag_indicator</span>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-bold text-gray-300 truncate">6. Outrun The Sun</p>
+<p class="text-[10px] text-gray-500 font-mono">4:20 • 140 BPM</p>
+</div>
+</div>
+</div>
+<!-- Bottom Fade -->
+<div class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-panel-dark to-transparent pointer-events-none"></div>
+</section>
+<!-- Column 2: Current Song (40%) -->
+<section class="w-[40%] flex flex-col gap-0 bg-panel-dark rounded-sm border border-white/10 overflow-hidden relative">
+<!-- Song Meta Header -->
+<div class="h-16 shrink-0 flex items-center justify-between px-6 bg-white/5 border-b border-white/5">
+<div class="flex flex-col justify-center">
+<span class="text-[10px] text-primary font-bold tracking-[0.2em] uppercase mb-0.5">Now Playing</span>
+<h2 class="text-2xl font-bold text-white tracking-tight uppercase glow-text">Cyber Heart</h2>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex flex-col items-end">
+<span class="text-[10px] text-gray-500 font-bold tracking-widest uppercase">Time</span>
+<span class="text-xl font-mono text-white tracking-tight">2:14 <span class="text-gray-600">/ 3:45</span></span>
+</div>
+<div class="h-8 w-px bg-white/10"></div>
+<div class="flex flex-col items-end">
+<span class="text-[10px] text-gray-500 font-bold tracking-widest uppercase">BPM</span>
+<span class="text-3xl font-mono font-bold text-primary tracking-tighter leading-none">128</span>
+</div>
+</div>
+</div>
+<!-- Progress Bar -->
+<div class="h-1.5 w-full bg-black relative">
+<div class="absolute left-0 top-0 bottom-0 bg-primary shadow-[0_0_10px_rgba(0,191,255,0.6)]" style="width: 60%"></div>
+</div>
+<!-- Lyrics View -->
+<div class="flex-1 relative overflow-hidden bg-[#0a0a0b] flex flex-col items-center justify-center p-8 text-center">
+<div class="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-[#0a0a0b] to-transparent z-10 pointer-events-none"></div>
+<div class="w-full max-w-lg space-y-6 opacity-40 blur-[1px] scale-95 origin-bottom transition-all duration-500">
+<p class="text-2xl font-medium leading-relaxed text-gray-400">Can you hear the static calling?</p>
+</div>
+<div class="w-full max-w-xl py-8 space-y-2 z-0">
+<p class="text-3xl md:text-4xl font-bold leading-tight text-white tracking-wide">We are running through the wire</p>
+<p class="text-3xl md:text-4xl font-bold leading-tight text-white tracking-wide text-primary">Circuits burning with desire</p>
+</div>
+<div class="w-full max-w-lg space-y-6 opacity-40 blur-[1px] scale-95 origin-top transition-all duration-500">
+<p class="text-2xl font-medium leading-relaxed text-gray-400">In the neon city lights...</p>
+</div>
+<div class="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#0a0a0b] to-transparent z-10 pointer-events-none"></div>
+</div>
+<!-- Next Song Preview footer -->
+<div class="h-8 shrink-0 flex items-center justify-center bg-black/40 border-t border-white/5">
+<p class="text-[10px] text-gray-500 uppercase tracking-widest">Next: Digital Rain (130 BPM)</p>
+</div>
+</section>
+<!-- Column 3: Connected Band (20%) -->
+<section class="w-[20%] flex flex-col gap-0 bg-panel-dark rounded-sm border border-white/10 overflow-hidden">
+<div class="h-10 shrink-0 flex items-center px-4 bg-white/5 border-b border-white/5">
+<h3 class="text-gray-400 text-xs font-bold tracking-[0.15em] uppercase">Network</h3>
+</div>
+<div class="flex-1 p-2 flex flex-col gap-1 overflow-y-auto">
+<!-- Lead Guitar -->
+<div class="flex items-center justify-between p-3 rounded-sm bg-white/5 border border-white/5">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded flex items-center justify-center bg-black border border-white/10 text-gray-300">
+<span class="material-symbols-outlined" style="font-size: 18px;">piano</span>
+</div>
+<div class="flex flex-col">
+<span class="text-sm font-bold text-white leading-none">Guitar</span>
+<span class="text-[10px] text-gray-500 mt-1">Jack</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-1">
+<div class="size-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,255,136,0.6)]"></div>
+<span class="text-[9px] text-secondary/80 font-mono">OK</span>
+</div>
+</div>
+<!-- Bass -->
+<div class="flex items-center justify-between p-3 rounded-sm bg-white/5 border border-white/5">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded flex items-center justify-center bg-black border border-white/10 text-gray-300">
+<span class="material-symbols-outlined" style="font-size: 18px;">music_note</span>
+</div>
+<div class="flex flex-col">
+<span class="text-sm font-bold text-white leading-none">Bass</span>
+<span class="text-[10px] text-gray-500 mt-1">Sarah</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-1">
+<div class="size-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,255,136,0.6)]"></div>
+<span class="text-[9px] text-secondary/80 font-mono">OK</span>
+</div>
+</div>
+<!-- Drums -->
+<div class="flex items-center justify-between p-3 rounded-sm bg-white/5 border border-white/5">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded flex items-center justify-center bg-black border border-white/10 text-gray-300">
+<span class="material-symbols-outlined" style="font-size: 18px;">album</span>
+</div>
+<div class="flex flex-col">
+<span class="text-sm font-bold text-white leading-none">Drums</span>
+<span class="text-[10px] text-gray-500 mt-1">Mike</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-1">
+<div class="size-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,255,136,0.6)]"></div>
+<span class="text-[9px] text-secondary/80 font-mono">OK</span>
+</div>
+</div>
+<!-- Keys -->
+<div class="flex items-center justify-between p-3 rounded-sm bg-white/5 border border-white/5">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded flex items-center justify-center bg-black border border-white/10 text-gray-300">
+<span class="material-symbols-outlined" style="font-size: 18px;">piano</span>
+</div>
+<div class="flex flex-col">
+<span class="text-sm font-bold text-white leading-none">Keys</span>
+<span class="text-[10px] text-gray-500 mt-1">Alex</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-1">
+<div class="size-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,255,136,0.6)]"></div>
+<span class="text-[9px] text-secondary/80 font-mono">OK</span>
+</div>
+</div>
+<!-- Vocals -->
+<div class="flex items-center justify-between p-3 rounded-sm bg-white/5 border border-white/5 opacity-50">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded flex items-center justify-center bg-black border border-white/10 text-gray-300">
+<span class="material-symbols-outlined" style="font-size: 18px;">mic</span>
+</div>
+<div class="flex flex-col">
+<span class="text-sm font-bold text-white leading-none">Backing</span>
+<span class="text-[10px] text-gray-500 mt-1">Loop</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-1">
+<div class="size-2 rounded-full bg-gray-500"></div>
+<span class="text-[9px] text-gray-500 font-mono">OFF</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Column 4: Control & Mixer (15%) -->
+<section class="w-[15%] flex flex-col gap-2">
+<!-- Mixer Module -->
+<div class="flex-1 bg-panel-dark rounded-sm border border-white/10 flex flex-col p-2">
+<div class="h-6 shrink-0 flex items-center justify-center mb-2">
+<h3 class="text-gray-400 text-[10px] font-bold tracking-[0.15em] uppercase text-center w-full">Main Out</h3>
+</div>
+<div class="flex-1 relative mx-auto w-12 bg-black rounded-full border border-white/10 p-1">
+<!-- Fader Track Design -->
+<div class="absolute left-1/2 top-2 bottom-2 w-0.5 bg-gray-800 -translate-x-1/2"></div>
+<!-- This simulates the fader position -->
+<div class="absolute bottom-[75%] left-1 right-1 h-8 bg-gray-700 rounded-sm border border-gray-500 shadow-lg cursor-pointer hover:bg-gray-600 transition-colors z-10 flex items-center justify-center">
+<div class="w-full h-[1px] bg-black/50"></div>
+</div>
+<!-- Level Meter Next to Fader -->
+<div class="absolute right-[-14px] bottom-2 top-2 w-1.5 flex flex-col-reverse gap-[2px]">
+<div class="h-1 bg-danger w-full opacity-30"></div>
+<div class="h-1 bg-danger w-full opacity-30"></div>
+<div class="h-1 bg-yellow-500 w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+<div class="h-1 bg-secondary w-full"></div>
+</div>
+</div>
+<div class="h-8 shrink-0 flex items-center justify-center mt-2">
+<span class="font-mono text-primary font-bold text-sm">75%</span>
+</div>
+</div>
+<!-- Panic Button -->
+<button class="h-24 bg-danger/10 border-2 border-danger text-danger rounded-sm flex flex-col items-center justify-center gap-1 active:bg-danger active:text-white transition-all duration-100 hover:bg-danger/20 group">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform" style="font-size: 32px;">warning</span>
+<span class="text-xs font-bold uppercase tracking-[0.2em]">Stop All</span>
+</button>
+</section>
+</main>
+<!-- Overlay Gradient to simulate screen reflection/finish (Optional but adds to OLED feel) -->
+<div class="fixed inset-0 bg-gradient-to-tr from-white/5 to-transparent opacity-10 pointer-events-none z-50"></div>
+</body></html>

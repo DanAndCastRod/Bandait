@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Cloud Sync &amp; Import</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#0095ff",
+              "background-light": "#ffffff",
+              "background-dark": "#000000",
+              "surface": "#121212",
+              "border-dim": "#2e526b",
+            },
+            fontFamily: {
+              "display": ["Space Grotesk", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .neon-glow {
+            box-shadow: 0 0 10px rgba(0, 149, 255, 0.4);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #2e526b;
+            border-radius: 10px;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark text-white selection:bg-primary/30">
+<div class="relative flex h-screen w-full flex-col overflow-hidden max-w-[430px] mx-auto border-x border-white/5">
+<!-- TopAppBar -->
+<header class="flex items-center bg-background-dark p-6 pb-2 justify-between shrink-0">
+<div class="text-white flex size-10 shrink-0 items-center justify-center rounded-full bg-surface" data-icon="ArrowLeft">
+<span class="material-symbols-outlined text-2xl">arrow_back</span>
+</div>
+<div class="flex flex-col items-center flex-1">
+<h2 class="text-white text-base font-bold leading-tight tracking-wider uppercase">Cloud Import</h2>
+</div>
+<div class="flex items-center justify-end">
+<span class="material-symbols-outlined text-primary text-xl">account_circle</span>
+</div>
+</header>
+<div class="px-6 py-2 shrink-0">
+<p class="text-primary/70 text-[10px] font-bold tracking-[0.2em] uppercase text-right">Logged in as band@example.com</p>
+</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar">
+<!-- SectionHeader: Connect Services -->
+<div class="px-6 pt-6 pb-4">
+<h3 class="text-white text-[11px] font-bold leading-tight tracking-[0.3em] uppercase opacity-60">Connect Services</h3>
+</div>
+<!-- TextGrid / Service Bento -->
+<div class="grid grid-cols-3 gap-3 px-6 mb-8">
+<div class="flex flex-col gap-3 rounded-xl border border-primary bg-primary/10 p-4 items-center justify-center aspect-square neon-glow">
+<span class="material-symbols-outlined text-primary text-3xl">add_to_drive</span>
+<span class="text-white text-[10px] font-bold tracking-wider uppercase">G-Drive</span>
+</div>
+<div class="flex flex-col gap-3 rounded-xl border border-white/10 bg-surface p-4 items-center justify-center aspect-square grayscale opacity-50">
+<span class="material-symbols-outlined text-white text-3xl">cloud</span>
+<span class="text-white text-[10px] font-bold tracking-wider uppercase">Dropbox</span>
+</div>
+<div class="flex flex-col gap-3 rounded-xl border border-white/10 bg-surface p-4 items-center justify-center aspect-square grayscale opacity-50">
+<span class="material-symbols-outlined text-white text-3xl">filter_drama</span>
+<span class="text-white text-[10px] font-bold tracking-wider uppercase">OneDrive</span>
+</div>
+</div>
+<!-- Tabs -->
+<div class="px-6 mb-4">
+<div class="flex border-b border-white/10 gap-6 overflow-x-auto no-scrollbar">
+<a class="flex flex-col items-center justify-center border-b-2 border-primary text-white pb-3 pt-2 whitespace-nowrap" href="#">
+<p class="text-white text-xs font-bold tracking-widest uppercase">All Files</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-2 border-transparent text-white/40 pb-3 pt-2 whitespace-nowrap" href="#">
+<p class="text-xs font-bold tracking-widest uppercase">Audio (.wav)</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-2 border-transparent text-white/40 pb-3 pt-2 whitespace-nowrap" href="#">
+<p class="text-xs font-bold tracking-widest uppercase">Data (.json)</p>
+</a>
+</div>
+</div>
+<!-- File Explorer -->
+<div class="px-6 pb-32">
+<div class="flex flex-col space-y-2">
+<!-- Folder Item -->
+<div class="flex items-center gap-4 p-4 rounded-xl bg-surface/50 border border-white/5">
+<span class="material-symbols-outlined text-primary/60">folder</span>
+<div class="flex-1">
+<p class="text-white text-sm font-medium">Tour 2024 / Assets</p>
+<p class="text-[10px] text-white/40 uppercase tracking-tighter">12 Items • Modified 2d ago</p>
+</div>
+<span class="material-symbols-outlined text-white/20">chevron_right</span>
+</div>
+<!-- File Item: Selected -->
+<div class="flex items-center gap-4 p-4 rounded-xl bg-primary/5 border border-primary/30 relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<span class="material-symbols-outlined text-primary">description</span>
+<div class="flex-1">
+<p class="text-white text-sm font-bold">opening_sequence.json</p>
+<p class="text-[10px] text-primary font-bold uppercase tracking-widest">Configuration • 42 KB</p>
+</div>
+<div class="size-5 rounded bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-black text-sm font-bold">check</span>
+</div>
+</div>
+<!-- File Item: Selected -->
+<div class="flex items-center gap-4 p-4 rounded-xl bg-primary/5 border border-primary/30 relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<span class="material-symbols-outlined text-primary">audio_file</span>
+<div class="flex-1">
+<p class="text-white text-sm font-bold">intro_pad_stereo.wav</p>
+<p class="text-[10px] text-primary font-bold uppercase tracking-widest">PCM Audio • 24.1 MB</p>
+</div>
+<div class="size-5 rounded bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-black text-sm font-bold">check</span>
+</div>
+</div>
+<!-- File Item -->
+<div class="flex items-center gap-4 p-4 rounded-xl bg-surface/30 border border-white/5">
+<span class="material-symbols-outlined text-white/40">subtitles</span>
+<div class="flex-1">
+<p class="text-white text-sm font-medium opacity-80">lyrics_v3_main.lrc</p>
+<p class="text-[10px] text-white/30 uppercase tracking-widest">LRC Script • 12 KB</p>
+</div>
+<div class="size-5 rounded border border-white/20 flex items-center justify-center"></div>
+</div>
+<!-- File Item -->
+<div class="flex items-center gap-4 p-4 rounded-xl bg-surface/30 border border-white/5">
+<span class="material-symbols-outlined text-white/40">audio_file</span>
+<div class="flex-1">
+<p class="text-white text-sm font-medium opacity-80">click_track_01.wav</p>
+<p class="text-[10px] text-white/30 uppercase tracking-widest">PCM Audio • 8.4 MB</p>
+</div>
+<div class="size-5 rounded border border-white/20 flex items-center justify-center"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Sticky Footer -->
+<div class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black via-black to-transparent pt-12">
+<!-- Progress Bar -->
+<div class="mb-4">
+<div class="flex justify-between items-end mb-2">
+<p class="text-[10px] font-bold text-primary tracking-[0.2em] uppercase">Syncing Selected Assets</p>
+<p class="text-[10px] font-bold text-white tracking-widest">2 / 2 Files</p>
+</div>
+<div class="h-1 w-full bg-white/10 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[65%] rounded-full neon-glow"></div>
+</div>
+</div>
+<button class="w-full bg-primary py-4 rounded-xl flex items-center justify-center gap-3 active:scale-[0.98] transition-transform">
+<span class="material-symbols-outlined text-black font-bold">sync</span>
+<span class="text-black font-bold uppercase tracking-[0.15em] text-sm">Download &amp; Sync</span>
+</button>
+<div class="h-4"></div> <!-- Safe area spacing -->
+</div>
+</div>
+</body></html>

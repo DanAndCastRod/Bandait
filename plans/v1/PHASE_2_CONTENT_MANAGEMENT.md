@@ -28,13 +28,15 @@ Necesitamos un formato estándar y eficiente. Usaremos JSON para transporte y ob
 **Objetivo:** Cargar, guardar y entender archivos de canciones.
 
 #### Tareas
-- [ ] **LRC Parser:**
+- [x] **LRC Parser:**
+    - **Componente Stitch:** Ver `synchronized_lrc_editor_1` y `_2`.
     - Implementar parser de Regex para formato estándar LRC `[mm:ss.xx] Texto`.
     - Extender formato para soportar metadatos (BPM, Compás) en cabeceras custom tags `#BPM:120`.
-- [ ] **Persistencia Local:**
+- [x] **Persistencia Local:**
     - Implementar base de datos local (Hive o Drift) para guardar el repertorio en el dispositivo.
     - Cachear canciones recibidas del Líder para no re-descargar si no han cambiado (hash check).
-- [ ] **Gestor de Setlists:**
+- [x] **Gestor de Setlists:**
+    - **Componente Stitch:** Ver `song_library_manager`.
     - CRUD básico de Listas de Reproducción.
     - Reordenamiento UI (ReorderableListView).
 
@@ -42,13 +44,38 @@ Necesitamos un formato estándar y eficiente. Usaremos JSON para transporte y ob
 **Objetivo:** Visualizar la letra correcta en el momento exacto.
 
 #### Tareas
-- [ ] **Visualizador de Texto Sincronizado:**
+- [x] **Visualizador de Texto Sincronizado:**
     - Widget que recibe `currentSongTime` y resalta la línea activa.
-    - Auto-scroll suave: La línea activa siempre debe estar centrada verticalmente o en el tercio superior.
-- [ ] **Interpolación de Tiempo:**
-    - El UI update rate (60fps) debe consultar el reloj sincronizado y actualizar la posición del scroll suavemente, no "a saltos" por línea.
-- [ ] **Editor Básico (Opcional MVP):**
-    - Permitir ajustar el offset de la letra (+/- ms) en tiempo real si el lrc está mal sincronizado.
+    - Auto-scroll suave: Implementado en `LyricEditorPage`.
+- [x] **Interpolación de Tiempo:**
+    - Implementado con `Stopwatch` y `Timer.periodic`.
+- [x] **Editor Básico (Opcional MVP):**
+    - Implementado "Mark Beat" para sincronización en tiempo real.
+    - Implementado "Paste Text" para carga rápida.
+- [x] **Stage View (Siguiente Paso):**
+    - Implementado `StageViewPage` basado en `musician_stage_view`.
+    - Modo solo lectura con metrónomo visual y letra grande para el escenario.
+
+### Sprint 7: Gestión de Setlists (Completado)
+**Objetivo:** Organizar las canciones en listas para el show.
+
+#### Tareas
+- [x] **Modelo de Datos:**
+    - `Setlist` con ID, Título, Fecha y lista de IDs de canciones.
+    - **Componente Stitch:** `dynamic_setlist_manager`.
+- [x] **UI de Librería:**
+    - Listado de Setlists guardados.
+    - Creación de nuevos setlists.
+- [x] **UI de Editor:**
+    - Agregar canciones desde la librería.
+    - Reordenar (Drag & Drop).
+    - Eliminar canciones.
+    - Renombrar Setlist.
+
+## 🚧 Pendientes / Siguiente Fase
+1.  **CRUD Completo:** Editar Título/Artista y Borrar canciones de la librería (Pendiente menor).
+2.  **Sincronización P2P:** La transferencia de canciones Líder->Follower (Fase 3).
+3.  **Cloud Sync:** Backup en la nube (Fase 6).
 
 ## 🧪 Criterios de Aceptación
 1.  Carga archivos .lrc estándar correctamente.

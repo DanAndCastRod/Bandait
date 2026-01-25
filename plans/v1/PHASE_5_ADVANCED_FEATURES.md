@@ -11,6 +11,7 @@
 
 #### Tareas
 - [ ] Integrar librería MIDI BLE (`flutter_midi_command`).
+- [ ] **Componente Stitch:** Ver `personal_monitor_mixer` (Concepto futuro).
 - [ ] UI de Mapeo MIDI en Líder:
     - "En el Segundo 45 (Coro), enviar Program Change #12 al Canal 1".
 - [ ] Motor de Disparo MIDI:

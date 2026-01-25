@@ -31,32 +31,32 @@ RelojCorregido = HoraLocal + Offset
 - [ ] **Setup del Proyecto:**
     - Estructura de directorios Clean Architecture: `domain`, `data`, `presentation`.
     - Inyección de dependencias (`get_it`, `injectable`).
-- [ ] **Servidor WebSocket (Líder):**
-    - Implementar `ServerEngine` usando `dart:io` HttpServer o `shelf_web_socket`.
-    - Mapeo de clientes conectados: `Map<ClientId, WebSocketChannel>`.
-    - Broadcast de mensajes.
-- [ ] **Cliente WebSocket (Seguidor):**
-    - Implementar `ClientEngine` con reconexión automática (Exponential backoff).
-    - Manejo de estados de conexión: `Disconnected`, `Connecting`, `Connected`.
-- [ ] **Protocolo de Mensajería:**
-    - Definir `MessageModel` (JSON): `{ "type": "PING", "payload": {}, "timestamp": 123456 }`.
-    - Tipos iniciales: `HANDSHAKE`, `PING`, `PONG`, `ACK`.
+- [x] **Servidor WebSocket (Líder):**
+    - [x] Implementar `ServerEngine` usando `dart:io` HttpServer o `shelf_web_socket`.
+    - [x] Mapeo de clientes conectados: `Map<ClientId, WebSocketChannel>`.
+    - [x] Broadcast de mensajes.
+- [x] **Cliente WebSocket (Seguidor):**
+    - [x] Implementar `ClientEngine` con reconexión automática (Exponential backoff).
+    - [x] Manejo de estados de conexión: `Disconnected`, `Connecting`, `Connected`.
+- [x] **Protocolo de Mensajería:**
+    - [x] Definir `MessageModel` (JSON): `{ "type": "PING", "payload": {}, "timestamp": 123456 }`.
+    - [x] Tipos iniciales: `HANDSHAKE`, `PING`, `PONG`, `ACK`.
 
 ### Sprint 2: Motor de Sincronización de Reloj
 **Objetivo:** Implementar la lógica matemática para alinear los relojes.
 
 #### Tareas
-- [ ] **Lógica de Ping/Pong NTP:**
-    - Cliente envía `SYNC_REQUEST` con `t0`.
-    - Servidor responde `SYNC_RESPONSE` adjuntando `t1` y `t2`.
-    - Cliente recibe en `t3` y calcula.
-- [ ] **Filtro de Calidad:**
-    - Descartar muestras con RTT inusualmente alto (spikes de red).
-    - Promediar las últimas N muestras válidas para suavizar el `offset`.
-    - Implementar "Drift Correction" continuo (resincronizar cada X segundos).
-- [ ] **UI de Debug:**
-    - Pantalla técnica que muestre: "Offset: -12ms", "RTT: 4ms", "Jitter: 1ms".
-    - Botón "Flash Test": El líder envía comando "Flash en T+2000ms". Todos los dispositivos deben flashear la pantalla visualmente al unísono para validar a ojo.
+- [x] **Lógica de Ping/Pong NTP:**
+    - [x] Cliente envía `SYNC_REQUEST` con `t0`.
+    - [x] Servidor responde `SYNC_RESPONSE` adjuntando `t1` y `t2`.
+    - [x] Cliente recibe en `t3` y calcula.
+- [x] **Filtro de Calidad:**
+    - [x] Descartar muestras con RTT inusualmente alto (spikes de red).
+    - [x] Promediar las últimas N muestras válidas para suavizar el `offset`.
+    - [x] Implementar "Drift Correction" continuo (resincronizar cada X segundos).
+- [x] **UI de Debug:**
+    - [x] Pantalla técnica que muestre: "Offset: -12ms", "RTT: 4ms", "Jitter: 1ms".
+    - [x] Botón "Flash Test": El líder envía comando "Flash en T+2000ms". Todos los dispositivos deben flashear la pantalla visualmente al unísono para validar a ojo.
 
 ## 🧪 Criterios de Aceptación
 1.  La conexión persiste aunque el servidor (app líder) vaya a background y vuelva (en Android puede requerir Foreground Service, evaluar).
