@@ -1,11 +1,11 @@
 import 'dart:io';
-import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:bandait/presentation/widgets/panic_overlay.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:bandait/core/di/injection.dart';
 import 'package:bandait/domain/repositories/session_repository.dart';
+import 'package:bandait/domain/repositories/audio_engine.dart';
 import 'package:bandait/domain/models/user_profile.dart';
 import 'package:bandait/presentation/theme/app_theme.dart';
 import 'package:bandait/presentation/widgets/visual_metronome.dart';
@@ -24,8 +24,7 @@ class _LeaderLobbyPageState extends State<LeaderLobbyPage> {
   String? _localIp;
   bool _isHosting = false;
   final int _port = 4567; // Fixed port for Bandait
-  final String _sessionToken = DateTime.now().millisecondsSinceEpoch
-      .toString(); // Simple token
+  final String _sessionToken = DateTime.now().millisecondsSinceEpoch.toString();
   double _bpm = 120.0;
   bool _isPlaying = false;
 
@@ -50,8 +49,6 @@ class _LeaderLobbyPageState extends State<LeaderLobbyPage> {
         type: InternetAddressType.IPv4,
       );
       for (var interface in interfaces) {
-        // Crude filter for likely local IP (usually starts 192 or 10)
-        // Adjust logic if needed for specific setups
         for (var addr in interface.addresses) {
           if (!addr.isLoopback) {
             _localIp = addr.address;
@@ -96,6 +93,26 @@ class _LeaderLobbyPageState extends State<LeaderLobbyPage> {
         backgroundColor: AppTheme.cardBackground,
         centerTitle: true,
         actions: [
+          // Audio Status Icon
+          IconButton(
+            icon: Icon(
+              getIt<AudioEngine>().isInitialized
+                  ? Icons.volume_up
+                  : Icons.volume_off,
+              color: getIt<AudioEngine>().isInitialized
+                  ? Colors.green
+                  : Colors.red,
+            ),
+            tooltip: getIt<AudioEngine>().isInitialized
+                ? 'Audio Ready'
+                : 'Audio Error (Tap to fix)',
+            onPressed: getIt<AudioEngine>().isInitialized
+                ? null
+                : () async {
+                    await getIt<AudioEngine>().initialize();
+                    setState(() {});
+                  },
+          ),
           IconButton(
             icon: const Icon(Icons.exit_to_app, color: Colors.red),
             onPressed: () {
@@ -229,11 +246,10 @@ class _LeaderLobbyPageState extends State<LeaderLobbyPage> {
                                         : Colors.green,
                                   ),
                                   onPressed: _isPlaying
-                                      ? null // Disable if playing, or make it pause?
+                                      ? null
                                       : () {
                                           _sessionRepo.startMetronome(_bpm);
                                           setState(() => _isPlaying = true);
-                                          // Note: Ideally we listen to a stream for this state
                                         },
                                 ),
                                 ElevatedButton.icon(

@@ -17,4 +17,7 @@ abstract class AudioEngine {
   Future<int> getGlobalOffset();
   Future<int> getBufferLength();
   Future<double> measureLatency();
+
+  /// Returns true if the engine is initialized.
+  bool get isInitialized;
 }

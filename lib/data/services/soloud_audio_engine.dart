@@ -17,6 +17,9 @@ class SoLoudAudioEngine implements AudioEngine {
   int _bufferLength = 512;
 
   @override
+  bool get isInitialized => _soloud != null && _soloud!.isInitialized;
+
+  @override
   Future<void> initialize() async {
     try {
       _soloud = SoLoud.instance;
@@ -66,28 +69,30 @@ class SoLoudAudioEngine implements AudioEngine {
 
   @override
   void playTick() {
-    if (_soloud == null) {
-      log('SoLoud not initialized', name: 'SoLoudAudioEngine');
+    if (_soloud == null) return;
+    if (!_soloud!.isInitialized) {
+      log('SoLoud engine NOT initialized yet', name: 'SoLoudAudioEngine');
       return;
     }
-    if (_tickSource == null) {
-      log('Tick source not loaded', name: 'SoLoudAudioEngine');
-      return;
-    }
+    if (_tickSource == null) return;
+
     try {
       _soloud!.play(_tickSource!);
     } catch (e) {
-      log('Error playing tick: $e', name: 'SoLoudAudioEngine');
+      // ignore
     }
   }
 
   @override
   void playTock() {
-    if (_soloud == null || _tockSource == null) return;
+    if (_soloud == null) return;
+    if (!_soloud!.isInitialized) return;
+    if (_tockSource == null) return;
+
     try {
       _soloud!.play(_tockSource!);
     } catch (e) {
-      log('Error playing tock: $e', name: 'SoLoudAudioEngine');
+      // ignore
     }
   }
 
