@@ -183,11 +183,11 @@ class _ProfileSelectionPageState extends State<ProfileSelectionPage> {
                       title: 'METRONOME',
                       icon: Icons.timer,
                       color: Colors.teal,
-                      // Pass false for isLeader just for local practice
+                      // Solo practice mode (no forceLeader, defaults to true)
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const MetronomePage(isLeader: false),
+                          builder: (_) => const MetronomePage(),
                         ),
                       ),
                     ),

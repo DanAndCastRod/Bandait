@@ -19,7 +19,7 @@
     - Indicador de Acorde actual (si aplica) anclado en zona visible.
 - [x] **Wakelock:**
     - Integrar `wakelock_plus`. Activar automáticamente al entrar a una Sesión. Desactivar al salir.
-- [/] **Prevención de Errores UI:**
+- [x] **Prevención de Errores UI:**
     - Gestos de deslizar para bloquear/desbloquear controles críticos en el Líder.
     - Ocultar botones de navegación de sistema (Immersive Mode) si es posible.
 

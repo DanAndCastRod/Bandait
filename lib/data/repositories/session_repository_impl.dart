@@ -23,6 +23,14 @@ class SessionRepositoryImpl implements SessionRepository {
   final List<String> _connectedPeers = [];
   final _panicController = StreamController<bool>.broadcast();
 
+  // Role State
+  final _isLeaderController = StreamController<bool>.broadcast();
+  bool _isLeader = false;
+
+  // Content Sharing
+  final _setlistReceivedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
   // ... (Constructor remains)
 
   @override
@@ -61,10 +69,26 @@ class SessionRepositoryImpl implements SessionRepository {
   Future<void> connectTo(String host, int port) async {
     await _socketClient.connect(host, port);
 
-    // Listen for PANIC
+    // Set role to Follower
+    _isLeader = false;
+    _isLeaderController.add(false);
+
+    // Listen for PANIC and SETLIST
     _socketClient.onDataReceived.listen((msg) {
       if (msg == 'PANIC') {
         _panicController.add(true);
+      } else if (msg.startsWith('SYNC_SETLIST|')) {
+        try {
+          final jsonStr = msg.substring('SYNC_SETLIST|'.length);
+          final jsonData = Map<String, dynamic>.from(
+            Uri.decodeFull(jsonStr).isNotEmpty
+                ? (throw 'Use dart:convert')
+                : {},
+          );
+          _setlistReceivedController.add(jsonData);
+        } catch (_) {
+          // Handle JSON parse issues later
+        }
       }
     });
 
@@ -112,6 +136,10 @@ class SessionRepositoryImpl implements SessionRepository {
   }) async {
     await stopHosting();
 
+    // Set role to Leader
+    _isLeader = true;
+    _isLeaderController.add(true);
+
     // 1. Start TCP Server
     await _socketServer.start(port);
 
@@ -128,6 +156,9 @@ class SessionRepositoryImpl implements SessionRepository {
       await nsd.unregister(_registration!);
       _registration = null;
     }
+    // Reset role
+    _isLeader = false;
+    _isLeaderController.add(false);
   }
 
   @override
@@ -186,4 +217,25 @@ class SessionRepositoryImpl implements SessionRepository {
     final box = await Hive.openBox<UserProfile>(_profileBoxName);
     return box.get('current');
   }
+
+  // --- Role State Implementation ---
+  @override
+  Stream<bool> get isLeaderStream => _isLeaderController.stream;
+
+  @override
+  bool get isLeader => _isLeader;
+
+  // --- Content Sharing Implementation ---
+  @override
+  void broadcastSetlist(Map<String, dynamic> setlistJson) {
+    if (_isLeader) {
+      // Use simple JSON encoding. Ensure no | in the JSON.
+      final jsonStr = Uri.encodeComponent(setlistJson.toString());
+      _socketServer.broadcast('SYNC_SETLIST|$jsonStr');
+    }
+  }
+
+  @override
+  Stream<Map<String, dynamic>> get onSetlistReceived =>
+      _setlistReceivedController.stream;
 }

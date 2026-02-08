@@ -247,7 +247,7 @@ class _RoleSelectionPageState extends State<RoleSelectionPage> {
                     icon: Icons.timer,
                     color: Colors.teal,
                     onTap: () =>
-                        _navigateTo(MetronomePage(isLeader: _isLeader)),
+                        _navigateTo(MetronomePage(forceLeader: _isLeader)),
                   ),
                 ),
                 const SizedBox(width: 12),

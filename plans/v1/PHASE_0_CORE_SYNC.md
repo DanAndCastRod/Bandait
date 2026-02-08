@@ -28,7 +28,7 @@ RelojCorregido = HoraLocal + Offset
 **Objetivo:** Establecer comunicación bidireccional fiable/rápida entre dispositivos en la misma LAN.
 
 #### Tareas
-- [ ] **Setup del Proyecto:**
+- [x] **Setup del Proyecto:**
     - Estructura de directorios Clean Architecture: `domain`, `data`, `presentation`.
     - Inyección de dependencias (`get_it`, `injectable`).
 - [x] **Servidor WebSocket (Líder):**

@@ -6,15 +6,20 @@ import '../bloc/metronome/metronome_state.dart';
 import '../../../application/distributed_metronome_manager.dart';
 
 class MetronomePage extends StatelessWidget {
-  final bool isLeader;
+  /// If true, forces leader mode (useful for solo practice).
+  /// If null, defaults to true (Solo Mode = controls enabled).
+  final bool? forceLeader;
 
-  const MetronomePage({super.key, required this.isLeader});
+  const MetronomePage({super.key, this.forceLeader});
 
   @override
   Widget build(BuildContext context) {
+    // Solo mode default: controls enabled.
+    final effectiveIsLeader = forceLeader ?? true;
+
     return BlocProvider(
       create: (_) => getIt<MetronomeBloc>(),
-      child: _MetronomeView(isLeader: isLeader),
+      child: _MetronomeView(isLeader: effectiveIsLeader),
     );
   }
 }

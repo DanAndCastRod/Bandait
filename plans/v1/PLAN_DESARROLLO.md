@@ -82,17 +82,17 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 *Objetivo: Que conectarse sea mágico y a prueba de fallos.*
 
 #### Sprint 8: Session Lobby & Roles
-- [ ] Implementar pantalla "¿Quién eres?" (Líder/Músico).
-- [ ] **Componente Stitch:** `leader_session_lobby` y `instrument_&_profile_selection`.
-- [ ] Líder: Pantalla de creación de sesión (IP, Puerto).
-- [ ] Generador de QR para conexión rápida.
-- [ ] Músico: Escáner QR y selección de Instrumento/Perfil.
+- [x] Implementar pantalla "¿Quién eres?" (Líder/Músico).
+- [x] **Componente Stitch:** `leader_session_lobby` y `instrument_&_profile_selection`.
+- [x] Líder: Pantalla de creación de sesión (IP, Puerto).
+- [x] Generador de QR para conexión rápida.
+- [x] Músico: Escáner QR y selección de Instrumento/Perfil.
 
 #### Sprint 9: Network Health & Diagnostics
-- [ ] **Componente Stitch:** `network_&_sync_diagnostic`.
-- [ ] Monitor de latencia (Ping/RTT) en tiempo real.
-- [ ] UI Semáforo: Verde (<10ms), Amarillo (Jitter), Rojo (Desconexión).
-- [ ] Alertas pasivas inteligentes ("Mala conexión WiFi").
+- [x] **Componente Stitch:** `network_&_sync_diagnostic`.
+- [x] Monitor de latencia (Ping/RTT) en tiempo real.
+- [x] UI Semáforo: Verde (<10ms), Amarillo (Jitter), Rojo (Desconexión).
+- [x] Alertas pasivas inteligentes ("Mala conexión WiFi").
 
 ---
 
@@ -100,14 +100,14 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 *Objetivo: Usabilidad en condiciones de escenario.*
 
 #### Sprint 10: Dashboards de Control
-- [ ] **Componente Stitch:** `leader_tablet_dashboard_v1` / `v2`.
-- [ ] Unificar controles de Transporte, Setlist y Librería en una sola pantalla para el Líder.
-- [ ] **Componente Stitch:** `musician_stage_view` (Mejoras Visuales).
-- [ ] Tema "OLED Black" verdadero para ahorro de batería.
+- [x] **Componente Stitch:** `leader_tablet_dashboard_v1` / `v2`.
+- [x] Unificar controles de Transporte, Setlist y Librería en una sola pantalla para el Líder.
+- [x] **Componente Stitch:** `musician_stage_view` (Mejoras Visuales).
+- [x] Tema "OLED Black" verdadero para ahorro de batería.
 
 #### Sprint 11: Feedback Visual y Pánico
-- [ ] **Metrónomo Visual:** Bordes de pantalla parpadeando con el beat.
-- [ ] **Panic Button:** Stop All seguro.
+- [x] **Metrónomo Visual:** Bordes de pantalla parpadeando con el beat.
+- [x] **Panic Button:** Stop All seguro.
 
 ---
 

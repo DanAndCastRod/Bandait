@@ -33,7 +33,7 @@ Usar archivos de audio (mp3/wav) introduce latencia de lectura de disco y decodi
     - Sonido "Tick" (Frecuencia alta, ej. 1200Hz, duración corta 50ms).
     - Sonido "Tock" (Frecuencia media, ej. 800Hz, para tiempos débiles).
 - [x] Implementar un "One-Shot" player y medir la latencia input-to-sound (tap en pantalla -> sonido).
-- [ ] **Componente Stitch:** Ver `audio_engine_&_latency_settings` para diseño de configuración de buffer y latencia.
+- [x] **Componente Stitch:** Ver `audio_engine_&_latency_settings` para diseño de configuración de buffer y latencia.
 
 ### Sprint 4: El Scheduler del Futuro
 **Objetivo:** Programar el sonido para que suene en un timestamp exacto del reloj sincronizado.

@@ -50,4 +50,18 @@ abstract class SessionRepository {
 
   /// Gets the local user profile.
   Future<UserProfile?> getUserProfile();
+
+  // --- Role State ---
+  /// Stream indicating if this device is the session Leader.
+  Stream<bool> get isLeaderStream;
+
+  /// Synchronous getter for current leader state.
+  bool get isLeader;
+
+  // --- Content Sharing ---
+  /// Broadcasts a setlist JSON to all connected peers (Leader only).
+  void broadcastSetlist(Map<String, dynamic> setlistJson);
+
+  /// Stream of setlists received from the Leader (Follower only).
+  Stream<Map<String, dynamic>> get onSetlistReceived;
 }
