@@ -13,10 +13,10 @@ El despliegue no es el final, es el comienzo del soporte. Bandait debe ser distr
 **Objetivo:** Automatizar la construcción y cumplir con los requisitos legales/técnicos de las tiendas.
 
 #### Tareas
-- [ ] **Gestión de Secretos:**
+- [x] **Gestión de Secretos:**
     - Generar y asegurar Keystores (Android) y Certificates/Provisioning Profiles (iOS).
     - Configurar variables de entorno en CI (API Keys, Signing configs).
-- [ ] **Pipeline de CI/CD (GitHub Actions / Codemagic):**
+- [x] **Pipeline de CI/CD (GitHub Actions / Codemagic):**
     - Workflow para PRs: `flutter analyze` + `flutter test`.
     - Workflow para Release: Build `appbundle` / `ipa` -> Upload to Store.
 - [ ] **Configuración de Tiendas (Draft):**

@@ -24,18 +24,18 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 *Objetivo: Establecer la arquitectura Cliente-Servidor y el protocolo de tiempo.*
 
 #### Sprint 1: Arquitectura y WebSockets
-- [ ] Inicializar proyecto Flutter (Clean Architecture).
-- [ ] Implementar Servidor WebSocket simple (en el dispositivo "Líder" o PC Server mock).
-- [ ] Implementar Cliente WebSocket (en dispositivo "Seguidor").
-- [ ] Definir protocolo de mensajes JSON básico (`HANDSHAKE`, `PING`, `PONG`).
-- [ ] **Componente Stitch:** Ver `network_&_sync_diagnostic` para herramientas de debug visual.
-- [ ] **Prueba de Concepto:** Lograr conexión bidireccional entre PC y Android/iOS.
+- [x] Inicializar proyecto Flutter (Clean Architecture).
+- [x] Implementar Servidor WebSocket simple (en el dispositivo "Líder" o PC Server mock).
+- [x] Implementar Cliente WebSocket (en dispositivo "Seguidor").
+- [x] Definir protocolo de mensajes JSON básico (`HANDSHAKE`, `PING`, `PONG`).
+- [x] **Componente Stitch:** Ver `network_&_sync_diagnostic` para herramientas de debug visual.
+- [x] **Prueba de Concepto:** Lograr conexión bidireccional entre PC y Android/iOS.
 
 #### Sprint 2: Algoritmo de Sincronización (NTP Simplificado)
-- [ ] Implementar lógica de cálculo de *Offset* y *Round Trip Time (RTT)*.
-- [ ] Crear el "Reloj Maestro" en el Líder.
-- [ ] Crear el "Reloj Ajustado" en los Seguidores (`HoraLocal + Offset`).
-- [ ] **KPI:** Lograr que ambos dispositivos impriman el timestamp actual con una diferencia < 5ms en logs.
+- [x] Implementar lógica de cálculo de *Offset* y *Round Trip Time (RTT)*.
+- [x] Crear el "Reloj Maestro" en el Líder.
+- [x] Crear el "Reloj Ajustado" en los Seguidores (`HoraLocal + Offset`).
+- [x] **KPI:** Lograr que ambos dispositivos impriman el timestamp actual con una diferencia < 5ms en logs.
 
 ---
 

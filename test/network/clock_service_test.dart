@@ -1,11 +1,41 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:bandait/data/network/clock_service.dart';
+import 'package:bandait/domain/repositories/audio_engine.dart';
+import 'package:bandait/core/di/injection.dart';
+
+/// Mock AudioEngine for testing (no-op implementation)
+class MockAudioEngine implements AudioEngine {
+  @override
+  Future<void> initialize() async {}
+  @override
+  void playTick() {}
+  @override
+  void playTock() {}
+  @override
+  Future<void> dispose() async {}
+  @override
+  Future<void> setGlobalOffset(int ms) async {}
+  @override
+  Future<void> setBufferLength(int samples) async {}
+  @override
+  Future<int> getGlobalOffset() async => 0;
+  @override
+  Future<int> getBufferLength() async => 256;
+  @override
+  Future<double> measureLatency() async => 0.0;
+  @override
+  bool get isInitialized => true;
+}
 
 void main() {
   group('ClockService Tests', () {
     late ClockService clockService;
 
     setUp(() {
+      // Register mock AudioEngine for DI
+      if (!getIt.isRegistered<AudioEngine>()) {
+        getIt.registerSingleton<AudioEngine>(MockAudioEngine());
+      }
       clockService = ClockService();
     });
 
