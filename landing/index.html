@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Bandait — Sistema de sincronización en tiempo real para músicos en vivo. Mantén a toda tu banda alineada en el escenario.">
+  <meta name="theme-color" content="#000000">
+
+  <title>Bandait — Sync Your Stage</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Beat Border Effect (Visual Metronome) -->
+  <div class="beat-border" id="beatBorder" aria-hidden="true"></div>
+
+  <!-- ====== HEADER ====== -->
+  <header class="site-header" id="siteHeader">
+    <div class="logo">BAND<span>AIT</span></div>
+    <nav>
+      <button class="nav-toggle" id="navToggle" aria-label="Abrir menú">
+        <span></span><span></span><span></span>
+      </button>
+      <ul class="nav-links" id="navLinks">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how-it-works">Cómo Funciona</a></li>
+        <li><a href="#specs">Specs</a></li>
+        <li><a href="#download">Descargar</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <!-- ====== HERO ====== -->
+  <section class="hero" id="hero">
+    <div class="hero-content">
+      <span class="hero-badge">v1.0 — Stage Ready</span>
+      <h1>Sincroniza tu <span class="neon">escenario</span></h1>
+      <p class="hero-tagline">
+        Sistema de sincronización en tiempo real para músicos en vivo.
+        Relojes alineados. Cero latencia percibida. Toda la banda en el mismo beat.
+      </p>
+      <div class="hero-ctas">
+        <a href="#download" class="btn btn-filled">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          Descargar
+        </a>
+        <a href="https://github.com/DanAndCastRod/Bandait" target="_blank" rel="noopener" class="btn btn-cyan">
+          <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== FEATURES ====== -->
+  <section class="section features" id="features">
+    <div class="container">
+      <span class="section-label">// Features</span>
+      <h2 class="section-title">Diseñado para el escenario</h2>
+      <p class="section-subtitle">
+        Cada función construida pensando en manos ocupadas, luces estroboscópicas y adrenalina al máximo.
+      </p>
+      <div class="features-grid">
+        <div class="feature-card reveal" data-accent="cyan">
+          <span class="feature-icon">⚡</span>
+          <h3>Sync de Relojes NTP</h3>
+          <p>No enviamos audio por WiFi. Sincronizamos relojes entre dispositivos y ejecutamos comandos en el futuro. Latencia percibida: cero.</p>
+        </div>
+        <div class="feature-card reveal" data-accent="lime">
+          <span class="feature-icon">📋</span>
+          <h3>Setlist Inteligente</h3>
+          <p>Gestiona tu lista de canciones con BPM, estructura de secciones y letras sincronizadas. El líder avanza, todos siguen.</p>
+        </div>
+        <div class="feature-card reveal" data-accent="magenta">
+          <span class="feature-icon">🔲</span>
+          <h3>Metrónomo Visual</h3>
+          <p>El borde de la pantalla parpadea con el beat, visible con tu visión periférica. Beat 1 en cyan brillante, los demás atenuados.</p>
+        </div>
+        <div class="feature-card reveal" data-accent="orange">
+          <span class="feature-icon">📱</span>
+          <h3>Multiplataforma</h3>
+          <p>Android, Windows, iOS, macOS. Construido con Flutter para funcionar donde tu banda lo necesite. Un dispositivo lidera, los demás siguen.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== HOW IT WORKS ====== -->
+  <section class="section how-it-works" id="how-it-works">
+    <div class="container">
+      <span class="section-label">// Arquitectura</span>
+      <h2 class="section-title">Cómo funciona</h2>
+      <p class="section-subtitle">
+        Topología Líder–Seguidor. Un dispositivo orquesta, los demás ejecutan localmente.
+      </p>
+      <div class="flow-diagram">
+        <div class="flow-node leader reveal">
+          <div class="flow-node-icon">🖥️</div>
+          <h4>Líder</h4>
+          <p>Orquesta la sesión, controla el setlist y sincroniza el reloj maestro.</p>
+        </div>
+        <div class="flow-arrow reveal">→</div>
+        <div class="flow-node follower reveal">
+          <div class="flow-node-icon">📱</div>
+          <h4>Seguidor A</h4>
+          <p>Recibe comandos de tiempo, muestra letras y genera audio local.</p>
+        </div>
+        <div class="flow-arrow reveal">→</div>
+        <div class="flow-node follower reveal">
+          <div class="flow-node-icon">📱</div>
+          <h4>Seguidor B</h4>
+          <p>Ve acordes, estructura y mantiene su propio metrónomo sincronizado.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== TECH SPECS ====== -->
+  <section class="section tech-specs" id="specs">
+    <div class="container">
+      <span class="section-label">// Tech Specs</span>
+      <h2 class="section-title">Bajo el capó</h2>
+      <div class="specs-list">
+        <div class="spec-item reveal">
+          <div>
+            <span class="spec-label">Framework</span>
+            <span class="spec-value">Flutter (Dart)</span>
+          </div>
+        </div>
+        <div class="spec-item reveal">
+          <div>
+            <span class="spec-label">Protocolo Red</span>
+            <span class="spec-value">WebSockets + NTP Custom</span>
+          </div>
+        </div>
+        <div class="spec-item reveal">
+          <div>
+            <span class="spec-label">Audio Engine</span>
+            <span class="spec-value">flutter_soloud (baja latencia)</span>
+          </div>
+        </div>
+        <div class="spec-item reveal">
+          <div>
+            <span class="spec-label">Descubrimiento</span>
+            <span class="spec-value">mDNS + QR Code</span>
+          </div>
+        </div>
+        <div class="spec-item reveal">
+          <div>
+            <span class="spec-label">Estado</span>
+            <span class="spec-value">BLoC Pattern (flutter_bloc)</span>
+          </div>
+        </div>
+        <div class="spec-item reveal">
+          <div>
+            <span class="spec-label">Plataformas</span>
+            <span class="spec-value">Android · Windows · iOS · macOS</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== DOWNLOAD ====== -->
+  <section class="section download" id="download">
+    <div class="container">
+      <span class="section-label">// Descargar</span>
+      <h2 class="section-title">Obtén Bandait</h2>
+      <p class="section-subtitle" style="margin-left:auto;margin-right:auto;">
+        Descarga la última versión para tu plataforma directamente desde GitHub Releases.
+      </p>
+      <div class="download-cards">
+        <div class="download-card android reveal">
+          <div class="download-icon">🤖</div>
+          <h3>Android</h3>
+          <span class="version">APK Universal</span>
+          <a href="https://github.com/DanAndCastRod/Bandait/releases/latest" target="_blank" rel="noopener" class="btn btn-lime" id="downloadAndroid">
+            <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            Descargar APK
+          </a>
+        </div>
+        <div class="download-card windows reveal">
+          <div class="download-icon">🪟</div>
+          <h3>Windows</h3>
+          <span class="version">x64 Portable</span>
+          <a href="https://github.com/DanAndCastRod/Bandait/releases/latest" target="_blank" rel="noopener" class="btn btn-cyan" id="downloadWindows">
+            <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            Descargar ZIP
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== FOOTER ====== -->
+  <footer class="site-footer">
+    <span class="footer-brand">© 2025 Bandait — by <a href="https://releven.cc" target="_blank" rel="noopener">Releven</a></span>
+    <ul class="footer-links">
+      <li><a href="https://github.com/DanAndCastRod/Bandait" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/DanAndCastRod/Bandait/releases" target="_blank" rel="noopener">Releases</a></li>
+      <li><a href="https://github.com/DanAndCastRod/Bandait/issues" target="_blank" rel="noopener">Issues</a></li>
+    </ul>
+  </footer>
+
+  <!-- Script -->
+  <script src="script.js"></script>
+</body>
+</html>
