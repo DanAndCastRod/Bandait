@@ -35,9 +35,9 @@ class MockSongRepository extends Mock implements SongRepository {
 void main() {
   late MockSongRepository mockRepo;
 
-  setUp(() {
+  setUp(() async {
     mockRepo = MockSongRepository();
-    getIt.reset();
+    await getIt.reset();
     getIt.registerSingleton<SongRepository>(mockRepo);
   });
 

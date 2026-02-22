@@ -11,14 +11,14 @@ void main() {
   late MockClockService mockClock;
   late StreamController<int> beatController;
 
-  setUp(() {
+  setUp(() async {
     mockClock = MockClockService();
     beatController = StreamController<int>.broadcast();
 
     // Stub the beatStream usage
     when(mockClock.beatStream).thenAnswer((_) => beatController.stream);
 
-    getIt.reset();
+    await getIt.reset();
     getIt.registerSingleton<ClockService>(mockClock);
   });
 

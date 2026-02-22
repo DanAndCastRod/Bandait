@@ -52,14 +52,14 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
-  setUp(() {
+  setUp(() async {
     mockRepo = MockSessionRepository();
     mockClock = MockClockService();
 
     // Stub beatStream to prevent crash in VisualMetronome
     when(mockClock.beatStream).thenAnswer((_) => Stream.value(1));
 
-    getIt.reset();
+    await getIt.reset();
     getIt.registerSingleton<SessionRepository>(mockRepo);
     getIt.registerSingleton<ClockService>(mockClock);
   });

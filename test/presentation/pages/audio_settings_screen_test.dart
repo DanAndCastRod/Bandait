@@ -33,20 +33,22 @@ class MockAudioEngine extends Mock implements AudioEngine {
 void main() {
   late MockAudioEngine mockAudioEngine;
 
-  setUp(() {
+  setUp(() async {
     mockAudioEngine = MockAudioEngine();
-    getIt.reset();
+    await getIt.reset();
     getIt.registerSingleton<AudioEngine>(mockAudioEngine);
   });
 
   testWidgets('AudioSettingsScreen loads and displays properties', (
     tester,
   ) async {
-    // Pump the widget
+    // pump the widget
     await tester.pumpWidget(const MaterialApp(home: AudioSettingsScreen()));
 
     // Initial state loading
     await tester.pumpAndSettle();
+
+    debugDumpApp();
 
     // Verify Title
     expect(find.text('AUDIO ENGINE'), findsOneWidget);
@@ -56,7 +58,7 @@ void main() {
     // Wait, let's trigger the latency test to see if it updates
 
     // Find "INITIATE PING" button
-    final fab = find.widgetWithText(ElevatedButton, 'INITIATE PING');
+    final fab = find.text('INITIATE PING');
     expect(fab, findsOneWidget);
 
     await tester.tap(fab);
