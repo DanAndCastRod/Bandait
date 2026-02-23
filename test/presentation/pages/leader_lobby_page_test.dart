@@ -93,17 +93,16 @@ void main() {
     // Do NOT use pumpAndSettle — VisualMetronome has infinite animations
 
     // Verify Title (always visible in AppBar)
-    expect(find.text('BAND LEADER'), findsOneWidget);
+    expect(find.text('THE ROCKERS'), findsOneWidget);
 
-    // Check for Exit button in AppBar (always visible)
-    expect(find.byIcon(Icons.exit_to_app), findsOneWidget);
+    // Check for settings button in AppBar
+    expect(find.byIcon(Icons.settings), findsOneWidget);
 
     // Check if hosting started (body content visible only when _isHosting)
-    // The SCAN TO JOIN text is inside the body that appears after hosting starts
-    final scanToJoin = find.text('SCAN TO JOIN');
-    if (scanToJoin.evaluate().isNotEmpty) {
+    final joinCode = find.text('JOIN CODE');
+    if (joinCode.evaluate().isNotEmpty) {
       // Hosting started — verify peer content
-      expect(find.text('CONNECTED MUSICIANS'), findsOneWidget);
+      expect(find.text('BAND MEMBERS'), findsOneWidget);
     }
     // If hosting hasn't started, the CircularProgressIndicator is shown
     // This is acceptable since NetworkInterface.list() behavior varies in test env

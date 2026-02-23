@@ -21,8 +21,16 @@ class SocketServer {
 
   Future<void> start(int port) async {
     await stop();
-    _serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
-    debugPrint('SocketServer listening on port $port');
+    try {
+      _serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    } catch (e) {
+      debugPrint(
+        'Failed to bind port $port: $e. Falling back to port 0 (dynamic)',
+      );
+      _serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    }
+
+    debugPrint('SocketServer listening on port ${_serverSocket!.port}');
 
     _serverSocket!.listen((socket) {
       _handleConnection(socket);

@@ -12,6 +12,9 @@ abstract class SessionRepository {
   /// Starts broadcasting this device as a Bandait Server (Leader).
   Future<void> startHosting({required String sessionName, required int port});
 
+  /// The active port being used. May differ from requested if fallback is used.
+  int get activePort;
+
   /// Stops broadcasting.
   Future<void> stopHosting();
 

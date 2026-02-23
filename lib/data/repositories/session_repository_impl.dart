@@ -130,6 +130,9 @@ class SessionRepositoryImpl implements SessionRepository {
   Stream<int> get latencyStream => _socketClient.latencyStream;
 
   @override
+  int get activePort => _socketServer.port;
+
+  @override
   Future<void> startHosting({
     required String sessionName,
     required int port,
@@ -140,13 +143,19 @@ class SessionRepositoryImpl implements SessionRepository {
     _isLeader = true;
     _isLeaderController.add(true);
 
-    // 1. Start TCP Server
+    // 1. Start TCP Server (might fallback to a different port)
     await _socketServer.start(port);
 
     // 2. Broadcast Service
-    _registration = await nsd.register(
-      nsd.Service(name: sessionName, type: _serviceType, port: port),
-    );
+    try {
+      _registration = await nsd.register(
+        nsd.Service(name: sessionName, type: _serviceType, port: activePort),
+      );
+    } catch (e) {
+      // Allow TCP to continue running even if mDNS discovery fails due to Android quirks
+      print('Warning: NSD Registration failed - $e');
+      _registration = null;
+    }
   }
 
   @override
