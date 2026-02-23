@@ -6,7 +6,9 @@ import 'package:bandait/domain/repositories/song_repository.dart';
 import 'package:bandait/domain/models/song.dart';
 import 'package:bandait/presentation/pages/library/song_library_page.dart';
 
-class MockSongRepository extends Mock implements SongRepository {
+/// Local mock that overrides watchSongs to return a stream with test data.
+/// Named differently to avoid conflict with generated MockSongRepository.
+class FakeSongRepository extends Mock implements SongRepository {
   @override
   Future<void> initialize() async {}
   @override
@@ -33,23 +35,22 @@ class MockSongRepository extends Mock implements SongRepository {
 }
 
 void main() {
-  late MockSongRepository mockRepo;
+  late FakeSongRepository mockRepo;
 
   setUp(() async {
-    mockRepo = MockSongRepository();
+    mockRepo = FakeSongRepository();
     await getIt.reset();
     getIt.registerSingleton<SongRepository>(mockRepo);
   });
 
   testWidgets('SongLibraryPage displays list of songs', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: SongLibraryPage()));
-    await tester.pumpAndSettle();
+    // Pump several frames to let StreamBuilder receive data
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('SONG LIBRARY'), findsOneWidget);
-    expect(find.text('Bohemian Rhapsody'), findsOneWidget);
-    expect(find.text('Led Zeppelin'), findsOneWidget);
-
-    // Test Interaction: Tap on item (should navigate or show details)
-    // For now just confirming presence is enough for UI check.
+    expect(find.text('LIBRARY'), findsOneWidget);
+    expect(find.text('BOHEMIAN RHAPSODY'), findsOneWidget);
+    expect(find.text('LED ZEPPELIN'), findsOneWidget);
   });
 }

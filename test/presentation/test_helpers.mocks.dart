@@ -31,6 +31,13 @@ import 'package:mockito/mockito.dart' as _i1;
 /// See the documentation for Mockito's code generation for more information.
 class MockAudioEngine extends _i1.Mock implements _i2.AudioEngine {
   @override
+  bool get isInitialized => (super.noSuchMethod(
+        Invocation.getter(#isInitialized),
+        returnValue: false,
+        returnValueForMissingStub: false,
+      ) as bool);
+
+  @override
   _i3.Future<void> initialize() => (super.noSuchMethod(
         Invocation.method(
           #initialize,
@@ -219,6 +226,27 @@ class MockSessionRepository extends _i1.Mock implements _i6.SessionRepository {
       ) as _i3.Stream<bool>);
 
   @override
+  _i3.Stream<bool> get isLeaderStream => (super.noSuchMethod(
+        Invocation.getter(#isLeaderStream),
+        returnValue: _i3.Stream<bool>.empty(),
+        returnValueForMissingStub: _i3.Stream<bool>.empty(),
+      ) as _i3.Stream<bool>);
+
+  @override
+  bool get isLeader => (super.noSuchMethod(
+        Invocation.getter(#isLeader),
+        returnValue: false,
+        returnValueForMissingStub: false,
+      ) as bool);
+
+  @override
+  _i3.Stream<Map<String, dynamic>> get onSetlistReceived => (super.noSuchMethod(
+        Invocation.getter(#onSetlistReceived),
+        returnValue: _i3.Stream<Map<String, dynamic>>.empty(),
+        returnValueForMissingStub: _i3.Stream<Map<String, dynamic>>.empty(),
+      ) as _i3.Stream<Map<String, dynamic>>);
+
+  @override
   _i3.Future<void> startHosting({
     required String? sessionName,
     required int? port,
@@ -330,6 +358,16 @@ class MockSessionRepository extends _i1.Mock implements _i6.SessionRepository {
         returnValue: _i3.Future<_i7.UserProfile?>.value(),
         returnValueForMissingStub: _i3.Future<_i7.UserProfile?>.value(),
       ) as _i3.Future<_i7.UserProfile?>);
+
+  @override
+  void broadcastSetlist(Map<String, dynamic>? setlistJson) =>
+      super.noSuchMethod(
+        Invocation.method(
+          #broadcastSetlist,
+          [setlistJson],
+        ),
+        returnValueForMissingStub: null,
+      );
 }
 
 /// A class which mocks [ClockService].
