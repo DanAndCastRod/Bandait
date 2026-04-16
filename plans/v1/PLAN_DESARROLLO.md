@@ -122,7 +122,7 @@ Este documento define la hoja de ruta para construir **Bandait**, un sistema de 
 *Objetivo: Poner la app en las manos de los músicos.*
 
 #### Sprint 13: CI/CD & Beta Testing
-- [ ] Configurar GitHub Actions / Codemagic para builds automáticos (Android APK / iOS IPA).
+- [x] Configurar GitHub Actions / Codemagic para builds automáticos (Android APK / iOS IPA).
 - [ ] Setup de Google Play Console (Internal Testing Track).
 - [ ] Setup de Apple TestFlight.
 - [ ] Implementar verificación de versiones obligatorias (Force Update).
