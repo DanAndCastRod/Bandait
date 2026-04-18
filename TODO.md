@@ -12,8 +12,8 @@
     - [ ] Implementar `ClientEngine` con reconexión automática
     - [ ] Manejo de estados de conexión
 - [ ] **Protocolo de Mensajería**
-    - [ ] Definir `MessageModel` (JSON)
-    - [ ] Mensajes: HANDSHAKE, PING, PONG, ACK
+    - [x] Definir `MessageModel` (JSON)
+    - [x] Mensajes: HANDSHAKE, PING, PONG, ACK
 
 ## Sprint 2: Motor de Sincronización de Reloj
 - [ ] **Lógica de Ping/Pong NTP**
