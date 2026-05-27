@@ -91,18 +91,20 @@ class TimelineWidget(QWidget):
 
     def start_playback(self):
         self._playing = True
-        self._timer.start(33)  # ~30fps
+        self._timer.start(33)
 
     def stop_playback(self):
         self._playing = False
         self._timer.stop()
 
     def _update_playhead(self):
-        self._position += 0.033
-        if self._position >= self._duration:
-            self._position = 0.0
-        self.update()
-        self.position_changed.emit(self._position)
+        """Actualizar posición del playhead (llamado por timer interno)."""
+        if self._playing:
+            self._position += 0.033
+            if self._position >= self._duration:
+                self._position = 0.0
+            self.update()
+            self.position_changed.emit(self._position)
 
     def _seconds_to_x(self, seconds: float) -> int:
         beat_duration = 60.0 / self._bpm

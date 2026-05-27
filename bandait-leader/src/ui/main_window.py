@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         self.audio_engine.started.connect(self._on_audio_started)
         self.audio_engine.stopped.connect(self._on_audio_stopped)
         self.audio_engine.beat.connect(self._on_audio_beat)
+        self.audio_engine.levels.connect(self._on_audio_levels)
 
         # Timer compartido para UI (30fps)
         self._ui_timer = QTimer(self)
@@ -317,7 +318,7 @@ class MainWindow(QMainWindow):
     def _apply_styles(self):
         """Aplicar QSS profesional."""
         qss_path = os.path.join(
-            os.path.dirname(__file__), "..", "styles", "bandait_daw.qss"
+            os.path.dirname(__file__), "..", "..", "styles", "bandait_daw.qss"
         )
         if os.path.exists(qss_path):
             with open(qss_path, "r", encoding="utf-8") as f:
@@ -407,22 +408,28 @@ class MainWindow(QMainWindow):
         self.transport.set_beat(beat_num)
         self.stage_view.set_beat(beat_num)
 
+    # === AUDIO LEVELS (from real audio callback) ===
+    def _on_audio_levels(self, levels: list):
+        """Actualizar VU meters con datos reales del audio callback."""
+        for i, level in enumerate(levels[:4]):
+            self.mixer.set_channel_level(i, level)
+        # Master level = average of all channels
+        master = sum(levels[:4]) / len(levels[:4]) if levels else 0.0
+        self.mixer.set_master_level(master)
+
+    def _update_timeline_position(self):
+        """Actualizar posición del playhead en el timeline."""
+        # El tiempo se calcula desde el inicio del playback
+        # Usamos el tiempo del transporte como fuente de verdad
+        seconds = self.transport._seconds
+        self.timeline.set_position(seconds)
+
     # === UI UPDATE (30fps) ===
     def _update_ui(self):
-        """Actualizar UI a 30fps — VU meters, tiempo, etc."""
-        # Simular niveles de audio para VU meters
-        import random
-        for i in range(min(4, len(self.mixer.channels))):
-            level = random.random() * 0.7 if self._is_playing else 0.0
-            self.mixer.set_channel_level(i, level)
-
-        master_level = random.random() * 0.5 if self._is_playing else 0.0
-        self.mixer.set_master_level(master_level)
-
-        # Actualizar tiempo desde audio engine
+        """Actualizar UI a 30fps — tiempo, posición, etc."""
         if self._is_playing:
-            # El audio engine mantiene el tiempo real
-            pass  # Los beats vienen por señal _on_audio_beat
+            # Actualizar posición del timeline
+            self._update_timeline_position()
 
     # === TRANSPORT CONTROLS ===
     def _on_play(self):
@@ -482,20 +489,20 @@ class MainWindow(QMainWindow):
 
     # === MIXER CONTROLS ===
     def _on_channel_mute(self, channel_id: int, muted: bool):
-        print(f"[MIXER] Canal {channel_id} mute={muted}")
-        # TODO: conectar a audio engine mixer
+        self.audio_engine.mixer.set_track_mute(channel_id, muted)
 
     def _on_channel_solo(self, channel_id: int, soloed: bool):
-        print(f"[MIXER] Canal {channel_id} solo={soloed}")
+        self.audio_engine.mixer.set_track_solo(channel_id, soloed)
 
     def _on_channel_fader(self, channel_id: int, db: float):
-        print(f"[MIXER] Canal {channel_id} fader={db:.1f}dB")
+        self.audio_engine.mixer.set_track_volume(channel_id, db)
 
     def _on_channel_pan(self, channel_id: int, pan: float):
-        print(f"[MIXER] Canal {channel_id} pan={pan:.2f}")
+        # TODO: implementar pan en mixer
+        pass
 
     def _on_master_fader(self, db: float):
-        print(f"[MIXER] Master fader={db:.1f}dB")
+        self.audio_engine.mixer.set_master_volume(db)
 
     # === STAGE CONTROLS ===
     def _on_panic(self):

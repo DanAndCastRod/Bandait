@@ -20,6 +20,7 @@ class Mixer:
         self.tracks: List[Track] = []
         self._output = np.zeros((block_size, output_channels), dtype=np.float32)
         self._any_solo = False
+        self._master_gain = 1.0  # 0 dB default
 
     def add_track(self, track: Track) -> None:
         self.tracks.append(track)
@@ -68,6 +69,9 @@ class Mixer:
         else:
             self._output[:, :n_input_ch] += input_block
 
+        # Apply master gain
+        self._output *= self._master_gain
+
         # Soft clip to prevent hard distortion
         np.tanh(self._output, out=self._output)
 
@@ -76,3 +80,29 @@ class Mixer:
     def get_input_raw(self) -> np.ndarray:
         """Return last input block (for recording)."""
         return getattr(self, '_last_input', np.zeros((self.block_size, self.input_channels), dtype=np.float32))
+
+    def set_track_volume(self, track_idx: int, db: float) -> None:
+        """Set volume of a track by index (-60 to +6 dB)."""
+        if 0 <= track_idx < len(self.tracks):
+            gain = 10 ** (db / 20.0)
+            self.tracks[track_idx].volume = gain
+
+    def set_track_mute(self, track_idx: int, muted: bool) -> None:
+        """Mute/unmute a track."""
+        if 0 <= track_idx < len(self.tracks):
+            self.tracks[track_idx].mute = muted
+
+    def set_track_solo(self, track_idx: int, soloed: bool) -> None:
+        """Solo/unsolo a track."""
+        if 0 <= track_idx < len(self.tracks):
+            self.tracks[track_idx].solo = soloed
+
+    def set_master_volume(self, db: float) -> None:
+        """Set master volume (-60 to +6 dB)."""
+        self._master_gain = 10 ** (db / 20.0)
+
+    def get_track(self, idx: int):
+        """Get track by index."""
+        if 0 <= idx < len(self.tracks):
+            return self.tracks[idx]
+        return None

@@ -24,6 +24,8 @@ class AudioEngine(QObject):
 
     # Beat signal (emitted from main thread via queued timer)
     beat = Signal(int, float)  # beat_number (1-4), bpm
+    # Audio levels (emitted from main thread)
+    levels = Signal(list)  # [ch0_level, ch1_level, ...] 0.0-1.0
 
     def __init__(
         self,
@@ -49,6 +51,15 @@ class AudioEngine(QObject):
             output_channels=self._output_channels,
             block_size=block_size,
         )
+        # Create default tracks (one per output channel)
+        from .track import Track
+        for i in range(self._output_channels):
+            track = Track(
+                name=f"Canal {i+1}",
+                volume=1.0,
+                output_channels=1 << i,
+            )
+            self.mixer.add_track(track)
         self.recorder = RecordingEngine(sample_rate=sample_rate)
         self.recorder.recording_started.connect(self.recording_started)
         self.recorder.recording_stopped.connect(self.recording_stopped)
@@ -69,8 +80,9 @@ class AudioEngine(QObject):
         self._click_idx = 0
         self._click_playing = False
 
-        # Thread-safe beat queue: audio callback -> main thread
+        # Thread-safe queues: audio callback -> main thread
         self._beat_queue: queue.Queue = queue.Queue()
+        self._levels_queue: queue.Queue = queue.Queue(maxsize=4)
         self._beat_timer = QTimer(self)
         self._beat_timer.timeout.connect(self._process_beat_queue)
         self._beat_timer.start(10)  # 100 Hz beat processing
@@ -131,6 +143,23 @@ class AudioEngine(QObject):
         mixed = self.mixer.process(indata) + click_out
         outdata[:] = mixed
 
+        # Calculate RMS levels for VU meters (from output)
+        if self._output_channels > 0:
+            levels = []
+            for ch in range(min(self._output_channels, 4)):
+                rms = np.sqrt(np.mean(mixed[:, ch] ** 2))
+                # Convert to 0-1 range (assuming -60dB = 0, 0dB = 1)
+                db = 20 * np.log10(max(rms, 1e-10))
+                level = max(0.0, min(1.0, (db + 60) / 60))
+                levels.append(level)
+            # Pad to 4 channels if needed
+            while len(levels) < 4:
+                levels.append(0.0)
+            try:
+                self._levels_queue.put_nowait(levels)
+            except queue.Full:
+                pass
+
         # Recording (use input channels)
         if self._recording:
             self.recorder.write_block(indata)
@@ -150,13 +179,23 @@ class AudioEngine(QObject):
                 pass
 
     def _process_beat_queue(self) -> None:
-        """Process queued beats from audio callback in main Qt thread."""
+        """Process queued beats and levels from audio callback in main Qt thread."""
+        # Process beats
         while not self._beat_queue.empty():
             try:
                 beat_num, bpm = self._beat_queue.get_nowait()
                 self.beat.emit(beat_num, bpm)
             except queue.Empty:
                 break
+        # Process levels (take latest only)
+        latest_levels = None
+        while not self._levels_queue.empty():
+            try:
+                latest_levels = self._levels_queue.get_nowait()
+            except queue.Empty:
+                break
+        if latest_levels:
+            self.levels.emit(latest_levels)
 
     def start(self) -> None:
         """Start audio stream."""
