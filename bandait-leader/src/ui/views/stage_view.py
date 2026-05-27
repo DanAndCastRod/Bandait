@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QSizePolicy
 )
+from PySide6.QtCore import Qt
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QKeyEvent, QColor
 
@@ -253,13 +254,14 @@ class StageView(QWidget):
         self._flash_anim.setEasingCurve(QEasingCurve.OutQuad)
 
     def _setup_timer(self):
+        """Timer solo para decay de UI, no para generar beats."""
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._flash_beat)
-        self._timer.start(500)  # Flash cada medio segundo para test
+        self._timer.timeout.connect(self._update_ui)
+        self._timer.start(33)  # 30fps para animaciones suaves
 
-    def _flash_beat(self):
-        self._beat_flash = not self._beat_flash
-        self.update()
+    def _update_ui(self):
+        """Actualizar animaciones de UI (flash decay, etc)."""
+        pass  # Las animaciones de beat se manejan en set_beat
 
     def set_song(self, title: str, current_lyric: str = "", next_lyric: str = "",
                  section: str = "", next_section: str = ""):
@@ -271,6 +273,18 @@ class StageView(QWidget):
         self._section = section
         self._next_section = next_section
         self.next_section_label.setText(next_section)
+        self._current_lyric_idx = 0
+
+    def set_lyrics(self, lyrics: list):
+        """Guardar lista de letras para scroll sincronizado."""
+        self._lyrics = lyrics
+        self._current_lyric_idx = 0
+        if lyrics:
+            self.current_lyric.setText(lyrics[0]["text"])
+            if len(lyrics) > 1:
+                self.next_lyric.setText(lyrics[1]["text"])
+            else:
+                self.next_lyric.setText("")
 
     def set_bpm(self, bpm: int):
         self._bpm = bpm
@@ -294,15 +308,24 @@ class StageView(QWidget):
 
     def _flash_border(self):
         """Flash de borde en beat 1 — simulación de frame OLED."""
-        # Cambiar stylesheet temporalmente para flash
-        original = self.styleSheet()
-        self.setStyleSheet("""
-            StageView {
-                border: 4px solid #00FFFF;
-                background: #000000;
-            }
-        """)
-        QTimer.singleShot(100, lambda: self.setStyleSheet(original or ""))
+        # Usar un widget overlay para el flash en vez de cambiar stylesheet completo
+        if not hasattr(self, '_flash_widget'):
+            self._flash_widget = QFrame(self)
+            self._flash_widget.setStyleSheet("""
+                QFrame {
+                    border: 4px solid #00FFFF;
+                    background: transparent;
+                }
+            """)
+            self._flash_widget.setGeometry(self.rect())
+            self._flash_widget.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self._flash_widget.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            self._flash_widget.hide()
+
+        self._flash_widget.setGeometry(self.rect())
+        self._flash_widget.show()
+        self._flash_widget.raise_()
+        QTimer.singleShot(100, lambda: self._flash_widget.hide() if hasattr(self, '_flash_widget') else None)
 
     def set_network_status(self, ok: bool):
         self._network_ok = ok

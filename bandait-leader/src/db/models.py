@@ -44,6 +44,7 @@ class Song(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
+    artist: Mapped[str] = mapped_column(String, default="")
     bpm: Mapped[int] = mapped_column(Integer, default=120)
     key: Mapped[str] = mapped_column(String, default="")
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
@@ -61,6 +62,7 @@ class Song(Base):
         return {
             "id": self.id,
             "title": self.title,
+            "artist": self.artist,
             "bpm": self.bpm,
             "key": self.key,
             "duration_seconds": self.duration_seconds,

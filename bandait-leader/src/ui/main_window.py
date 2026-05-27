@@ -21,6 +21,7 @@ from src.ui.widgets.timeline import TimelineWidget
 from src.ui.views.stage_view import StageView
 from src.ui.views.library_view import LibraryView
 from src.ui.views.ai_view import AIView
+from src.db.seed import seed_database
 
 
 class MainWindow(QMainWindow):
@@ -37,6 +38,12 @@ class MainWindow(QMainWindow):
         self._is_playing = False
         self._current_tab = 0
         self._current_song = None
+
+        # Seed database with sample data if empty
+        try:
+            seed_database()
+        except Exception as e:
+            print(f"[DB] Seed error (non-critical): {e}")
 
         # Servicios
         self.clock_service = ClockService()
@@ -316,13 +323,50 @@ class MainWindow(QMainWindow):
         return panel
 
     def _apply_styles(self):
-        """Aplicar QSS profesional."""
-        qss_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "styles", "bandait_daw.qss"
-        )
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
+        """Aplicar QSS profesional OLED Noir."""
+        import os
+        # Buscar el archivo QSS en múltiples ubicaciones posibles
+        possible_paths = [
+            os.path.join(os.path.dirname(__file__), "..", "..", "styles", "bandait_daw.qss"),
+            os.path.join(os.path.dirname(__file__), "..", "styles", "bandait_daw.qss"),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "styles", "bandait_daw.qss"),
+            os.path.join(os.path.dirname(__file__), "styles", "bandait_daw.qss"),
+        ]
+
+        qss_loaded = False
+        for qss_path in possible_paths:
+            qss_path = os.path.abspath(qss_path)
+            if os.path.exists(qss_path):
+                try:
+                    with open(qss_path, "r", encoding="utf-8") as f:
+                        qss_content = f.read()
+                        self.setStyleSheet(qss_content)
+                        print(f"[UI] QSS cargado desde: {qss_path}")
+                        qss_loaded = True
+                        break
+                except Exception as e:
+                    print(f"[UI] Error leyendo QSS {qss_path}: {e}")
+
+        if not qss_loaded:
+            print("[UI] WARNING: No se encontró archivo QSS. Usando estilos por defecto.")
+            # Aplicar estilos mínimos inline como fallback
+            self.setStyleSheet("""
+                QMainWindow, QWidget {
+                    background-color: #000000;
+                    color: #F0F0F0;
+                }
+                QPushButton {
+                    background: transparent;
+                    border: 2px solid #00FFFF;
+                    color: #00FFFF;
+                    border-radius: 4px;
+                    padding: 8px 20px;
+                }
+                QPushButton:hover {
+                    background: #00FFFF;
+                    color: #000000;
+                }
+            """)
 
     def _setup_menu(self):
         """Configurar menú de la aplicación."""
@@ -537,14 +581,26 @@ class MainWindow(QMainWindow):
             beats = bars * 4  # 4/4 por defecto
             self.timeline.add_section(label, beat_pos, beats)
             beat_pos += beats
+
+        # Si no hay secciones, crear una genérica
+        if not sections:
+            self.timeline.add_section("Completa", 0, 64)
+
         self.timeline.set_duration(song_data.get("duration_seconds", 180))
         self.timeline.set_bpm(song_data.get("bpm", 120))
 
     def _load_song_to_stage(self, song_data: dict):
-        """Cargar canción en vista de escenario."""
+        """Cargar canción en vista de escenario con letras reales."""
         lyrics = song_data.get("lyrics", [])
+
+        # Extraer letras del lyrics_text si no hay lyrics parseadas
+        if not lyrics and song_data.get("lyrics_text"):
+            lines = song_data["lyrics_text"].strip().split("\n")
+            lyrics = [{"time": i * 5.0, "text": line.strip()} for i, line in enumerate(lines) if line.strip()]
+
         current_lyric = lyrics[0]["text"] if lyrics else ""
         next_lyric = lyrics[1]["text"] if len(lyrics) > 1 else ""
+
         sections = song_data.get("sections", [])
         current_section = sections[0]["label"] if sections else "Intro"
         next_section = sections[1]["label"] if len(sections) > 1 else ""
@@ -556,6 +612,7 @@ class MainWindow(QMainWindow):
             section=current_section,
             next_section=next_section,
         )
+        self.stage_view.set_lyrics(lyrics)
         self.stage_view.set_bpm(song_data.get("bpm", 120))
 
     def _on_setlist_selected(self, setlist_id: int):

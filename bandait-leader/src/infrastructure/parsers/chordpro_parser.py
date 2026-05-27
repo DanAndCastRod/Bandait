@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 
 @dataclass
@@ -24,7 +24,7 @@ class ChordProParser:
     CHORD_RE = re.compile(r"\[([^\]]+)\]")
 
     @classmethod
-    def parse(cls, content: str) -> Dict[str, any]:
+    def parse(cls, content: str) -> Dict[str, Any]:
         sections: List[SongSection] = []
         current_label = "Unknown"
         current_lines: List[str] = []

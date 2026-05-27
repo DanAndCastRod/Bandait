@@ -249,16 +249,20 @@ class LibraryView(QWidget):
         """Cargar canciones desde SQLite."""
         if not self._db_session:
             return
-        songs = self._db_session.query(Song).all()
-        self.songs_table.setRowCount(len(songs))
-        for i, song in enumerate(songs):
-            self.songs_table.setItem(i, 0, self._create_item(song.title))
-            self.songs_table.setItem(i, 1, self._create_item(""))  # artist no existe en modelo
-            self.songs_table.setItem(i, 2, self._create_bpm_item(str(song.bpm)))
-            self.songs_table.setItem(i, 3, self._create_item(song.key))
-            duration_str = f"{int(song.duration_seconds // 60)}:{int(song.duration_seconds % 60):02d}"
-            self.songs_table.setItem(i, 4, self._create_item(duration_str))
-            self.songs_table.setItem(i, 5, self._create_item("Reciente"))
+        try:
+            songs = self._db_session.query(Song).all()
+            self.songs_table.setRowCount(len(songs))
+            for i, song in enumerate(songs):
+                self.songs_table.setItem(i, 0, self._create_item(song.title))
+                self.songs_table.setItem(i, 1, self._create_item(song.artist or ""))
+                self.songs_table.setItem(i, 2, self._create_bpm_item(str(song.bpm)))
+                self.songs_table.setItem(i, 3, self._create_item(song.key or ""))
+                duration_str = f"{int(song.duration_seconds // 60)}:{int(song.duration_seconds % 60):02d}"
+                self.songs_table.setItem(i, 4, self._create_item(duration_str))
+                self.songs_table.setItem(i, 5, self._create_item("Reciente"))
+        except Exception as e:
+            print(f"[DB] Error cargando canciones: {e}")
+            self.songs_table.setRowCount(0)
 
     def _load_setlists_from_db(self):
         """Cargar setlists desde SQLite."""
@@ -398,11 +402,33 @@ class LibraryView(QWidget):
         QMessageBox.information(self, "Nuevo Evento", "Función en desarrollo: Gestor de eventos")
 
     def get_song_data(self, row: int) -> dict:
-        """Retornar datos de canción seleccionada como dict."""
+        """Retornar datos de canción seleccionada desde la DB."""
         if row < 0 or row >= self.songs_table.rowCount():
             return {}
+
+        title = self.songs_table.item(row, 0).text()
+
+        # Buscar en DB por título
+        if self._db_session:
+            song = self._db_session.query(Song).filter(Song.title == title).first()
+            if song:
+                return {
+                    "id": song.id,
+                    "title": song.title,
+                    "artist": song.artist or "",
+                    "bpm": song.bpm,
+                    "key": song.key or "",
+                    "duration_seconds": song.duration_seconds or 180,
+                    "lyrics_text": song.lyrics_text or "",
+                    "chords_text": song.chords_text or "",
+                    "audio_path": song.audio_path or "",
+                    "lyrics": self._parse_lyrics(song.lyrics_text),
+                    "sections": self._parse_sections(song.chords_text or song.lyrics_text),
+                }
+
+        # Fallback: datos de la tabla
         return {
-            "title": self.songs_table.item(row, 0).text(),
+            "title": title,
             "artist": self.songs_table.item(row, 1).text() if self.songs_table.item(row, 1) else "",
             "bpm": int(self.songs_table.item(row, 2).text()) if self.songs_table.item(row, 2) else 120,
             "key": self.songs_table.item(row, 3).text() if self.songs_table.item(row, 3) else "",
@@ -416,6 +442,37 @@ class LibraryView(QWidget):
                 {"label": "Coro", "bars": 16},
             ],
         }
+
+    def _parse_lyrics(self, text: str) -> list:
+        """Parsear texto de letras a lista de dicts."""
+        if not text:
+            return []
+        lines = text.strip().split("\n")
+        return [{"time": i * 5.0, "text": line.strip()} for i, line in enumerate(lines) if line.strip()]
+
+    def _parse_sections(self, text: str) -> list:
+        """Intentar extraer secciones del texto."""
+        if not text:
+            return [{"label": "Intro", "bars": 4}, {"label": "Verso", "bars": 16}, {"label": "Coro", "bars": 16}]
+
+        # Buscar patrones como [Intro], [Verso], etc.
+        import re
+        sections = []
+        section_re = re.compile(r'\[(Intro|Verso?|Pre-Coro|Coro|Chorus|Puente|Bridge|Solo|Outro)\]', re.IGNORECASE)
+        matches = list(section_re.finditer(text))
+        for i, match in enumerate(matches):
+            label = match.group(1).capitalize()
+            if label.lower() in ("chorus", "coro"):
+                label = "Coro"
+            elif label.lower() in ("verse", "verso"):
+                label = "Verso"
+            elif label.lower() == "bridge":
+                label = "Puente"
+            sections.append({"label": label, "bars": 8})
+
+        if not sections:
+            return [{"label": "Intro", "bars": 4}, {"label": "Verso", "bars": 16}, {"label": "Coro", "bars": 16}]
+        return sections
 
     def _parse_duration(self, text: str) -> int:
         """Convertir '4:32' a segundos."""

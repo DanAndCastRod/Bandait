@@ -51,13 +51,16 @@ class AudioEngine(QObject):
             output_channels=self._output_channels,
             block_size=block_size,
         )
-        # Create default tracks (one per output channel)
+        # Create 4 tracks (DAW standard) — independent of physical channels
+        # Each track can be routed to any physical output via output_channels bitmask
         from .track import Track
-        for i in range(self._output_channels):
+        for i in range(4):
+            # Route to available output (wrap around if fewer physical channels)
+            target_ch = min(i, max(0, self._output_channels - 1))
             track = Track(
-                name=f"Canal {i+1}",
+                name=f"Pista {i+1}",
                 volume=1.0,
-                output_channels=1 << i,
+                output_channels=1 << target_ch,
             )
             self.mixer.add_track(track)
         self.recorder = RecordingEngine(sample_rate=sample_rate)
