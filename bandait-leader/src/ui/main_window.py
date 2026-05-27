@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QStackedWidget,
+    QTabWidget,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -16,6 +17,11 @@ from src.sync.clock_service import ClockService
 from src.network.server import BandaitServer
 from src.audio.audio_engine import AudioEngine
 from src.domain.models import SessionState, SessionStatus, MessageType
+from src.db.models import init_db
+from src.ui.library_view import LibraryView
+from src.ui.gig_manager_view import GigManagerView
+from src.ui.rehearsal_view import RehearsalView
+from src.ui.ai_panel import AIPanel
 
 
 class MainWindow(QMainWindow):
@@ -36,6 +42,9 @@ class MainWindow(QMainWindow):
         self._status = SessionStatus.IDLE
         self._recording = False
         self._current_beat = 0
+
+        # Initialize database
+        self._db_session_factory = init_db("bandait.db")
 
         self._build_ui()
         self._setup_timers()
@@ -86,12 +95,36 @@ class MainWindow(QMainWindow):
         transport.addWidget(self._btn_record)
         layout.addLayout(transport)
 
-        # Main view stack
-        self._stack = QStackedWidget()
-        self._placeholder = QLabel("Stage / Library / Mixer views will load here.")
-        self._placeholder.setAlignment(Qt.AlignCenter)
-        self._stack.addWidget(self._placeholder)
-        layout.addWidget(self._stack)
+        # Main tabbed views
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+
+        # Stage view (placeholder for now — will be full screen later)
+        self._stage_placeholder = QLabel("STAGE MODE\n\nFull-screen performance view.\nPress F11 to toggle.")
+        self._stage_placeholder.setAlignment(Qt.AlignCenter)
+        self._stage_placeholder.setObjectName("stagePlaceholder")
+        self._tabs.addTab(self._stage_placeholder, "▶ Stage")
+
+        # Library view
+        self._library_view = LibraryView(self._db_session_factory)
+        self._library_view.setlist_loaded.connect(self._on_setlist_loaded)
+        self._tabs.addTab(self._library_view, "📚 Library")
+
+        # Gig Manager view
+        self._gig_view = GigManagerView(self._db_session_factory)
+        self._gig_view.gig_selected.connect(self._on_gig_selected)
+        self._tabs.addTab(self._gig_view, "🎤 Gigs")
+
+        # Rehearsal view
+        self._rehearsal_view = RehearsalView(self._db_session_factory)
+        self._rehearsal_view.rehearsal_selected.connect(self._on_rehearsal_selected)
+        self._tabs.addTab(self._rehearsal_view, "🎧 Rehearsals")
+
+        # AI Assistant panel (side tab)
+        self._ai_panel = AIPanel()
+        self._tabs.addTab(self._ai_panel, "🤖 AI")
+
+        layout.addWidget(self._tabs)
 
         # Footer info
         self._info_label = QLabel("Waiting for followers...")
@@ -192,6 +225,15 @@ class MainWindow(QMainWindow):
                 room="default",
             )
         )
+
+    def _on_setlist_loaded(self, setlist) -> None:
+        self._info_label.setText(f"Setlist loaded: {setlist.name} ({len(setlist.songs)} songs)")
+
+    def _on_gig_selected(self, gig) -> None:
+        self._info_label.setText(f"Gig selected: {gig.name} @ {gig.venue}")
+
+    def _on_rehearsal_selected(self, rehearsal) -> None:
+        self._info_label.setText(f"Rehearsal: {rehearsal.date.strftime('%Y-%m-%d')}")
 
     def closeEvent(self, event) -> None:
         self._audio.stop()

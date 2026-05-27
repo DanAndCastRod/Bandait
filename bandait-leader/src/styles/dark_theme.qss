@@ -71,3 +71,75 @@ QPushButton#actionPadRecord:hover {
     background: #FF00FF;
     color: #000000;
 }
+
+QTabWidget::pane {
+    border: 1px solid #141414;
+    background: #000000;
+}
+
+QTabBar::tab {
+    background: #0A0A0A;
+    color: #666666;
+    padding: 12px 24px;
+    border: none;
+    font-weight: bold;
+}
+
+QTabBar::tab:selected {
+    background: #000000;
+    color: #00FFFF;
+    border-bottom: 2px solid #00FFFF;
+}
+
+QTabBar::tab:hover {
+    color: #F0F0F0;
+}
+
+QLabel#sectionTitle {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 18px;
+    font-weight: bold;
+    color: #CCFF00;
+    text-transform: uppercase;
+    padding-bottom: 8px;
+}
+
+QLabel#stagePlaceholder {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 24px;
+    color: #00FFFF;
+}
+
+QListWidget {
+    background: #0A0A0A;
+    border: 1px solid #141414;
+    color: #F0F0F0;
+    outline: none;
+}
+
+QListWidget::item:selected {
+    background: #141414;
+    color: #00FFFF;
+    border-left: 3px solid #00FFFF;
+}
+
+QListWidget::item:hover {
+    background: #141414;
+}
+
+QLineEdit, QTextEdit, QSpinBox, QComboBox, QDateTimeEdit {
+    background: #0A0A0A;
+    border: 1px solid #333333;
+    color: #F0F0F0;
+    padding: 8px;
+    border-radius: 4px;
+}
+
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QComboBox:focus, QDateTimeEdit:focus {
+    border: 1px solid #00FFFF;
+}
+
+QSplitter::handle {
+    background: #141414;
+    width: 2px;
+}
