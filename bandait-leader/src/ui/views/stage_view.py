@@ -277,13 +277,32 @@ class StageView(QWidget):
         self.bpm_display.setText(str(bpm))
 
     def set_beat(self, beat: int):
-        """Actualizar indicador de beat (1-4)."""
+        """Actualizar indicador de beat (1-4) con flash visual."""
         self._beat = beat
         for i, led in enumerate(self.beat_indicators):
             if i == beat - 1:
-                led.setStyleSheet("color: #CCFF00; font-weight: bold;")
+                # Beat 1 = Cyan brillante, otros = Lima tenue
+                if beat == 1:
+                    led.setStyleSheet("color: #00FFFF; font-size: 40px; font-weight: bold;")
+                else:
+                    led.setStyleSheet("color: #CCFF00; font-size: 32px;")
             else:
-                led.setStyleSheet("color: #333333;")
+                led.setStyleSheet("color: #333333; font-size: 32px;")
+        # Flash de borde para beat 1
+        if beat == 1:
+            self._flash_border()
+
+    def _flash_border(self):
+        """Flash de borde en beat 1 — simulación de frame OLED."""
+        # Cambiar stylesheet temporalmente para flash
+        original = self.styleSheet()
+        self.setStyleSheet("""
+            StageView {
+                border: 4px solid #00FFFF;
+                background: #000000;
+            }
+        """)
+        QTimer.singleShot(100, lambda: self.setStyleSheet(original or ""))
 
     def set_network_status(self, ok: bool):
         self._network_ok = ok
