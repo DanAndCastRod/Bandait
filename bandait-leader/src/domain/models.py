@@ -12,6 +12,16 @@ class SessionStatus(str, Enum):
     PAUSED = "PAUSED"
 
 
+class MessageType(str, Enum):
+    SYNC_BEACON = "SYNC_BEACON"
+    STATE_UPDATE = "STATE_UPDATE"
+    SONG_LOAD = "SONG_LOAD"
+    PLAY = "PLAY"
+    STOP = "STOP"
+    PANIC = "PANIC"
+    FULL_STATE = "FULL_STATE"
+
+
 @dataclass(frozen=True)
 class LyricLine:
     time: float

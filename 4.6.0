@@ -1,0 +1,8 @@
+Requirement already satisfied: pytest-qt in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (4.5.0)
+Requirement already satisfied: pytest in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (from pytest-qt) (9.0.3)
+Requirement already satisfied: pluggy>=1.1 in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (from pytest-qt) (1.6.0)
+Requirement already satisfied: typing_extensions in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (from pytest-qt) (4.15.0)
+Requirement already satisfied: colorama>=0.4 in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (from pytest->pytest-qt) (0.4.6)
+Requirement already satisfied: iniconfig>=1.0.1 in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (from pytest->pytest-qt) (2.3.0)
+Requirement already satisfied: packaging>=22 in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (from pytest->pytest-qt) (26.0)
+Requirement already satisfied: pygments>=2.7.2 in c:\users\daniel.castaneda\appdata\local\programs\python\python311\lib\site-packages (from pytest->pytest-qt) (2.20.0)
