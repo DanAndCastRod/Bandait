@@ -348,3 +348,43 @@ class LibraryView(QWidget):
 
     def _on_add_event(self):
         QMessageBox.information(self, "Nuevo Evento", "Función en desarrollo: Gestor de eventos")
+
+    def get_song_data(self, row: int) -> dict:
+        """Retornar datos de canción seleccionada como dict."""
+        if row < 0 or row >= self.songs_table.rowCount():
+            return {}
+        return {
+            "title": self.songs_table.item(row, 0).text(),
+            "artist": self.songs_table.item(row, 1).text(),
+            "bpm": int(self.songs_table.item(row, 2).text()),
+            "key": self.songs_table.item(row, 3).text(),
+            "duration_seconds": self._parse_duration(self.songs_table.item(row, 4).text()),
+            "lyrics": [],
+            "sections": [
+                {"label": "Intro", "bars": 4},
+                {"label": "Verso", "bars": 16},
+                {"label": "Coro", "bars": 16},
+            ],
+        }
+
+    def _parse_duration(self, text: str) -> int:
+        """Convertir '4:32' a segundos."""
+        try:
+            parts = text.split(":")
+            return int(parts[0]) * 60 + int(parts[1])
+        except Exception:
+            return 180
+
+    def _on_next_song(self):
+        """Seleccionar siguiente canción."""
+        current = self.songs_table.currentRow()
+        next_row = (current + 1) % self.songs_table.rowCount()
+        self.songs_table.selectRow(next_row)
+        self._on_song_selected()
+
+    def _on_prev_song(self):
+        """Seleccionar canción anterior."""
+        current = self.songs_table.currentRow()
+        prev_row = (current - 1) % self.songs_table.rowCount()
+        self.songs_table.selectRow(prev_row)
+        self._on_song_selected()

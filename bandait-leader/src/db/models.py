@@ -40,6 +40,7 @@ gig_member_association = Table(
 
 class Song(Base):
     __tablename__ = "songs"
+    __allow_unmapped__ = True
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -71,6 +72,7 @@ class Song(Base):
 
 class Setlist(Base):
     __tablename__ = "setlists"
+    __allow_unmapped__ = True
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -95,6 +97,7 @@ class Setlist(Base):
 
 class BandMember(Base):
     __tablename__ = "band_members"
+    __allow_unmapped__ = True
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -119,6 +122,7 @@ class BandMember(Base):
 
 class Gig(Base):
     __tablename__ = "gigs"
+    __allow_unmapped__ = True
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)

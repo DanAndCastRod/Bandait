@@ -28,13 +28,14 @@ class RecordingEngine(QObject):
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-    def start(self, session_name: str, n_channels: int = 4) -> str:
+    def start(self, session_name: str, n_channels: int = 4, base_dir: Optional[str] = None) -> str:
         """Start recording. Returns the output folder path."""
         if self._recording:
             return ""
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        self._folder = Path("recordings") / f"{session_name}_{timestamp}"
+        root = Path(base_dir) if base_dir else Path("recordings")
+        self._folder = root / f"{session_name}_{timestamp}"
         self._folder.mkdir(parents=True, exist_ok=True)
 
         self._writers = []

@@ -14,6 +14,7 @@ from PySide6.QtGui import QFont, QKeyEvent, QAction
 
 from src.sync.clock_service import ClockService
 from src.network.server import BandaitServer
+from src.audio.audio_engine import AudioEngine
 from src.ui.widgets.transport import TransportWidget
 from src.ui.widgets.mixer import MixerWidget
 from src.ui.widgets.timeline import TimelineWidget
@@ -35,15 +36,22 @@ class MainWindow(QMainWindow):
         self._bpm = 120
         self._is_playing = False
         self._current_tab = 0
+        self._current_song = None
 
         # Servicios
         self.clock_service = ClockService()
         self.server = BandaitServer(clock_service=self.clock_service)
+        self.audio_engine = AudioEngine(channels=2, block_size=512)
 
-        # Timer de UI
+        # Conectar señales de audio
+        self.audio_engine.started.connect(self._on_audio_started)
+        self.audio_engine.stopped.connect(self._on_audio_stopped)
+        self.audio_engine.beat.connect(self._on_audio_beat)
+
+        # Timer compartido para UI (30fps)
         self._ui_timer = QTimer(self)
         self._ui_timer.timeout.connect(self._update_ui)
-        self._ui_timer.start(33)  # ~30fps
+        self._ui_timer.start(33)
 
         self._setup_ui()
         self._apply_styles()
@@ -109,16 +117,20 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.status_bar.setFont(QFont("Inter", 9))
 
-        self.status_net = QLabel("🟢 Red: Servidor activo")
+        self.status_net = QLabel("● Red: Servidor activo")
+        self.status_net.setStyleSheet("color: #CCFF00;")
         self.status_bar.addWidget(self.status_net)
 
-        self.status_audio = QLabel("🔊 Audio: Listo")
+        self.status_audio = QLabel("Audio: Listo")
+        self.status_audio.setStyleSheet("color: #666666;")
         self.status_bar.addWidget(self.status_audio)
 
-        self.status_sync = QLabel("⏱ Sync: 0ms offset")
+        self.status_sync = QLabel("Sync: 0ms offset")
+        self.status_sync.setStyleSheet("color: #666666;")
         self.status_bar.addWidget(self.status_sync)
 
-        self.status_followers = QLabel("👥 Seguidores: 0")
+        self.status_followers = QLabel("Seguidores: 0")
+        self.status_followers.setStyleSheet("color: #666666;")
         self.status_bar.addWidget(self.status_followers)
 
         self.setStatusBar(self.status_bar)
@@ -212,7 +224,7 @@ class MainWindow(QMainWindow):
         self.stage_view.panic_clicked.connect(self._on_panic)
         self.stage_view.next_song_clicked.connect(self._on_next_song)
         self.stage_view.prev_song_clicked.connect(self._on_prev_song)
-        self.tabs.addTab(self.stage_view, "🎤 Escenario")
+        self.tabs.addTab(self.stage_view, "Escenario")
 
         # Tab 2: Mezcla (Timeline + controles)
         mix_widget = QWidget()
@@ -255,7 +267,7 @@ class MainWindow(QMainWindow):
 
         zoom_layout.addStretch()
 
-        add_section_btn = QPushButton("➕ Agregar Sección")
+        add_section_btn = QPushButton("+ Agregar Sección")
         add_section_btn.setObjectName("primary")
         add_section_btn.setStyleSheet("""
             QPushButton {
@@ -271,18 +283,18 @@ class MainWindow(QMainWindow):
         zoom_layout.addWidget(add_section_btn)
 
         mix_layout.addLayout(zoom_layout)
-        self.tabs.addTab(mix_widget, "🎚 Mezcla")
+        self.tabs.addTab(mix_widget, "Mezcla")
 
         # Tab 3: Biblioteca
         self.library_view = LibraryView()
         self.library_view.song_selected.connect(self._on_song_selected)
         self.library_view.setlist_selected.connect(self._on_setlist_selected)
         self.library_view.import_requested.connect(self._on_import_song)
-        self.tabs.addTab(self.library_view, "📚 Biblioteca")
+        self.tabs.addTab(self.library_view, "Biblioteca")
 
         # Tab 4: IA
         self.ai_view = AIView()
-        self.tabs.addTab(self.ai_view, "🤖 IA")
+        self.tabs.addTab(self.ai_view, "IA")
 
         layout.addWidget(self.tabs)
 
@@ -381,43 +393,79 @@ class MainWindow(QMainWindow):
         else:
             self.showFullScreen()
 
+    # === AUDIO ENGINE CALLBACKS ===
+    def _on_audio_started(self):
+        self.status_audio.setText("Audio: Reproduciendo")
+        self.status_audio.setStyleSheet("color: #CCFF00;")
+
+    def _on_audio_stopped(self):
+        self.status_audio.setText("Audio: Detenido")
+        self.status_audio.setStyleSheet("color: #666666;")
+
+    def _on_audio_beat(self, beat_num: int, bpm: float):
+        """Llamado desde el audio engine en cada beat."""
+        self.transport.set_beat(beat_num)
+        self.stage_view.set_beat(beat_num)
+
+    # === UI UPDATE (30fps) ===
     def _update_ui(self):
-        """Actualizar UI a 30fps."""
+        """Actualizar UI a 30fps — VU meters, tiempo, etc."""
         # Simular niveles de audio para VU meters
         import random
-        for i in range(4):
+        for i in range(min(4, len(self.mixer.channels))):
             level = random.random() * 0.7 if self._is_playing else 0.0
             self.mixer.set_channel_level(i, level)
 
         master_level = random.random() * 0.5 if self._is_playing else 0.0
         self.mixer.set_master_level(master_level)
 
-        # Actualizar beat visual
+        # Actualizar tiempo desde audio engine
         if self._is_playing:
-            beat = (int(self.transport._seconds * self._bpm / 60) % 4) + 1
-            self.transport.set_beat(beat)
-            self.stage_view.set_beat(beat)
+            # El audio engine mantiene el tiempo real
+            pass  # Los beats vienen por señal _on_audio_beat
 
+    # === TRANSPORT CONTROLS ===
     def _on_play(self):
+        """Iniciar reproducción."""
         self._is_playing = True
+        try:
+            self.audio_engine.start()
+        except Exception as e:
+            print(f"[AUDIO] No se pudo iniciar audio: {e}")
+            # Modo simulación: seguir sin audio
         self.timeline.start_playback()
-        self.status_audio.setText("🔊 Audio: Reproduciendo")
+        self.status_audio.setText("Audio: Reproduciendo")
         self.status_audio.setStyleSheet("color: #CCFF00;")
 
     def _on_stop(self):
+        """Detener reproducción."""
         self._is_playing = False
+        try:
+            self.audio_engine.stop()
+        except Exception as e:
+            print(f"[AUDIO] No se pudo detener audio: {e}")
         self.timeline.stop_playback()
         self.timeline.set_position(0.0)
-        self.status_audio.setText("🔊 Audio: Detenido")
+        self.transport.set_time(0.0)
+        self.status_audio.setText("Audio: Detenido")
         self.status_audio.setStyleSheet("color: #666666;")
 
     def _on_rec(self):
+        """Toggle grabación."""
         is_rec = self.transport.rec_btn.isChecked()
         if is_rec:
-            self.status_audio.setText("🔴 Audio: Grabando")
+            try:
+                self.audio_engine.start_recording("session_live")
+            except Exception as e:
+                print(f"[AUDIO] No se pudo iniciar grabación: {e}")
+            self.status_audio.setText("Audio: Grabando")
             self.status_audio.setStyleSheet("color: #FF0000; font-weight: bold;")
         else:
-            self.status_audio.setText("🔊 Audio: Listo")
+            try:
+                self.audio_engine.stop_recording()
+            except Exception as e:
+                print(f"[AUDIO] No se pudo detener grabación: {e}")
+            self.status_audio.setText("Audio: Listo")
             self.status_audio.setStyleSheet("color: #666666;")
 
     def _on_loop(self, enabled: bool):
@@ -428,42 +476,87 @@ class MainWindow(QMainWindow):
 
     def _on_bpm_changed(self, bpm: int):
         self._bpm = bpm
+        self.audio_engine.set_bpm(float(bpm))
         self.timeline.set_bpm(bpm)
         self.stage_view.set_bpm(bpm)
 
+    # === MIXER CONTROLS ===
     def _on_channel_mute(self, channel_id: int, muted: bool):
-        pass  # TODO: conectar a audio engine
+        print(f"[MIXER] Canal {channel_id} mute={muted}")
+        # TODO: conectar a audio engine mixer
 
     def _on_channel_solo(self, channel_id: int, soloed: bool):
-        pass  # TODO: conectar a audio engine
+        print(f"[MIXER] Canal {channel_id} solo={soloed}")
 
     def _on_channel_fader(self, channel_id: int, db: float):
-        pass  # TODO: conectar a audio engine
+        print(f"[MIXER] Canal {channel_id} fader={db:.1f}dB")
 
     def _on_channel_pan(self, channel_id: int, pan: float):
-        pass  # TODO: conectar a audio engine
+        print(f"[MIXER] Canal {channel_id} pan={pan:.2f}")
 
     def _on_master_fader(self, db: float):
-        pass  # TODO: conectar a audio engine
+        print(f"[MIXER] Master fader={db:.1f}dB")
 
+    # === STAGE CONTROLS ===
     def _on_panic(self):
         self._on_stop()
         # TODO: detener servidor, desconectar seguidores
 
     def _on_next_song(self):
-        pass  # TODO: cambiar a siguiente canción
+        self.library_view._on_next_song()
 
     def _on_prev_song(self):
-        pass  # TODO: cambiar a canción anterior
+        self.library_view._on_prev_song()
 
+    # === LIBRARY / SONG SELECTION ===
     def _on_song_selected(self, song_id: int):
-        pass  # TODO: cargar canción en timeline
+        """Cargar canción en timeline y stage."""
+        print(f"[MAIN] Canción seleccionada: {song_id}")
+        # Obtener datos de la canción desde la library
+        song_data = self.library_view.get_song_data(song_id)
+        if song_data:
+            self._load_song_to_timeline(song_data)
+            self._load_song_to_stage(song_data)
+            self._current_song = song_data
+
+    def _load_song_to_timeline(self, song_data: dict):
+        """Cargar secciones de canción en timeline."""
+        self.timeline.clear_sections()
+        sections = song_data.get("sections", [])
+        beat_pos = 0
+        for section in sections:
+            label = section.get("label", "Sección")
+            bars = section.get("bars", 8)
+            beats = bars * 4  # 4/4 por defecto
+            self.timeline.add_section(label, beat_pos, beats)
+            beat_pos += beats
+        self.timeline.set_duration(song_data.get("duration_seconds", 180))
+        self.timeline.set_bpm(song_data.get("bpm", 120))
+
+    def _load_song_to_stage(self, song_data: dict):
+        """Cargar canción en vista de escenario."""
+        lyrics = song_data.get("lyrics", [])
+        current_lyric = lyrics[0]["text"] if lyrics else ""
+        next_lyric = lyrics[1]["text"] if len(lyrics) > 1 else ""
+        sections = song_data.get("sections", [])
+        current_section = sections[0]["label"] if sections else "Intro"
+        next_section = sections[1]["label"] if len(sections) > 1 else ""
+
+        self.stage_view.set_song(
+            title=song_data.get("title", "Sin título"),
+            current_lyric=current_lyric,
+            next_lyric=next_lyric,
+            section=current_section,
+            next_section=next_section,
+        )
+        self.stage_view.set_bpm(song_data.get("bpm", 120))
 
     def _on_setlist_selected(self, setlist_id: int):
-        pass  # TODO: cargar setlist
+        print(f"[MAIN] Setlist seleccionado: {setlist_id}")
 
     def _on_import_song(self, file_path: str):
-        pass  # TODO: importar canción
+        print(f"[MAIN] Importando: {file_path}")
+        # TODO: parsear LRC/ChordPro y guardar en DB
 
     def _on_add_section(self):
         from PySide6.QtWidgets import QInputDialog
@@ -471,15 +564,32 @@ class MainWindow(QMainWindow):
         if ok and label:
             self.timeline.add_section(label, 0, 16)
 
+    # === KEYBOARD SHORTCUTS ===
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Space:
+            # Toggle play/stop
             if self._is_playing:
                 self.transport.play_btn.setChecked(False)
-                self._on_play()
+                self._on_stop()
             else:
                 self.transport.play_btn.setChecked(True)
                 self._on_play()
         elif event.key() == Qt.Key_R:
             self.transport.rec_btn.setChecked(not self.transport.rec_btn.isChecked())
             self._on_rec()
-        super().keyPressEvent(event)
+        elif event.key() == Qt.Key_F11:
+            self._toggle_fullscreen()
+        else:
+            super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        """Limpiar al cerrar."""
+        try:
+            self.audio_engine.stop()
+        except Exception:
+            pass
+        try:
+            self.server.stop()
+        except Exception:
+            pass
+        event.accept()
