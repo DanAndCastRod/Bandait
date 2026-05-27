@@ -238,12 +238,12 @@ class AudioEngine(QObject):
         self._bpm = bpm
         self._beat_interval_samples = int(60.0 / bpm * self.sample_rate)
 
-    def start_recording(self, session_name: str) -> str:
+    def start_recording(self, session_name: str, base_dir: str = None) -> str:
         """Start recording to disk."""
         if not self._running:
             self.start()
         self._recording = True
-        return self.recorder.start(session_name, self.channels)
+        return self.recorder.start(session_name, self._input_channels, base_dir)
 
     def stop_recording(self) -> None:
         """Stop recording."""

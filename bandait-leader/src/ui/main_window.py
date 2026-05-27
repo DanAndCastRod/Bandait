@@ -502,22 +502,46 @@ class MainWindow(QMainWindow):
         self.status_audio.setStyleSheet("color: #666666;")
 
     def _on_rec(self):
-        """Toggle grabación."""
+        """Toggle grabación con nombre descriptivo y carpeta organizada."""
+        import time
+        import os
+
         is_rec = self.transport.rec_btn.isChecked()
         if is_rec:
+            # Generar nombre de sesión: fecha_hora + canción actual
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            song_name = ""
+            if self._current_song:
+                song_name = self._current_song.get("title", "").replace(" ", "_")
+            session_name = f"{timestamp}_{song_name}" if song_name else f"{timestamp}_ensayo"
+
+            # Carpeta base: Documents/Bandait/Recordings/
+            base_dir = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "Recordings")
+            os.makedirs(base_dir, exist_ok=True)
+
             try:
-                self.audio_engine.start_recording("session_live")
+                folder = self.audio_engine.start_recording(session_name, base_dir=base_dir)
+                self._last_recording_folder = folder
+                print(f"[REC] Grabando en: {folder}")
+                self.status_audio.setText(f"● GRABANDO — {session_name}")
+                self.status_audio.setStyleSheet("color: #FF0000; font-weight: bold;")
+                self.status_bar.showMessage(f"Grabación iniciada: {os.path.basename(folder)}", 5000)
             except Exception as e:
                 print(f"[AUDIO] No se pudo iniciar grabación: {e}")
-            self.status_audio.setText("Audio: Grabando")
-            self.status_audio.setStyleSheet("color: #FF0000; font-weight: bold;")
+                self.transport.rec_btn.setChecked(False)
+                self.status_audio.setText("Audio: Error de grabación")
+                self.status_audio.setStyleSheet("color: #FFAA00;")
         else:
             try:
                 self.audio_engine.stop_recording()
+                self.status_audio.setText("Audio: Listo")
+                self.status_audio.setStyleSheet("color: #666666;")
+                if hasattr(self, '_last_recording_folder'):
+                    self.status_bar.showMessage(
+                        f"Grabación guardada en: {self._last_recording_folder}", 10000
+                    )
             except Exception as e:
                 print(f"[AUDIO] No se pudo detener grabación: {e}")
-            self.status_audio.setText("Audio: Listo")
-            self.status_audio.setStyleSheet("color: #666666;")
 
     def _on_loop(self, enabled: bool):
         pass  # TODO: implementar loop

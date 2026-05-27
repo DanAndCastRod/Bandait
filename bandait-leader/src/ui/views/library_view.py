@@ -338,46 +338,128 @@ class LibraryView(QWidget):
             self.import_requested.emit(file_path)
 
     def _import_file(self, file_path: str):
-        """Importar archivo y guardar en DB."""
+        """Importar archivo y guardar en DB con metadata extraída."""
+        import re
         ext = os.path.splitext(file_path)[1].lower()
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+
         try:
             if ext in (".lrc", ".txt"):
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
+
+                # Extraer título y artista de metadatos LRC
+                title = base_name
+                artist = ""
+                for line in content.splitlines():
+                    if line.startswith("[ti:"):
+                        title = line[4:-1].strip()
+                    elif line.startswith("[ar:"):
+                        artist = line[4:-1].strip()
+
                 lines = LRCParser.parse(content)
                 lyrics_text = "\n".join([l.text for l in lines])
+
+                # Estimar BPM y duración
+                if lines:
+                    last_time = lines[-1].time_ms / 1000.0
+                    duration = max(last_time + 30, 180)  # mínimo 3 min
+                else:
+                    duration = 180
+
                 song = Song(
-                    id=f"song-{os.path.basename(file_path)}",
-                    title=os.path.basename(file_path),
+                    id=f"song-{base_name}-{hash(file_path) % 10000:04d}",
+                    title=title,
+                    artist=artist,
                     bpm=120,
+                    duration_seconds=duration,
                     lyrics_text=lyrics_text,
                 )
+
             elif ext in (".pro", ".cho", ".chopro"):
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
                 result = ChordProParser.parse(content)
+
+                # Extraer duración estimada de las secciones
+                sections = result.get("sections", [])
+                total_bars = sum(len(s.get("lines", [])) for s in sections)
+                bpm = result.get("bpm", 120)
+                duration = (total_bars * 4 * 60) / max(bpm, 60) if total_bars > 0 else 180
+
                 song = Song(
-                    id=f"song-{result.get('title', 'unknown')}",
-                    title=result.get("title", "Sin título"),
-                    bpm=result.get("bpm", 120),
+                    id=f"song-{result.get('title', base_name)}-{hash(file_path) % 10000:04d}",
+                    title=result.get("title", base_name),
+                    artist=result.get("artist", ""),
+                    bpm=bpm,
                     key=result.get("key", ""),
+                    duration_seconds=duration,
                     chords_text=content,
+                    lyrics_text="\n".join(
+                        line for s in sections for line in s.get("lines", [])
+                    ),
                 )
+
+            elif ext in (".mp3", ".wav", ".flac", ".ogg"):
+                # Audio file — try to extract metadata
+                duration = 180  # default
+                try:
+                    import mutagen
+                    from mutagen.mp3 import MP3
+                    audio = MP3(file_path)
+                    duration = audio.info.length
+                    tags = audio.tags
+                    title = tags.get("TIT2", base_name) if tags else base_name
+                    artist = tags.get("TPE1", "") if tags else ""
+                except Exception:
+                    title = base_name
+                    artist = ""
+
+                song = Song(
+                    id=f"song-{base_name}-{hash(file_path) % 10000:04d}",
+                    title=title,
+                    artist=artist,
+                    duration_seconds=duration,
+                    audio_path=file_path,
+                )
+
             else:
                 song = Song(
-                    id=f"song-{os.path.basename(file_path)}",
-                    title=os.path.basename(file_path),
+                    id=f"song-{base_name}-{hash(file_path) % 10000:04d}",
+                    title=base_name,
                     audio_path=file_path,
                 )
 
             if self._db_session:
-                self._db_session.add(song)
-                self._db_session.commit()
+                # Check for duplicate by title+artist
+                existing = self._db_session.query(Song).filter(
+                    Song.title == song.title,
+                    Song.artist == song.artist
+                ).first()
+                if existing:
+                    reply = QMessageBox.question(
+                        self, "Canción existente",
+                        f"'{song.title}' ya existe. ¿Reemplazar?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    if reply == QMessageBox.Yes:
+                        existing.lyrics_text = song.lyrics_text or existing.lyrics_text
+                        existing.chords_text = song.chords_text or existing.chords_text
+                        existing.audio_path = song.audio_path or existing.audio_path
+                        existing.bpm = song.bpm or existing.bpm
+                        self._db_session.commit()
+                        QMessageBox.information(self, "Importar", f"Canción actualizada: {song.title}")
+                else:
+                    self._db_session.add(song)
+                    self._db_session.commit()
+                    QMessageBox.information(self, "Importar", f"Canción importada: {song.title}")
+
                 self._load_songs_from_db()
 
-            QMessageBox.information(self, "Importar", f"Canción importada: {song.title}")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"No se pudo importar: {e}")
+            QMessageBox.warning(self, "Error", f"No se pudo importar:\n{e}")
+            import traceback
+            traceback.print_exc()
 
     def _on_add_song(self):
         QMessageBox.information(self, "Nueva Canción", "Función en desarrollo: Editor de canciones")
