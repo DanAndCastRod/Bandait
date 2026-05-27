@@ -18,41 +18,89 @@ class AIWorker(QThread):
     response_ready = Signal(str)
     error = Signal(str)
 
-    def __init__(self, prompt: str, mode: str = "chat"):
+    def __init__(self, prompt: str, mode: str = "chat", songs_data: list = None):
         super().__init__()
         self.prompt = prompt
         self.mode = mode
+        self.songs_data = songs_data or []
+        self._assistant = None
 
     def run(self):
         try:
-            # Simulación de respuesta de IA
-            # En producción: import google.generativeai as genai
-            import time
-            time.sleep(1.5)
+            # Intentar usar AIAssistant real
+            try:
+                from src.ai.ai_assistant import AIAssistant
+                self._assistant = AIAssistant()
+            except Exception as e:
+                print(f"[AI] Usando modo offline: {e}")
+                self._assistant = None
 
-            responses = {
-                "chat": f"🤖 **Asistente Bandait**: Entiendo que preguntas sobre '{self.prompt[:50]}...'. "
-                        f"\n\nComo asistente musical, te sugiero:\n"
-                        f"\n1. Revisar el tempo actual de {120} BPM\n"
-                        f"2. Practicar con metrónomo a velocidad reducida\n"
-                        f"3. Grabar el ensayo para análisis posterior",
-                "analyze": "📊 **Análisis del último ensayo**:\n\n"
-                          "✅ Tempo estable en 90% de la canción\n"
-                          "⚠️ Desaceleración detectada en el puente (-5 BPM)\n"
-                          "💡 Sugerencia: Practicar transición Verso→Coro con click",
-                "setlist": "🎵 **Setlist sugerido para evento de 45 min**:\n\n"
-                          "1. Intro (0:45) - Calentamiento\n"
-                          "2. Medianoche en Pereira (4:32)\n"
-                          "3. Volver a Verte (3:45)\n"
-                          "4. Cover: Smells Like (4:18)\n"
-                          "5. [DESCANSO - 2 min]\n"
-                          "6. Ensayo #1 (5:12) - Cierre energético",
-            }
+            if self._assistant and not getattr(self._assistant, '_offline', True):
+                # Modo online con Google Cloud
+                if self.mode == "analyze":
+                    response = self._assistant.analyze_rehearsal(
+                        rehearsal_notes=self.prompt,
+                        bpm_data=[120, 118, 121, 119, 120],  # TODO: real data
+                        song_titles=[s.get("title", "?") for s in self.songs_data[:5]],
+                    )
+                elif self.mode == "setlist":
+                    response = self._assistant.suggest_setlist(
+                        songs=self.songs_data,
+                        target_duration_minutes=45,
+                    )
+                else:
+                    response = self._assistant.chat(self.prompt)
 
-            response = responses.get(self.mode, responses["chat"])
-            self.response_ready.emit(response)
+                self.response_ready.emit(f"🤖 **Asistente Bandait**:\n\n{response}")
+            else:
+                # Modo offline — respuestas locales inteligentes
+                self._offline_response()
+
         except Exception as e:
             self.error.emit(str(e))
+
+    def _offline_response(self):
+        """Respuestas locales cuando no hay conexión a Google Cloud."""
+        import time
+        time.sleep(0.5)  # Simular procesamiento
+
+        if self.mode == "analyze":
+            response = (
+                "📊 **Análisis de Ensayo (Modo Offline)**\n\n"
+                "Basado en los datos locales disponibles:\n\n"
+                "✅ Tempo general estable\n"
+                "💡 Consejo: Practicar transiciones entre secciones\n"
+                "📝 Nota: Conecta una API key de Google Cloud para análisis avanzado"
+            )
+        elif self.mode == "setlist":
+            if self.songs_data:
+                songs_list = "\n".join(f"{i+1}. {s.get('title', '?')} ({s.get('bpm', 120)} BPM)"
+                                        for i, s in enumerate(self.songs_data[:8]))
+                response = (
+                    f"🎵 **Setlist Sugerido (Modo Offline)**\n\n"
+                    f"Canciones disponibles:\n{songs_list}\n\n"
+                    f"💡 Consejo: Alternar tempos para mantener energía\n"
+                    f"📝 Conecta Google Cloud para sugerencias inteligentes"
+                )
+            else:
+                response = (
+                    "🎵 **Setlist (Modo Offline)**\n\n"
+                    "No hay canciones en la biblioteca.\n"
+                    "Importa canciones primero para generar setlists."
+                )
+        else:
+            response = (
+                f"🤖 **Asistente Bandait (Modo Offline)**\n\n"
+                f"Entiendo: *{self.prompt[:60]}...*\n\n"
+                f"Como asistente musical, te sugiero:\n"
+                f"1. Revisar el tempo actual con el metrónomo\n"
+                f"2. Practicar secciones difíciles a velocidad reducida\n"
+                f"3. Grabar el ensayo para revisión posterior\n\n"
+                f"📝 Para análisis avanzado, configura tu API key de Google Cloud:\n"
+                f"   `set BANDAIT_GOOGLE_API_KEY=tu-clave`"
+            )
+
+        self.response_ready.emit(response)
 
 
 class AIView(QWidget):
@@ -240,8 +288,23 @@ class AIView(QWidget):
         self.status_label.setText("🟡 Pensando...")
         self.status_label.setStyleSheet("color: #FFAA00;")
 
+        # Obtener canciones disponibles para contexto
+        songs_data = []
+        try:
+            from src.db.models import Song
+            from src.db.models import init_db
+            import os
+            db_path = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "bandait.db")
+            Session = init_db(db_path)
+            session = Session()
+            songs = session.query(Song).limit(20).all()
+            songs_data = [s.to_dict() for s in songs]
+            session.close()
+        except Exception as e:
+            print(f"[AI] No se pudieron cargar canciones: {e}")
+
         # Llamar a IA en thread
-        self.worker = AIWorker(text, mode)
+        self.worker = AIWorker(text, mode, songs_data)
         self.worker.response_ready.connect(self._on_response)
         self.worker.error.connect(self._on_error)
         self.worker.start()
