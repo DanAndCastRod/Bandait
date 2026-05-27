@@ -1,14 +1,15 @@
 """
 Bandait DAW — Vista de Escenario (Modo Evento en Vivo)
 Pantalla fullscreen minimalista para performance en vivo.
+Flash de bordes para metrónomo, letras grandes, beacon de red.
 """
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QKeyEvent, QColor
 
 
 class StageView(QWidget):
@@ -28,8 +29,11 @@ class StageView(QWidget):
         self._is_fullscreen = False
         self._network_ok = True
         self._beat_flash = False
+        self._lyrics = []
+        self._current_lyric_idx = 0
 
         self._setup_ui()
+        self._setup_animations()
         self._setup_timer()
 
     def _setup_ui(self):
@@ -241,6 +245,12 @@ class StageView(QWidget):
         bottom.addWidget(self.panic_btn)
 
         layout.addLayout(bottom)
+
+    def _setup_animations(self):
+        """Configurar animaciones de flash para metrónomo."""
+        self._flash_anim = QPropertyAnimation(self, b"styleSheet")
+        self._flash_anim.setDuration(100)
+        self._flash_anim.setEasingCurve(QEasingCurve.OutQuad)
 
     def _setup_timer(self):
         self._timer = QTimer(self)

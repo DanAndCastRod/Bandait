@@ -1,8 +1,9 @@
 """
 Bandait DAW — Vista de Biblioteca
-Gestión de canciones, setlists y eventos en español.
+Gestión de canciones, setlists y eventos con persistencia SQLite real.
 """
 
+import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QLineEdit, QComboBox,
@@ -11,9 +12,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
+from src.db.models import init_db, Song, Setlist
+from src.infrastructure.parsers.lrc_parser import LRCParser
+from src.infrastructure.parsers.chordpro_parser import ChordProParser
+
 
 class LibraryView(QWidget):
-    """Biblioteca musical con canciones, setlists y eventos."""
+    """Biblioteca musical con canciones, setlists y eventos persistentes."""
 
     song_selected = Signal(int)
     setlist_selected = Signal(int)
@@ -21,7 +26,18 @@ class LibraryView(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._db_session = None
+        self._setup_db()
         self._setup_ui()
+        self._load_songs_from_db()
+        self._load_setlists_from_db()
+
+    def _setup_db(self):
+        """Inicializar conexión a SQLite."""
+        db_path = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "bandait.db")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        Session = init_db(db_path)
+        self._db_session = Session()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -29,7 +45,7 @@ class LibraryView(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         # === TÍTULO ===
-        title = QLabel("📚 BIBLIOTECA MUSICAL")
+        title = QLabel("BIBLIOTECA MUSICAL")
         title.setFont(QFont("Inter", 18, QFont.Bold))
         title.setStyleSheet("color: #F0F0F0;")
         layout.addWidget(title)
@@ -40,15 +56,15 @@ class LibraryView(QWidget):
 
         # --- TAB: CANCIONES ---
         songs_widget = self._create_songs_tab()
-        self.tabs.addTab(songs_widget, "🎵 Canciones")
+        self.tabs.addTab(songs_widget, "Canciones")
 
         # --- TAB: SETLISTS ---
         setlists_widget = self._create_setlists_tab()
-        self.tabs.addTab(setlists_widget, "📋 Setlists")
+        self.tabs.addTab(setlists_widget, "Setlists")
 
         # --- TAB: EVENTOS ---
         events_widget = self._create_events_tab()
-        self.tabs.addTab(events_widget, "🎤 Eventos")
+        self.tabs.addTab(events_widget, "Eventos")
 
         layout.addWidget(self.tabs)
 
@@ -64,22 +80,23 @@ class LibraryView(QWidget):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Buscar canción...")
         self.search_input.setMinimumWidth(200)
+        self.search_input.textChanged.connect(self._on_search_songs)
         toolbar.addWidget(self.search_input)
 
         toolbar.addStretch()
 
-        import_btn = QPushButton("⬆ Importar")
+        import_btn = QPushButton("Importar")
         import_btn.setObjectName("primary")
         import_btn.setToolTip("Importar archivo LRC, ChordPro o MP3")
         import_btn.clicked.connect(self._on_import)
         toolbar.addWidget(import_btn)
 
-        add_btn = QPushButton("➕ Nueva")
+        add_btn = QPushButton("Nueva")
         add_btn.setObjectName("primary")
         add_btn.clicked.connect(self._on_add_song)
         toolbar.addWidget(add_btn)
 
-        delete_btn = QPushButton("🗑 Eliminar")
+        delete_btn = QPushButton("Eliminar")
         delete_btn.setObjectName("danger")
         delete_btn.clicked.connect(self._on_delete_song)
         toolbar.addWidget(delete_btn)
@@ -101,9 +118,6 @@ class LibraryView(QWidget):
         self.songs_table.setSelectionMode(QTableWidget.SingleSelection)
         self.songs_table.itemSelectionChanged.connect(self._on_song_selected)
         self.songs_table.setMinimumHeight(300)
-
-        # Datos de ejemplo
-        self._load_sample_songs()
 
         layout.addWidget(self.songs_table)
 
@@ -131,7 +145,7 @@ class LibraryView(QWidget):
 
         toolbar.addStretch()
 
-        new_btn = QPushButton("➕ Nuevo Setlist")
+        new_btn = QPushButton("Nuevo Setlist")
         new_btn.setObjectName("primary")
         new_btn.clicked.connect(self._on_add_setlist)
         toolbar.addWidget(new_btn)
@@ -148,8 +162,6 @@ class LibraryView(QWidget):
         self.setlists_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.setlists_table.itemSelectionChanged.connect(self._on_setlist_selected)
 
-        self._load_sample_setlists()
-
         layout.addWidget(self.setlists_table)
 
         # Detalle del setlist
@@ -165,15 +177,15 @@ class LibraryView(QWidget):
         # Botones de acción
         actions = QHBoxLayout()
 
-        edit_btn = QPushButton("✏ Editar")
+        edit_btn = QPushButton("Editar")
         edit_btn.setObjectName("primary")
         actions.addWidget(edit_btn)
 
-        play_btn = QPushButton("▶ Cargar")
+        play_btn = QPushButton("Cargar")
         play_btn.setObjectName("success")
         actions.addWidget(play_btn)
 
-        duplicate_btn = QPushButton("📋 Duplicar")
+        duplicate_btn = QPushButton("Duplicar")
         actions.addWidget(duplicate_btn)
 
         detail_layout.addLayout(actions)
@@ -196,7 +208,7 @@ class LibraryView(QWidget):
 
         toolbar.addStretch()
 
-        new_event_btn = QPushButton("➕ Nuevo Evento")
+        new_event_btn = QPushButton("Nuevo Evento")
         new_event_btn.setObjectName("primary")
         new_event_btn.clicked.connect(self._on_add_event)
         toolbar.addWidget(new_event_btn)
@@ -211,8 +223,6 @@ class LibraryView(QWidget):
         ])
         self.events_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.events_table.setSelectionBehavior(QTableWidget.SelectRows)
-
-        self._load_sample_events()
 
         layout.addWidget(self.events_table)
 
@@ -234,62 +244,58 @@ class LibraryView(QWidget):
 
         return widget
 
-    def _load_sample_songs(self):
-        """Cargar canciones de ejemplo."""
-        sample_data = [
-            ["Medianoche en Pereira", "Los Rolling Ruanas", "124", "Am", "4:32", "Hace 2 días"],
-            ["Volver a Verte", "Banda Local", "118", "C", "3:45", "Hace 1 semana"],
-            ["Ensayo #1", "Instrumental", "135", "Em", "5:12", "Ayer"],
-            ["Cover: Smells Like", "Nirvana (Cover)", "140", "F#m", "4:18", "Hace 3 días"],
-            ["Intro del Set", "Personal", "90", "Dm", "0:45", "Hoy"],
-        ]
-        self.songs_table.setRowCount(len(sample_data))
-        for i, row_data in enumerate(sample_data):
-            for j, value in enumerate(row_data):
-                item = QTableWidgetItem(value)
-                item.setFont(QFont("Inter", 11))
-                if j == 2:  # BPM
-                    item.setFont(QFont("JetBrains Mono", 11))
-                    item.setForeground(QColor(0, 255, 255))
-                self.songs_table.setItem(i, j, item)
+    # === DB OPERATIONS ===
+    def _load_songs_from_db(self):
+        """Cargar canciones desde SQLite."""
+        if not self._db_session:
+            return
+        songs = self._db_session.query(Song).all()
+        self.songs_table.setRowCount(len(songs))
+        for i, song in enumerate(songs):
+            self.songs_table.setItem(i, 0, self._create_item(song.title))
+            self.songs_table.setItem(i, 1, self._create_item(""))  # artist no existe en modelo
+            self.songs_table.setItem(i, 2, self._create_bpm_item(str(song.bpm)))
+            self.songs_table.setItem(i, 3, self._create_item(song.key))
+            duration_str = f"{int(song.duration_seconds // 60)}:{int(song.duration_seconds % 60):02d}"
+            self.songs_table.setItem(i, 4, self._create_item(duration_str))
+            self.songs_table.setItem(i, 5, self._create_item("Reciente"))
 
-    def _load_sample_setlists(self):
-        sample_data = [
-            ["Set Ensayo Mayo", "12", "48 min", "2024-05-20", "Activo"],
-            ["Evento Bar La Esquina", "8", "35 min", "2024-05-15", "Completado"],
-            ["Práctica Covers", "15", "62 min", "2024-05-18", "Activo"],
-        ]
-        self.setlists_table.setRowCount(len(sample_data))
-        for i, row_data in enumerate(sample_data):
-            for j, value in enumerate(row_data):
-                item = QTableWidgetItem(value)
-                item.setFont(QFont("Inter", 11))
-                if j == 4:  # Estado
-                    if value == "Activo":
-                        item.setForeground(QColor(204, 255, 0))
-                    else:
-                        item.setForeground(QColor(102, 102, 102))
-                self.setlists_table.setItem(i, j, item)
+    def _load_setlists_from_db(self):
+        """Cargar setlists desde SQLite."""
+        if not self._db_session:
+            return
+        setlists = self._db_session.query(Setlist).all()
+        self.setlists_table.setRowCount(len(setlists))
+        for i, sl in enumerate(setlists):
+            self.setlists_table.setItem(i, 0, self._create_item(sl.name))
+            n_songs = len(sl.songs) if sl.songs else 0
+            self.setlists_table.setItem(i, 1, self._create_item(str(n_songs)))
+            self.setlists_table.setItem(i, 2, self._create_item("—"))
+            self.setlists_table.setItem(i, 3, self._create_item("—"))
+            self.setlists_table.setItem(i, 4, self._create_item("Activo"))
 
-    def _load_sample_events(self):
-        sample_data = [
-            ["2024-05-30", "Festival de Rock Local", "Plaza Central", "Set Ensayo Mayo", "Confirmado", ""],
-            ["2024-06-15", "Concierto Privado", "Casa del Manager", "Evento Bar La Esquina", "Pendiente", ""],
-            ["2024-05-10", "Ensayo General", "Estudio", "Práctica Covers", "Completado", ""],
-        ]
-        self.events_table.setRowCount(len(sample_data))
-        for i, row_data in enumerate(sample_data):
-            for j, value in enumerate(row_data):
-                item = QTableWidgetItem(value)
-                item.setFont(QFont("Inter", 11))
-                if j == 4:  # Estado
-                    if value == "Confirmado":
-                        item.setForeground(QColor(204, 255, 0))
-                    elif value == "Pendiente":
-                        item.setForeground(QColor(255, 170, 0))
-                    else:
-                        item.setForeground(QColor(102, 102, 102))
-                self.events_table.setItem(i, j, item)
+    def _create_item(self, text: str) -> QTableWidgetItem:
+        item = QTableWidgetItem(text)
+        item.setFont(QFont("Inter", 11))
+        return item
+
+    def _create_bpm_item(self, text: str) -> QTableWidgetItem:
+        item = QTableWidgetItem(text)
+        item.setFont(QFont("JetBrains Mono", 11))
+        item.setForeground(QColor(0, 255, 255))
+        return item
+
+    # === EVENT HANDLERS ===
+    def _on_search_songs(self, text: str):
+        """Filtrar canciones por búsqueda."""
+        for row in range(self.songs_table.rowCount()):
+            match = False
+            for col in range(4):
+                item = self.songs_table.item(row, col)
+                if item and text.lower() in item.text().lower():
+                    match = True
+                    break
+            self.songs_table.setRowHidden(row, not match)
 
     def _on_song_selected(self):
         selected = self.songs_table.selectedItems()
@@ -324,8 +330,50 @@ class LibraryView(QWidget):
             "Todos los archivos (*.*)"
         )
         if file_path:
+            self._import_file(file_path)
             self.import_requested.emit(file_path)
-            QMessageBox.information(self, "Importar", f"Importando: {file_path}")
+
+    def _import_file(self, file_path: str):
+        """Importar archivo y guardar en DB."""
+        ext = os.path.splitext(file_path)[1].lower()
+        try:
+            if ext in (".lrc", ".txt"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                lines = LRCParser.parse(content)
+                lyrics_text = "\n".join([l.text for l in lines])
+                song = Song(
+                    id=f"song-{os.path.basename(file_path)}",
+                    title=os.path.basename(file_path),
+                    bpm=120,
+                    lyrics_text=lyrics_text,
+                )
+            elif ext in (".pro", ".cho", ".chopro"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                result = ChordProParser.parse(content)
+                song = Song(
+                    id=f"song-{result.get('title', 'unknown')}",
+                    title=result.get("title", "Sin título"),
+                    bpm=result.get("bpm", 120),
+                    key=result.get("key", ""),
+                    chords_text=content,
+                )
+            else:
+                song = Song(
+                    id=f"song-{os.path.basename(file_path)}",
+                    title=os.path.basename(file_path),
+                    audio_path=file_path,
+                )
+
+            if self._db_session:
+                self._db_session.add(song)
+                self._db_session.commit()
+                self._load_songs_from_db()
+
+            QMessageBox.information(self, "Importar", f"Canción importada: {song.title}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"No se pudo importar: {e}")
 
     def _on_add_song(self):
         QMessageBox.information(self, "Nueva Canción", "Función en desarrollo: Editor de canciones")
@@ -355,10 +403,12 @@ class LibraryView(QWidget):
             return {}
         return {
             "title": self.songs_table.item(row, 0).text(),
-            "artist": self.songs_table.item(row, 1).text(),
-            "bpm": int(self.songs_table.item(row, 2).text()),
-            "key": self.songs_table.item(row, 3).text(),
-            "duration_seconds": self._parse_duration(self.songs_table.item(row, 4).text()),
+            "artist": self.songs_table.item(row, 1).text() if self.songs_table.item(row, 1) else "",
+            "bpm": int(self.songs_table.item(row, 2).text()) if self.songs_table.item(row, 2) else 120,
+            "key": self.songs_table.item(row, 3).text() if self.songs_table.item(row, 3) else "",
+            "duration_seconds": self._parse_duration(
+                self.songs_table.item(row, 4).text() if self.songs_table.item(row, 4) else "3:00"
+            ),
             "lyrics": [],
             "sections": [
                 {"label": "Intro", "bars": 4},

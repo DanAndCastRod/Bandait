@@ -277,6 +277,7 @@ class TestDataFlow:
         timeline.add_section("Coro", 24, 16)
         assert len(timeline._sections) == 3
         assert timeline._bpm == 124
+        # No iniciar playback en test — el timer requiere event loop
 
     def test_stage_set_song(self):
         from src.ui.views.stage_view import StageView
