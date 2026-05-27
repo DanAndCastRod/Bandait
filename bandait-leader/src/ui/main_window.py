@@ -326,11 +326,11 @@ class MainWindow(QMainWindow):
         """Aplicar QSS profesional OLED Noir."""
         import os
         # Buscar el archivo QSS en múltiples ubicaciones posibles
+        script_dir = os.path.dirname(os.path.abspath(__file__))
         possible_paths = [
-            os.path.join(os.path.dirname(__file__), "..", "..", "styles", "bandait_daw.qss"),
-            os.path.join(os.path.dirname(__file__), "..", "styles", "bandait_daw.qss"),
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "styles", "bandait_daw.qss"),
-            os.path.join(os.path.dirname(__file__), "styles", "bandait_daw.qss"),
+            os.path.join(script_dir, "..", "styles", "bandait_daw.qss"),           # src/ui/../styles/
+            os.path.join(script_dir, "..", "..", "src", "styles", "bandait_daw.qss"),  # desde raíz
+            os.path.join(script_dir, "styles", "bandait_daw.qss"),                # src/ui/styles/
         ]
 
         qss_loaded = False

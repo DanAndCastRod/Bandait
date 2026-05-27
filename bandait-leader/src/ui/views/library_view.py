@@ -33,9 +33,24 @@ class LibraryView(QWidget):
         self._load_setlists_from_db()
 
     def _setup_db(self):
-        """Inicializar conexión a SQLite."""
+        """Inicializar conexión a SQLite con migración automática."""
         db_path = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "bandait.db")
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+        # Si la DB existe pero el schema es viejo, eliminarla
+        if os.path.exists(db_path):
+            try:
+                Session = init_db(db_path)
+                test_session = Session()
+                # Test si la columna artist existe
+                from sqlalchemy import text
+                test_session.execute(text("SELECT artist FROM songs LIMIT 1"))
+                test_session.close()
+            except Exception:
+                # Schema viejo — eliminar y recrear
+                print("[DB] Schema desactualizado. Recreando base de datos...")
+                os.remove(db_path)
+
         Session = init_db(db_path)
         self._db_session = Session()
 
