@@ -13,10 +13,11 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from qasync import QEventLoop
 
-from ui.main_window import MainWindow
-from network.bandait_server import BandaitServer
-from sync.clock_service import ClockService
-from core.config import Config
+from src.ui.main_window import MainWindow
+from src.network.server import BandaitServer
+from src.sync.clock_service import ClockService
+from src.audio.audio_engine import AudioEngine
+from src.core.config import Config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,16 +44,20 @@ def main() -> int:
         app.setStyleSheet(style_path.read_text(encoding="utf-8"))
 
     # Services
-    clock = ClockService()
-    server = BandaitServer(host=config.host, port=config.port, clock=clock)
+    clock = ClockService(mode="leader")
+    server = BandaitServer(clock, host=config.host, port=config.port)
+    audio = AudioEngine(
+        sample_rate=48000,
+        block_size=256,
+        channels=4,
+    )
 
-    window = MainWindow(clock=clock, server=server)
+    window = MainWindow(clock=clock, server=server, audio=audio)
     window.show()
 
     with loop:
         # Start background services
         asyncio.ensure_future(server.start())
-        asyncio.ensure_future(clock.run())
         loop.run_forever()
 
     return 0
