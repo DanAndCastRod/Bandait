@@ -49,11 +49,18 @@ class AIAssistant:
     """Google Cloud AI proxy for Bandait rehearsal and gig assistance."""
 
     def __init__(self, config: Optional[AIConfig] = None):
-        self._config = config or self._load_config()
+        self._offline = False
+        try:
+            self._config = config or self._load_config()
+        except RuntimeError as e:
+            print(f"[AI] Offline mode: {e}")
+            self._config = AIConfig(api_key="offline")
+            self._offline = True
         self._limiter = RateLimiter(self._config.rate_limit_per_minute)
         self._history: List[Dict[str, str]] = []  # chat history
         self._client: Optional[Any] = None
-        self._init_client()
+        if not self._offline:
+            self._init_client()
 
     @staticmethod
     def _load_config() -> AIConfig:

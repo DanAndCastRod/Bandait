@@ -1,6 +1,8 @@
 """Socket.IO server for Bandait leader-follower synchronization."""
 
 import asyncio
+import threading
+import queue
 import socketio
 from dataclasses import asdict
 from typing import Any, Optional
@@ -10,7 +12,10 @@ from src.domain.models import SessionState, MessageType
 
 
 class BandaitServer:
-    """Async Socket.IO server with room-based session management."""
+    """Async Socket.IO server with room-based session management.
+
+    Thread-safe for Qt integration: use ``broadcast_state_sync()`` from any thread.
+    """
 
     def __init__(
         self,
@@ -27,7 +32,12 @@ class BandaitServer:
         )
         self._app = socketio.ASGIApp(self._sio)
         self._sessions: dict[str, dict[str, Any]] = {}
+        self._thread: Optional[threading.Thread] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._setup_handlers()
+
+        # Thread-safe broadcast queue
+        self._broadcast_queue: queue.Queue = queue.Queue()
 
     def _setup_handlers(self) -> None:
         @self._sio.event
@@ -103,16 +113,44 @@ class BandaitServer:
                 skip_sid=sid,
             )
 
-    async def start(self) -> None:
+    def start(self) -> None:
+        """Start server in a background thread (non-blocking for Qt event loop)."""
         import uvicorn
-        config = uvicorn.Config(
-            self._app,
-            host=self._host,
-            port=self._port,
-            log_level="info",
-        )
-        server = uvicorn.Server(config)
-        await server.serve()
+
+        def _run():
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            # Start broadcast processor
+            self._loop.create_task(self._broadcast_processor())
+            config = uvicorn.Config(
+                self._app,
+                host=self._host,
+                port=self._port,
+                log_level="info",
+                loop="asyncio",
+            )
+            server = uvicorn.Server(config)
+            self._loop.run_until_complete(server.serve())
+
+        self._thread = threading.Thread(target=_run, daemon=True)
+        self._thread.start()
+        print(f"[NET] Server starting on {self._host}:{self._port}")
+
+    async def _broadcast_processor(self) -> None:
+        """Process broadcast queue from other threads."""
+        while True:
+            try:
+                event, data, room = self._broadcast_queue.get_nowait()
+                await self._sio.emit(event, data, room=room)
+            except queue.Empty:
+                await asyncio.sleep(0.05)
+
+    def broadcast_state_sync(self, state: dict, room: str = "default") -> None:
+        """Thread-safe broadcast from Qt or any other thread."""
+        self._broadcast_queue.put(("state_update", state, room))
+        # Also store in session cache
+        if room in self._sessions:
+            self._sessions[room]["state"] = state
 
     def get_app(self) -> Any:
         return self._app

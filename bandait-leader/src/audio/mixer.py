@@ -8,11 +8,17 @@ from .track import Track
 class Mixer:
     """Mixes multiple tracks into physical output channels."""
 
-    def __init__(self, n_channels: int = 4, block_size: int = 256) -> None:
-        self.n_channels = n_channels
+    def __init__(
+        self,
+        input_channels: int = 2,
+        output_channels: int = 2,
+        block_size: int = 256,
+    ) -> None:
+        self.input_channels = input_channels
+        self.output_channels = output_channels
         self.block_size = block_size
         self.tracks: List[Track] = []
-        self._output = np.zeros((block_size, n_channels), dtype=np.float32)
+        self._output = np.zeros((block_size, output_channels), dtype=np.float32)
         self._any_solo = False
 
     def add_track(self, track: Track) -> None:
@@ -25,13 +31,15 @@ class Mixer:
     def process(self, input_block: np.ndarray) -> np.ndarray:
         """
         Mix all tracks into output channels.
-        input_block: (n_frames, n_channels) from audio interface input.
-        Returns: (n_frames, n_channels) for output.
+        input_block: (n_frames, n_input_channels) from audio interface input.
+        Returns: (n_frames, n_output_channels) for output.
         """
         n_frames = input_block.shape[0]
+        n_input_ch = input_block.shape[1] if input_block.ndim > 1 else 1
+
         if n_frames > self.block_size:
             self.block_size = n_frames
-            self._output = np.zeros((n_frames, self.n_channels), dtype=np.float32)
+            self._output = np.zeros((n_frames, self.output_channels), dtype=np.float32)
             for t in self.tracks:
                 t.set_buffer_size(n_frames)
 
@@ -45,13 +53,20 @@ class Mixer:
                 continue
 
             block = track.get_block(n_frames)
-            # Route to assigned channels
-            for ch in range(self.n_channels):
+            # Route to assigned channels (bitmask)
+            for ch in range(self.output_channels):
                 if track.output_channels & (1 << ch):
                     self._output[:, ch] += block
 
-        # Add input passthrough (for monitoring)
-        self._output += input_block
+        # Add input passthrough (for monitoring) — map input channels to output
+        if n_input_ch >= self.output_channels:
+            self._output += input_block[:, :self.output_channels]
+        elif n_input_ch == 1 and self.output_channels >= 2:
+            # Mono input to stereo output
+            self._output[:, 0] += input_block[:, 0]
+            self._output[:, 1] += input_block[:, 0]
+        else:
+            self._output[:, :n_input_ch] += input_block
 
         # Soft clip to prevent hard distortion
         np.tanh(self._output, out=self._output)
@@ -60,5 +75,4 @@ class Mixer:
 
     def get_input_raw(self) -> np.ndarray:
         """Return last input block (for recording)."""
-        # This is populated by the audio engine
-        return getattr(self, '_last_input', np.zeros((self.block_size, self.n_channels), dtype=np.float32))
+        return getattr(self, '_last_input', np.zeros((self.block_size, self.input_channels), dtype=np.float32))

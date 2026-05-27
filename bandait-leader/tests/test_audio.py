@@ -30,7 +30,7 @@ def test_track_mute(qapp):
 
 def test_mixer_routing(qapp):
     """Mixer routes tracks to correct output channels."""
-    mixer = Mixer(n_channels=4, block_size=256)
+    mixer = Mixer(input_channels=4, output_channels=4, block_size=256)
 
     track1 = Track(name="Click", output_channels=0b0001)  # Ch1
     track1._buffer = np.ones(256, dtype=np.float32) * 0.5
@@ -53,7 +53,7 @@ def test_mixer_routing(qapp):
 
 def test_mixer_solo(qapp):
     """Solo isolates a single track."""
-    mixer = Mixer(n_channels=2, block_size=128)
+    mixer = Mixer(input_channels=2, output_channels=2, block_size=128)
 
     track1 = Track(name="A", output_channels=0b0001)
     track1._buffer = np.ones(128, dtype=np.float32) * 0.5

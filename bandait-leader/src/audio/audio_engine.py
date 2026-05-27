@@ -1,10 +1,12 @@
 """Main audio engine: metronome, mixer, recorder, and transport."""
 
+import threading
+import queue
 from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QTimer
 
 from .track import Track
 from .mixer import Mixer
@@ -14,20 +16,20 @@ from .recorder import RecordingEngine
 class AudioEngine(QObject):
     """Low-latency audio engine with metronome, mixing, and recording."""
 
-    # Transport signals
+    # Transport signals (emitted from main thread only)
     started = Signal()
     stopped = Signal()
     recording_started = Signal(str)
     recording_stopped = Signal()
 
-    # Beat signal (emitted on audio thread — receivers must be thread-safe)
+    # Beat signal (emitted from main thread via queued timer)
     beat = Signal(int, float)  # beat_number (1-4), bpm
 
     def __init__(
         self,
         sample_rate: int = 48000,
         block_size: int = 256,
-        channels: int = 4,
+        channels: int = 2,
         device: Optional[int] = None,
         parent=None,
     ) -> None:
@@ -37,7 +39,16 @@ class AudioEngine(QObject):
         self.channels = channels
         self.device = device
 
-        self.mixer = Mixer(n_channels=channels, block_size=block_size)
+        # Detect actual hardware capabilities
+        self._input_channels = channels
+        self._output_channels = channels
+        self._detect_device_channels()
+
+        self.mixer = Mixer(
+            input_channels=self._input_channels,
+            output_channels=self._output_channels,
+            block_size=block_size,
+        )
         self.recorder = RecordingEngine(sample_rate=sample_rate)
         self.recorder.recording_started.connect(self.recording_started)
         self.recorder.recording_stopped.connect(self.recording_stopped)
@@ -57,6 +68,25 @@ class AudioEngine(QObject):
         self._click = self._generate_click()
         self._click_idx = 0
         self._click_playing = False
+
+        # Thread-safe beat queue: audio callback -> main thread
+        self._beat_queue: queue.Queue = queue.Queue()
+        self._beat_timer = QTimer(self)
+        self._beat_timer.timeout.connect(self._process_beat_queue)
+        self._beat_timer.start(10)  # 100 Hz beat processing
+
+    def _detect_device_channels(self) -> None:
+        """Detect actual input/output channel counts from hardware."""
+        try:
+            info = sd.query_devices(self.device)
+            self._input_channels = info.get("max_input_channels", self.channels)
+            self._output_channels = info.get("max_output_channels", self.channels)
+            print(f"[AUDIO] Device '{info['name']}': {self._input_channels} in, {self._output_channels} out")
+        except Exception:
+            print(f"[AUDIO] Could not query device; using defaults: {self._input_channels} in, {self._output_channels} out")
+        # Clamp to requested channels
+        self._input_channels = min(self._input_channels, self.channels)
+        self._output_channels = min(self._output_channels, self.channels)
 
     def _generate_click(self) -> np.ndarray:
         """Generate a short click sound (tick vs tock by filtering)."""
@@ -82,8 +112,8 @@ class AudioEngine(QObject):
         # Metronome scheduling
         self._schedule_metronome(frames)
 
-        # Build click output
-        click_out = np.zeros((frames, self.channels), dtype=np.float32)
+        # Build click output (only for available output channels)
+        click_out = np.zeros((frames, self._output_channels), dtype=np.float32)
         if self._click_playing:
             remaining = min(frames, len(self._click) - self._click_idx)
             if remaining > 0:
@@ -101,7 +131,7 @@ class AudioEngine(QObject):
         mixed = self.mixer.process(indata) + click_out
         outdata[:] = mixed
 
-        # Recording
+        # Recording (use input channels)
         if self._recording:
             self.recorder.write_block(indata)
 
@@ -113,9 +143,20 @@ class AudioEngine(QObject):
             self._beat = (self._beat + 1) % 4
             self._click_playing = True
             self._click_idx = 0
-            # Emit on next event loop (don't block audio callback)
-            # Note: Signal from audio thread may be unsafe; use queued connection
-            self.beat.emit(self._beat + 1, self._bpm)
+            # Queue beat for main thread emission (audio callback thread is NOT Qt)
+            try:
+                self._beat_queue.put_nowait((self._beat + 1, self._bpm))
+            except queue.Full:
+                pass
+
+    def _process_beat_queue(self) -> None:
+        """Process queued beats from audio callback in main Qt thread."""
+        while not self._beat_queue.empty():
+            try:
+                beat_num, bpm = self._beat_queue.get_nowait()
+                self.beat.emit(beat_num, bpm)
+            except queue.Empty:
+                break
 
     def start(self) -> None:
         """Start audio stream."""
@@ -126,7 +167,7 @@ class AudioEngine(QObject):
                 samplerate=self.sample_rate,
                 blocksize=self.block_size,
                 device=self.device,
-                channels=self.channels,
+                channels=(self._input_channels, self._output_channels),
                 dtype=np.float32,
                 latency="low",
                 callback=self._audio_callback,
@@ -134,8 +175,10 @@ class AudioEngine(QObject):
             self._stream.start()
             self._running = True
             self.started.emit()
+            print(f"[AUDIO] Stream started: {self._input_channels} in / {self._output_channels} out @ {self.sample_rate} Hz")
         except Exception as e:
             print(f"[AUDIO] Failed to start: {e}")
+            raise
 
     def stop(self) -> None:
         """Stop audio stream."""

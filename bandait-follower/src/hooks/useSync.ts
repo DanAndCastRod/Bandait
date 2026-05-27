@@ -10,7 +10,7 @@ export function useSync() {
   const joinSession = useCallback((sessionId: string) => {
     const ip = localStorage.getItem('bandait_last_ip') || window.location.hostname
     const port = localStorage.getItem('bandait_last_port') || '4040'
-    const url = `ws://${ip}:${port}`
+    const url = `http://${ip}:${port}`
 
     syncService.setConnectHandler(() => setConnected(true))
     syncService.setDisconnectHandler(() => setConnected(false))

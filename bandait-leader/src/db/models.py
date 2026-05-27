@@ -15,7 +15,8 @@ from sqlalchemy import (
     Table,
     Text,
 )
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Mapped, mapped_column
+
 
 Base = declarative_base()
 
@@ -40,18 +41,17 @@ gig_member_association = Table(
 class Song(Base):
     __tablename__ = "songs"
 
-    id = Column(String, primary_key=True)
-    title = Column(String, nullable=False)
-    bpm = Column(Integer, default=120)
-    key = Column(String, default="")
-    duration_seconds = Column(Float, default=0.0)
-    lyrics_text = Column(Text, default="")
-    chords_text = Column(Text, default="")
-    audio_path = Column(String, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    bpm: Mapped[int] = mapped_column(Integer, default=120)
+    key: Mapped[str] = mapped_column(String, default="")
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    lyrics_text: Mapped[str] = mapped_column(Text, default="")
+    chords_text: Mapped[str] = mapped_column(Text, default="")
+    audio_path: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    setlists: List["Setlist"] = relationship(
-        "Setlist",
+    setlists: Mapped[List["Setlist"]] = relationship(
         secondary=setlist_song_association,
         back_populates="songs",
     )
@@ -72,18 +72,17 @@ class Song(Base):
 class Setlist(Base):
     __tablename__ = "setlists"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    songs: List[Song] = relationship(
-        Song,
+    songs: Mapped[List["Song"]] = relationship(
         secondary=setlist_song_association,
         back_populates="setlists",
         order_by=setlist_song_association.c.position,
     )
-    gigs: List["Gig"] = relationship("Gig", back_populates="setlist")
+    gigs: Mapped[List["Gig"]] = relationship("Gig", back_populates="setlist")
 
     def to_dict(self) -> dict:
         return {
@@ -97,15 +96,14 @@ class Setlist(Base):
 class BandMember(Base):
     __tablename__ = "band_members"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    role = Column(String, default="")  # e.g., "vocals", "drums", "bass"
-    color = Column(String, default="#00FFFF")
-    email = Column(String, default="")
-    phone = Column(String, default="")
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, default="")
+    color: Mapped[str] = mapped_column(String, default="#00FFFF")
+    email: Mapped[str] = mapped_column(String, default="")
+    phone: Mapped[str] = mapped_column(String, default="")
 
-    gigs: List["Gig"] = relationship(
-        "Gig",
+    gigs: Mapped[List["Gig"]] = relationship(
         secondary=gig_member_association,
         back_populates="members",
     )
@@ -122,18 +120,17 @@ class BandMember(Base):
 class Gig(Base):
     __tablename__ = "gigs"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    venue = Column(String, default="")
-    date = Column(DateTime, nullable=False)
-    setlist_id = Column(String, ForeignKey("setlists.id"))
-    notes = Column(Text, default="")
-    status = Column(String, default="planned")  # planned, confirmed, completed, cancelled
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    venue: Mapped[str] = mapped_column(String, default="")
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    setlist_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("setlists.id"))
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="planned")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    setlist: Optional[Setlist] = relationship("Setlist", back_populates="gigs")
-    members: List[BandMember] = relationship(
-        BandMember,
+    setlist: Mapped[Optional["Setlist"]] = relationship("Setlist", back_populates="gigs")
+    members: Mapped[List["BandMember"]] = relationship(
         secondary=gig_member_association,
         back_populates="gigs",
     )
@@ -155,14 +152,14 @@ class Gig(Base):
 class Rehearsal(Base):
     __tablename__ = "rehearsals"
 
-    id = Column(String, primary_key=True)
-    date = Column(DateTime, default=datetime.utcnow)
-    setlist_id = Column(String, ForeignKey("setlists.id"))
-    recording_folder = Column(String, default="")
-    notes = Column(Text, default="")
-    duration_minutes = Column(Integer, default=0)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    setlist_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("setlists.id"))
+    recording_folder: Mapped[str] = mapped_column(String, default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=0)
 
-    setlist: Optional[Setlist] = relationship("Setlist")
+    setlist: Mapped[Optional["Setlist"]] = relationship("Setlist")
 
 
 # --- Database setup ---

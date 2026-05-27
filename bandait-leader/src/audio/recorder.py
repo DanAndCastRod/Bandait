@@ -46,7 +46,7 @@ class RecordingEngine(QObject):
                 samplerate=self.sample_rate,
                 channels=1,
                 format="FLAC",
-                subtype="PCM_24",
+                subtype="PCM_16",
             )
             self._writers.append(writer)
 

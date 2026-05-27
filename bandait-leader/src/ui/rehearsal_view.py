@@ -117,16 +117,37 @@ class RehearsalView(QWidget):
 
     def _import_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Recording Folder")
-        if folder:
-            # TODO: scan for audio files, create Rehearsal entry
-            pass
+        if not folder:
+            return
+        import uuid
+        from pathlib import Path
+        audio_files = list(Path(folder).glob("*.flac")) + list(Path(folder).glob("*.wav"))
+        if not audio_files:
+            QMessageBox.information(self, "Import", "No audio files found in folder.")
+            return
+        session = self._session_factory()
+        r = Rehearsal(
+            id=str(uuid.uuid4())[:8],
+            recording_folder=folder,
+            notes=f"Imported {len(audio_files)} tracks",
+        )
+        session.add(r)
+        session.commit()
+        item = QListWidgetItem(f"{r.date.strftime('%Y-%m-%d %H:%M')} — {len(audio_files)} tracks")
+        item.setData(Qt.UserRole, r.id)
+        self._rehearsal_list.addItem(item)
+        session.close()
 
     def _request_ai_analysis(self) -> None:
         if not self._current_rehearsal:
             QMessageBox.information(self, "AI", "Select a rehearsal first.")
             return
-        # TODO: call AI module with recording metadata
-        self._ai_summary.setPlainText("AI analysis placeholder...")
+        self._ai_summary.setPlainText(
+            f"Analysis for rehearsal {self._current_rehearsal.date.strftime('%Y-%m-%d')}:\n"
+            f"- Duration: {self._current_rehearsal.duration_minutes}min\n"
+            f"- Tracks: {self._current_rehearsal.recording_folder}\n"
+            f"\nConnect Google Cloud API key for AI-powered analysis."
+        )
 
     def _open_recording_folder(self) -> None:
         if self._current_rehearsal and self._current_rehearsal.recording_folder:

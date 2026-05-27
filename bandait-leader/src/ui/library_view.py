@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from src.db.models import Song, Setlist
+from src.db.models import Song, Setlist, setlist_song_association
 from src.infrastructure.parsers.lrc_parser import LRCParser
 from src.infrastructure.parsers.chordpro_parser import ChordProParser
 
@@ -156,28 +156,120 @@ class LibraryView(QWidget):
         session.close()
 
     def _on_songs_reordered(self) -> None:
-        # TODO: persist new order to association table
-        pass
+        if not self._current_setlist:
+            return
+        session = self._session_factory()
+        setlist = session.query(Setlist).filter_by(id=self._current_setlist.id).first()
+        if setlist:
+            # Update positions in association table
+            for i in range(self._song_list.count()):
+                item = self._song_list.item(i)
+                song_id = item.data(Qt.UserRole)
+                # Update position via raw SQL since SQLAlchemy association table
+                session.execute(
+                    setlist_song_association.update()
+                    .where(
+                        (setlist_song_association.c.setlist_id == setlist.id) &
+                        (setlist_song_association.c.song_id == song_id)
+                    )
+                    .values(position=i)
+                )
+            session.commit()
+        session.close()
 
     def _create_setlist(self) -> None:
-        # TODO: prompt for name, create in DB, refresh list
-        pass
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "New Setlist", "Setlist name:")
+        if not ok or not name.strip():
+            return
+        import uuid
+        session = self._session_factory()
+        sl = Setlist(id=str(uuid.uuid4())[:8], name=name.strip())
+        session.add(sl)
+        session.commit()
+        item = QListWidgetItem(sl.name)
+        item.setData(Qt.UserRole, sl.id)
+        self._setlist_list.addItem(item)
+        session.close()
 
     def _rename_setlist(self, item: QListWidgetItem) -> None:
-        # TODO: inline edit or dialog
-        pass
+        from PySide6.QtWidgets import QInputDialog
+        setlist_id = item.data(Qt.UserRole)
+        new_name, ok = QInputDialog.getText(self, "Rename Setlist", "New name:", text=item.text())
+        if not ok or not new_name.strip():
+            return
+        session = self._session_factory()
+        sl = session.query(Setlist).filter_by(id=setlist_id).first()
+        if sl:
+            sl.name = new_name.strip()
+            session.commit()
+            item.setText(sl.name)
+        session.close()
 
     def _delete_setlist(self, item: QListWidgetItem) -> None:
-        # TODO: confirm, delete from DB
-        pass
+        from PySide6.QtWidgets import QMessageBox
+        ret = QMessageBox.question(self, "Delete Setlist", f"Delete '{item.text()}'?")
+        if ret != QMessageBox.Yes:
+            return
+        setlist_id = item.data(Qt.UserRole)
+        session = self._session_factory()
+        sl = session.query(Setlist).filter_by(id=setlist_id).first()
+        if sl:
+            session.delete(sl)
+            session.commit()
+            self._setlist_list.takeItem(self._setlist_list.row(item))
+        session.close()
 
     def _add_song_to_setlist(self) -> None:
-        # TODO: dialog to select existing song or create new
-        pass
+        if not self._current_setlist:
+            QMessageBox.information(self, "Add Song", "Select a setlist first.")
+            return
+        from PySide6.QtWidgets import QInputDialog
+        title, ok = QInputDialog.getText(self, "New Song", "Song title:")
+        if not ok or not title.strip():
+            return
+        import uuid
+        session = self._session_factory()
+        song = Song(
+            id=str(uuid.uuid4())[:8],
+            title=title.strip(),
+            bpm=self._song_bpm.value(),
+            key=self._song_key.text(),
+            lyrics_text=self._song_lyrics.toPlainText(),
+        )
+        session.add(song)
+        # Add to current setlist with next position
+        max_pos = session.query(setlist_song_association.c.position).filter_by(
+            setlist_id=self._current_setlist.id
+        ).order_by(setlist_song_association.c.position.desc()).first()
+        next_pos = (max_pos[0] + 1) if max_pos else 0
+        session.execute(
+            setlist_song_association.insert().values(
+                setlist_id=self._current_setlist.id,
+                song_id=song.id,
+                position=next_pos,
+            )
+        )
+        session.commit()
+        si = QListWidgetItem(f"{song.title} ({song.bpm} BPM)")
+        si.setData(Qt.UserRole, song.id)
+        self._song_list.addItem(si)
+        session.close()
 
     def _save_song(self) -> None:
-        # TODO: create/update Song in DB
-        pass
+        import uuid
+        session = self._session_factory()
+        song = Song(
+            id=str(uuid.uuid4())[:8],
+            title=self._song_title.text() or "Untitled",
+            bpm=self._song_bpm.value(),
+            key=self._song_key.text(),
+            lyrics_text=self._song_lyrics.toPlainText(),
+        )
+        session.add(song)
+        session.commit()
+        QMessageBox.information(self, "Saved", f"Song '{song.title}' saved to library.")
+        session.close()
 
     def _import_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

@@ -137,8 +137,28 @@ class GigManagerView(QWidget):
         session.close()
 
     def _create_gig(self) -> None:
-        # TODO: prompt for minimal info, insert to DB, refresh list
-        pass
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        import uuid
+        name, ok = QInputDialog.getText(self, "New Event", "Event name:")
+        if not ok or not name.strip():
+            return
+        venue, ok = QInputDialog.getText(self, "New Event", "Venue:")
+        if not ok:
+            venue = ""
+        session = self._session_factory()
+        gig = Gig(
+            id=str(uuid.uuid4())[:8],
+            name=name.strip(),
+            venue=venue.strip(),
+            date=datetime.now(),
+            status="planned",
+        )
+        session.add(gig)
+        session.commit()
+        item = QListWidgetItem(f"{gig.name} @ {gig.venue} ({gig.date.strftime('%Y-%m-%d')})")
+        item.setData(Qt.UserRole, gig.id)
+        self._gig_list.addItem(item)
+        session.close()
 
     def _save_gig(self) -> None:
         if not self._current_gig:
