@@ -17,6 +17,7 @@ export interface SessionState {
   currentSongId: string | null;
   nextEventTimestamp: number; // leader time in ms
   bpm: number;
+  beat: number; // 1-4
 }
 
 export interface Song {
