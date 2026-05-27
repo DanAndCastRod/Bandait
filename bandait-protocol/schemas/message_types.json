@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MessageTypes",
+  "description": "Enumeration of all Socket.IO event names used in the Bandait protocol.",
+  "type": "object",
+  "properties": {
+    "client_to_server": {
+      "type": "array",
+      "items": { "type": "string", "enum": [
+        "join_session",
+        "sync_request",
+        "panic",
+        "request_full_state"
+      ]}
+    },
+    "server_to_client": {
+      "type": "array",
+      "items": { "type": "string", "enum": [
+        "sync_response",
+        "state_update",
+        "full_state",
+        "song_load",
+        "play_at",
+        "stop_at",
+        "panic_ack",
+        "error"
+      ]}
+    }
+  }
+}

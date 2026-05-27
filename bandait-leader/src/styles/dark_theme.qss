@@ -1,0 +1,73 @@
+/* Bandait Leader — OLED Noir & Neon Theme (QSS) */
+
+QMainWindow, QWidget {
+    background-color: #000000;
+    color: #F0F0F0;
+    font-family: "Inter", "Segoe UI", sans-serif;
+    font-size: 14px;
+}
+
+QLabel {
+    color: #F0F0F0;
+}
+
+QLabel#bpmDisplay {
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 64px;
+    font-weight: bold;
+    color: #00FFFF;
+}
+
+QLabel#statusLabel {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 24px;
+    font-weight: bold;
+    color: #CCFF00;
+    text-transform: uppercase;
+}
+
+QLabel#infoLabel {
+    color: #666666;
+    font-size: 12px;
+}
+
+QPushButton {
+    background: transparent;
+    border: 2px solid #00FFFF;
+    border-radius: 4px;
+    color: #00FFFF;
+    min-width: 120px;
+    min-height: 56px;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+QPushButton:hover {
+    background: #00FFFF;
+    color: #000000;
+}
+
+QPushButton:pressed {
+    background: #00FFFF;
+    color: #000000;
+}
+
+QPushButton#actionPadDanger {
+    border-color: #FF0000;
+    color: #FF0000;
+}
+
+QPushButton#actionPadDanger:hover {
+    background: #FF0000;
+    color: #000000;
+}
+
+QPushButton#actionPadRecord {
+    border-color: #FF00FF;
+    color: #FF00FF;
+}
+
+QPushButton#actionPadRecord:hover {
+    background: #FF00FF;
+    color: #000000;
+}

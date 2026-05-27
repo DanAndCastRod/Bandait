@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Song",
+  "description": "Musical composition entity shared between Leader and Follower.",
+  "type": "object",
+  "required": ["id", "title", "bpm"],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "bpm": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500
+    },
+    "key": {
+      "type": "string",
+      "description": "Musical key signature (e.g. 'Em', 'F#')."
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "bars"],
+        "properties": {
+          "label": { "type": "string" },
+          "bars": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "lyrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["time", "text"],
+        "properties": {
+          "time": { "type": "number", "description": "Offset in seconds from song start." },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "audio_path": {
+      "type": ["string", "null"],
+      "description": "Local or network path to backing track audio file."
+    }
+  },
+  "additionalProperties": false
+}

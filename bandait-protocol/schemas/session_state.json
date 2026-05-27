@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionState",
+  "description": "Shared protocol state broadcast from Leader to all Followers.",
+  "type": "object",
+  "required": ["session_id", "leader_ip", "status", "current_song_id", "next_event_timestamp", "bpm", "beat"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Unique session identifier."
+    },
+    "leader_ip": {
+      "type": "string",
+      "description": "IPv4 address of the leader device."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["IDLE", "COUNTING", "PLAYING", "PAUSED"],
+      "description": "Current transport state."
+    },
+    "current_song_id": {
+      "type": ["string", "null"],
+      "description": "Active song identifier or null if none loaded."
+    },
+    "next_event_timestamp": {
+      "type": "integer",
+      "description": "Absolute monotonic nanosecond timestamp on the leader clock when the next musical event (e.g. beat 1) must occur."
+    },
+    "bpm": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "description": "Current tempo in beats per minute."
+    },
+    "beat": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "description": "Current beat within the bar (1-4)."
+    }
+  },
+  "additionalProperties": false
+}
