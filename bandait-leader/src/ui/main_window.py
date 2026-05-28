@@ -3,6 +3,7 @@ Bandait DAW — Ventana Principal
 Layout tipo DAW profesional: transporte arriba, mixer derecha, contenido centro, navegación izquierda.
 """
 
+import sys
 import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -328,9 +329,9 @@ class MainWindow(QMainWindow):
         # Buscar el archivo QSS en múltiples ubicaciones posibles
         script_dir = os.path.dirname(os.path.abspath(__file__))
         possible_paths = [
-            os.path.join(script_dir, "..", "styles", "bandait_daw.qss"),           # src/ui/../styles/
-            os.path.join(script_dir, "..", "..", "src", "styles", "bandait_daw.qss"),  # desde raíz
-            os.path.join(script_dir, "styles", "bandait_daw.qss"),                # src/ui/styles/
+            os.path.join(script_dir, "..", "styles", "bandait_dark.qss"),      # src/ui/../styles/
+            os.path.join(script_dir, "..", "..", "styles", "bandait_dark.qss"),  # src/styles/
+            os.path.join(os.path.dirname(sys.argv[0]), "src", "styles", "bandait_dark.qss"),  # desde ejecutable
         ]
 
         qss_loaded = False

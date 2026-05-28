@@ -1,89 +1,82 @@
 ---
 type: plan
 id: 01KSKCEGM6BCX4EBDPN8VVTWC9
-version: 3
+version: 5
 sessionId: ses_2go5kktw9si6uzg5x
-title: Bandait Líder — DAW Profesional en Español
+title: 'Bandait 2.0 — Implementación Completa: Líder Web + Desktop + PWA'
 createdAt: 1779840795271
-updatedAt: 1779846578714
+updatedAt: 1779940091664
 comments: []
 ---
-# Bandait Líder — Transformación a DAW Profesional
+# Plan de Implementación: Bandait 2.0
 
 ## Contexto
-Transformar el esqueleto funcional actual en una aplicación de producción profesional para acompañamiento de ensayos y eventos en vivo. Toda la interfaz en español.
+El proyecto Bandait necesita:
+1. **Líder Web** — Interfaz web que permite controlar el líder desde cualquier navegador (desktop, tablet, teléfono)
+2. **Líder Desktop** — Aplicación PySide6 con estética DAW profesional (tipo Ableton/Studio One)
+3. **PWA Seguidor** — Aplicación web progresiva que los músicos usan en sus teléfonos
 
-## Objetivos
-1. Apariencia de DAW profesional (Ableton/Studio One/Cubase)
-2. Mixer real con VU meters, faders, mute/solo/pan
-3. Timeline con secciones de canción
-4. Transporte profesional con tiempo, BPM, tap tempo
-5. Stage view fullscreen para eventos
-6. Gestión de biblioteca, setlists y eventos en español
-7. Integración IA como asistente de ensayos
-8. Audio multicanal con routing a tarjetas Behringer
-
-## Stack
-- PySide6 (Qt6)
-- Python 3.11+
-- sounddevice (PortAudio/ASIO)
-- numpy
-- python-socketio
-- SQLAlchemy + Alembic
-- google-generativeai
+## Estado Actual
+- `bandait-leader/` — Líder Desktop PySide6 funcional pero con UI básica
+- `bandait-leader-web/` — Template Vite vacío, sin funcionalidad Bandait
+- `bandait-follower/` — PWA React esqueleto, no conecta al líder
+- `bandait-protocol/` — Schemas JSON definidos
+- `design-system/` — Tokens de diseño OLED Noir & Neon
 
 ## Fases de Implementación
 
-### Fase A: Design System
-- Paleta OLED Noir & Neon completa
-- Tipografía: Inter (UI), JetBrains Mono (números)
-- QSS con estados hover/pressed/disabled
-- Iconos SVG inline para todos los controles
+### Fase 1: Líder Web — Control Remoto Profesional
+**Objetivo**: Interfaz web React que se conecta al servidor Socket.IO del líder y permite control completo.
 
-### Fase B: MainWindow DAW
-- Layout tipo Ableton: transporte arriba, mixer derecha, timeline centro, navegación izquierda
-- Tabs: Escenario, Mezcla, Biblioteca, Eventos, Ensayos, IA
-- Barra de estado con info de red y audio
+**Tareas**:
+1.1 Reemplazar template Vite con app React real
+1.2 Crear servicio Socket.IO cliente con reconexión automática
+1.3 Implementar vistas: Transporte, Mixer, Timeline, Stage, Library
+1.4 Aplicar estética OLED Noir & Neon (CSS con tokens del design system)
+1.5 Implementar control remoto: Play/Stop/Rec, cambio de BPM, carga de canciones
+1.6 Responsive: desktop (layout DAW), tablet (compacto), móvil (Stage mode)
 
-### Fase C: Transporte Profesional
-- Display de tiempo mm:ss.ms con JetBrains Mono
-- BPM grande con tap tempo
-- Botones: Reproducir, Detener, Grabar, Bucle, Localizar
-- Indicador de estado de grabación (LED rojo parpadeante)
+### Fase 2: Líder Desktop — Estética DAW Profesional
+**Objetivo**: Que se vea como Ableton Live / Studio One, no como app de inventario.
 
-### Fase D: Mixer Real
-- 4 canales con VU meters animados
-- Faders con valores en dB
-- Botones Mute/Solo/Pan por canal
-- Matrix de routing a salidas físicas
-- Master channel
+**Tareas**:
+2.1 Crear QSS global con paleta OLED Noir & Neon
+2.2 Rediseñar Transporte: barra profesional con tiempo, BPM, controles
+2.3 Rediseñar Mixer: faders verticales, VU meters animados, mute/solo LEDs
+2.4 Rediseñar Timeline: pista horizontal con secciones, playhead, zoom
+2.5 Rediseñar Stage: pantalla completa, letra gigante, metrónomo visual
+2.6 Rediseñar Library: tabla profesional con metadata, búsqueda, filtros
+2.7 Animaciones: beat flash, transiciones suaves, micro-interacciones
 
-### Fase E: Timeline
-- Pista horizontal con secciones (Intro, Verso, Coro, Puente)
-- Playhead que se desplaza
-- Zoom horizontal
-- Marcadores de tiempo
+### Fase 3: PWA Seguidor — Conexión Real al Líder
+**Objetivo**: Teléfonos de músicos se conectan al líder y muestran letras, acordes, metrónomo.
 
-### Fase F: Stage View
-- Fullscreen sin chrome
-- Letra gigante centrada
-- BPM y próxima sección
-- Beacon de red (barra superior)
-- Slide to stop
+**Tareas**:
+3.1 Implementar cliente Socket.IO real con sync NTP-lite
+3.2 Implementar Web Audio API para click metrónomo local
+3.3 Implementar Stage View con scroll de letras sincronizado
+3.4 Implementar Library con sync desde líder (IndexedDB)
+3.5 Implementar QR scanner real con jsQR
+3.6 Implementar modo offline con cache de setlist
 
-### Fase G: Biblioteca y Gestión
-- Importar canciones (LRC, ChordPro, MP3 backing)
-- Editor de setlists (drag & drop)
-- Gestión de eventos/gigs
-- Historial de ensayos con grabaciones
+### Fase 4: Deploy y Documentación
+**Objetivo**: Empaquetar y desplegar todo.
 
-### Fase H: IA Assistant
-- Chat con Gemini
-- Análisis de grabaciones
-- Sugerencias de setlist
-- Transcripción de notas de voz
+**Tareas**:
+4.1 PyInstaller para líder desktop (Windows .exe)
+4.2 Build PWA y deploy a GitHub Pages
+4.3 Build Líder Web y deploy a Vercel/Netlify
+4.4 Actualizar documentación (SETUP.md, USER_GUIDE.md)
+4.5 Verificar tests (Python + TypeScript)
+
+## Criterios de Aceptación
+- [ ] Líder Web se abre en navegador y controla el líder desktop
+- [ ] Líder Desktop se ve como DAW profesional (negro, acentos neon)
+- [ ] PWA se instala en teléfono y conecta al líder
+- [ ] Tests pasan (Python + TypeScript)
+- [ ] Documentación actualizada
 
 ## Notas
-- Todo en español: botones, labels, tooltips
-- Performance: 60fps en UI, audio sin dropouts
-- Responsive: adaptarse a resoluciones 1366x768 hasta 4K
+- Todo el código en español (UI, comentarios, documentación)
+- Paleta: OLED Noir & Neon (#000000 fondo, #00FFFF cyan, #CCFF00 lime, #FF00FF magenta)
+- Tipografía: JetBrains Mono (números/BPM), Inter (UI general)
