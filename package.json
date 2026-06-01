@@ -1,0 +1,21 @@
+{
+  "name": "bandait-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bandait — Sistema de sincronización en tiempo real para músicos en vivo",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:landing": "playwright test --project=landing",
+    "test:e2e:leader-web": "playwright test --project=leader-web",
+    "test:e2e:follower": "playwright test --project=follower",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
+    "install:browsers": "playwright install"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "playwright": "^1.60.0"
+  }
+}
