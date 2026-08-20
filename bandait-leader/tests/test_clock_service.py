@@ -1,7 +1,7 @@
 """Tests for NTP-like clock synchronization."""
 
 import time
-import pytest
+
 from src.sync.clock_service import ClockService, SyncResult
 
 
@@ -19,11 +19,11 @@ def test_ntp_algorithm_basic(qapp):
 
     # After enough samples, offset should converge
     for _ in range(15):
-        t0 = time.monotonic_ns()
+        time.monotonic_ns()
         time.sleep(0.001)  # 1ms simulated network
         t1 = time.monotonic_ns()
         time.sleep(0.001)
-        t2 = time.monotonic_ns()
+        time.monotonic_ns()
         clock.record_sync_request()
         clock.record_sync_response(t1)
 

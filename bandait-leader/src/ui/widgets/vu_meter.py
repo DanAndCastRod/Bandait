@@ -3,9 +3,9 @@ Bandait DAW — Medidor de Nivel (VU Meter)
 Widget personalizado con colores dinámicos según nivel.
 """
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PySide6.QtCore import Qt, QTimer, QRect
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont
+from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtWidgets import QWidget
 
 
 class VUMeter(QWidget):
@@ -88,7 +88,7 @@ class VUMeter(QWidget):
         if self._level > 0:
             bar_h = int((h - 40) * self._level)
             bar_y = 20 + (h - 40) - bar_h
-            level_rect = QRect(bar_x + 2, bar_y, bar_w - 4, bar_h)
+            QRect(bar_x + 2, bar_y, bar_w - 4, bar_h)
 
             # Gradient manual por segmentos
             segments = 20

@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 
-from .models import init_db, Song, Setlist, Gig, BandMember
+from .models import BandMember, Gig, Setlist, Song, init_db
 
 
 def seed_database(db_path: str = None):
@@ -180,7 +180,7 @@ En el aire""",
     session.commit()
     session.close()
 
-    print(f"[DB] Base de datos sembrada: 3 canciones, 1 setlist, 1 evento, 3 miembros")
+    print("[DB] Base de datos sembrada: 3 canciones, 1 setlist, 1 evento, 3 miembros")
 
 
 if __name__ == "__main__":

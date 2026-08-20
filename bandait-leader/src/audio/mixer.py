@@ -1,7 +1,8 @@
 """Multi-channel mixer with per-track routing."""
 
+
 import numpy as np
-from typing import List
+
 from .track import Track
 
 
@@ -17,7 +18,7 @@ class Mixer:
         self.input_channels = input_channels
         self.output_channels = output_channels
         self.block_size = block_size
-        self.tracks: List[Track] = []
+        self.tracks: list[Track] = []
         self._output = np.zeros((block_size, output_channels), dtype=np.float32)
         self._any_solo = False
         self._master_gain = 1.0  # 0 dB default

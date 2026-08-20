@@ -36,16 +36,21 @@ describe("SyncService", () => {
     ];
 
     // Access private for test
-    (sync as any).syncResults = results;
-    (sync as any).computeStableOffset();
+    const syncPrivate = sync as unknown as {
+      syncResults: typeof results;
+      computeStableOffset: () => void;
+      stableOffsetMs: number | null;
+    };
+    syncPrivate.syncResults = results;
+    syncPrivate.computeStableOffset();
 
-    const offset = (sync as any).stableOffsetMs;
+    const offset = syncPrivate.stableOffsetMs;
     expect(offset).not.toBeNull();
     expect(Math.abs(offset - 5.0)).toBeLessThan(2.0); // Should ignore 100ms outlier
   });
 
   it("should convert times using stable offset", () => {
-    (sync as any).stableOffsetMs = 10.0;
+    (sync as unknown as { stableOffsetMs: number | null }).stableOffsetMs = 10.0;
 
     // convertToLocal: leaderTime - offset = 100 - 10 = 90
     expect(sync.convertToLocal(100)).toBe(90);

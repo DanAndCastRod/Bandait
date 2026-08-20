@@ -4,17 +4,29 @@ Gestión de canciones, setlists y eventos con persistencia SQLite real.
 """
 
 import os
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QLineEdit, QComboBox,
-    QTabWidget, QFrame, QHeaderView, QMessageBox, QFileDialog
-)
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QColor
 
-from src.db.models import init_db, Song, Setlist
-from src.infrastructure.parsers.lrc_parser import LRCParser
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from src.db.models import Setlist, Song, init_db
 from src.infrastructure.parsers.chordpro_parser import ChordProParser
+from src.infrastructure.parsers.lrc_parser import LRCParser
 
 
 class LibraryView(QWidget):
@@ -354,13 +366,12 @@ class LibraryView(QWidget):
 
     def _import_file(self, file_path: str):
         """Importar archivo y guardar en DB con metadata extraída."""
-        import re
         ext = os.path.splitext(file_path)[1].lower()
         base_name = os.path.splitext(os.path.basename(file_path))[0]
 
         try:
             if ext in (".lrc", ".txt"):
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     content = f.read()
 
                 # Extraer título y artista de metadatos LRC
@@ -392,7 +403,7 @@ class LibraryView(QWidget):
                 )
 
             elif ext in (".pro", ".cho", ".chopro"):
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     content = f.read()
                 result = ChordProParser.parse(content)
 
@@ -419,7 +430,6 @@ class LibraryView(QWidget):
                 # Audio file — try to extract metadata
                 duration = 180  # default
                 try:
-                    import mutagen
                     from mutagen.mp3 import MP3
                     audio = MP3(file_path)
                     duration = audio.info.length
@@ -557,7 +567,7 @@ class LibraryView(QWidget):
         sections = []
         section_re = re.compile(r'\[(Intro|Verso?|Pre-Coro|Coro|Chorus|Puente|Bridge|Solo|Outro)\]', re.IGNORECASE)
         matches = list(section_re.finditer(text))
-        for i, match in enumerate(matches):
+        for _i, match in enumerate(matches):
             label = match.group(1).capitalize()
             if label.lower() in ("chorus", "coro"):
                 label = "Coro"

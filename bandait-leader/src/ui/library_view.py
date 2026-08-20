@@ -1,28 +1,27 @@
 """Library view: song management, setlist editor, and content browser."""
 
-from typing import Optional
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QFileDialog,
     QHBoxLayout,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
     QLabel,
     QLineEdit,
-    QSpinBox,
-    QTextEdit,
-    QSplitter,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
-    QFileDialog,
     QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal
 
-from src.db.models import Song, Setlist, setlist_song_association
-from src.infrastructure.parsers.lrc_parser import LRCParser
+from src.db.models import Setlist, Song, setlist_song_association
 from src.infrastructure.parsers.chordpro_parser import ChordProParser
+from src.infrastructure.parsers.lrc_parser import LRCParser
 
 
 class LibraryView(QWidget):
@@ -33,7 +32,7 @@ class LibraryView(QWidget):
     def __init__(self, db_session_factory, parent=None):
         super().__init__(parent)
         self._session_factory = db_session_factory
-        self._current_setlist: Optional[Setlist] = None
+        self._current_setlist: Setlist | None = None
         self._build_ui()
         self._load_data()
 

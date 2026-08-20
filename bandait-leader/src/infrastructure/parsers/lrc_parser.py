@@ -2,7 +2,6 @@
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass
@@ -17,8 +16,8 @@ class LRCParser:
     TIME_RE = re.compile(r"\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)")
 
     @classmethod
-    def parse(cls, content: str) -> List[LyricLine]:
-        lines: List[LyricLine] = []
+    def parse(cls, content: str) -> list[LyricLine]:
+        lines: list[LyricLine] = []
         for raw in content.splitlines():
             raw = raw.strip()
             if not raw or raw.startswith("[ar:") or raw.startswith("[ti:"):
@@ -31,6 +30,6 @@ class LRCParser:
         return sorted(lines, key=lambda x: x.time_ms)
 
     @classmethod
-    def parse_file(cls, path: str) -> List[LyricLine]:
-        with open(path, "r", encoding="utf-8") as f:
+    def parse_file(cls, path: str) -> list[LyricLine]:
+        with open(path, encoding="utf-8") as f:
             return cls.parse(f.read())

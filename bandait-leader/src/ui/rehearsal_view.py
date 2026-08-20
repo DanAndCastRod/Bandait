@@ -1,24 +1,23 @@
 """Rehearsal view: recordings, analysis, and AI-assisted feedback."""
 
 from pathlib import Path
-from typing import Optional
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QFileDialog,
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
-    QLabel,
-    QTextEdit,
-    QFileDialog,
     QMessageBox,
+    QPushButton,
     QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal
 
-from src.db.models import Rehearsal, Setlist
+from src.db.models import Rehearsal
 
 
 class RehearsalView(QWidget):
@@ -29,7 +28,7 @@ class RehearsalView(QWidget):
     def __init__(self, db_session_factory, parent=None):
         super().__init__(parent)
         self._session_factory = db_session_factory
-        self._current_rehearsal: Optional[Rehearsal] = None
+        self._current_rehearsal: Rehearsal | None = None
         self._build_ui()
         self._load_data()
 
@@ -120,7 +119,6 @@ class RehearsalView(QWidget):
         if not folder:
             return
         import uuid
-        from pathlib import Path
         audio_files = list(Path(folder).glob("*.flac")) + list(Path(folder).glob("*.wav"))
         if not audio_files:
             QMessageBox.information(self, "Import", "No audio files found in folder.")

@@ -39,6 +39,13 @@ export default function StageView({ sessionId, onLibrary, onDisconnect }: Props)
     }
   }, [beat])
 
+  const handleEmergencyStop = useCallback(() => {
+    syncService.disconnect()
+    alert('EMERGENCY STOP ACTIVATED')
+    setIsSliding(false)
+    setSlideProgress(0)
+  }, [])
+
   const handleSlideStart = useCallback(() => {
     setIsSliding(true)
     setSlideProgress(0)
@@ -52,7 +59,7 @@ export default function StageView({ sessionId, onLibrary, onDisconnect }: Props)
       }
     }, 20)
     slideTimer.current = interval
-  }, [])
+  }, [handleEmergencyStop])
 
   const handleSlideEnd = useCallback(() => {
     setIsSliding(false)
@@ -60,13 +67,6 @@ export default function StageView({ sessionId, onLibrary, onDisconnect }: Props)
     if (slideTimer.current) {
       window.clearInterval(slideTimer.current)
     }
-  }, [])
-
-  const handleEmergencyStop = useCallback(() => {
-    syncService.disconnect()
-    alert('EMERGENCY STOP ACTIVATED')
-    setIsSliding(false)
-    setSlideProgress(0)
   }, [])
 
   const isBeatOne = visualBeat === 1

@@ -3,15 +3,21 @@ Bandait DAW — Mezclador de Canales Profesional
 Mixer con 4 canales: VU meters, faders, mute/solo/pan, routing matrix.
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QFrame, QSlider, QSizePolicy
-)
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
-from .vu_meter import VUMeter
 from .fader import FaderWidget
+from .vu_meter import VUMeter
 
 
 class ChannelStrip(QWidget):

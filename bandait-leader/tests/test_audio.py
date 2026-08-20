@@ -1,9 +1,9 @@
 """Tests for audio engine, mixer, and recorder."""
 
 import numpy as np
-import pytest
-from src.audio.track import Track
+
 from src.audio.mixer import Mixer
+from src.audio.track import Track
 
 
 def test_track_volume(qapp):
@@ -73,9 +73,9 @@ def test_mixer_solo(qapp):
 
 def test_recorder_lifecycle(qapp):
     """Recording engine starts and stops correctly."""
-    from src.audio.recorder import RecordingEngine
-    import tempfile
     import os
+
+    from src.audio.recorder import RecordingEngine
 
     recorder = RecordingEngine(sample_rate=48000)
     assert not recorder.is_recording()

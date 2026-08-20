@@ -3,13 +3,19 @@ Bandait DAW — Asistente de IA
 Integración con Google Cloud para análisis de ensayos y sugerencias.
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QLineEdit, QScrollArea, QFrame, QMessageBox,
-    QComboBox, QProgressBar
-)
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class AIWorker(QThread):
@@ -291,9 +297,9 @@ class AIView(QWidget):
         # Obtener canciones disponibles para contexto
         songs_data = []
         try:
-            from src.db.models import Song
-            from src.db.models import init_db
             import os
+
+            from src.db.models import Song, init_db
             db_path = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "bandait.db")
             Session = init_db(db_path)
             session = Session()

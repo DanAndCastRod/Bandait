@@ -3,25 +3,34 @@ Bandait DAW — Ventana Principal
 Layout tipo DAW profesional: transporte arriba, mixer derecha, contenido centro, navegación izquierda.
 """
 
+import contextlib
 import os
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QSplitter, QStatusBar, QTabWidget,
-    QSizePolicy, QApplication
-)
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent, QAction
 
-from src.sync.clock_service import ClockService
-from src.network.server import BandaitServer
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QFont, QKeyEvent
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QSplitter,
+    QStatusBar,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
 from src.audio.audio_engine import AudioEngine
-from src.ui.widgets.transport import TransportWidget
+from src.db.seed import seed_database
+from src.network.server import BandaitServer
+from src.sync.clock_service import ClockService
+from src.ui.views.ai_view import AIView
+from src.ui.views.library_view import LibraryView
+from src.ui.views.stage_view import StageView
 from src.ui.widgets.mixer import MixerWidget
 from src.ui.widgets.timeline import TimelineWidget
-from src.ui.views.stage_view import StageView
-from src.ui.views.library_view import LibraryView
-from src.ui.views.ai_view import AIView
-from src.db.seed import seed_database
+from src.ui.widgets.transport import TransportWidget
 
 
 class MainWindow(QMainWindow):
@@ -324,7 +333,6 @@ class MainWindow(QMainWindow):
 
     def _apply_styles(self):
         """Aplicar QSS profesional OLED Noir."""
-        import os
         # Buscar el archivo QSS en múltiples ubicaciones posibles
         script_dir = os.path.dirname(os.path.abspath(__file__))
         possible_paths = [
@@ -338,7 +346,7 @@ class MainWindow(QMainWindow):
             qss_path = os.path.abspath(qss_path)
             if os.path.exists(qss_path):
                 try:
-                    with open(qss_path, "r", encoding="utf-8") as f:
+                    with open(qss_path, encoding="utf-8") as f:
                         qss_content = f.read()
                         self.setStyleSheet(qss_content)
                         print(f"[UI] QSS cargado desde: {qss_path}")
@@ -504,7 +512,6 @@ class MainWindow(QMainWindow):
     def _on_rec(self):
         """Toggle grabación con nombre descriptivo y carpeta organizada."""
         import time
-        import os
 
         is_rec = self.transport.rec_btn.isChecked()
         if is_rec:
@@ -672,12 +679,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Limpiar al cerrar."""
-        try:
+        with contextlib.suppress(Exception):
             self.audio_engine.stop()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             self.server.stop()
-        except Exception:
-            pass
         event.accept()

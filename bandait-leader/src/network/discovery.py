@@ -2,8 +2,9 @@
 
 import json
 import socket
-import qrcode
 from io import BytesIO
+
+import qrcode
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QPixmap
 

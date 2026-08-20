@@ -3,12 +3,9 @@ Bandait DAW — Barra de Transporte Profesional
 Controles de reproducción con display de tiempo, BPM, y estado.
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel,
-    QFrame, QSizePolicy
-)
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class TransportWidget(QWidget):
@@ -199,7 +196,7 @@ class TransportWidget(QWidget):
         beat_layout = QHBoxLayout()
         beat_layout.setSpacing(4)
         self.beat_indicators = []
-        for i in range(4):
+        for _i in range(4):
             led = QLabel("●")
             led.setFont(QFont("JetBrains Mono", 14))
             led.setStyleSheet("color: #333333;")

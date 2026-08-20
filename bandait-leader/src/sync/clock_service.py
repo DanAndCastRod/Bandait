@@ -1,10 +1,11 @@
 """High-precision clock synchronization service using NTP-like algorithm."""
 
-import time
 import statistics
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
-from PySide6.QtCore import QObject, Signal, QThread
+
+from PySide6.QtCore import QObject, QThread, Signal
 
 
 @dataclass(frozen=True)
@@ -26,8 +27,8 @@ class _ClockWorker(QObject):
         super().__init__()
         self._interval_ms = interval_ms
         self._running = False
-        self._request_time_ns: Optional[int] = None
-        self._pending_callback: Optional[Callable[[], int]] = None
+        self._request_time_ns: int | None = None
+        self._pending_callback: Callable[[], int] | None = None
 
     def start(self) -> None:
         self._running = True
@@ -78,16 +79,16 @@ class ClockService(QObject):
         mode: str = "leader",  # "leader" or "follower"
         sync_window: int = 10,
         outlier_threshold: float = 2.0,
-        parent: Optional[QObject] = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._mode = mode
         self._sync_window = sync_window
         self._outlier_threshold = outlier_threshold
         self._results: list[SyncResult] = []
-        self._stable_offset_ms: Optional[float] = None
-        self._worker: Optional[_ClockWorker] = None
-        self._thread: Optional[QThread] = None
+        self._stable_offset_ms: float | None = None
+        self._worker: _ClockWorker | None = None
+        self._thread: QThread | None = None
 
     def start(self) -> None:
         self._worker = _ClockWorker()
@@ -150,7 +151,7 @@ class ClockService(QObject):
             return local_time_ms
         return local_time_ms + self._stable_offset_ms
 
-    def get_stable_offset_ms(self) -> Optional[float]:
+    def get_stable_offset_ms(self) -> float | None:
         return self._stable_offset_ms
 
     def record_sync_request(self) -> int:

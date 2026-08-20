@@ -1,8 +1,8 @@
 """Audio track with mixing controls and channel routing."""
 
-import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional
+
+import numpy as np
 
 
 @dataclass

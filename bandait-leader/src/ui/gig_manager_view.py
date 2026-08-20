@@ -1,26 +1,24 @@
 """Gig manager: events, venues, setlist assignments, and post-gig notes."""
 
 from datetime import datetime
-from typing import Optional
 
+from PySide6.QtCore import QDateTime, Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QComboBox,
+    QDateTimeEdit,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QLabel,
-    QLineEdit,
-    QDateTimeEdit,
-    QTextEdit,
-    QComboBox,
-    QMessageBox,
     QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QDateTime, Signal
 
-from src.db.models import Gig, Setlist, BandMember
+from src.db.models import Gig, Setlist
 
 
 class GigManagerView(QWidget):
@@ -31,7 +29,7 @@ class GigManagerView(QWidget):
     def __init__(self, db_session_factory, parent=None):
         super().__init__(parent)
         self._session_factory = db_session_factory
-        self._current_gig: Optional[Gig] = None
+        self._current_gig: Gig | None = None
         self._build_ui()
         self._load_data()
 
@@ -137,8 +135,9 @@ class GigManagerView(QWidget):
         session.close()
 
     def _create_gig(self) -> None:
-        from PySide6.QtWidgets import QInputDialog, QMessageBox
         import uuid
+
+        from PySide6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(self, "New Event", "Event name:")
         if not ok or not name.strip():
             return

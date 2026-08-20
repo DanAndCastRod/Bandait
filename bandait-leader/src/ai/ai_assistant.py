@@ -5,11 +5,9 @@ Never expose the key to the PWA or client-side code.
 """
 
 import os
-import json
 import time
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Any
-from pathlib import Path
+from typing import Any
 
 import keyring
 
@@ -27,7 +25,7 @@ class RateLimiter:
     def __init__(self, max_calls: int, window_seconds: int = 60):
         self.max_calls = max_calls
         self.window = window_seconds
-        self._calls: List[float] = []
+        self._calls: list[float] = []
 
     def can_call(self) -> bool:
         now = time.time()
@@ -48,7 +46,7 @@ class RateLimiter:
 class AIAssistant:
     """Google Cloud AI proxy for Bandait rehearsal and gig assistance."""
 
-    def __init__(self, config: Optional[AIConfig] = None):
+    def __init__(self, config: AIConfig | None = None):
         self._offline = False
         try:
             self._config = config or self._load_config()
@@ -57,8 +55,8 @@ class AIAssistant:
             self._config = AIConfig(api_key="offline")
             self._offline = True
         self._limiter = RateLimiter(self._config.rate_limit_per_minute)
-        self._history: List[Dict[str, str]] = []  # chat history
-        self._client: Optional[Any] = None
+        self._history: list[dict[str, str]] = []  # chat history
+        self._client: Any | None = None
         if not self._offline:
             self._init_client()
 
@@ -88,7 +86,7 @@ class AIAssistant:
         except ImportError:
             self._client = None
 
-    def _call(self, prompt: str, system: Optional[str] = None) -> str:
+    def _call(self, prompt: str, system: str | None = None) -> str:
         if not self._client:
             return "[AI offline: google-generativeai not installed]"
         if not self._limiter.can_call():
@@ -111,8 +109,8 @@ class AIAssistant:
     def analyze_rehearsal(
         self,
         rehearsal_notes: str,
-        bpm_data: List[float],
-        song_titles: List[str],
+        bpm_data: list[float],
+        song_titles: list[str],
     ) -> str:
         """Analyze a rehearsal for tempo consistency and energy."""
         avg_bpm = sum(bpm_data) / len(bpm_data) if bpm_data else 0
@@ -129,7 +127,7 @@ class AIAssistant:
 
     def suggest_setlist(
         self,
-        songs: List[Dict[str, Any]],
+        songs: list[dict[str, Any]],
         target_duration_minutes: int,
         venue_type: str = "general",
     ) -> str:
@@ -159,7 +157,7 @@ class AIAssistant:
             ),
         )
 
-    def get_history(self) -> List[Dict[str, str]]:
+    def get_history(self) -> list[dict[str, str]]:
         return list(self._history)
 
     def clear_history(self) -> None:

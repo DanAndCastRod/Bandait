@@ -1,10 +1,10 @@
 """Multi-track recording engine with per-channel FLAC writing."""
 
-import time
+import contextlib
 import queue
 import threading
+import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import soundfile as sf
@@ -23,12 +23,12 @@ class RecordingEngine(QObject):
         self.sample_rate = sample_rate
         self._recording = False
         self._writers: list[sf.SoundFile] = []
-        self._folder: Optional[Path] = None
+        self._folder: Path | None = None
         self._queue: queue.Queue = queue.Queue(maxsize=100)
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-    def start(self, session_name: str, n_channels: int = 4, base_dir: Optional[str] = None) -> str:
+    def start(self, session_name: str, n_channels: int = 4, base_dir: str | None = None) -> str:
         """Start recording. Returns the output folder path."""
         if self._recording:
             return ""
@@ -77,10 +77,8 @@ class RecordingEngine(QObject):
         """Queue a block for writing (called from audio callback)."""
         if not self._recording:
             return
-        try:
-            self._queue.put_nowait(block.copy())
-        except queue.Full:
-            pass  # Drop frame rather than block audio thread
+        with contextlib.suppress(queue.Full):
+            self._queue.put_nowait(block.copy())  # Drop frame rather than block audio thread
 
     def _write_loop(self) -> None:
         """Background thread: dequeue and write to FLAC files."""
@@ -90,7 +88,7 @@ class RecordingEngine(QObject):
             except queue.Empty:
                 continue
 
-            n_frames = block.shape[0]
+            block.shape[0]
             for ch, writer in enumerate(self._writers):
                 if ch < block.shape[1]:
                     try:

@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Any
+from typing import Any
 
 
 @dataclass
@@ -14,8 +14,8 @@ class ChordSegment:
 @dataclass
 class SongSection:
     label: str  # Verse, Chorus, Intro, etc.
-    lines: List[str]
-    chords: List[List[ChordSegment]]  # chords per line
+    lines: list[str]
+    chords: list[list[ChordSegment]]  # chords per line
 
 
 class ChordProParser:
@@ -24,11 +24,11 @@ class ChordProParser:
     CHORD_RE = re.compile(r"\[([^\]]+)\]")
 
     @classmethod
-    def parse(cls, content: str) -> Dict[str, Any]:
-        sections: List[SongSection] = []
+    def parse(cls, content: str) -> dict[str, Any]:
+        sections: list[SongSection] = []
         current_label = "Unknown"
-        current_lines: List[str] = []
-        current_chords: List[List[ChordSegment]] = []
+        current_lines: list[str] = []
+        current_chords: list[list[ChordSegment]] = []
 
         directives = {}
 
@@ -64,7 +64,7 @@ class ChordProParser:
                 continue
 
             # Chords + lyrics line
-            chords_in_line: List[ChordSegment] = []
+            chords_in_line: list[ChordSegment] = []
             clean_line = ""
             pos = 0
             for match in cls.CHORD_RE.finditer(raw):
@@ -99,6 +99,6 @@ class ChordProParser:
         }
 
     @classmethod
-    def parse_file(cls, path: str) -> Dict[str, any]:
-        with open(path, "r", encoding="utf-8") as f:
+    def parse_file(cls, path: str) -> dict[str, any]:
+        with open(path, encoding="utf-8") as f:
             return cls.parse(f.read())

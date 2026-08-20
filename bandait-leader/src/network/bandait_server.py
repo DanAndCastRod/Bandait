@@ -1,14 +1,13 @@
 """Socket.IO server for leader-follower sync."""
 
-import asyncio
 import logging
-from typing import Dict, Set
 
 import socketio
-from uvicorn import Config as UvicornConfig, Server
+from uvicorn import Config as UvicornConfig
+from uvicorn import Server
 
+from domain.models import SessionState
 from sync.clock_service import ClockService
-from domain.models import SessionState, SessionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class BandaitServer:
         self.clock = clock
         self.sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
         self.app = socketio.ASGIApp(self.sio)
-        self._sessions: Dict[str, Set[str]] = {}
+        self._sessions: dict[str, set[str]] = {}
         self._current_state: SessionState | None = None
         self._server: Server | None = None
 
@@ -34,7 +33,7 @@ class BandaitServer:
         @self.sio.event
         async def disconnect(sid):
             logger.info("Follower disconnected: %s", sid)
-            for session, sids in self._sessions.items():
+            for _session, sids in self._sessions.items():
                 sids.discard(sid)
 
         @self.sio.event

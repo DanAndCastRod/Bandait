@@ -4,13 +4,9 @@ Pantalla fullscreen minimalista para performance en vivo.
 Flash de bordes para metrónomo, letras grandes, beacon de red.
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QSizePolicy
-)
-from PySide6.QtCore import Qt
-from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QFont, QKeyEvent, QColor
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class StageView(QWidget):
@@ -171,7 +167,7 @@ class StageView(QWidget):
         beat_layout = QHBoxLayout()
         beat_layout.setSpacing(16)
         self.beat_indicators = []
-        for i in range(4):
+        for _i in range(4):
             led = QLabel("●")
             led.setFont(QFont("JetBrains Mono", 32))
             led.setStyleSheet("color: #333333;")

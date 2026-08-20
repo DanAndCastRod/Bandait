@@ -1,14 +1,13 @@
 """Test visual startup — verifies the app initializes without crashing."""
 
-import sys
 import os
+import sys
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
 
 from ui.main_window import MainWindow
 

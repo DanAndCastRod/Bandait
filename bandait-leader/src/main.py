@@ -3,15 +3,15 @@ Bandait DAW — Punto de entrada principal
 Líder de sesión profesional para ensayos y eventos en vivo.
 """
 
-import sys
 import os
+import sys
 
 # Asegurar que src/ está en el path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
+from PySide6.QtWidgets import QApplication
 
 from src.ui.main_window import MainWindow
 

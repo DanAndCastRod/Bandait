@@ -1,22 +1,20 @@
 """SQLAlchemy ORM models for Bandait Leader."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import (
-    create_engine,
     Column,
+    DateTime,
+    Float,
+    ForeignKey,
     Integer,
     String,
-    Float,
-    Boolean,
-    DateTime,
-    ForeignKey,
     Table,
     Text,
+    create_engine,
 )
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Mapped, mapped_column
-
+from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship, sessionmaker
 
 Base = declarative_base()
 
@@ -53,7 +51,7 @@ class Song(Base):
     audio_path: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    setlists: Mapped[List["Setlist"]] = relationship(
+    setlists: Mapped[list["Setlist"]] = relationship(
         secondary=setlist_song_association,
         back_populates="songs",
     )
@@ -81,12 +79,12 @@ class Setlist(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    songs: Mapped[List["Song"]] = relationship(
+    songs: Mapped[list["Song"]] = relationship(
         secondary=setlist_song_association,
         back_populates="setlists",
         order_by=setlist_song_association.c.position,
     )
-    gigs: Mapped[List["Gig"]] = relationship("Gig", back_populates="setlist")
+    gigs: Mapped[list["Gig"]] = relationship("Gig", back_populates="setlist")
 
     def to_dict(self) -> dict:
         return {
@@ -108,7 +106,7 @@ class BandMember(Base):
     email: Mapped[str] = mapped_column(String, default="")
     phone: Mapped[str] = mapped_column(String, default="")
 
-    gigs: Mapped[List["Gig"]] = relationship(
+    gigs: Mapped[list["Gig"]] = relationship(
         secondary=gig_member_association,
         back_populates="members",
     )
@@ -130,13 +128,13 @@ class Gig(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     venue: Mapped[str] = mapped_column(String, default="")
     date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    setlist_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("setlists.id"))
+    setlist_id: Mapped[str | None] = mapped_column(String, ForeignKey("setlists.id"))
     notes: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String, default="planned")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     setlist: Mapped[Optional["Setlist"]] = relationship("Setlist", back_populates="gigs")
-    members: Mapped[List["BandMember"]] = relationship(
+    members: Mapped[list["BandMember"]] = relationship(
         secondary=gig_member_association,
         back_populates="gigs",
     )
@@ -160,7 +158,7 @@ class Rehearsal(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    setlist_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("setlists.id"))
+    setlist_id: Mapped[str | None] = mapped_column(String, ForeignKey("setlists.id"))
     recording_folder: Mapped[str] = mapped_column(String, default="")
     notes: Mapped[str] = mapped_column(Text, default="")
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0)

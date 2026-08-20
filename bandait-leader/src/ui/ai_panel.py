@@ -1,21 +1,17 @@
 """AI Assistant panel — chat interface and analysis results."""
 
-from typing import Optional
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
     QHBoxLayout,
-    QTextEdit,
-    QLineEdit,
-    QPushButton,
     QLabel,
+    QLineEdit,
     QProgressBar,
-    QSplitter,
-    QListWidget,
-    QListWidgetItem,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QThread, Signal
 
 from src.ai.ai_assistant import AIAssistant
 
@@ -53,8 +49,8 @@ class AIPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._assistant: Optional[AIAssistant] = None
-        self._workers: List[AIWorker] = []
+        self._assistant: AIAssistant | None = None
+        self._workers: list[AIWorker] = []
         self._request_counter = 0
         self._build_ui()
         self._init_ai()

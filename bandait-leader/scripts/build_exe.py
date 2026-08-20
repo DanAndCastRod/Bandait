@@ -9,8 +9,8 @@ Output:
     dist/BandaitLeader.exe  — single executable (if --onefile)
 """
 
-import sys
 import shutil
+import sys
 from pathlib import Path
 
 # Ensure PyInstaller is available

@@ -4,9 +4,9 @@ Vista de arreglo con secciones de canción, playhead, zoom.
 Interactivo: drag secciones, zoom rueda ratón, click para posicionar.
 """
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QSizePolicy
-from PySide6.QtCore import Qt, QRect, QTimer, Signal, QPoint
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QMouseEvent, QWheelEvent, QKeyEvent
+from PySide6.QtCore import QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
 
 class SectionItem:

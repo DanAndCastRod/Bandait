@@ -1,9 +1,10 @@
 """Tests for Bandait Socket.IO server."""
 
+
 import pytest
-import asyncio
-from src.sync.clock_service import ClockService
+
 from src.network.server import BandaitServer
+from src.sync.clock_service import ClockService
 
 
 @pytest.fixture

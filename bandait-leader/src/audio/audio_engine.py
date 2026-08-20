@@ -1,16 +1,15 @@
 """Main audio engine: metronome, mixer, recorder, and transport."""
 
-import threading
+import contextlib
 import queue
-from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 
-from .track import Track
 from .mixer import Mixer
 from .recorder import RecordingEngine
+from .track import Track
 
 
 class AudioEngine(QObject):
@@ -32,7 +31,7 @@ class AudioEngine(QObject):
         sample_rate: int = 48000,
         block_size: int = 256,
         channels: int = 2,
-        device: Optional[int] = None,
+        device: int | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -53,7 +52,6 @@ class AudioEngine(QObject):
         )
         # Create 4 tracks (DAW standard) — independent of physical channels
         # Each track can be routed to any physical output via output_channels bitmask
-        from .track import Track
         for i in range(4):
             # Route to available output (wrap around if fewer physical channels)
             target_ch = min(i, max(0, self._output_channels - 1))
@@ -67,7 +65,7 @@ class AudioEngine(QObject):
         self.recorder.recording_started.connect(self.recording_started)
         self.recorder.recording_stopped.connect(self.recording_stopped)
 
-        self._stream: Optional[sd.Stream] = None
+        self._stream: sd.Stream | None = None
         self._running = False
         self._recording = False
 
@@ -158,10 +156,8 @@ class AudioEngine(QObject):
             # Pad to 4 channels if needed
             while len(levels) < 4:
                 levels.append(0.0)
-            try:
+            with contextlib.suppress(queue.Full):
                 self._levels_queue.put_nowait(levels)
-            except queue.Full:
-                pass
 
         # Recording (use input channels)
         if self._recording:
@@ -176,10 +172,8 @@ class AudioEngine(QObject):
             self._click_playing = True
             self._click_idx = 0
             # Queue beat for main thread emission (audio callback thread is NOT Qt)
-            try:
+            with contextlib.suppress(queue.Full):
                 self._beat_queue.put_nowait((self._beat + 1, self._bpm))
-            except queue.Full:
-                pass
 
     def _process_beat_queue(self) -> None:
         """Process queued beats and levels from audio callback in main Qt thread."""

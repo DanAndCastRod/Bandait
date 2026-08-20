@@ -1,14 +1,14 @@
 """Socket.IO server for Bandait leader-follower synchronization."""
 
 import asyncio
-import threading
 import queue
-import socketio
-from dataclasses import asdict
-from typing import Any, Optional
+import threading
+from typing import Any
 
+import socketio
+
+from src.domain.models import MessageType
 from src.sync.clock_service import ClockService
-from src.domain.models import SessionState, MessageType
 
 
 class BandaitServer:
@@ -32,8 +32,8 @@ class BandaitServer:
         )
         self._app = socketio.ASGIApp(self._sio)
         self._sessions: dict[str, dict[str, Any]] = {}
-        self._thread: Optional[threading.Thread] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: threading.Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._setup_handlers()
 
         # Thread-safe broadcast queue

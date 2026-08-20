@@ -4,18 +4,16 @@ Verifica cada componente sin necesidad de UI visual.
 Ejecutar: cd bandait-leader && pytest tests/test_integration.py -v
 """
 
-import sys
 import os
-import time
+import sys
 import tempfile
-import threading
-from pathlib import Path
+import time
 
 # Asegurar que src/ está en path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import pytest
 import numpy as np
+import pytest
 
 
 # =============================================================================
@@ -37,7 +35,7 @@ class TestImports:
         assert TransportWidget is not None
 
     def test_import_mixer(self):
-        from src.ui.widgets.mixer import MixerWidget, ChannelStrip
+        from src.ui.widgets.mixer import ChannelStrip, MixerWidget
         assert MixerWidget is not None
         assert ChannelStrip is not None
 
@@ -50,7 +48,7 @@ class TestImports:
         assert VUMeter is not None
 
     def test_import_timeline(self):
-        from src.ui.widgets.timeline import TimelineWidget, SectionItem
+        from src.ui.widgets.timeline import SectionItem, TimelineWidget
         assert TimelineWidget is not None
         assert SectionItem is not None
 
@@ -92,16 +90,16 @@ class TestImports:
         assert BandaitServer is not None
 
     def test_import_models(self):
-        from src.db.models import Song, Setlist, Gig, Rehearsal, BandMember
-        from src.infrastructure.parsers.lrc_parser import LyricLine
+        from src.db.models import Song
         from src.infrastructure.parsers.chordpro_parser import ChordSegment
+        from src.infrastructure.parsers.lrc_parser import LyricLine
         assert Song is not None
         assert LyricLine is not None
         assert ChordSegment is not None
 
     def test_import_parsers(self):
-        from src.infrastructure.parsers.lrc_parser import LRCParser
         from src.infrastructure.parsers.chordpro_parser import ChordProParser
+        from src.infrastructure.parsers.lrc_parser import LRCParser
         assert LRCParser is not None
         assert ChordProParser is not None
 
@@ -147,7 +145,6 @@ class TestAudioEngine:
 
     def test_recorder(self):
         from src.audio.recorder import RecordingEngine
-        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             rec = RecordingEngine(sample_rate=48000)
             path = rec.start("test_session", n_channels=2, base_dir=tmpdir)
@@ -167,8 +164,9 @@ class TestSyncNetwork:
 
     def test_clock_service(self):
         from PySide6.QtCore import QCoreApplication
+
         from src.sync.clock_service import ClockService
-        app = QCoreApplication.instance() or QCoreApplication([])
+        QCoreApplication.instance() or QCoreApplication([])
         clock = ClockService()
         t1 = clock.get_leader_time_ns()
         time.sleep(0.05)  # Aumentar para evitar resolución de timer de Windows
@@ -223,8 +221,7 @@ class TestDatabase:
     """Probar base de datos SQLite."""
 
     def test_db_init(self):
-        from src.db.models import init_db, Song
-        import tempfile
+        from src.db.models import init_db
         tmpdir = tempfile.mkdtemp()
         try:
             db_path = os.path.join(tmpdir, "test.db")
@@ -237,8 +234,7 @@ class TestDatabase:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_song_crud(self):
-        from src.db.models import init_db, Song
-        import tempfile
+        from src.db.models import Song, init_db
         tmpdir = tempfile.mkdtemp()
         try:
             db_path = os.path.join(tmpdir, "test.db")
@@ -268,7 +264,7 @@ class TestDataFlow:
         self.app = QApplication.instance() or QApplication([])
 
     def test_song_to_timeline(self):
-        from src.ui.widgets.timeline import TimelineWidget, SectionItem
+        from src.ui.widgets.timeline import TimelineWidget
         timeline = TimelineWidget()
         timeline.set_bpm(124)
         timeline.set_duration(240)
@@ -300,32 +296,36 @@ class TestUIWidgets:
 
     def test_transport_widget(self):
         from PySide6.QtWidgets import QApplication
+
         from src.ui.widgets.transport import TransportWidget
-        app = QApplication.instance() or QApplication([])
+        QApplication.instance() or QApplication([])
         transport = TransportWidget()
         assert transport is not None
         assert transport.time_display.text() == "00:00.000"
 
     def test_fader_widget(self):
         from PySide6.QtWidgets import QApplication
+
         from src.ui.widgets.fader import FaderWidget
-        app = QApplication.instance() or QApplication([])
+        QApplication.instance() or QApplication([])
         fader = FaderWidget("Test")
         fader.set_db(-12.0)
         assert fader.get_db() == pytest.approx(-12.0, abs=1.0)
 
     def test_vu_meter(self):
         from PySide6.QtWidgets import QApplication
+
         from src.ui.widgets.vu_meter import VUMeter
-        app = QApplication.instance() or QApplication([])
+        QApplication.instance() or QApplication([])
         vu = VUMeter("CH1")
         vu.set_level(0.5)
         assert vu._level == 0.5
 
     def test_channel_strip(self):
         from PySide6.QtWidgets import QApplication
+
         from src.ui.widgets.mixer import ChannelStrip
-        app = QApplication.instance() or QApplication([])
+        QApplication.instance() or QApplication([])
         ch = ChannelStrip(0, "Voz")
         assert ch.channel_id == 0
         ch.set_name("Guitarra")

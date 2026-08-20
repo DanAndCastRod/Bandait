@@ -18,7 +18,7 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         import sounddevice as sd
-        
+
         # Auto-detect audio hardware capabilities
         try:
             default_out = sd.query_devices(kind="output")
@@ -28,7 +28,7 @@ class Config:
         except Exception:
             max_out = 2
             max_in = 2
-        
+
         # Clamp to hardware limits (default 4, but hardware may only support 2)
         channels_out = min(
             int(os.getenv("BANDAIT_AUDIO_CHANNELS_OUT", "4")),
@@ -38,7 +38,7 @@ class Config:
             int(os.getenv("BANDAIT_AUDIO_CHANNELS_IN", "4")),
             max_in
         )
-        
+
         return cls(
             host=os.getenv("BANDAIT_HOST", "0.0.0.0"),
             port=int(os.getenv("BANDAIT_PORT", "4040")),
