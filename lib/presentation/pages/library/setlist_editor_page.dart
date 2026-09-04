@@ -53,7 +53,10 @@ class _SetlistEditorPageState extends State<SetlistEditorPage> {
       songIds: _songIds,
     );
     await _setlistRepo.saveSetlist(updatedSetlist);
-    if (mounted) Navigator.pop(context);
+    if (mounted) {
+      setState(() => _isDirty = false);
+      Navigator.pop(context);
+    }
   }
 
   void _showAddSongDialog() async {
@@ -133,7 +136,43 @@ class _SetlistEditorPageState extends State<SetlistEditorPage> {
     return WillPopScope(
       onWillPop: () async {
         if (_isDirty) {
-          // TODO: Confirm discard
+          final shouldDiscard = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: AppTheme.cardBackground,
+              title: const Text(
+                'Discard Changes?',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: const Text(
+                'You have unsaved changes. Are you sure you want to discard them?',
+                style: TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text(
+                    'CANCEL',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text(
+                    'DISCARD',
+                    style: TextStyle(
+                      color: AppTheme.primaryColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+          return shouldDiscard ?? false;
         }
         return true;
       },
