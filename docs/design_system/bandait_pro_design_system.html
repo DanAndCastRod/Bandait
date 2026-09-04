@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bandait 3.0 — Propuestas de Rediseño Visual Profesional</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(150, 150, 150, 0.25); border-radius: 3px; }
+    
+    /* Theme Palettes */
+    .theme-stage-noir {
+      --bg-base: #000000;
+      --bg-surface: #0a0a0c;
+      --bg-surface-alt: #131318;
+      --border-color: #22222a;
+      --accent-primary: #38bdf8;
+      --accent-secondary: #34d399;
+      --accent-warning: #fbbf24;
+      --accent-danger: #f43f5e;
+      --text-main: #f8fafc;
+      --text-dim: #94a3b8;
+    }
+
+    .theme-industrial {
+      --bg-base: #121316;
+      --bg-surface: #1a1c22;
+      --bg-surface-alt: #242730;
+      --border-color: #333846;
+      --accent-primary: #ff5500;
+      --accent-secondary: #ffb703;
+      --accent-warning: #fb8500;
+      --accent-danger: #e63946;
+      --text-main: #f1f3f5;
+      --text-dim: #8c96a5;
+    }
+
+    .theme-analog-warm {
+      --bg-base: #0c0b0a;
+      --bg-surface: #171513;
+      --bg-surface-alt: #23201d;
+      --border-color: #38332e;
+      --accent-primary: #d97706;
+      --accent-secondary: #ca8a04;
+      --accent-warning: #eab308;
+      --accent-danger: #dc2626;
+      --text-main: #fafaf9;
+      --text-dim: #a8a29e;
+    }
+
+    .theme-container {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      transition: all 0.25s ease;
+    }
+  </style>
+</head>
+<body class="bg-black text-slate-100 antialiased min-h-screen p-4 md:p-8">
+
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- Header Section -->
+    <header class="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-2 border border-cyan-500/20">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+            Sistema de Diseño Pro para Músicos
+          </div>
+          <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
+            Bandait 3.0 — Ergonomía & Estética Profesional de Escenario
+          </h1>
+          <p class="text-slate-400 text-sm md:text-base mt-1">
+            Diseño concebido para <strong class="text-slate-200">visibilidad a 2 metros de distancia</strong>, interfaces sin distracciones, protección ocular en oscuridad y control táctil sin errores.
+          </p>
+        </div>
+
+        <!-- Interactive Theme Selector -->
+        <div class="bg-slate-900 border border-slate-800 p-2 rounded-xl flex items-center gap-1.5 self-start md:self-auto">
+          <span class="text-[11px] font-mono text-slate-400 px-2 uppercase">Paleta:</span>
+          <button onclick="setTheme('stage-noir')" id="btn-theme-stage-noir" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500 text-slate-950 transition-all">
+            OLED Stage Noir
+          </button>
+          <button onclick="setTheme('industrial')" id="btn-theme-industrial" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all">
+            Industrial TE-Style
+          </button>
+          <button onclick="setTheme('analog-warm')" id="btn-theme-analog-warm" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all">
+            Analog Warm Studio
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Themed Interactive Sandbox -->
+    <main id="theme-root" class="theme-container theme-stage-noir border border-slate-800 rounded-3xl p-6 md:p-8 space-y-8">
+
+      <!-- Section 1: Design Principles -->
+      <section class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+        <div class="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)]">
+          <div class="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 font-mono font-bold flex items-center justify-center mb-2 border border-cyan-500/20">01</div>
+          <h3 class="font-bold text-sm mb-1 text-[var(--text-main)]">Lectura a Distancia (2 Metros)</h3>
+          <p class="text-[var(--text-dim)] leading-relaxed">
+            Tipografías display de trazo grueso y números monoespaciados de alto contraste. El músico de pie puede leer su compás, acorde o letra sin inclinarse hacia el atril.
+          </p>
+        </div>
+
+        <div class="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)]">
+          <div class="w-8 h-8 rounded-lg bg-violet-500/10 text-violet-400 font-mono font-bold flex items-center justify-center mb-2 border border-violet-500/20">02</div>
+          <h3 class="font-bold text-sm mb-1 text-[var(--text-main)]">Prevención de Toques Falsos</h3>
+          <p class="text-[var(--text-dim)] leading-relaxed">
+            Áreas interactivas de al menos 52x52px con espaciado de seguridad. Los botones de parada o salto tienen confirmación visual para evitar cortes accidentales en pleno concierto.
+          </p>
+        </div>
+
+        <div class="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)]">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 font-mono font-bold flex items-center justify-center mb-2 border border-emerald-500/20">03</div>
+          <h3 class="font-bold text-sm mb-1 text-[var(--text-main)]">Batería & OLED True Black</h3>
+          <p class="text-[var(--text-dim)] leading-relaxed">
+            Fondos negro absoluto (#000000) que apagan los píxeles OLED en teléfonos y tablets, garantizando hasta 4 horas continuas de pantalla encendida sin sobrecalentamiento.
+          </p>
+        </div>
+      </section>
+
+      <!-- Section 2: Interactive Component Mockups -->
+      <section class="space-y-6">
+        <div class="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
+          <div>
+            <h2 class="text-lg font-bold text-[var(--text-main)]">Propuesta de Módulos Visuales de Escenario</h2>
+            <p class="text-xs text-[var(--text-dim)]">Componentes adaptados a situaciones de alto estrés en tarima:</p>
+          </div>
+          <span class="text-xs font-mono text-[var(--accent-primary)] font-semibold uppercase tracking-wider">
+            Layout Modular Pro
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+          <!-- Left Column (7 cols): Stage Teleprompter & ChordPro View -->
+          <div class="lg:col-span-7 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl p-6 space-y-5">
+            <div class="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
+              <div class="flex items-center gap-3">
+                <span class="w-2.5 h-2.5 rounded-full bg-[var(--accent-secondary)] animate-ping"></span>
+                <span class="font-mono text-sm font-bold text-[var(--text-main)]">124 BPM • 4/4</span>
+                <span class="text-xs font-mono px-2 py-0.5 rounded bg-[var(--bg-surface-alt)] border border-[var(--border-color)] text-[var(--accent-warning)]">
+                  Tono: G Mayor
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="px-2.5 py-1 rounded bg-[var(--bg-surface-alt)] border border-[var(--border-color)] text-xs font-mono hover:text-[var(--accent-primary)] transition-all">
+                  -1 Tono
+                </button>
+                <button class="px-2.5 py-1 rounded bg-[var(--bg-surface-alt)] border border-[var(--border-color)] text-xs font-mono hover:text-[var(--accent-primary)] transition-all">
+                  +1 Tono
+                </button>
+              </div>
+            </div>
+
+            <!-- Big Measure & Section Indicator Banner -->
+            <div class="bg-[var(--bg-base)] border border-[var(--border-color)] rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <div class="text-[10px] font-mono uppercase tracking-widest text-[var(--accent-primary)] font-bold">
+                  Sección Musical
+                </div>
+                <div class="text-2xl font-black text-[var(--text-main)] mt-0.5">
+                  CORO PRINCIPAL
+                </div>
+              </div>
+
+              <!-- High Contrast Measure Box -->
+              <div class="text-right">
+                <div class="text-[10px] font-mono uppercase tracking-widest text-[var(--text-dim)] font-bold">
+                  Compás / Total
+                </div>
+                <div class="text-2xl font-mono font-black text-[var(--text-main)]">
+                  <span class="text-[var(--accent-primary)]">24</span> <span class="text-[var(--text-dim)]">/</span> 32
+                </div>
+              </div>
+            </div>
+
+            <!-- Visual Beat Ring / Metronome Pulse -->
+            <div class="grid grid-cols-4 gap-2 font-mono text-center">
+              <div class="py-2.5 rounded-lg bg-[var(--accent-primary)] text-slate-950 font-black text-base shadow-sm">1</div>
+              <div class="py-2.5 rounded-lg bg-[var(--bg-surface-alt)] text-[var(--text-dim)] font-bold text-base border border-[var(--border-color)]">2</div>
+              <div class="py-2.5 rounded-lg bg-[var(--bg-surface-alt)] text-[var(--text-dim)] font-bold text-base border border-[var(--border-color)]">3</div>
+              <div class="py-2.5 rounded-lg bg-[var(--bg-surface-alt)] text-[var(--text-dim)] font-bold text-base border border-[var(--border-color)]">4</div>
+            </div>
+
+            <!-- High Legibility ChordPro Render Area -->
+            <div class="bg-[var(--bg-base)] border border-[var(--border-color)] rounded-xl p-5 space-y-4 font-mono">
+              <div class="opacity-40 text-xs">
+                <span class="text-[var(--accent-warning)] font-bold">[Cadd9]                 [G]</span>
+                <p class="text-[var(--text-main)] font-sans">Y no habrá más dolor en la mañana...</p>
+              </div>
+
+              <!-- Active Sing-along Bar -->
+              <div class="bg-[var(--bg-surface-alt)] border-l-4 border-[var(--accent-primary)] p-3 rounded-r-xl space-y-1">
+                <div class="text-sm font-bold text-[var(--accent-warning)] tracking-wider">
+                  [Em7]                     [Dsus4]
+                </div>
+                <div class="text-lg md:text-xl font-black font-sans text-white tracking-wide">
+                  NO TEMERÉ, PORQUE TÚ ESTÁS AQUÍ
+                </div>
+              </div>
+
+              <div class="opacity-40 text-xs">
+                <span class="text-[var(--accent-warning)] font-bold">[Cadd9]                 [Dsus4]</span>
+                <p class="text-[var(--text-main)] font-sans">Tu gracia y tu poder me sostendrán...</p>
+              </div>
+            </div>
+
+            <!-- Voice Cue Notification Pill -->
+            <div class="p-3 rounded-xl bg-[var(--bg-surface-alt)] border border-[var(--border-color)] flex items-center justify-between text-xs">
+              <div class="flex items-center gap-2 text-[var(--accent-primary)] font-mono">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                <span>Voice Cue: <strong class="text-[var(--text-main)]">"Puente en compás 32 (Corte en el 4)"</strong></span>
+              </div>
+              <span class="text-[10px] font-mono text-[var(--text-dim)]">Disparo automático</span>
+            </div>
+          </div>
+
+          <!-- Right Column (5 cols): Hardware Strip & Remote Control Console -->
+          <div class="lg:col-span-5 space-y-6">
+
+            <!-- Remote Touch Control Module for Leader Smartphone -->
+            <div class="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl p-5 space-y-4">
+              <div class="flex items-center justify-between border-b border-[var(--border-color)] pb-2.5">
+                <h3 class="font-bold text-sm text-[var(--text-main)]">Consola de Mando Remoto (Atril)</h3>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] font-bold">
+                  Líder Touch
+                </span>
+              </div>
+
+              <!-- Oversized Stage Buttons -->
+              <div class="grid grid-cols-2 gap-3 font-mono">
+                <button class="py-4 rounded-xl bg-[var(--accent-secondary)] text-slate-950 font-black text-sm uppercase tracking-wider hover:opacity-90 transition-all flex flex-col items-center justify-center gap-1 shadow-md">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span>PLAY / CUE</span>
+                </button>
+                <button class="py-4 rounded-xl bg-[var(--accent-danger)] text-white font-black text-sm uppercase tracking-wider hover:opacity-90 transition-all flex flex-col items-center justify-center gap-1 shadow-md">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
+                  <span>PARADA SECA</span>
+                </button>
+              </div>
+
+              <!-- Secondary Show Actions -->
+              <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+                <button class="py-3 rounded-xl bg-[var(--bg-surface-alt)] border border-[var(--border-color)] font-bold text-[var(--text-main)] hover:border-[var(--accent-primary)] transition-all flex flex-col items-center gap-1">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+                  <span>Anterior</span>
+                </button>
+                <button class="py-3 rounded-xl bg-[var(--bg-surface-alt)] border border-[var(--border-color)] font-bold text-[var(--accent-warning)] hover:border-[var(--accent-warning)] transition-all flex flex-col items-center gap-1">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                  <span>Repetir</span>
+                </button>
+                <button class="py-3 rounded-xl bg-[var(--bg-surface-alt)] border border-[var(--border-color)] font-bold text-[var(--text-main)] hover:border-[var(--accent-primary)] transition-all flex flex-col items-center gap-1">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                  <span>Siguiente</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- In-Ear Hardware Channel Strip Mockup -->
+            <div class="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl p-5 space-y-3">
+              <div class="flex items-center justify-between border-b border-[var(--border-color)] pb-2">
+                <h3 class="font-bold text-xs text-[var(--text-main)] font-mono uppercase tracking-wider">
+                  Faders In-Ear con dB Scale
+                </h3>
+                <span class="text-[10px] font-mono text-emerald-400 font-semibold">Limiter: -0.5 dB</span>
+              </div>
+
+              <!-- 4 Faders Strip -->
+              <div class="grid grid-cols-4 gap-3 text-center font-mono text-[11px]">
+                <div class="space-y-1.5 bg-[var(--bg-base)] p-2.5 rounded-xl border border-[var(--border-color)]">
+                  <div class="text-[var(--accent-primary)] font-bold truncate">Clic</div>
+                  <div class="h-28 flex items-center justify-center">
+                    <input type="range" orient="vertical" class="h-24 w-4 accent-cyan-400" value="85" style="-webkit-appearance: slider-vertical;">
+                  </div>
+                  <div class="text-[10px] text-[var(--text-dim)]">0 dB</div>
+                </div>
+
+                <div class="space-y-1.5 bg-[var(--bg-base)] p-2.5 rounded-xl border border-[var(--border-color)]">
+                  <div class="text-[var(--accent-secondary)] font-bold truncate">Voice</div>
+                  <div class="h-28 flex items-center justify-center">
+                    <input type="range" orient="vertical" class="h-24 w-4 accent-emerald-400" value="75" style="-webkit-appearance: slider-vertical;">
+                  </div>
+                  <div class="text-[10px] text-[var(--text-dim)]">-3 dB</div>
+                </div>
+
+                <div class="space-y-1.5 bg-[var(--bg-base)] p-2.5 rounded-xl border border-[var(--border-color)]">
+                  <div class="text-[var(--accent-warning)] font-bold truncate">Stems</div>
+                  <div class="h-28 flex items-center justify-center">
+                    <input type="range" orient="vertical" class="h-24 w-4 accent-amber-400" value="60" style="-webkit-appearance: slider-vertical;">
+                  </div>
+                  <div class="text-[10px] text-[var(--text-dim)]">-6 dB</div>
+                </div>
+
+                <div class="space-y-1.5 bg-[var(--bg-base)] p-2.5 rounded-xl border border-[var(--border-color)]">
+                  <div class="text-rose-400 font-bold truncate">Retorno</div>
+                  <div class="h-28 flex items-center justify-center">
+                    <input type="range" orient="vertical" class="h-24 w-4 accent-rose-400" value="95" style="-webkit-appearance: slider-vertical;">
+                  </div>
+                  <div class="text-[10px] text-[var(--text-dim)]">+2 dB</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Section 3: Color Palette Specs -->
+      <section class="p-5 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-surface)] space-y-3">
+        <h3 class="font-bold text-xs text-[var(--text-main)] uppercase tracking-wider font-mono">
+          Especificación de Tokens Cromáticos para Tarima
+        </h3>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+          <div class="p-2.5 rounded-lg bg-[var(--bg-base)] border border-[var(--border-color)]">
+            <span class="block text-[10px] text-[var(--text-dim)]">Fondo Primario</span>
+            <span class="font-bold text-[var(--text-main)]">Pitch Black #000000</span>
+          </div>
+          <div class="p-2.5 rounded-lg bg-[var(--bg-base)] border border-[var(--border-color)]">
+            <span class="block text-[10px] text-[var(--text-dim)]">Acento de Tiempo / Clic</span>
+            <span class="font-bold text-[var(--accent-primary)]">Neon Cyan #38BDF8</span>
+          </div>
+          <div class="p-2.5 rounded-lg bg-[var(--bg-base)] border border-[var(--border-color)]">
+            <span class="block text-[10px] text-[var(--text-dim)]">Armonía / Acordes</span>
+            <span class="font-bold text-[var(--accent-warning)]">Signal Amber #FBBF24</span>
+          </div>
+          <div class="p-2.5 rounded-lg bg-[var(--bg-base)] border border-[var(--border-color)]">
+            <span class="block text-[10px] text-[var(--text-dim)]">Parada / Alertas de Error</span>
+            <span class="font-bold text-[var(--accent-danger)]">Critical Red #F43F5E</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+  </div>
+
+  <script>
+    function setTheme(themeName) {
+      const root = document.getElementById('theme-root');
+      root.className = 'theme-container theme-' + themeName + ' border border-slate-800 rounded-3xl p-6 md:p-8 space-y-8';
+
+      ['stage-noir', 'industrial', 'analog-warm'].forEach(t => {
+        const btn = document.getElementById('btn-theme-' + t);
+        if (btn) {
+          if (t === themeName) {
+            btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500 text-slate-950 transition-all';
+          } else {
+            btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all';
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bandait 3.0 — Laboratorio de Tipografías y Estilos Radicales</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+
+  <!-- Google Fonts Reales -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Cinzel:wght@500;700;900&family=IBM+Plex+Mono:ital,wght@0,400;0,600;0,700;1,400&family=Orbitron:wght@600;800;900&family=Playfair+Display:ital,wght@0,600;0,900;1,400&family=Share+Tech+Mono&family=Silkscreen:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* Clases Tipográficas Especiales */
+    .font-bebas { font-family: 'Bebas Neue', sans-serif; }
+    .font-share-mono { font-family: 'Share Tech Mono', monospace; }
+    .font-space { font-family: 'Space Grotesk', sans-serif; }
+    .font-ibm-mono { font-family: 'IBM Plex Mono', monospace; }
+    .font-orbitron { font-family: 'Orbitron', sans-serif; }
+    .font-silkscreen { font-family: 'Silkscreen', monospace; }
+    .font-cinzel { font-family: 'Cinzel', serif; }
+    .font-playfair { font-family: 'Playfair Display', serif; }
+
+    /* Estilos de forma y componentes específicos */
+    .clip-chamfer {
+      clip-path: polygon(14px 0%, calc(100% - 14px) 0%, 100% 14px, 100% calc(100% - 14px), calc(100% - 14px) 100%, 14px 100%, 0% calc(100% - 14px), 0% 14px);
+    }
+    .clip-tab-left {
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+    }
+    .hazard-stripe {
+      background: repeating-linear-gradient(-45deg, #ffb000, #ffb000 8px, #000 8px, #000 16px);
+    }
+    .vfd-glow-cyan {
+      text-shadow: 0 0 12px rgba(0, 229, 255, 0.8), 0 0 24px rgba(0, 229, 255, 0.4);
+    }
+    .vfd-glow-amber {
+      text-shadow: 0 0 12px rgba(255, 170, 0, 0.8), 0 0 24px rgba(255, 170, 0, 0.4);
+    }
+    .crt-scanlines {
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.35) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      background-size: 100% 3px, 6px 100%;
+    }
+  </style>
+</head>
+<body class="bg-[#050608] text-slate-100 min-h-screen p-3 md:p-8 font-sans antialiased">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- MASTER TOP HEADER -->
+    <header class="bg-[#0a0c10] border border-[#1b202e] rounded-2xl p-5 shadow-2xl">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="px-2.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-mono uppercase tracking-widest font-bold">
+              Bandait Pro Systems • Exploración Radical
+            </span>
+            <span class="text-xs font-mono text-slate-500">Laboratorio Tipográfico y Estilístico</span>
+          </div>
+          <h1 class="text-2xl md:text-3xl font-black tracking-tight text-white uppercase">
+            Propuestas de Estilos y Tipografías Extremas
+          </h1>
+          <p class="text-slate-400 text-xs md:text-sm mt-0.5">
+            Cuatro universos estéticos independientes: desde aviónica militar y brutalismo suizo, hasta sintetizadores japoneses de 1989 y elegancia de sala sinfónica.
+          </p>
+        </div>
+
+        <!-- STYLE SWITCHER BUTTONS -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 bg-[#12151f] p-2 rounded-xl border border-[#232a3d]">
+          <button onclick="switchStyle('milspec')" id="tab-milspec" class="px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left flex flex-col justify-center">
+            <span class="text-[9px] uppercase tracking-wider block font-mono text-amber-400">Estilo A</span>
+            <span class="font-bold text-white">1. MIL-SPEC HUD</span>
+          </button>
+          <button onclick="switchStyle('swiss')" id="tab-swiss" class="px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left flex flex-col justify-center">
+            <span class="text-[9px] uppercase tracking-wider block font-mono text-slate-400">Estilo B</span>
+            <span class="font-bold text-slate-300">2. SWISS LAB</span>
+          </button>
+          <button onclick="switchStyle('vfd89')" id="tab-vfd89" class="px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left flex flex-col justify-center">
+            <span class="text-[9px] uppercase tracking-wider block font-mono text-slate-400">Estilo C</span>
+            <span class="font-bold text-slate-300">3. TOKYO 1989 VFD</span>
+          </button>
+          <button onclick="switchStyle('hall')" id="tab-hall" class="px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left flex flex-col justify-center">
+            <span class="text-[9px] uppercase tracking-wider block font-mono text-slate-400">Estilo D</span>
+            <span class="font-bold text-slate-300">4. CONCERT HALL</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ACTIVE STYLE MOUNT POINT -->
+    <main id="style-mount-point" class="space-y-6">
+      <!-- Injected by JavaScript -->
+    </main>
+
+    <!-- TYPOGRAPHY MATRIX COMPARISON (FOOTER REFERENCE) -->
+    <section class="bg-[#0b0d13] border border-[#1b202e] rounded-2xl p-5 text-xs text-slate-400">
+      <div class="flex items-center justify-between border-b border-[#1b202e] pb-3 mb-4">
+        <h3 class="font-mono text-cyan-400 font-bold uppercase tracking-wider text-xs flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          Matriz Técnica de Selección Tipográfica para Escenario
+        </h3>
+        <span class="font-mono text-slate-500">Prueba de campo: 2 a 3 metros bajo reflectores</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="p-3 rounded-xl bg-[#07090e] border border-slate-800/80 space-y-1">
+          <div class="font-bebas text-lg text-amber-400 tracking-wider">BEBAS NEUE + SHARE TECH</div>
+          <div class="text-white font-bold">MIL-SPEC AVIONICS</div>
+          <p class="text-[11px] text-slate-400 leading-snug">
+            Ultra-condensada de alto impacto vertical. Permite acordes y letras gigantescas sin desbordar el ancho de pantalla móvil.
+          </p>
+        </div>
+
+        <div class="p-3 rounded-xl bg-[#07090e] border border-slate-800/80 space-y-1">
+          <div class="font-space text-base text-cyan-400 font-bold">SPACE GROTESK + IBM PLEX</div>
+          <div class="text-white font-bold">SWISS BAUHAUS LAB</div>
+          <p class="text-[11px] text-slate-400 leading-snug">
+            Geometría exacta, contraste quirúrgico. Diseñada para lectura instantánea y ausencia total de ruido visual decorativo.
+          </p>
+        </div>
+
+        <div class="p-3 rounded-xl bg-[#07090e] border border-slate-800/80 space-y-1">
+          <div class="font-orbitron text-sm text-[#00e5ff] font-bold">ORBITRON + SILKSCREEN</div>
+          <div class="text-white font-bold">TOKYO 1989 VFD</div>
+          <p class="text-[11px] text-slate-400 leading-snug">
+            Matriz de puntos 5x7 y displays fluorescentes. Evoca el hardware emblemático de Akai y Roland con luminiscencia en escenario.
+          </p>
+        </div>
+
+        <div class="p-3 rounded-xl bg-[#07090e] border border-slate-800/80 space-y-1">
+          <div class="font-cinzel text-sm text-[#c5a059] font-bold">CINZEL + PLAYFAIR SERIF</div>
+          <div class="text-white font-bold">CONCERT HALL</div>
+          <p class="text-[11px] text-slate-400 leading-snug">
+            Serif monumental grabada para partituras y conciertos de gala. Acentos cobrizos, números romanos y elegancia atemporal.
+          </p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    const styleData = {
+      // ----------------------------------------------------
+      // 1. MIL-SPEC HUD (Aviónica de Cabina / Militar Táctico)
+      // ----------------------------------------------------
+      milspec: `
+        <div class="space-y-6">
+          
+          <!-- Anatomy Card -->
+          <div class="bg-[#0b0c0e] border-2 border-amber-500/40 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <span class="text-[10px] font-share-mono uppercase tracking-widest text-amber-500 font-bold">[SPEC FILE: AVIONICS-HUD-01]</span>
+              <h2 class="text-xl font-bebas tracking-wide text-white">CONCEPTO: CABINA TÁCTICA AEROESPACIAL & MIL-STD-1472</h2>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs font-share-mono">
+              <span class="px-2 py-1 bg-amber-950/60 border border-amber-500 text-amber-300 rounded font-bold">DISPLAY: Bebas Neue (Condensed)</span>
+              <span class="px-2 py-1 bg-[#1a1710] border border-amber-800 text-amber-400 rounded">TELEMETRÍA: Share Tech Mono</span>
+              <span class="px-2 py-1 bg-black text-slate-400 rounded border border-slate-800">PALETA: Fósforo Ámbar + Negro Carbón</span>
+            </div>
+          </div>
+
+          <!-- Live Component Mockup: Mil-Spec -->
+          <div class="bg-[#080809] border-2 border-[#2b2518] p-6 space-y-6 clip-chamfer relative shadow-2xl">
+            
+            <!-- Hazard Badge Ribbon -->
+            <div class="flex items-center justify-between border-b border-[#2b2518] pb-3">
+              <div class="flex items-center gap-2">
+                <div class="w-12 h-3 hazard-stripe"></div>
+                <span class="text-xs font-share-mono text-amber-400 font-bold uppercase tracking-wider">FLIGHT STAGE CONSOLE • SYSTEM ARMED</span>
+              </div>
+              <span class="text-xs font-share-mono text-emerald-400 font-bold">ASIO_DRIVER // 64 SAMPLES // 1.2ms // ONLINE</span>
+            </div>
+
+            <!-- Main Telemetry Heads-Up -->
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+              
+              <!-- Track Identity -->
+              <div class="md:col-span-4 bg-[#0d0d10] border-l-4 border-amber-500 p-4 space-y-1">
+                <span class="text-[10px] font-share-mono text-slate-500 uppercase block tracking-widest">MISSION TRACK 04 / 16</span>
+                <h3 class="text-3xl font-bebas tracking-wider text-amber-400 leading-none">DE MÚSICA LIGERA</h3>
+                <p class="text-xs font-share-mono text-slate-400">ARTIST: SODA STEREO • SHOW TONALITY: <span class="text-white font-bold">B MINOR (TRANS -1)</span></p>
+              </div>
+
+              <!-- HUD Target Reticle / Central Counter -->
+              <div class="md:col-span-5 bg-[#030303] border-2 border-amber-500/60 p-4 text-center grid grid-cols-3 gap-2 font-share-mono relative">
+                <div class="border-r border-amber-900/50">
+                  <span class="text-[9px] text-amber-600 uppercase block font-bold">TARGET BPM</span>
+                  <span class="text-3xl font-bold text-amber-400 tracking-wider">125.0</span>
+                </div>
+                <div class="border-r border-amber-900/50">
+                  <span class="text-[9px] text-amber-600 uppercase block font-bold">BAR COUNTER</span>
+                  <span class="text-3xl font-bold text-white tracking-wider">014<span class="text-amber-700 text-lg">/32</span></span>
+                </div>
+                <div>
+                  <span class="text-[9px] text-amber-600 uppercase block font-bold">TACT BEAT</span>
+                  <span class="text-3xl font-bold text-emerald-400 tracking-wider animate-pulse">01</span>
+                </div>
+              </div>
+
+              <!-- Mil-Spec Toggle Switches & Trigger Button -->
+              <div class="md:col-span-3 flex items-center justify-end gap-2 font-share-mono">
+                <button class="px-3 py-3 bg-[#17140f] border border-amber-700/50 text-amber-400 hover:bg-amber-950 font-bold text-xs uppercase">
+                  &lt; PREV
+                </button>
+                <button class="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-black font-black text-sm uppercase tracking-wider clip-chamfer font-share-mono shadow-[0_0_20px_rgba(245,158,11,0.5)]">
+                  ARM / GO
+                </button>
+                <button class="px-3 py-3 bg-[#24080a] border border-rose-600 text-rose-400 hover:bg-rose-950 font-bold text-xs uppercase">
+                  ABORT
+                </button>
+                <button class="px-3 py-3 bg-[#17140f] border border-amber-700/50 text-amber-400 hover:bg-amber-950 font-bold text-xs uppercase">
+                  NEXT &gt;
+                </button>
+              </div>
+
+            </div>
+
+            <!-- Structure Ribbon: Segmented Aviation Timeline -->
+            <div class="bg-[#050506] border border-[#2b2518] p-3 space-y-1.5 font-share-mono">
+              <div class="flex justify-between text-[11px] text-amber-500">
+                <span>STRUCTURE RADAR: TIME 01:24.00</span>
+                <span>STATUS: PHASE 03 PRE-CHORUS</span>
+              </div>
+              <div class="grid grid-cols-12 gap-1 h-8 text-[11px] text-center font-bold">
+                <div class="col-span-2 bg-[#17140f] border border-amber-900 text-slate-500 flex items-center justify-center">01:INTRO</div>
+                <div class="col-span-3 bg-[#17140f] border border-amber-800 text-amber-600 flex items-center justify-center">02:VERSE</div>
+                <div class="col-span-3 bg-amber-500 text-black border-2 border-white flex items-center justify-center font-black">
+                  03:PRE-CHORUS [ENGAGED]
+                </div>
+                <div class="col-span-2 bg-[#17140f] border border-amber-900 text-slate-500 flex items-center justify-center">04:CHORUS</div>
+                <div class="col-span-2 bg-[#17140f] border border-amber-900 text-slate-500 flex items-center justify-center">05:OUTRO</div>
+              </div>
+            </div>
+
+            <!-- Big ChordPro Readout for Music Stand (High Impact) -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              
+              <div class="md:col-span-2 bg-[#020202] border-2 border-amber-500/30 p-5 space-y-3">
+                <div class="flex justify-between items-center text-xs font-share-mono text-amber-500 border-b border-amber-950 pb-2">
+                  <span>TELEPROMPTER HUD MATRIX</span>
+                  <span>VIEW DISTANCE: 3.0 METERS</span>
+                </div>
+                
+                <div class="space-y-4">
+                  <div class="opacity-25 font-share-mono text-xs text-amber-400">
+                    [Bm] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [G]<br>
+                    Ella durmió al calor de las masas...
+                  </div>
+
+                  <!-- ACTIVE STAGE LINE (ULTRA LEGIBLE) -->
+                  <div class="bg-[#120f08] border-l-4 border-amber-400 p-4">
+                    <div class="font-bebas text-2xl tracking-widest text-amber-400">
+                      [D] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [A]
+                    </div>
+                    <div class="font-bebas text-4xl md:text-5xl tracking-wide text-white leading-none mt-1">
+                      NADA MÁS QUEDA, NADA MÁS QUEDA
+                    </div>
+                  </div>
+
+                  <div class="opacity-25 font-share-mono text-xs text-amber-400">
+                    [Bm] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [G]<br>
+                    No le enviaré cenizas de rosas...
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mil-Spec Tactical Channel Strips -->
+              <div class="bg-[#0d0d10] border border-[#2b2518] p-4 space-y-3 font-share-mono">
+                <div class="flex justify-between items-center text-xs text-amber-400 border-b border-slate-800 pb-2">
+                  <span>IN-EAR GAIN MATRIX</span>
+                  <span class="text-emerald-400">LIMITER: ON</span>
+                </div>
+
+                <div class="space-y-2 text-xs">
+                  <div>
+                    <div class="flex justify-between text-[11px] mb-1">
+                      <span class="text-amber-300">CLIC GENERATOR</span>
+                      <span class="text-white">0.0 dB</span>
+                    </div>
+                    <div class="w-full bg-black h-3 border border-amber-800 p-0.5">
+                      <div class="bg-amber-400 h-full w-[85%]"></div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="flex justify-between text-[11px] mb-1">
+                      <span class="text-amber-300">VOICE CUES</span>
+                      <span class="text-white">-3.2 dB</span>
+                    </div>
+                    <div class="w-full bg-black h-3 border border-amber-800 p-0.5">
+                      <div class="bg-amber-500 h-full w-[70%]"></div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="flex justify-between text-[11px] mb-1">
+                      <span class="text-amber-300">STEMS RETURN</span>
+                      <span class="text-white">-6.0 dB</span>
+                    </div>
+                    <div class="w-full bg-black h-3 border border-amber-800 p-0.5">
+                      <div class="bg-amber-600 h-full w-[55%]"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="pt-2">
+                  <button class="w-full py-2 bg-rose-950/60 border border-rose-600 text-rose-300 font-bold text-xs uppercase hover:bg-rose-900">
+                    MUTE ALL STEMS (DIRECT PA)
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      `,
+
+      // ----------------------------------------------------
+      // 2. SWISS LAB (Bauhaus Funcionalista / Dieter Rams)
+      // ----------------------------------------------------
+      swiss: `
+        <div class="space-y-6">
+          
+          <!-- Anatomy Card -->
+          <div class="bg-[#121418] border border-slate-700 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <span class="text-[10px] font-ibm-mono uppercase tracking-widest text-cyan-400 font-bold">[SPEC FILE: BRAUN-BAUHAUS-02]</span>
+              <h2 class="text-xl font-space font-bold tracking-tight text-white">CONCEPTO: RACIONALISMO SUIZO & MINIMALISMO INDUSTRIAL</h2>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs font-ibm-mono">
+              <span class="px-2 py-1 bg-cyan-950/60 border border-cyan-500 text-cyan-300 rounded font-bold">DISPLAY: Space Grotesk</span>
+              <span class="px-2 py-1 bg-slate-800 border border-slate-700 text-slate-300 rounded">MÉTRICAS: IBM Plex Mono</span>
+              <span class="px-2 py-1 bg-black text-slate-400 rounded border border-slate-800">PALETA: Gris Cemento + Azul Cobalto + Naranja</span>
+            </div>
+          </div>
+
+          <!-- Live Component Mockup: Swiss Lab -->
+          <div class="bg-[#181a1f] border border-[#2b2e38] p-6 space-y-6 rounded-none shadow-2xl">
+            
+            <!-- Swiss Header Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-12 border-b border-[#2b2e38] pb-4 items-baseline">
+              <div class="md:col-span-6 font-space font-bold text-sm tracking-tight text-slate-300">
+                bandait / stage control laboratory / unit-01
+              </div>
+              <div class="md:col-span-6 flex justify-end gap-3 font-ibm-mono text-xs text-slate-400">
+                <span>clock: master_internal</span>
+                <span>offset: 0.00ms</span>
+                <span class="text-[#ff4500] font-bold">status: active</span>
+              </div>
+            </div>
+
+            <!-- Swiss Pure Telemetry Banner -->
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+              
+              <div class="md:col-span-5 space-y-1">
+                <span class="text-xs font-ibm-mono text-[#0066ff] font-bold block">04. track in progress</span>
+                <h3 class="text-3xl md:text-4xl font-space font-bold text-white tracking-tight">
+                  de música ligera
+                </h3>
+                <p class="text-xs font-ibm-mono text-slate-400">soda stereo / key: b-minor (trans -1)</p>
+              </div>
+
+              <!-- Clean Numerical Blocks (No Skeuomorphism) -->
+              <div class="md:col-span-4 grid grid-cols-3 gap-2 font-ibm-mono">
+                <div class="bg-[#0e1014] p-3 border border-[#252833] text-center">
+                  <span class="text-[10px] text-slate-500 block uppercase font-bold">bpm</span>
+                  <span class="text-2xl font-bold text-white">125</span>
+                </div>
+                <div class="bg-[#0e1014] p-3 border border-[#252833] text-center">
+                  <span class="text-[10px] text-slate-500 block uppercase font-bold">measure</span>
+                  <span class="text-2xl font-bold text-white">14<span class="text-slate-600 text-sm">/32</span></span>
+                </div>
+                <div class="bg-[#0e1014] p-3 border border-[#0066ff] text-center">
+                  <span class="text-[10px] text-[#0066ff] block uppercase font-bold">beat</span>
+                  <span class="text-2xl font-bold text-[#0066ff]">01</span>
+                </div>
+              </div>
+
+              <!-- Round Mechanical Buttons (Dieter Rams Style) -->
+              <div class="md:col-span-3 flex items-center justify-end gap-3 font-space">
+                <button class="w-12 h-12 rounded-full bg-[#252833] text-white hover:bg-slate-700 flex items-center justify-center font-bold text-xs transition-all">
+                  cue
+                </button>
+                <button class="w-14 h-14 rounded-full bg-[#ff4500] text-white hover:bg-[#e03d00] flex items-center justify-center font-bold text-xs uppercase transition-all shadow-md">
+                  play
+                </button>
+                <button class="w-12 h-12 rounded-full bg-[#0e1014] border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center font-bold text-xs transition-all">
+                  stop
+                </button>
+              </div>
+
+            </div>
+
+            <!-- Swiss Monospace Structure Bar -->
+            <div class="border-t border-b border-[#2b2e38] py-3 font-ibm-mono text-xs">
+              <div class="flex justify-between mb-2 text-slate-400">
+                <span>arrangement sequence</span>
+                <span class="text-white font-bold">01:24.40 / 03:32.00</span>
+              </div>
+              <div class="flex gap-1 h-6">
+                <div class="flex-1 bg-[#252833] flex items-center justify-center text-[10px] text-slate-400">intro</div>
+                <div class="flex-1 bg-[#252833] flex items-center justify-center text-[10px] text-slate-400">verse 1</div>
+                <div class="flex-[1.5] bg-[#0066ff] flex items-center justify-center text-[10px] text-white font-bold">pre-chorus [active]</div>
+                <div class="flex-1 bg-[#252833] flex items-center justify-center text-[10px] text-slate-400">chorus</div>
+                <div class="flex-1 bg-[#252833] flex items-center justify-center text-[10px] text-slate-400">solo</div>
+              </div>
+            </div>
+
+            <!-- Swiss Modernist Lyrics & Clean Chords -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              <div class="md:col-span-2 bg-[#0e1014] border border-[#252833] p-6 space-y-4">
+                <div class="flex justify-between text-xs font-ibm-mono text-slate-500 border-b border-[#252833] pb-2">
+                  <span>typography: space grotesk + ibm plex mono</span>
+                  <span>view ratio: 100%</span>
+                </div>
+
+                <div class="space-y-4">
+                  <div class="opacity-25 font-ibm-mono text-xs text-slate-400">
+                    Bm &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; G<br>
+                    ella durmió al calor de las masas...
+                  </div>
+
+                  <div class="bg-[#181a1f] p-4 border-l-2 border-[#ff4500] space-y-1">
+                    <div class="font-ibm-mono text-base font-bold text-[#ff4500] tracking-wider">
+                      [D] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [A]
+                    </div>
+                    <div class="font-space text-2xl md:text-3xl font-bold text-white tracking-tight">
+                      nada más queda, nada más queda
+                    </div>
+                  </div>
+
+                  <div class="opacity-25 font-ibm-mono text-xs text-slate-400">
+                    Bm &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; G<br>
+                    no le enviaré cenizas de rosas...
+                  </div>
+                </div>
+              </div>
+
+              <!-- Swiss Minimalist Faders -->
+              <div class="bg-[#0e1014] border border-[#252833] p-5 space-y-4 font-ibm-mono text-xs">
+                <div class="flex justify-between items-center text-slate-400 border-b border-[#252833] pb-2">
+                  <span>in-ear monitor</span>
+                  <span class="text-[#0066ff]">limiter: -0.5db</span>
+                </div>
+
+                <div class="space-y-3">
+                  <div>
+                    <div class="flex justify-between text-[11px] mb-1 text-slate-300">
+                      <span>ch 01 / click</span>
+                      <span class="font-bold">0.0 db</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#0066ff]" value="85">
+                  </div>
+
+                  <div>
+                    <div class="flex justify-between text-[11px] mb-1 text-slate-300">
+                      <span>ch 02 / voice cue</span>
+                      <span class="font-bold">-3.0 db</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#0066ff]" value="70">
+                  </div>
+
+                  <div>
+                    <div class="flex justify-between text-[11px] mb-1 text-slate-300">
+                      <span>ch 03 / stems</span>
+                      <span class="font-bold">-6.0 db</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#0066ff]" value="55">
+                  </div>
+                </div>
+
+                <div class="pt-2">
+                  <button class="w-full py-2 bg-[#252833] hover:bg-slate-700 text-white font-bold text-xs uppercase transition-all">
+                    solo return
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      `,
+
+      // ----------------------------------------------------
+      // 3. TOKYO 1989 VFD (Sampler Vintage Japonés / Akai & Roland)
+      // ----------------------------------------------------
+      vfd89: `
+        <div class="space-y-6">
+          
+          <!-- Anatomy Card -->
+          <div class="bg-[#051114] border border-[#00e5ff]/40 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <span class="text-[10px] font-silkscreen uppercase tracking-widest text-[#00e5ff] font-bold">[SPEC FILE: AKAI-ROLAND-1989]</span>
+              <h2 class="text-xl font-orbitron font-bold tracking-wide text-white">CONCEPTO: RACK SAMPLER & PANTALLA VFD JAPONESA</h2>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs font-silkscreen">
+              <span class="px-2 py-1 bg-[#00e5ff]/20 border border-[#00e5ff] text-[#00e5ff] rounded font-bold">DISPLAY: Orbitron</span>
+              <span class="px-2 py-1 bg-[#092226] border border-cyan-800 text-cyan-300 rounded">DOT MATRIX: Silkscreen</span>
+              <span class="px-2 py-1 bg-black text-slate-400 rounded border border-slate-800">PALETA: Fósforo Cian + Gel Ámbar Incandescente</span>
+            </div>
+          </div>
+
+          <!-- Live Component Mockup: Tokyo 1989 -->
+          <div class="bg-[#0b0f14] border-4 border-[#1e2736] p-6 space-y-6 rounded-3xl crt-scanlines shadow-2xl relative">
+            
+            <!-- Smoked Glass VFD Header Display -->
+            <div class="bg-[#021317] border-2 border-[#00e5ff]/60 rounded-xl p-4 space-y-3 shadow-[inset_0_0_20px_rgba(0,229,255,0.2)]">
+              
+              <div class="flex items-center justify-between border-b border-[#00e5ff]/20 pb-2 text-[10px] font-silkscreen text-[#00e5ff]/70">
+                <span>TOKYO SOUND LAB // DIGITAL WORKSTATION 1989</span>
+                <span class="vfd-glow-cyan text-[#00e5ff]">SAMPLING RATE: 48.0kHz 16-BIT LINEAR</span>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center font-orbitron">
+                
+                <div class="md:col-span-5 space-y-1">
+                  <span class="text-[9px] font-silkscreen text-amber-400 block tracking-widest">PGM 04: ROCK CLASSICS</span>
+                  <h3 class="text-2xl md:text-3xl font-bold text-[#00e5ff] vfd-glow-cyan uppercase">
+                    DE MUSICA LIGERA
+                  </h3>
+                  <p class="text-[11px] font-silkscreen text-slate-400">KEY: Bm (-1) • TIME: 03:32</p>
+                </div>
+
+                <!-- Fluorescent Segment Numbers -->
+                <div class="md:col-span-4 bg-[#01090c] border border-[#00e5ff]/40 p-3 rounded-lg text-center grid grid-cols-3 gap-2">
+                  <div>
+                    <span class="text-[9px] font-silkscreen text-[#00e5ff]/60 block">TEMPO</span>
+                    <span class="text-2xl font-black text-[#00e5ff] vfd-glow-cyan">125</span>
+                  </div>
+                  <div>
+                    <span class="text-[9px] font-silkscreen text-[#00e5ff]/60 block">BAR</span>
+                    <span class="text-2xl font-black text-white">014</span>
+                  </div>
+                  <div>
+                    <span class="text-[9px] font-silkscreen text-[#00e5ff]/60 block">BEAT</span>
+                    <span class="text-2xl font-black text-amber-400 vfd-glow-amber">01</span>
+                  </div>
+                </div>
+
+                <!-- Backlit Gel Buttons (Soft Push) -->
+                <div class="md:col-span-3 flex items-center justify-end gap-2 font-silkscreen">
+                  <button class="px-3 py-3 rounded bg-[#132833] border border-[#00e5ff]/50 text-[#00e5ff] hover:bg-[#00e5ff]/20 font-bold text-xs uppercase transition-all">
+                    REW
+                  </button>
+                  <button class="px-4 py-3 rounded bg-[#ffaa00] text-black font-black text-xs uppercase tracking-wider hover:bg-amber-300 shadow-[0_0_15px_rgba(255,170,0,0.6)]">
+                    PLAY
+                  </button>
+                  <button class="px-3 py-3 rounded bg-[#2e1115] border border-rose-600 text-rose-300 hover:bg-rose-900 font-bold text-xs uppercase">
+                    STOP
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+
+            <!-- VFD Dot-Matrix Structure Display -->
+            <div class="bg-[#021317] border border-[#00e5ff]/30 p-3 rounded-xl font-silkscreen text-xs text-[#00e5ff]">
+              <div class="flex justify-between mb-1 text-[10px] opacity-75">
+                <span>SEQUENCE PATTERN MONITOR</span>
+                <span>STEP: 014 / 032</span>
+              </div>
+              <div class="grid grid-cols-5 gap-1 text-center text-[10px]">
+                <div class="p-1.5 bg-[#01090c] border border-[#00e5ff]/20 text-slate-500">INTRO</div>
+                <div class="p-1.5 bg-[#01090c] border border-[#00e5ff]/20 text-slate-500">VERSE</div>
+                <div class="p-1.5 bg-[#00e5ff] text-black font-black shadow-[0_0_10px_#00e5ff]">PRE-CHORUS</div>
+                <div class="p-1.5 bg-[#01090c] border border-[#00e5ff]/20 text-slate-500">CHORUS</div>
+                <div class="p-1.5 bg-[#01090c] border border-[#00e5ff]/20 text-slate-500">SOLO</div>
+              </div>
+            </div>
+
+            <!-- Dot Matrix Lyrics Screen -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              <div class="md:col-span-2 bg-[#021317] border-2 border-[#00e5ff]/40 p-5 rounded-2xl space-y-4">
+                <div class="flex justify-between text-xs font-silkscreen text-amber-400 border-b border-[#00e5ff]/20 pb-2">
+                  <span>LCD LYRIC PROMPTER // AUTO-TRANSPOSE ON</span>
+                  <span class="text-[#00e5ff]">VFD CHORUS SYNC</span>
+                </div>
+
+                <div class="space-y-4 font-orbitron">
+                  <div class="opacity-30 text-xs font-silkscreen text-slate-400">
+                    [Bm] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [G]<br>
+                    ELLA DURMIO AL CALOR DE LAS MASAS...
+                  </div>
+
+                  <div class="bg-[#010b0e] border-l-4 border-[#00e5ff] p-4 rounded-r-xl space-y-1">
+                    <div class="font-silkscreen text-sm font-bold text-amber-400 vfd-glow-amber">
+                      [D] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [A]
+                    </div>
+                    <div class="text-2xl md:text-3xl font-black text-white vfd-glow-cyan tracking-wide uppercase leading-tight">
+                      NADA MAS QUEDA, NADA MAS QUEDA
+                    </div>
+                  </div>
+
+                  <div class="opacity-30 text-xs font-silkscreen text-slate-400">
+                    [Bm] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [G]<br>
+                    NO LE ENVIARE CENIZAS DE ROSAS...
+                  </div>
+                </div>
+              </div>
+
+              <!-- Vintage Tokyo Knurled Dial & Sliders -->
+              <div class="bg-[#0e141c] border border-[#232f42] p-5 rounded-2xl space-y-4 font-silkscreen text-xs">
+                <div class="flex justify-between items-center text-[#00e5ff] border-b border-slate-800 pb-2">
+                  <span>MIXER CH 1-4</span>
+                  <span class="text-amber-400">PEAK LIMIT</span>
+                </div>
+
+                <div class="space-y-3">
+                  <div>
+                    <div class="flex justify-between text-[10px] text-slate-400 mb-1">
+                      <span>CLICK GEN</span>
+                      <span class="text-white">85%</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#00e5ff]" value="85">
+                  </div>
+                  <div>
+                    <div class="flex justify-between text-[10px] text-slate-400 mb-1">
+                      <span>VOICE PROMPT</span>
+                      <span class="text-white">70%</span>
+                    </div>
+                    <input type="range" class="w-full accent-amber-400" value="70">
+                  </div>
+                  <div>
+                    <div class="flex justify-between text-[10px] text-slate-400 mb-1">
+                      <span>BACKING STEMS</span>
+                      <span class="text-white">55%</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#00e5ff]" value="55">
+                  </div>
+                </div>
+
+                <div class="pt-2">
+                  <button class="w-full py-2.5 rounded bg-[#1c2738] border border-[#00e5ff]/40 text-[#00e5ff] hover:bg-[#00e5ff]/20 font-bold text-xs uppercase transition-all">
+                    SOLO CUE
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      `,
+
+      // ----------------------------------------------------
+      // 4. CONCERT HALL (Neoclásico de Gran Sala / Teatro Sinfónico)
+      // ----------------------------------------------------
+      hall: `
+        <div class="space-y-6">
+          
+          <!-- Anatomy Card -->
+          <div class="bg-[#0f0f13] border border-[#c5a059]/40 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <span class="text-[10px] font-mono uppercase tracking-widest text-[#c5a059] font-bold">[SPEC FILE: PHILHARMONIC-HALL-04]</span>
+              <h2 class="text-xl font-cinzel font-bold tracking-wide text-white">CONCEPTO: NEOCLÁSICO DE GRAN SALA & PARTITURA DE LUJO</h2>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs font-mono">
+              <span class="px-2 py-1 bg-[#241f14] border border-[#c5a059] text-[#e0c68a] rounded font-bold">DISPLAY: Cinzel (Monumental)</span>
+              <span class="px-2 py-1 bg-[#1a171c] border border-stone-700 text-stone-300 rounded">LÍRICA: Playfair Display Serif</span>
+              <span class="px-2 py-1 bg-black text-slate-400 rounded border border-slate-800">PALETA: Terciopelo Negro + Bronce Bruñido + Marfil</span>
+            </div>
+          </div>
+
+          <!-- Live Component Mockup: Concert Hall -->
+          <div class="bg-[#0d0d12] border border-[#2a2721] p-6 space-y-6 rounded-3xl shadow-2xl relative">
+            
+            <!-- Hall Header -->
+            <div class="flex items-center justify-between border-b border-[#25221b] pb-3 text-xs font-mono text-[#c5a059]">
+              <span class="uppercase tracking-widest font-bold">SINFONÍA DE ESCENARIO • DIRECCIÓN MUSICAL</span>
+              <span class="text-stone-400">TIEMPO: MAESTOSO • ENLACE NTP CALIBRADO</span>
+            </div>
+
+            <!-- Header Telemetry: Classical Proportions -->
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+              
+              <div class="md:col-span-5 space-y-1">
+                <span class="text-xs font-mono text-[#c5a059] tracking-widest block uppercase">MOVIMIENTO IV</span>
+                <h3 class="text-2xl md:text-3xl font-cinzel font-black text-[#f7f4ea] tracking-wider">
+                  DE MÚSICA LIGERA
+                </h3>
+                <p class="text-xs font-playfair italic text-stone-400">Soda Stereo • Tonalidad: Si menor (Trans -1)</p>
+              </div>
+
+              <!-- Roman & Serif Counter -->
+              <div class="md:col-span-4 bg-[#08080b] border border-[#3b3427] p-3 rounded-xl text-center grid grid-cols-3 gap-2">
+                <div>
+                  <span class="text-[9px] font-mono text-stone-500 uppercase block font-bold">TEMPO</span>
+                  <span class="text-2xl font-cinzel font-bold text-[#c5a059]">125</span>
+                </div>
+                <div>
+                  <span class="text-[9px] font-mono text-stone-500 uppercase block font-bold">COMPÁS</span>
+                  <span class="text-2xl font-cinzel font-bold text-white">XIV<span class="text-stone-600 text-sm">/XXXII</span></span>
+                </div>
+                <div>
+                  <span class="text-[9px] font-mono text-stone-500 uppercase block font-bold">PULSO</span>
+                  <span class="text-2xl font-cinzel font-bold text-[#e0c68a]">I</span>
+                </div>
+              </div>
+
+              <!-- Classical Elegant Buttons -->
+              <div class="md:col-span-3 flex items-center justify-end gap-2 font-mono">
+                <button class="px-4 py-2.5 rounded-xl bg-[#17161b] border border-[#332f26] text-stone-300 hover:text-white text-xs font-bold transition-all">
+                  PREV
+                </button>
+                <button class="px-5 py-2.5 rounded-xl bg-[#c5a059] text-black font-black text-xs uppercase tracking-widest hover:bg-[#d9b56f] transition-all shadow-lg">
+                  EJECUTAR
+                </button>
+                <button class="px-4 py-2.5 rounded-xl bg-[#17161b] border border-rose-900/60 text-rose-300 hover:bg-rose-950/40 text-xs font-bold transition-all">
+                  PAUSA
+                </button>
+              </div>
+
+            </div>
+
+            <!-- Structure Ribbon: Gold Leaf Accent -->
+            <div class="border-t border-b border-[#25221b] py-3 font-mono text-xs">
+              <div class="flex justify-between mb-2 text-stone-400">
+                <span class="uppercase tracking-widest">Estructura Armónica de la Obra</span>
+                <span class="text-[#c5a059]">01:24 / 03:32</span>
+              </div>
+              <div class="grid grid-cols-12 gap-1 h-6 text-[10px] text-center font-bold">
+                <div class="col-span-2 bg-[#17161b] border border-stone-800 text-stone-500 flex items-center justify-center">INTRO</div>
+                <div class="col-span-3 bg-[#17161b] border border-stone-800 text-stone-400 flex items-center justify-center">VERSO</div>
+                <div class="col-span-3 bg-[#c5a059] text-black flex items-center justify-center font-black">
+                  PRE-CORO [ACTUAL]
+                </div>
+                <div class="col-span-2 bg-[#17161b] border border-stone-800 text-stone-400 flex items-center justify-center">CORO</div>
+                <div class="col-span-2 bg-[#17161b] border border-stone-800 text-stone-500 flex items-center justify-center">SOLO</div>
+              </div>
+            </div>
+
+            <!-- Editorial Serif Lyrics with Chords -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              <div class="md:col-span-2 bg-[#08080b] border border-[#2b2720] p-6 rounded-2xl space-y-4">
+                <div class="flex justify-between items-center text-xs font-mono text-[#c5a059] border-b border-[#25221b] pb-2">
+                  <span>FACSIMILE CHORDPRO • TRANSPOSICIÓN ARMÓNICA</span>
+                  <span class="text-stone-400">Puntaje Orquestal: 36pt</span>
+                </div>
+
+                <div class="space-y-4">
+                  <div class="opacity-30 font-mono text-xs text-[#c5a059]">
+                    [Bm] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [G]<br>
+                    <span class="font-playfair text-stone-300 text-sm">Ella durmió al calor de las masas...</span>
+                  </div>
+
+                  <div class="bg-[#121217] border-l-2 border-[#c5a059] p-5 rounded-r-xl space-y-1">
+                    <div class="font-mono text-base font-bold text-[#c5a059] tracking-wider">
+                      [D] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [A]
+                    </div>
+                    <div class="font-playfair text-2xl md:text-3xl font-black text-[#f7f4ea] tracking-tight leading-relaxed">
+                      Nada más queda, nada más queda
+                    </div>
+                  </div>
+
+                  <div class="opacity-30 font-mono text-xs text-[#c5a059]">
+                    [Bm] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [G]<br>
+                    <span class="font-playfair text-stone-300 text-sm">No le enviaré cenizas de rosas...</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Refined Velvet Mixer Strip -->
+              <div class="bg-[#08080b] border border-[#2b2720] p-5 rounded-2xl space-y-4 font-mono text-xs">
+                <div class="flex justify-between items-center text-[#c5a059] border-b border-[#25221b] pb-2">
+                  <span>RETORNO PERSONAL</span>
+                  <span class="text-stone-400">LIMITADOR: -0.5 dB</span>
+                </div>
+
+                <div class="space-y-3">
+                  <div>
+                    <div class="flex justify-between text-[11px] text-stone-400 mb-1">
+                      <span>METRÓNOMO CUE</span>
+                      <span class="text-white">0.0 dB</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#c5a059]" value="85">
+                  </div>
+                  <div>
+                    <div class="flex justify-between text-[11px] text-stone-400 mb-1">
+                      <span>GUÍA DE VOZ</span>
+                      <span class="text-white">-3.2 dB</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#c5a059]" value="70">
+                  </div>
+                  <div>
+                    <div class="flex justify-between text-[11px] text-stone-400 mb-1">
+                      <span>PISTAS DE RELLENO</span>
+                      <span class="text-white">-6.0 dB</span>
+                    </div>
+                    <input type="range" class="w-full accent-[#c5a059]" value="55">
+                  </div>
+                </div>
+
+                <div class="pt-2">
+                  <button class="w-full py-2.5 rounded-xl bg-[#1c1a21] border border-[#3d372c] text-[#e0c68a] hover:bg-[#25232c] font-bold text-xs uppercase transition-all">
+                    SOLO AUDICIÓN
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      `
+    };
+
+    function switchStyle(styleKey) {
+      document.getElementById('style-mount-point').innerHTML = styleData[styleKey];
+
+      const tabs = ['milspec', 'swiss', 'vfd89', 'hall'];
+      tabs.forEach(t => {
+        const btn = document.getElementById('tab-' + t);
+        if (btn) {
+          if (t === styleKey) {
+            btn.className = 'px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left flex flex-col justify-center bg-[#1d2334] border border-cyan-400 shadow-md';
+          } else {
+            btn.className = 'px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left flex flex-col justify-center bg-transparent border border-transparent hover:bg-[#161a26]';
+          }
+        }
+      });
+    }
+
+    // Default initialization with Mil-Spec
+    switchStyle('milspec');
+  </script>
+</body>
+</html>

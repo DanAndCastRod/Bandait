@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bandait 3.0 — Estudio de Rediseño Visual Avanzado</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: #08080a; }
+    ::-webkit-scrollbar-thumb { background: #22222a; border-radius: 2px; }
+    
+    /* Segmented Display Simulation */
+    @font-face {
+      font-family: 'SegmentFont';
+      src: local('Courier New');
+    }
+    .font-vfd {
+      font-family: 'Courier New', Courier, monospace;
+      letter-spacing: 2px;
+      text-shadow: 0 0 10px currentColor;
+    }
+    .led-glow-cyan { box-shadow: 0 0 14px rgba(56, 189, 248, 0.6); }
+    .led-glow-amber { box-shadow: 0 0 14px rgba(245, 158, 11, 0.6); }
+    .led-glow-emerald { box-shadow: 0 0 14px rgba(16, 185, 129, 0.6); }
+    .knob-shadow { box-shadow: inset 0 2px 4px rgba(255,255,255,0.1), 0 4px 10px rgba(0,0,0,0.8); }
+    .chassis-bevel { box-shadow: inset 1px 1px 0 rgba(255,255,255,0.06), 0 10px 30px rgba(0,0,0,0.9); }
+  </style>
+</head>
+<body class="bg-[#050507] text-slate-100 antialiased min-h-screen p-3 md:p-8 font-sans">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- Top Engineering Bar -->
+    <header class="bg-[#0b0c10] border border-[#1e222d] rounded-2xl p-5 shadow-2xl chassis-bevel">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-400 text-[10px] font-mono uppercase tracking-widest font-bold">
+              Bandait Pro Systems • v3.0
+            </span>
+            <span class="text-xs font-mono text-slate-500">Hardware & Stage Ergonomics</span>
+          </div>
+          <h1 class="text-2xl md:text-3xl font-black tracking-tight text-white uppercase">
+            Estudio de Rediseño Visual Avanzado
+          </h1>
+          <p class="text-slate-400 text-xs md:text-sm mt-0.5">
+            Propuesta de componentes físicos-digitales: faders con serigrafía dB, perillas rotativas, displays VFD y layouts de cabina de audio profesional.
+          </p>
+        </div>
+
+        <!-- Paradigm Selector -->
+        <div class="flex flex-wrap items-center gap-2 bg-[#12151c] p-1.5 rounded-xl border border-[#232836]">
+          <button onclick="setParadigm('cockpit')" id="btn-cockpit" class="px-3 py-2 rounded-lg text-xs font-mono font-bold bg-cyan-500 text-black transition-all flex items-center gap-2">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            1. Cockpit HUD de Escenario
+          </button>
+          <button onclick="setParadigm('rack')" id="btn-rack" class="px-3 py-2 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-2">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            2. Rack Modular 19" (Studio)
+          </button>
+          <button onclick="setParadigm('field')" id="btn-field" class="px-3 py-2 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-2">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16m-7 6h7"/></svg>
+            3. Nordic Industrial Field
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- DYNAMIC CONTAINER -->
+    <div id="paradigm-content" class="space-y-6">
+      <!-- Injected via JavaScript -->
+    </div>
+
+    <!-- Persistent Global Audio Component Spec Sheet -->
+    <footer class="bg-[#0b0c10] border border-[#1e222d] rounded-2xl p-5 chassis-bevel text-xs">
+      <div class="flex items-center justify-between border-b border-[#1e222d] pb-2.5 mb-3">
+        <span class="font-mono text-cyan-400 font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Especificación de Componentes Nuevos Propuestos
+        </span>
+        <span class="font-mono text-slate-500">Métricas de Escenario Real</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-slate-400">
+        <div>
+          <strong class="text-white block font-mono mb-0.5">Potenciómetros Rotativos:</strong>
+          Control continuo 270° con escala circular y lectura numérica en tiempo real (Gain, Pan, Send).
+        </div>
+        <div>
+          <strong class="text-white block font-mono mb-0.5">Display VFD Fluorescente:</strong>
+          Lectura ultra-rápida de BPM, compás y timecode sin depender de fuentes genéricas de navegador.
+        </div>
+        <div>
+          <strong class="text-white block font-mono mb-0.5">Cinta de Estructura de Canción:</strong>
+          Timeline segmentado con bloques de color por sección (Intro, Verso, Coro, Solo) y cabezal de lectura.
+        </div>
+        <div>
+          <strong class="text-white block font-mono mb-0.5">Botones Táctiles Convexos:</strong>
+          Biselados con textura de goma vulcanizada, feedback de pulsación luminosa y confirmación visual.
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    const paradigms = {
+      // 1. COCKPIT HUD
+      cockpit: `
+        <!-- PARADIGMA 1: COCKPIT HUD -->
+        <div class="bg-black border-2 border-[#1c212c] rounded-3xl p-6 space-y-6 shadow-2xl">
+          
+          <!-- Cockpit Header / Master Telemetry -->
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-[#07090e] border border-[#1b202c] p-4 rounded-2xl">
+            
+            <!-- Song & Band Telemetry -->
+            <div class="md:col-span-4 space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                <span class="text-[10px] font-mono text-emerald-400 uppercase font-bold tracking-wider">EN VIVO • ASIO ACTIVO</span>
+              </div>
+              <h2 class="text-xl font-black text-white truncate tracking-wide">04. DE MÚSICA LIGERA</h2>
+              <p class="text-xs font-mono text-slate-400">Soda Stereo • Tono Show: <strong class="text-amber-400">Bm (-1)</strong></p>
+            </div>
+
+            <!-- Central VFD HUD Display -->
+            <div class="md:col-span-4 bg-[#030406] border-2 border-[#1a2333] rounded-xl p-3 text-center flex items-center justify-around font-mono">
+              <div>
+                <span class="text-[9px] text-slate-500 uppercase block font-bold">BPM MASTER</span>
+                <span class="text-2xl font-black text-cyan-400 font-vfd">125.0</span>
+              </div>
+              <div class="w-px h-8 bg-slate-800"></div>
+              <div>
+                <span class="text-[9px] text-slate-500 uppercase block font-bold">COMPÁS</span>
+                <span class="text-2xl font-black text-white font-vfd">014<span class="text-slate-600 text-lg">/032</span></span>
+              </div>
+              <div class="w-px h-8 bg-slate-800"></div>
+              <div>
+                <span class="text-[9px] text-slate-500 uppercase block font-bold">BEAT</span>
+                <span class="text-2xl font-black text-emerald-400 font-vfd">01</span>
+              </div>
+            </div>
+
+            <!-- Master Transport Controls -->
+            <div class="md:col-span-4 flex items-center justify-end gap-2 font-mono">
+              <button class="px-4 py-3 rounded-xl bg-[#161a24] border border-[#293042] text-slate-300 font-bold hover:bg-[#202636] transition-all flex items-center gap-1.5 text-xs">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+                PREV
+              </button>
+              <button class="px-6 py-3 rounded-xl bg-cyan-400 text-black font-black text-xs uppercase tracking-wider hover:bg-cyan-300 transition-all shadow-lg flex items-center gap-2">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                PLAY CUE
+              </button>
+              <button class="px-4 py-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-400 font-bold hover:bg-rose-500/30 transition-all text-xs">
+                STOP
+              </button>
+              <button class="px-4 py-3 rounded-xl bg-[#161a24] border border-[#293042] text-slate-300 font-bold hover:bg-[#202636] transition-all flex items-center gap-1.5 text-xs">
+                NEXT
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+
+          </div>
+
+          <!-- Section Musical Ribbon (Timeline de Estructura Visual) -->
+          <div class="bg-[#07090e] border border-[#1b202c] rounded-2xl p-4 space-y-2">
+            <div class="flex items-center justify-between text-xs font-mono">
+              <span class="text-slate-400 font-bold uppercase">Línea de Estructura en Vivo</span>
+              <span class="text-cyan-400">Tiempo actual: 01:24 / 03:32</span>
+            </div>
+            <div class="grid grid-cols-12 gap-1 h-7 rounded-lg overflow-hidden font-mono text-[10px] text-center font-bold">
+              <div class="col-span-2 bg-slate-800 text-slate-400 flex items-center justify-center">INTRO (4)</div>
+              <div class="col-span-3 bg-slate-700 text-slate-300 flex items-center justify-center">VERSO 1 (8)</div>
+              <div class="col-span-3 bg-cyan-500 text-black flex items-center justify-center border-2 border-white shadow-md">
+                PRE-CORO (8) [ACTUAL]
+              </div>
+              <div class="col-span-2 bg-amber-600 text-black flex items-center justify-center">CORO (8)</div>
+              <div class="col-span-2 bg-slate-800 text-slate-500 flex items-center justify-center">SOLO (8)</div>
+            </div>
+          </div>
+
+          <!-- Main Stage Teleprompter + Chords (Visibilidad a 2 metros) -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Teleprompter Big Screen -->
+            <div class="lg:col-span-2 bg-[#040507] border border-[#1c2230] rounded-2xl p-6 space-y-4">
+              <div class="flex items-center justify-between text-xs font-mono border-b border-slate-800 pb-2.5">
+                <span class="text-amber-400 font-bold">NOTACIÓN CHORDPRO • TRANSPOSICIÓN ACTIVA</span>
+                <span class="text-slate-500">Auto-Scroll: Sincronizado</span>
+              </div>
+
+              <!-- Chord Block Active -->
+              <div class="space-y-4 py-2 font-mono">
+                <div class="opacity-30 text-xs">
+                  <span class="text-amber-400 font-bold">[Bm]                    [G]</span>
+                  <p class="text-slate-300 font-sans text-sm">Ella durmió al calor de las masas...</p>
+                </div>
+
+                <div class="bg-[#0b101d] border-l-4 border-cyan-400 p-4 rounded-r-xl space-y-1.5 shadow-lg">
+                  <div class="text-base font-bold text-amber-400 tracking-wider">
+                    [D]                     [A]
+                  </div>
+                  <div class="text-2xl md:text-3xl font-black font-sans text-white tracking-wide leading-tight">
+                    NADA MÁS QUEDA, NADA MÁS QUEDA
+                  </div>
+                </div>
+
+                <div class="opacity-30 text-xs">
+                  <span class="text-amber-400 font-bold">[Bm]                    [G]</span>
+                  <p class="text-slate-300 font-sans text-sm">No le enviaré cenizas de rosas...</p>
+                </div>
+              </div>
+
+              <!-- Voice Cue Banner -->
+              <div class="bg-violet-950/40 border border-violet-500/40 rounded-xl p-3 flex items-center justify-between text-xs">
+                <div class="flex items-center gap-2 text-violet-300 font-mono">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+                  <span>Voice Prompt: <strong>"CORO EN 2 COMPASES (ENTRADA FUERTE)"</strong></span>
+                </div>
+                <span class="text-[10px] font-mono text-violet-400 bg-violet-950 px-2 py-0.5 rounded border border-violet-800">In-Ear Ready</span>
+              </div>
+            </div>
+
+            <!-- In-Ear Quick Channel Strip -->
+            <div class="bg-[#07090e] border border-[#1b202c] rounded-2xl p-5 space-y-4 font-mono">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span class="text-xs font-bold text-white uppercase">Mezcla In-Ear Personal</span>
+                <span class="text-[10px] text-emerald-400 font-bold">Limitador: -0.5 dB</span>
+              </div>
+
+              <div class="grid grid-cols-3 gap-3 text-center text-xs">
+                <!-- Fader 1 -->
+                <div class="bg-[#020305] p-2.5 rounded-xl border border-slate-800 space-y-2">
+                  <span class="text-cyan-400 font-bold block text-[10px]">CLIC</span>
+                  <div class="h-32 flex items-center justify-center">
+                    <input type="range" orient="vertical" class="h-28 w-3 accent-cyan-400" value="85" style="-webkit-appearance: slider-vertical;">
+                  </div>
+                  <span class="text-[10px] text-slate-500 block">0 dB</span>
+                </div>
+
+                <!-- Fader 2 -->
+                <div class="bg-[#020305] p-2.5 rounded-xl border border-slate-800 space-y-2">
+                  <span class="text-violet-400 font-bold block text-[10px]">VOZ CUE</span>
+                  <div class="h-32 flex items-center justify-center">
+                    <input type="range" orient="vertical" class="h-28 w-3 accent-violet-400" value="75" style="-webkit-appearance: slider-vertical;">
+                  </div>
+                  <span class="text-[10px] text-slate-500 block">-3 dB</span>
+                </div>
+
+                <!-- Fader 3 -->
+                <div class="bg-[#020305] p-2.5 rounded-xl border border-slate-800 space-y-2">
+                  <span class="text-amber-400 font-bold block text-[10px]">STEMS</span>
+                  <div class="h-32 flex items-center justify-center">
+                    <input type="range" orient="vertical" class="h-28 w-3 accent-amber-400" value="60" style="-webkit-appearance: slider-vertical;">
+                  </div>
+                  <span class="text-[10px] text-slate-500 block">-6 dB</span>
+                </div>
+              </div>
+
+              <!-- Quick Mute / Solo Buttons -->
+              <div class="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                <button class="py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold">MUTE GUÍA</button>
+                <button class="py-2 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">SOLO RETORNO</button>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      `,
+
+      // 2. MODULAR RACK 19"
+      rack: `
+        <!-- PARADIGMA 2: RACK MODULAR 19" (ANODIZED STUDIO CHASSIS) -->
+        <div class="bg-[#0f1013] border-4 border-[#2b303d] rounded-3xl p-6 space-y-5 shadow-2xl relative">
+          
+          <!-- Rack Ears Simulation -->
+          <div class="flex items-center justify-between border-b-2 border-[#202531] pb-3 text-xs font-mono text-slate-500">
+            <span class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-slate-800 border-2 border-slate-600 inline-block"></span>
+              RACK UNIT 01: MASTER TIME & ASIO ENGINE
+            </span>
+            <span>48.0 kHz • 64 SAMPLES • 1.3ms</span>
+            <span class="flex items-center gap-2">
+              RACK UNIT 02: STEM MIXER
+              <span class="w-3 h-3 rounded-full bg-slate-800 border-2 border-slate-600 inline-block"></span>
+            </span>
+          </div>
+
+          <!-- Unit 1: Master Clock Module -->
+          <div class="bg-[#171920] border-2 border-[#2c3344] rounded-xl p-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+            
+            <div class="md:col-span-3 space-y-1">
+              <span class="text-[10px] font-mono text-amber-500 uppercase font-bold tracking-widest block">BANDAIT PRECISION CLOCK</span>
+              <h3 class="text-base font-black text-white">NTP SYNC GENERATOR</h3>
+              <div class="text-[11px] font-mono text-slate-400">Jitter: &lt; 0.12ms • Drift: 0.00ms</div>
+            </div>
+
+            <!-- Rotary Knobs & LED Rings -->
+            <div class="md:col-span-5 flex items-center justify-around font-mono">
+              <!-- Knob 1: BPM Coarse -->
+              <div class="text-center space-y-1">
+                <div class="w-14 h-14 rounded-full bg-[#0c0e12] border-2 border-[#3d465c] knob-shadow mx-auto flex items-center justify-center relative">
+                  <div class="w-1.5 h-3 bg-amber-400 rounded-full absolute top-1"></div>
+                  <span class="text-xs font-black text-white">125</span>
+                </div>
+                <span class="text-[10px] text-slate-400 font-bold">BPM COARSE</span>
+              </div>
+
+              <!-- Knob 2: Fine Offset -->
+              <div class="text-center space-y-1">
+                <div class="w-14 h-14 rounded-full bg-[#0c0e12] border-2 border-[#3d465c] knob-shadow mx-auto flex items-center justify-center relative">
+                  <div class="w-1.5 h-3 bg-cyan-400 rounded-full absolute top-1"></div>
+                  <span class="text-xs font-black text-white">±0</span>
+                </div>
+                <span class="text-[10px] text-slate-400 font-bold">TIME SHIFT</span>
+              </div>
+
+              <!-- Knob 3: Master Output -->
+              <div class="text-center space-y-1">
+                <div class="w-14 h-14 rounded-full bg-[#0c0e12] border-2 border-[#3d465c] knob-shadow mx-auto flex items-center justify-center relative">
+                  <div class="w-1.5 h-3 bg-emerald-400 rounded-full absolute top-1"></div>
+                  <span class="text-xs font-black text-white">8.5</span>
+                </div>
+                <span class="text-[10px] text-slate-400 font-bold">ASIO LEVEL</span>
+              </div>
+            </div>
+
+            <!-- LED Ladder Meters -->
+            <div class="md:col-span-4 bg-[#0d0f14] p-3 rounded-lg border border-[#2b3345] flex items-center justify-between font-mono">
+              <div class="space-y-1 text-center text-[10px]">
+                <span class="text-slate-500 block font-bold">SALIDA 1-2</span>
+                <div class="h-16 w-4 bg-slate-900 mx-auto rounded overflow-hidden flex flex-col justify-end p-0.5 gap-0.5">
+                  <div class="w-full h-1 bg-rose-500"></div>
+                  <div class="w-full h-1 bg-amber-400"></div>
+                  <div class="w-full h-2 bg-emerald-400"></div>
+                  <div class="w-full h-3 bg-emerald-500"></div>
+                  <div class="w-full h-4 bg-emerald-600"></div>
+                </div>
+                <span class="text-emerald-400">-6 dB</span>
+              </div>
+
+              <div class="space-y-1 text-center text-[10px]">
+                <span class="text-slate-500 block font-bold">SALIDA 3 (CLIC)</span>
+                <div class="h-16 w-4 bg-slate-900 mx-auto rounded overflow-hidden flex flex-col justify-end p-0.5 gap-0.5">
+                  <div class="w-full h-1 bg-slate-800"></div>
+                  <div class="w-full h-1 bg-amber-400"></div>
+                  <div class="w-full h-2 bg-emerald-400"></div>
+                  <div class="w-full h-3 bg-emerald-500"></div>
+                  <div class="w-full h-4 bg-emerald-600"></div>
+                </div>
+                <span class="text-amber-400">-2 dB</span>
+              </div>
+
+              <div class="space-y-1 text-center text-[10px]">
+                <span class="text-slate-500 block font-bold">WI-FI IN-EAR</span>
+                <div class="h-16 w-4 bg-slate-900 mx-auto rounded overflow-hidden flex flex-col justify-end p-0.5 gap-0.5">
+                  <div class="w-full h-1 bg-slate-800"></div>
+                  <div class="w-full h-1 bg-slate-800"></div>
+                  <div class="w-full h-2 bg-cyan-400"></div>
+                  <div class="w-full h-3 bg-cyan-500"></div>
+                  <div class="w-full h-4 bg-cyan-600"></div>
+                </div>
+                <span class="text-cyan-400">SYNC</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Unit 2: Stems Mixing Console Strip -->
+          <div class="bg-[#171920] border-2 border-[#2c3344] rounded-xl p-4 space-y-3 font-mono">
+            <div class="flex items-center justify-between text-xs border-b border-[#2c3344] pb-2 text-slate-400">
+              <span class="font-bold text-white uppercase">MÓDULO STEMS & MÚSICO VIRTUAL (CH 01 - 04)</span>
+              <span class="text-amber-400 font-bold">Virtual Soundcheck: Listo para Reproducir</span>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-center">
+              <!-- Channel 1: Drums -->
+              <div class="bg-[#0e1015] p-3 rounded-lg border border-[#2b3345] space-y-2">
+                <span class="text-cyan-400 font-bold block">CH 1: BATERÍA</span>
+                <div class="flex justify-center gap-1 text-[10px]">
+                  <button class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">M</button>
+                  <button class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">S</button>
+                </div>
+                <input type="range" class="w-full accent-cyan-400" value="85">
+                <span class="text-[10px] text-slate-500 block">PAN: C • 0.0 dB</span>
+              </div>
+
+              <!-- Channel 2: Bass -->
+              <div class="bg-[#0e1015] p-3 rounded-lg border border-[#2b3345] space-y-2">
+                <span class="text-emerald-400 font-bold block">CH 2: BAJO</span>
+                <div class="flex justify-center gap-1 text-[10px]">
+                  <button class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold">M</button>
+                  <button class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">S</button>
+                </div>
+                <input type="range" class="w-full accent-emerald-400" value="0">
+                <span class="text-[10px] text-rose-400 block font-bold">MUTED (MÚSICO EN VIVO)</span>
+              </div>
+
+              <!-- Channel 3: Keys / Pads -->
+              <div class="bg-[#0e1015] p-3 rounded-lg border border-[#2b3345] space-y-2">
+                <span class="text-violet-400 font-bold block">CH 3: TECLADOS</span>
+                <div class="flex justify-center gap-1 text-[10px]">
+                  <button class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">M</button>
+                  <button class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">S</button>
+                </div>
+                <input type="range" class="w-full accent-violet-400" value="70">
+                <span class="text-[10px] text-emerald-400 block font-bold">RELLENO VIRTUAL ON</span>
+              </div>
+
+              <!-- Channel 4: Backing Vocals -->
+              <div class="bg-[#0e1015] p-3 rounded-lg border border-[#2b3345] space-y-2">
+                <span class="text-amber-400 font-bold block">CH 4: COROS</span>
+                <div class="flex justify-center gap-1 text-[10px]">
+                  <button class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">M</button>
+                  <button class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">S</button>
+                </div>
+                <input type="range" class="w-full accent-amber-400" value="65">
+                <span class="text-[10px] text-slate-500 block">PAN: R15 • -3.2 dB</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      `,
+
+      // 3. NORDIC INDUSTRIAL FIELD
+      field: `
+        <!-- PARADIGMA 3: NORDIC INDUSTRIAL FIELD (TEENAGE ENGINEERING / OP-1 MINIMALIST) -->
+        <div class="bg-[#121316] border border-[#262830] rounded-3xl p-6 space-y-6 shadow-2xl font-mono">
+          
+          <!-- Header Minimalist Bar -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#262830] pb-4 gap-2">
+            <div>
+              <span class="text-[10px] text-[#ff5500] font-black uppercase tracking-widest">BANDAIT FIELD-01 • ULTRA PRECISION</span>
+              <h3 class="text-xl font-black text-[#f1f3f5]">SETLIST CONSOLE // SHOW 42</h3>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="px-2 py-1 bg-[#1c1e24] border border-[#333742] text-[#ffb703] font-bold rounded">
+                KEY: Bm (TRANS -1)
+              </span>
+              <span class="px-2 py-1 bg-[#ff5500] text-black font-black rounded">
+                BPM 125
+              </span>
+            </div>
+          </div>
+
+          <!-- Mechanical Grid Layout -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            <!-- Field Tile 1: Metronome Pulse Block -->
+            <div class="bg-[#181a20] border border-[#2c303c] rounded-2xl p-5 space-y-3">
+              <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">TIMING CORE</span>
+              <div class="grid grid-cols-4 gap-1.5 text-center">
+                <div class="py-3 bg-[#ff5500] text-black font-black text-lg rounded-lg shadow-sm">1</div>
+                <div class="py-3 bg-[#242732] text-slate-500 font-bold text-lg rounded-lg">2</div>
+                <div class="py-3 bg-[#242732] text-slate-500 font-bold text-lg rounded-lg">3</div>
+                <div class="py-3 bg-[#242732] text-slate-500 font-bold text-lg rounded-lg">4</div>
+              </div>
+              <div class="text-[11px] text-slate-400 text-center font-bold">
+                COMPÁS: <span class="text-white text-base font-black">14</span> / 32 • PRE-CORO
+              </div>
+            </div>
+
+            <!-- Field Tile 2: Emergency Touch Controls -->
+            <div class="bg-[#181a20] border border-[#2c303c] rounded-2xl p-5 space-y-3">
+              <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">STAGE ACTION TRIGGER</span>
+              <div class="grid grid-cols-2 gap-2">
+                <button class="py-3.5 bg-[#ffb703] hover:bg-amber-400 text-black font-black text-xs rounded-xl transition-all uppercase">
+                  PLAY / SYNC
+                </button>
+                <button class="py-3.5 bg-[#e63946] hover:bg-rose-500 text-white font-black text-xs rounded-xl transition-all uppercase">
+                  PANIC STOP
+                </button>
+              </div>
+              <button class="w-full py-2 bg-[#242732] border border-[#383d4c] text-slate-300 font-bold text-xs rounded-xl hover:bg-[#2c303c] transition-all">
+                LOOP COMPÁS 12-16 (REPETIR)
+              </button>
+            </div>
+
+            <!-- Field Tile 3: AI Co-Pilot Summary -->
+            <div class="bg-[#181a20] border border-[#2c303c] rounded-2xl p-5 space-y-2">
+              <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">AI CO-PILOT ADVISOR</span>
+              <div class="p-2.5 rounded-xl bg-[#111317] border border-[#282c37] text-[11px] text-slate-300 space-y-1">
+                <div>• Siguiente canción: <strong class="text-white">Persiana Americana</strong></div>
+                <div>• Compatibilidad armónica: <strong class="text-[#ffb703]">100% (Camelot 8B)</strong></div>
+                <div>• Sugerencia: <span class="text-slate-400">Entrada directa de batería sin conteo.</span></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ChordPro High Contrast Sheet -->
+          <div class="bg-[#181a20] border border-[#2c303c] rounded-2xl p-5 space-y-3">
+            <div class="flex justify-between items-center text-xs text-slate-400 border-b border-[#2c303c] pb-2">
+              <span>TELEPROMPTER INDUSTRIAL MONO</span>
+              <span class="text-[#ff5500] font-bold">ACORDES TRANSPUESTOS</span>
+            </div>
+            <div class="p-4 bg-[#0e1013] rounded-xl border border-[#232732] space-y-2 text-sm leading-relaxed">
+              <div class="text-[#ffb703] font-black text-base">[Bm]                       [G]</div>
+              <div class="text-white font-black text-lg">ELLA DURMIÓ AL CALOR DE LAS MASAS</div>
+              <div class="text-[#ffb703] font-black text-base mt-2">[D]                        [A]</div>
+              <div class="text-white font-black text-lg">Y YO DESPERTÉ QUERIENDO SOÑARLA</div>
+            </div>
+          </div>
+
+        </div>
+      `
+    };
+
+    function setParadigm(paradigmKey) {
+      document.getElementById('paradigm-content').innerHTML = paradigms[paradigmKey];
+
+      ['cockpit', 'rack', 'field'].forEach(p => {
+        const btn = document.getElementById('btn-' + p);
+        if (btn) {
+          if (p === paradigmKey) {
+            btn.className = 'px-3 py-2 rounded-lg text-xs font-mono font-bold bg-cyan-500 text-black transition-all flex items-center gap-2';
+          } else {
+            btn.className = 'px-3 py-2 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-2';
+          }
+        }
+      });
+    }
+
+    // Initialize with Cockpit HUD
+    setParadigm('cockpit');
+  </script>
+</body>
+</html>
