@@ -79,3 +79,21 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Verificación y Pruebas:**
   - `bandait-leader`: Pruebas unitarias de control concurrente, Last-Write-Wins, saltos de setlist, tempo nudge y panic stop en `test_concurrent_control.py` (100% verde).
   - `bandait-follower`: Verificación estática con `tsc --noEmit` y `eslint` completadas con 0 errores y 0 advertencias.
+
+### [2026-09-06] - Sprint 4 Completado: Mezcla Multipista, Pre-Caché IndexedDB y Co-Pilot con IA
+* **Sprint / Módulo:** Sprint 4 / `bandait-leader` & `bandait-follower`
+* **Acción técnica realizada:**
+  - **Pipeline de Separación de Stems Multipista (`stem_separator.py`):** Arquitectura asíncrona de extracción de pistas (Drums, Bass, Vocals, Other) con seguimiento de trabajos en segundo plano (`StemSeparationJob`), progreso porcentual, metadata técnica de pistas y generación sintética de contingencia en formato PCM WAV 16-bit 44.1 kHz.
+  - **Motor Armónico Camelot y Formateador ChordPro (`harmonic_engine.py`):** Mapeo estricto del sistema de 24 tonalidades al código Camelot (1A-12B), algoritmo de compatibilidad de transiciones en vivo (exacta, relativa mayor/menor, modulación de paso adyacente, salto de energía +1/+2 semitonos / +7 pasos Camelot) y serializador de acordes en formato estándar ChordPro.
+  - **Generador de Guías y Prompts de Voz para Monitoreo In-Ear (`voice_prompts.py`):** Síntesis y secuenciación de avisos auditivos directos para retorno intraural de músicos (conteos de entrada en compás, advertencias anticipadas de cambio de sección como coro/estrofa/puente con 4 compases de antelación, y alertas vocales de saltos de repertorio en vivo).
+  - **Servicio de Pre-Caché Offline en IndexedDB (`indexedDb.ts` v2 & `stemCacheService.ts`):** Actualización del esquema IndexedDB a versión 2 con object store `stemBlobs`. Implementación de `stemCacheService` para pre-descarga paralela o secuencial del repertorio antes del concierto, telemetría de almacenamiento en megabytes, verificación de integridad y cancelación segura de transferencias activas.
+  - **Mezclador Multipista para Monitoreo In-Ear (`MultiTrackMixer.tsx` & `StageView.tsx`):** Consola virtual de monitoreo intraural personal estilo Swiss Bauhaus Lab con faders individuales para Batería (`DRM`), Bajo (`BAS`), Voces (`VOX`), Armonía (`OTH`), Click Metrónomo (`CLK`) y Guía de Voz (`VOZ`). Escala de volumen calibrada en decibelios (-inf a +2 dB), paneo estéreo (-100 a +100), conmutadores Mute/Solo, presets inmediatos (`EQUILIBRADO`, `BATERISTA`, `CANTANTE`, `ARMONÍA`), botón de corte general de emergencia (`[PANIC: SILENCIAR IN-EAR]`) y limitador de protección auditiva estricto con techo rígido a -0.5 dBFS.
+  - **Regla Estricta CERO EMOJIS:** Cumplimiento total con nomenclaturas técnicas normalizadas (`[IN-EAR DSP]`, `[DRM]`, `[BAS]`, `[VOX]`, `[OTH]`, `[CLK]`, `[VOZ]`, `[PRE-CARGAR STEMS]`, `[MEZCLA]`).
+* **Impacto en Audio / Red / UI:**
+  - Seguridad auditiva en tarima: el limitador a -0.5 dBFS en cada canal y en el master protege el oído de los músicos contra picos inesperados o realimentaciones acústicas.
+  - Confiabilidad offline total: el pre-almacenamiento de stems en IndexedDB garantiza que durante el show no se dependa de la conexión Wi-Fi ni del ancho de banda para la reproducción multipista.
+  - Claridad de interpretación: las guías de voz automáticas y el monitoreo personalizado reducen errores de entrada o desfasajes en transiciones complejas.
+* **Verificación y Pruebas:**
+  - `bandait-leader`: Pruebas de integración de pipeline de IA ejecutadas con éxito en `test_ai_pipeline.py` (Camelot, compatibilidad energética, ChordPro, Stem Separator y Voice Prompts).
+  - `bandait-follower`: Verificación estática de tipos con `tsc --noEmit` y análisis de linter con `eslint` pasando con 0 errores y 0 advertencias. Pruebas unitarias de pre-caché y telemetría en `stemCacheService.test.ts`.
+

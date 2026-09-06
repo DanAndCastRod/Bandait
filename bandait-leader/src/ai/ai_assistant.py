@@ -11,7 +11,10 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 
-import keyring
+try:
+    import keyring
+except ImportError:
+    keyring = None
 
 
 @dataclass
@@ -69,10 +72,11 @@ class AIAssistant:
         api_key = os.environ.get("BANDAIT_GOOGLE_API_KEY", "")
         if not api_key:
             # 2. Try keyring (Windows Credential Manager)
-            try:
-                api_key = keyring.get_password("bandait", "google_api_key") or ""
-            except Exception:
-                api_key = ""
+            if keyring:
+                try:
+                    api_key = keyring.get_password("bandait", "google_api_key") or ""
+                except Exception:
+                    api_key = ""
         if not api_key:
             raise RuntimeError(
                 "Google API key not found. Set BANDAIT_GOOGLE_API_KEY env var "

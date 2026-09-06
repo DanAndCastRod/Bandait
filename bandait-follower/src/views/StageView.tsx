@@ -7,6 +7,7 @@ import SongRibbon, { RibbonSong } from '../components/SongRibbon'
 import VFDDisplay from '../components/VFDDisplay'
 import HardwareKnob from '../components/HardwareKnob'
 import DirectorRemoteToolbar from '../components/DirectorRemoteToolbar'
+import MultiTrackMixer from '../components/MultiTrackMixer'
 import { CommandType } from '../types/protocol'
 import { getAllSetlists } from '../db/indexedDb'
 
@@ -48,6 +49,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
   ])
   const [inEarVolume, setInEarVolume] = useState(0.8)
   const [showDirectorControls, setShowDirectorControls] = useState(true)
+  const [showMixer, setShowMixer] = useState(false)
 
   useEffect(() => {
     joinSession(sessionId)
@@ -305,6 +307,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
           )}
           <button className="btn-icon" onClick={onLibrary} title="Biblioteca">[LIB]</button>
           <button className="btn-icon" onClick={onSettings} title="Ajustes y Estilos">[CFG]</button>
+          <button className="btn-icon" onClick={() => setShowMixer(true)} title="Mezclador In-Ear">[MEZCLA]</button>
           <button className="btn-icon" onClick={toggleFullscreen} title="Pantalla completa">[FS]</button>
           <button
             className="btn-icon"
@@ -416,6 +419,15 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
       <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
         {connected ? `● CONECTADO | ${sessionId}` : '○ OFFLINE'}
       </div>
+
+      {/* IN-EAR MULTI-TRACK STEM MIXER */}
+      <MultiTrackMixer
+        songId={state?.currentSongId || 'song_01'}
+        isOpen={showMixer}
+        onClose={() => setShowMixer(false)}
+        initialMasterVolume={inEarVolume}
+        onMasterVolumeChange={(vol) => setInEarVolume(vol)}
+      />
     </div>
   )
 }
