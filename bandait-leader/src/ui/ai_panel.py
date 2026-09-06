@@ -1,6 +1,6 @@
 """AI Assistant panel — chat interface and analysis results."""
 
-from typing import Optional
+from typing import Optional, List
 
 from PySide6.QtWidgets import (
     QWidget,
