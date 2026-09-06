@@ -5,7 +5,7 @@ import threading
 import queue
 import socketio
 from dataclasses import asdict
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 import time
 from src.sync.clock_service import ClockService
