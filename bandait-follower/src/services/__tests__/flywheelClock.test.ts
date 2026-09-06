@@ -41,6 +41,7 @@ describe('FlywheelClock', () => {
     }))
 
     vi.stubGlobal('AudioContext', MockAudioContext)
+    vi.stubGlobal('window', { AudioContext: MockAudioContext })
     clock = new FlywheelClock()
   })
 

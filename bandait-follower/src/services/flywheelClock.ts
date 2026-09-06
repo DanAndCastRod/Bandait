@@ -120,7 +120,7 @@ export class FlywheelClock {
     this.isPlaying = false
     this.isAutonomous = false
     if (this.timerId !== null) {
-      window.clearTimeout(this.timerId)
+      clearTimeout(this.timerId)
       this.timerId = null
     }
     this.currentBeat = 1
@@ -181,7 +181,7 @@ export class FlywheelClock {
       this.advanceBeat()
     }
 
-    this.timerId = window.setTimeout(this.schedule, this.lookaheadMs)
+    this.timerId = setTimeout(this.schedule, this.lookaheadMs) as unknown as number
   }
 
   private advanceBeat() {
