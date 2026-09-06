@@ -38,6 +38,48 @@ gig_member_association = Table(
 )
 
 
+class User(Base):
+    __tablename__ = "users"
+    __allow_unmapped__ = True
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String, default="")
+    phone: Mapped[Optional[str]] = mapped_column(String, default="")
+    auth_provider: Mapped[str] = mapped_column(String, default="google")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "email": self.email,
+            "phone": self.phone,
+            "auth_provider": self.auth_provider,
+        }
+
+
+class Band(Base):
+    __tablename__ = "bands"
+    __allow_unmapped__ = True
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    owner_id: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    members: Mapped[List["BandMember"]] = relationship("BandMember", back_populates="band")
+    setlists: Mapped[List["Setlist"]] = relationship("Setlist", back_populates="band")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "owner_id": self.owner_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Song(Base):
     __tablename__ = "songs"
     __allow_unmapped__ = True
@@ -78,9 +120,11 @@ class Setlist(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    band_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("bands.id"), nullable=True, default="band_default")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    band: Mapped[Optional["Band"]] = relationship("Band", back_populates="setlists")
     songs: Mapped[List["Song"]] = relationship(
         secondary=setlist_song_association,
         back_populates="setlists",
@@ -92,6 +136,7 @@ class Setlist(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "band_id": self.band_id,
             "songs": [s.to_dict() for s in self.songs],
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -103,11 +148,14 @@ class BandMember(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    band_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("bands.id"), nullable=True, default="band_default")
+    user_id: Mapped[str] = mapped_column(String, default="")
     role: Mapped[str] = mapped_column(String, default="")
     color: Mapped[str] = mapped_column(String, default="#00FFFF")
     email: Mapped[str] = mapped_column(String, default="")
     phone: Mapped[str] = mapped_column(String, default="")
 
+    band: Mapped[Optional["Band"]] = relationship("Band", back_populates="members")
     gigs: Mapped[List["Gig"]] = relationship(
         secondary=gig_member_association,
         back_populates="members",
@@ -117,6 +165,8 @@ class BandMember(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "band_id": self.band_id,
+            "user_id": self.user_id,
             "role": self.role,
             "color": self.color,
         }

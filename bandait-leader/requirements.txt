@@ -15,3 +15,5 @@ ruff>=0.1.0
 qrcode[pil]>=7.4.0
 pytest>=7.4.0
 pytest-qt>=4.2.0
+openpyxl>=3.1.0
+
