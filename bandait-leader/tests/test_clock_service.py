@@ -69,3 +69,81 @@ def test_leader_time_monotonic(qapp):
     assert t2 >= t1
     diff_ms = (t2 - t1) / 1e6
     assert 40.0 < diff_ms < 100.0  # Should be ~50ms
+
+
+def test_start_playback_forces_beat_one_and_resets_phase(qapp):
+    """START must force beat=1 and reset clock phase."""
+    clock = ClockService(mode="leader")
+    state = clock.start_playback(bpm=120)
+
+    assert state["status"] == "PLAYING"
+    assert state["beat"] == 1
+    assert state["bar"] == 1
+    assert state["bpm"] == 120
+    assert clock.current_beat == 1
+    assert clock.phase_start_ns is not None
+    assert state["next_event_timestamp"] == clock.phase_start_ns
+
+
+def test_resume_playback_forces_beat_one_and_resets_phase(qapp):
+    """RESUME must force beat=1 and re-align clock phase."""
+    clock = ClockService(mode="leader")
+    clock._current_bar = 5
+    clock._current_beat = 3
+    clock._status = "PAUSED"
+
+    state = clock.resume_playback(bpm=130)
+
+    assert state["status"] == "PLAYING"
+    assert state["beat"] == 1
+    assert state["bar"] == 5
+    assert state["bpm"] == 130
+    assert clock.current_beat == 1
+    assert clock.phase_start_ns is not None
+
+
+def test_handle_transport_command_start_and_resume(qapp):
+    """handle_transport_command properly handles START and RESUME commands."""
+    clock = ClockService(mode="leader")
+
+    start_res = clock.handle_transport_command("START", bpm=140)
+    assert start_res["status"] == "PLAYING"
+    assert start_res["beat"] == 1
+    assert start_res["bpm"] == 140
+
+    pause_res = clock.handle_transport_command("PAUSE")
+    assert pause_res["status"] == "PAUSED"
+
+    resume_res = clock.handle_transport_command("RESUME")
+    assert resume_res["status"] == "PLAYING"
+    assert resume_res["beat"] == 1
+
+
+def test_calculate_beat_at_time_phase_locked(qapp):
+    """Test calculation of bar and beat locked to phase clock."""
+    clock = ClockService(mode="leader")
+    clock.start_playback(bpm=120, beats_per_bar=4)
+    start_ns = clock.phase_start_ns
+    beat_ns = int((60.0 / 120) * 1e9)  # 500ms per beat
+
+    # At exact start: bar 1, beat 1
+    bar, beat, next_ns = clock.calculate_beat_at_time(start_ns)
+    assert bar == 1
+    assert beat == 1
+    assert next_ns == start_ns + beat_ns
+
+    # Halfway into beat 1: still beat 1
+    bar, beat, _ = clock.calculate_beat_at_time(start_ns + beat_ns // 2)
+    assert bar == 1
+    assert beat == 1
+
+    # At beat 2: bar 1, beat 2
+    bar, beat, _ = clock.calculate_beat_at_time(start_ns + beat_ns + 1000)
+    assert bar == 1
+    assert beat == 2
+
+    # At bar 2 beat 1 (beat index 4)
+    bar, beat, _ = clock.calculate_beat_at_time(start_ns + 4 * beat_ns + 1000)
+    assert bar == 2
+    assert beat == 1
+

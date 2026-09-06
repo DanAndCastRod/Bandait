@@ -31,7 +31,7 @@ class AudioEngine(QObject):
         self,
         sample_rate: int = 48000,
         block_size: int = 256,
-        channels: int = 2,
+        channels: int = 4,
         device: Optional[int] = None,
         parent=None,
     ) -> None:
@@ -40,6 +40,10 @@ class AudioEngine(QObject):
         self.block_size = block_size
         self.channels = channels
         self.device = device
+
+        # Stage routing flags: Salidas 1-2 PA (FOH), Salida 3 cable a baterista
+        self.enable_drummer_click = True  # Output 3 (Ch index 2)
+        self.enable_pa_click = False       # Output 1-2 (Ch index 0-1)
 
         # Detect actual hardware capabilities
         self._input_channels = channels
@@ -90,6 +94,66 @@ class AudioEngine(QObject):
         self._beat_timer.timeout.connect(self._process_beat_queue)
         self._beat_timer.start(10)  # 100 Hz beat processing
 
+    @staticmethod
+    def get_audio_devices() -> list[dict]:
+        """Query all available host audio devices."""
+        try:
+            devices = sd.query_devices()
+            hostapis = sd.query_hostapis()
+            results = []
+            for idx, dev in enumerate(devices):
+                api_name = hostapis[dev["hostapi"]]["name"] if dev.get("hostapi") is not None else "Unknown"
+                results.append({
+                    "id": idx,
+                    "name": dev["name"],
+                    "hostapi": api_name,
+                    "max_inputs": dev.get("max_input_channels", 0),
+                    "max_outputs": dev.get("max_output_channels", 0),
+                    "default_samplerate": dev.get("default_samplerate", 48000),
+                    "is_asio": "asio" in api_name.lower() or "asio" in dev["name"].lower(),
+                })
+            return results
+        except Exception as e:
+            print(f"[AUDIO] Error querying devices: {e}")
+            return []
+
+    @classmethod
+    def get_asio_devices(cls) -> list[dict]:
+        """Return list of low-latency ASIO interfaces or multi-channel devices (>= 3 outputs)."""
+        all_devs = cls.get_audio_devices()
+        asio_devs = [d for d in all_devs if d["is_asio"]]
+        if asio_devs:
+            return asio_devs
+        # Fallback for non-Windows platforms (Linux/macOS): return devices with >= 3 outputs
+        return [d for d in all_devs if d["max_outputs"] >= 3]
+
+    def set_device(self, device_id: Optional[int], channels: int = 4) -> None:
+        """Select and activate an audio device with multi-channel routing."""
+        was_running = self._running
+        if was_running:
+            self.stop()
+
+        self.device = device_id
+        self.channels = channels
+        self._detect_device_channels()
+
+        self.mixer = Mixer(
+            input_channels=self._input_channels,
+            output_channels=self._output_channels,
+            block_size=self.block_size,
+        )
+        for i in range(4):
+            target_ch = min(i, max(0, self._output_channels - 1))
+            track = Track(
+                name=f"Pista {i+1}",
+                volume=1.0,
+                output_channels=1 << target_ch,
+            )
+            self.mixer.add_track(track)
+
+        if was_running:
+            self.start()
+
     def _detect_device_channels(self) -> None:
         """Detect actual input/output channel counts from hardware."""
         try:
@@ -134,9 +198,23 @@ class AudioEngine(QObject):
             if remaining > 0:
                 # Beat 1 = louder, higher freq simulated by amplitude
                 amplitude = 1.0 if self._beat == 0 else 0.6
-                click_out[:remaining, 0] = (
+                click_chunk = (
                     self._click[self._click_idx : self._click_idx + remaining] * amplitude
                 )
+
+                # Salida 3 (Ch index 2): Cable dedicado baterista (< 1.5ms)
+                if self._output_channels >= 3 and self.enable_drummer_click:
+                    click_out[:remaining, 2] = click_chunk
+                elif self._output_channels > 0 and self.enable_drummer_click:
+                    click_out[:remaining, 0] = click_chunk
+
+                # Salidas 1-2 PA (FOH): Sólo si enable_pa_click está activo (ensayo/prueba)
+                if self.enable_pa_click:
+                    if self._output_channels >= 1:
+                        click_out[:remaining, 0] += click_chunk
+                    if self._output_channels >= 2:
+                        click_out[:remaining, 1] += click_chunk
+
                 self._click_idx += remaining
                 if self._click_idx >= len(self._click):
                     self._click_playing = False
@@ -201,9 +279,20 @@ class AudioEngine(QObject):
             self.levels.emit(latest_levels)
 
     def start(self) -> None:
-        """Start audio stream."""
+        """Start audio stream, forcing beat = 1 and resetting metronome phase."""
         if self._running:
             return
+
+        # Force beat = 1 and reset metronome phase for immediate downbeat lock
+        self._beat = 0
+        self._samples_since_beat = 0
+        self._click_playing = True
+        self._click_idx = 0
+        try:
+            self._beat_queue.put_nowait((1, self._bpm))
+        except queue.Full:
+            pass
+
         try:
             self._stream = sd.Stream(
                 samplerate=self.sample_rate,

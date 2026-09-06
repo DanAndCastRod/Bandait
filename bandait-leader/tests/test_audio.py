@@ -116,3 +116,33 @@ def test_metronome_bpm_calculation(qapp):
     # At 60 BPM
     interval_60 = int(60.0 / 60.0 * 48000)
     assert interval_60 == 48000
+
+
+def test_asio_multichannel_routing_and_devices(qapp, monkeypatch):
+    """Verify ASIO querying and channel routing configuration."""
+    from src.audio.audio_engine import AudioEngine
+
+    # Mock sounddevice devices
+    fake_devices = [
+        {"name": "Focusrite USB ASIO", "hostapi": 0, "max_input_channels": 4, "max_output_channels": 4, "default_samplerate": 48000},
+        {"name": "Built-in Output", "hostapi": 1, "max_input_channels": 0, "max_output_channels": 2, "default_samplerate": 44100},
+    ]
+    fake_hostapis = [
+        {"name": "ASIO"},
+        {"name": "MME"},
+    ]
+
+    import sounddevice as sd
+    monkeypatch.setattr(sd, "query_devices", lambda *args: fake_devices if not args else fake_devices[0])
+    monkeypatch.setattr(sd, "query_hostapis", lambda: fake_hostapis)
+
+    asio_devs = AudioEngine.get_asio_devices()
+    assert len(asio_devs) == 1
+    assert asio_devs[0]["name"] == "Focusrite USB ASIO"
+    assert asio_devs[0]["is_asio"] is True
+
+    engine = AudioEngine(channels=4, device=0)
+    assert engine._output_channels == 4
+    assert engine.enable_drummer_click is True
+    assert engine.enable_pa_click is False
+

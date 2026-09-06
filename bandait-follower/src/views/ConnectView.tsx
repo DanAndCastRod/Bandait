@@ -2,9 +2,11 @@ import { useState, useRef } from 'react'
 
 interface Props {
   onConnect: (sessionId: string) => void
+  onSettings?: () => void
+  onLibrary?: () => void
 }
 
-export default function ConnectView({ onConnect }: Props) {
+export default function ConnectView({ onConnect, onSettings, onLibrary }: Props) {
   const [ip, setIp] = useState(localStorage.getItem('bandait_last_ip') || '')
   const [port, setPort] = useState(localStorage.getItem('bandait_last_port') || '4040')
   const [sessionId, setSessionId] = useState('default')
@@ -25,17 +27,54 @@ export default function ConnectView({ onConnect }: Props) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    // Placeholder: real QR scanning would use a library like jsQR
     setScanning(true)
     setTimeout(() => {
       setScanning(false)
-      // Mock: extract from QR
       onConnect('default')
     }, 1500)
   }
 
   return (
     <div className="connect-view">
+      <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px' }}>
+        {onLibrary && (
+          <button
+            type="button"
+            onClick={onLibrary}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--text-secondary)',
+              color: 'var(--text-secondary)',
+              padding: '6px 12px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontFamily: 'var(--font-mono)',
+              cursor: 'pointer',
+            }}
+          >
+            [LIB]
+          </button>
+        )}
+        {onSettings && (
+          <button
+            type="button"
+            onClick={onSettings}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--text-secondary)',
+              color: 'var(--text-secondary)',
+              padding: '6px 12px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontFamily: 'var(--font-mono)',
+              cursor: 'pointer',
+            }}
+          >
+            [CFG]
+          </button>
+        )}
+      </div>
+
       <h1 className="connect-title">BANDAIT</h1>
       <p className="connect-subtitle">Stage Monitor</p>
 

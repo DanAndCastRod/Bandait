@@ -1,19 +1,76 @@
 /* Bandait Follower — OLED Noir & Neon Design Tokens */
 
-:root {
+:root,
+.theme-swiss {
   --bg-primary: #000000;
-  --bg-surface: #0A0A0A;
+  --bg-surface: #0a0a0a;
   --bg-elevated: #141414;
-  --text-primary: #F0F0F0;
-  --text-secondary: #666666;
+  --text-primary: #ffffff;
+  --text-secondary: #888888;
   --text-disabled: #333333;
-  --accent-active: #00FFFF;
-  --accent-success: #CCFF00;
-  --accent-warning: #FFAA00;
-  --accent-danger: #FF0000;
-  --accent-special: #FF00FF;
-  --font-ui: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+  --accent-active: #ffffff;
+  --accent-focus: #e11d48;
+  --accent-success: #10b981;
+  --accent-warning: #f59e0b;
+  --accent-danger: #ef4444;
+  --accent-special: #e11d48;
+  --font-ui: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --theme-border: #222222;
+}
+
+.theme-milspec {
+  --bg-primary: #050608;
+  --bg-surface: #0b0e14;
+  --bg-elevated: #151a24;
+  --text-primary: #ffb000;
+  --text-secondary: #996a00;
+  --text-disabled: #3d2a00;
+  --accent-active: #ffb000;
+  --accent-focus: #ff3b00;
+  --accent-success: #ffb000;
+  --accent-warning: #ff8000;
+  --accent-danger: #ff0000;
+  --accent-special: #ffb000;
+  --font-ui: 'Bebas Neue', system-ui, sans-serif;
+  --font-mono: 'Share Tech Mono', monospace;
+  --theme-border: #ffb00044;
+}
+
+.theme-tokyo {
+  --bg-primary: #03070b;
+  --bg-surface: #07121c;
+  --bg-elevated: #0d1e2e;
+  --text-primary: #00e5ff;
+  --text-secondary: #007788;
+  --text-disabled: #003344;
+  --accent-active: #00e5ff;
+  --accent-focus: #ff0077;
+  --accent-success: #00ffaa;
+  --accent-warning: #ffaa00;
+  --accent-danger: #ff0055;
+  --accent-special: #ff0077;
+  --font-ui: 'Orbitron', system-ui, sans-serif;
+  --font-mono: 'Silkscreen', monospace;
+  --theme-border: #00e5ff44;
+}
+
+.theme-concert {
+  --bg-primary: #0a0708;
+  --bg-surface: #171012;
+  --bg-elevated: #261b1e;
+  --text-primary: #e6c875;
+  --text-secondary: #8c734b;
+  --text-disabled: #4a3c26;
+  --accent-active: #d4af37;
+  --accent-focus: #9e1b32;
+  --accent-success: #d4af37;
+  --accent-warning: #e59866;
+  --accent-danger: #9e1b32;
+  --accent-special: #d4af37;
+  --font-ui: 'Cinzel', serif;
+  --font-mono: 'Playfair Display', serif;
+  --theme-border: #d4af3744;
 }
 
 * {

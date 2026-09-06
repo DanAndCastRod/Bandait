@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useSync } from '../hooks/useSync'
 import { syncService } from '../services/syncService'
+import { flywheelClock } from '../services/flywheelClock'
 
 interface Props {
   sessionId: string
   onLibrary: () => void
+  onSettings: () => void
   onDisconnect: () => void
 }
 
@@ -18,9 +20,10 @@ interface SongData {
   segments: Array<{ label: string; bars: number }>
 }
 
-export default function StageView({ sessionId, onLibrary, onDisconnect }: Props) {
+export default function StageView({ sessionId, onLibrary, onSettings, onDisconnect }: Props) {
   const { connected, state, offsetMs, joinSession } = useSync()
   const [health, setHealth] = useState<NetworkHealth>('good')
+  const [isFlywheelAutonomous, setIsFlywheelAutonomous] = useState(false)
   const [slideProgress, setSlideProgress] = useState(0)
   const [isSliding, setIsSliding] = useState(false)
   const slideTimer = useRef<number | null>(null)
@@ -28,10 +31,7 @@ export default function StageView({ sessionId, onLibrary, onDisconnect }: Props)
   const [currentLyricIndex, setCurrentLyricIndex] = useState(0)
   const [elapsedTime, setElapsedTime] = useState(0)
   const [songData, setSongData] = useState<SongData | null>(null)
-  // Audio context for click
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const nextNoteTimeRef = useRef(0)
-  const timerRef = useRef<number | null>(null)
+
 
   useEffect(() => {
     joinSession(sessionId)
@@ -81,45 +81,31 @@ export default function StageView({ sessionId, onLibrary, onDisconnect }: Props)
     }
   }, [elapsedTime, songData, currentLyricIndex, state?.status])
 
-  // Web Audio metronome
+  // Synchronize Flywheel with connection state
   useEffect(() => {
+    flywheelClock.setConnected(connected)
+  }, [connected])
+
+  // Flywheel Web Audio precision metronome & clock
+  useEffect(() => {
+    flywheelClock.setCallbacks(
+      (_bar, beatNum) => {
+        setVisualBeat(beatNum)
+        setTimeout(() => setVisualBeat(0), 120)
+      },
+      (autonomous) => {
+        setIsFlywheelAutonomous(autonomous)
+      }
+    )
+
     if (state?.status === 'PLAYING' && state?.bpm) {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new AudioContext()
-      }
-      const ctx = audioCtxRef.current
-      const bpm = state.bpm
-      const beatDuration = 60.0 / bpm
-
-      const schedule = () => {
-        const now = ctx.currentTime
-        while (nextNoteTimeRef.current < now + 0.1) {
-          const osc = ctx.createOscillator()
-          const gain = ctx.createGain()
-          osc.connect(gain)
-          gain.connect(ctx.destination)
-
-          // Beat 1 = higher pitch, louder
-          const isBeatOne = Math.round(nextNoteTimeRef.current / beatDuration) % 4 === 0
-          osc.frequency.value = isBeatOne ? 1000 : 800
-          gain.gain.setValueAtTime(isBeatOne ? 0.3 : 0.15, nextNoteTimeRef.current)
-          gain.gain.exponentialRampToValueAtTime(0.001, nextNoteTimeRef.current + 0.05)
-
-          osc.start(nextNoteTimeRef.current)
-          osc.stop(nextNoteTimeRef.current + 0.05)
-
-          nextNoteTimeRef.current += beatDuration
-        }
-      }
-
-      nextNoteTimeRef.current = ctx.currentTime + 0.05
-      timerRef.current = window.setInterval(schedule, 25)
-
-      return () => {
-        if (timerRef.current) clearInterval(timerRef.current)
-      }
+      flywheelClock.start(state.bpm)
     } else {
-      if (timerRef.current) clearInterval(timerRef.current)
+      flywheelClock.stop()
+    }
+
+    return () => {
+      flywheelClock.stop()
     }
   }, [state?.status, state?.bpm])
 
@@ -234,10 +220,26 @@ export default function StageView({ sessionId, onLibrary, onDisconnect }: Props)
       </div>
 
       {/* Top Bar: Navigation */}
-      <div className="stage-topbar">
-        <button className="btn-icon" onClick={onLibrary} title="Biblioteca">☰</button>
-        <button className="btn-icon" onClick={toggleFullscreen} title="Pantalla completa">⛶</button>
-        <button className="btn-icon" onClick={onDisconnect} title="Desconectar">✕</button>
+      <div className="stage-topbar" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {isFlywheelAutonomous && (
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '11px',
+              color: 'var(--accent-warning)',
+              border: '1px solid var(--accent-warning)',
+              padding: '2px 8px',
+              borderRadius: '3px',
+              letterSpacing: '1px',
+            }}
+          >
+            FLYWHEEL INERTIA
+          </span>
+        )}
+        <button className="btn-icon" onClick={onLibrary} title="Biblioteca">[LIB]</button>
+        <button className="btn-icon" onClick={onSettings} title="Ajustes y Estilos">[CFG]</button>
+        <button className="btn-icon" onClick={toggleFullscreen} title="Pantalla completa">[FS]</button>
+        <button className="btn-icon" onClick={onDisconnect} title="Desconectar">[SALIR]</button>
       </div>
 
       {/* Main Content */}

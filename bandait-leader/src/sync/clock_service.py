@@ -73,6 +73,11 @@ class ClockService(QObject):
     # Emitted when a stable offset is computed
     offset_stable = Signal(float)  # offset_ms
 
+    # Transport phase signals
+    beat_updated = Signal(int, int, float)  # bar, beat (1-4), bpm
+    transport_state_changed = Signal(str, int, int)  # status, beat, timestamp_ns
+    phase_reset = Signal(int, int)  # beat=1, timestamp_ns
+
     def __init__(
         self,
         mode: str = "leader",  # "leader" or "follower"
@@ -88,6 +93,15 @@ class ClockService(QObject):
         self._stable_offset_ms: Optional[float] = None
         self._worker: Optional[_ClockWorker] = None
         self._thread: Optional[QThread] = None
+
+        # Transport clock phase management
+        self._status = "IDLE"
+        self._bpm = 120
+        self._beats_per_bar = 4
+        self._current_beat = 1
+        self._current_bar = 1
+        self._phase_start_ns: Optional[int] = None
+        self._next_event_timestamp_ns: int = 0
 
     def start(self) -> None:
         self._worker = _ClockWorker()
@@ -165,3 +179,161 @@ class ClockService(QObject):
         t2 = time.monotonic_ns()
         if self._worker:
             self._worker.record_response(t2, leader_time_ns)
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    @property
+    def current_beat(self) -> int:
+        return self._current_beat
+
+    @property
+    def current_bar(self) -> int:
+        return self._current_bar
+
+    @property
+    def bpm(self) -> int:
+        return self._bpm
+
+    @property
+    def next_event_timestamp_ns(self) -> int:
+        return self._next_event_timestamp_ns
+
+    @property
+    def phase_start_ns(self) -> Optional[int]:
+        return self._phase_start_ns
+
+    def start_playback(
+        self,
+        bpm: Optional[int] = None,
+        lead_in_ms: float = 0.0,
+        beats_per_bar: int = 4,
+    ) -> dict:
+        """Start playback, forcing beat = 1 and resetting clock phase."""
+        if bpm is not None:
+            self._bpm = max(20, min(500, int(bpm)))
+        self._beats_per_bar = max(1, beats_per_bar)
+        self._current_beat = 1
+        self._current_bar = 1
+        self._status = "PLAYING"
+
+        now_ns = self.get_leader_time_ns()
+        lead_in_ns = int(lead_in_ms * 1e6)
+        self._phase_start_ns = now_ns + lead_in_ns
+        self._next_event_timestamp_ns = self._phase_start_ns
+
+        self.phase_reset.emit(1, self._phase_start_ns)
+        self.beat_updated.emit(1, 1, float(self._bpm))
+        self.transport_state_changed.emit("PLAYING", 1, self._phase_start_ns)
+
+        return {
+            "status": "PLAYING",
+            "bpm": self._bpm,
+            "beat": 1,
+            "bar": 1,
+            "next_event_timestamp": self._next_event_timestamp_ns,
+        }
+
+    def resume_playback(
+        self,
+        bpm: Optional[int] = None,
+        lead_in_ms: float = 0.0,
+    ) -> dict:
+        """Resume playback, forcing beat = 1 and resetting clock phase."""
+        if bpm is not None:
+            self._bpm = max(20, min(500, int(bpm)))
+        self._current_beat = 1
+        self._status = "PLAYING"
+
+        now_ns = self.get_leader_time_ns()
+        lead_in_ns = int(lead_in_ms * 1e6)
+        self._phase_start_ns = now_ns + lead_in_ns
+        self._next_event_timestamp_ns = self._phase_start_ns
+
+        self.phase_reset.emit(1, self._phase_start_ns)
+        self.beat_updated.emit(self._current_bar, 1, float(self._bpm))
+        self.transport_state_changed.emit("PLAYING", 1, self._phase_start_ns)
+
+        return {
+            "status": "PLAYING",
+            "bpm": self._bpm,
+            "beat": 1,
+            "bar": self._current_bar,
+            "next_event_timestamp": self._next_event_timestamp_ns,
+        }
+
+    def stop_playback(self) -> dict:
+        """Stop playback and reset transport phase."""
+        self._status = "IDLE"
+        self._current_beat = 1
+        self._current_bar = 1
+        self._phase_start_ns = None
+        self._next_event_timestamp_ns = 0
+
+        self.transport_state_changed.emit("IDLE", 1, 0)
+
+        return {
+            "status": "IDLE",
+            "bpm": self._bpm,
+            "beat": 1,
+            "bar": 1,
+            "next_event_timestamp": 0,
+        }
+
+    def pause_playback(self) -> dict:
+        """Pause playback preserving current position."""
+        self._status = "PAUSED"
+        now_ns = self.get_leader_time_ns()
+        self.transport_state_changed.emit("PAUSED", self._current_beat, now_ns)
+
+        return {
+            "status": "PAUSED",
+            "bpm": self._bpm,
+            "beat": self._current_beat,
+            "bar": self._current_bar,
+            "next_event_timestamp": 0,
+        }
+
+    def handle_transport_command(
+        self,
+        command: str,
+        bpm: Optional[int] = None,
+        lead_in_ms: float = 0.0,
+    ) -> dict:
+        """Unified command handler enforcing clock phase reset on START and RESUME."""
+        cmd = command.strip().upper()
+        if cmd in ("START", "PLAY"):
+            return self.start_playback(bpm=bpm, lead_in_ms=lead_in_ms)
+        elif cmd == "RESUME":
+            return self.resume_playback(bpm=bpm, lead_in_ms=lead_in_ms)
+        elif cmd == "STOP":
+            return self.stop_playback()
+        elif cmd == "PAUSE":
+            return self.pause_playback()
+        else:
+            raise ValueError(f"Unknown transport command: {command}")
+
+    def calculate_beat_at_time(self, time_ns: Optional[int] = None) -> tuple[int, int, int]:
+        """Calculate (bar, beat, next_event_timestamp_ns) from phase clock."""
+        if self._phase_start_ns is None or self._status != "PLAYING":
+            return (self._current_bar, self._current_beat, self._next_event_timestamp_ns)
+
+        if time_ns is None:
+            time_ns = self.get_leader_time_ns()
+
+        elapsed_ns = time_ns - self._phase_start_ns
+        if elapsed_ns < 0:
+            return (1, 1, self._phase_start_ns)
+
+        beat_duration_ns = int((60.0 / self._bpm) * 1e9)
+        total_beats = elapsed_ns // beat_duration_ns
+        current_beat = int((total_beats % self._beats_per_bar) + 1)
+        current_bar = int((total_beats // self._beats_per_bar) + 1)
+        next_event_ns = self._phase_start_ns + int((total_beats + 1) * beat_duration_ns)
+
+        self._current_beat = current_beat
+        self._current_bar = current_bar
+        self._next_event_timestamp_ns = next_event_ns
+
+        return (current_bar, current_beat, next_event_ns)
