@@ -157,6 +157,12 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
     }
   }, [state?.currentSongId])
 
+  const handleEmergencyStop = useCallback(() => {
+    syncService.disconnect()
+    setIsSliding(false)
+    setSlideProgress(0)
+  }, [])
+
   const handleSlideStart = useCallback(() => {
     setIsSliding(true)
     setSlideProgress(0)
@@ -170,7 +176,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
       }
     }, 20)
     slideTimer.current = interval
-  }, [])
+  }, [handleEmergencyStop])
 
   const handleSlideEnd = useCallback(() => {
     setIsSliding(false)
@@ -178,12 +184,6 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
     if (slideTimer.current) {
       window.clearInterval(slideTimer.current)
     }
-  }, [])
-
-  const handleEmergencyStop = useCallback(() => {
-    syncService.disconnect()
-    setIsSliding(false)
-    setSlideProgress(0)
   }, [])
 
   const toggleFullscreen = useCallback(() => {

@@ -14,7 +14,7 @@ export class SyncService {
   private syncResults: SyncResult[] = [];
   private stableOffsetMs: number | null = null;
   private onStateUpdate: ((state: SessionState) => void) | null = null;
-  private onCommand: ((cmd: any) => void) | null = null;
+  private onCommand: ((cmd: unknown) => void) | null = null;
   private onConnect: (() => void) | null = null;
   private onDisconnect: (() => void) | null = null;
 
@@ -46,7 +46,7 @@ export class SyncService {
       this.onStateUpdate?.(state);
     });
 
-    this.socket.on("command", (cmd: any) => {
+    this.socket.on("command", (cmd: unknown) => {
       this.onCommand?.(cmd);
     });
   }
@@ -159,7 +159,7 @@ export class SyncService {
     this.onStateUpdate = handler;
   }
 
-  setCommandHandler(handler: (cmd: any) => void): void {
+  setCommandHandler(handler: (cmd: unknown) => void): void {
     this.onCommand = handler;
   }
 

@@ -35,17 +35,27 @@ describe("SyncService", () => {
       { rttMs: 200, offsetMs: 100, timestampMs: 5000 }, // outlier
     ];
 
-    // Access private for test
-    (sync as any).syncResults = results;
-    (sync as any).computeStableOffset();
+    // Access internal fields for test
+    type SyncTestAccess = {
+      syncResults: typeof results
+      computeStableOffset: () => void
+      stableOffsetMs: number | null
+    }
+    const syncInternal = sync as unknown as SyncTestAccess
+    syncInternal.syncResults = results
+    syncInternal.computeStableOffset()
 
-    const offset = (sync as any).stableOffsetMs;
-    expect(offset).not.toBeNull();
-    expect(Math.abs(offset - 5.0)).toBeLessThan(2.0); // Should ignore 100ms outlier
-  });
+    const offset = syncInternal.stableOffsetMs
+    expect(offset).not.toBeNull()
+    expect(Math.abs(offset! - 5.0)).toBeLessThan(2.0) // Should ignore 100ms outlier
+  })
 
   it("should convert times using stable offset", () => {
-    (sync as any).stableOffsetMs = 10.0;
+    type SyncTestAccess = {
+      stableOffsetMs: number | null
+    }
+    const syncInternal = sync as unknown as SyncTestAccess
+    syncInternal.stableOffsetMs = 10.0
 
     // convertToLocal: leaderTime - offset = 100 - 10 = 90
     expect(sync.convertToLocal(100)).toBe(90);
