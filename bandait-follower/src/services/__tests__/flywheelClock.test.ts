@@ -59,13 +59,22 @@ describe('FlywheelClock', () => {
   })
 
   it('forces beat = 1 and bar = 1 on start', () => {
+    let firstBeat = -1
+    let firstBar = -1
+    clock.setCallbacks((bar, beat) => {
+      if (firstBeat === -1) {
+        firstBar = bar
+        firstBeat = beat
+      }
+    })
+
     clock.start(130, 4)
     const state = clock.getState()
 
     expect(state.isPlaying).toBe(true)
     expect(state.bpm).toBe(130)
-    expect(state.currentBeat).toBe(1)
-    expect(state.currentBar).toBe(1)
+    expect(firstBeat).toBe(1)
+    expect(firstBar).toBe(1)
     expect(state.isAutonomous).toBe(false)
   })
 
