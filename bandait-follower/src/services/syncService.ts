@@ -4,7 +4,7 @@
  */
 
 import { io, Socket } from "socket.io-client";
-import { MessageType, SessionState, SyncResult } from "../types/protocol";
+import { MessageType, SessionState, SyncResult, SetlistJumpAlert, CommandType } from "../types/protocol";
 
 const SYNC_WINDOW = 10;
 const OUTLIER_THRESHOLD = 2.0;
@@ -15,6 +15,7 @@ export class SyncService {
   private stableOffsetMs: number | null = null;
   private onStateUpdate: ((state: SessionState) => void) | null = null;
   private onCommand: ((cmd: unknown) => void) | null = null;
+  private onSetlistJump: ((alert: SetlistJumpAlert) => void) | null = null;
   private onConnect: (() => void) | null = null;
   private onDisconnect: (() => void) | null = null;
 
@@ -48,6 +49,10 @@ export class SyncService {
 
     this.socket.on("command", (cmd: unknown) => {
       this.onCommand?.(cmd);
+    });
+
+    this.socket.on("setlist_jump", (alert: SetlistJumpAlert) => {
+      this.onSetlistJump?.(alert);
     });
   }
 
@@ -169,6 +174,21 @@ export class SyncService {
 
   setDisconnectHandler(handler: () => void): void {
     this.onDisconnect = handler;
+  }
+
+  setSetlistJumpHandler(handler: (alert: SetlistJumpAlert) => void): void {
+    this.onSetlistJump = handler;
+  }
+
+  sendCommand(type: CommandType, payload?: Record<string, unknown>, sessionId: string = "default"): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit("control_command", {
+      sessionId,
+      type,
+      origin: "director_mobile",
+      timestampNs: Date.now() * 1000000,
+      payload: payload || {},
+    });
   }
 }
 

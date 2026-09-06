@@ -7,8 +7,10 @@ import socketio
 from dataclasses import asdict
 from typing import Any, Optional
 
+import time
 from src.sync.clock_service import ClockService
-from src.domain.models import SessionState, MessageType
+from src.domain.models import SessionState, MessageType, CommandType, ConcurrentCommand, Song
+from src.domain.concurrent_control import ConcurrentControlManager, IClockService
 
 
 class BandaitServer:
@@ -34,6 +36,7 @@ class BandaitServer:
         self._sessions: dict[str, dict[str, Any]] = {}
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._control_manager = ConcurrentControlManager(self._clock)
         self._setup_handlers()
 
         # Thread-safe broadcast queue
@@ -103,15 +106,60 @@ class BandaitServer:
                 )
 
         @self._sio.on("control_command")
-        async def control_command(sid: str, data: dict) -> None:
-            """Transport commands: PLAY, STOP, PANIC, etc."""
+        async def control_command(sid: str, data: dict) -> dict:
+            """Transport commands: PLAY, STOP, JUMP_SONG, TEMPO_NUDGE, PANIC."""
             session_id = data.get("sessionId", "default")
-            await self._sio.emit(
-                "command",
-                data,
-                room=session_id,
-                skip_sid=sid,
+            cmd_type_str = data.get("type", "PLAY")
+            try:
+                cmd_type = CommandType(cmd_type_str)
+            except ValueError:
+                cmd_type = CommandType.PLAY
+
+            cmd = ConcurrentCommand(
+                command_id=data.get("commandId", f"cmd_{time.monotonic_ns()}"),
+                command_type=cmd_type,
+                origin=data.get("origin", "director_mobile"),
+                sender_user_id=data.get("userId", sid),
+                session_id=session_id,
+                timestamp_ns=data.get("timestampNs", time.monotonic_ns()),
+                payload=data.get("payload", {}),
             )
+
+            result = self._control_manager.process_command(cmd)
+
+            ack_data = {
+                "type": MessageType.COMMAND_ACK.value,
+                "commandId": cmd.command_id,
+                "success": result.success,
+                "actionTaken": result.action_taken,
+                "state": asdict(result.new_state),
+            }
+
+            if result.success:
+                if session_id in self._sessions:
+                    self._sessions[session_id]["state"] = asdict(result.new_state)
+
+                await self._sio.emit(
+                    "state_update",
+                    asdict(result.new_state),
+                    room=session_id,
+                )
+
+                if result.jump_alert:
+                    await self._sio.emit(
+                        "setlist_jump",
+                        asdict(result.jump_alert),
+                        room=session_id,
+                    )
+
+            return ack_data
+
+    def set_setlist(self, songs: List[Song]) -> None:
+        """Update active setlist in concurrent control manager."""
+        self._control_manager.set_setlist(songs)
+
+    def get_control_manager(self) -> ConcurrentControlManager:
+        return self._control_manager
 
     def start(self) -> None:
         """Start server in a background thread (non-blocking for Qt event loop)."""

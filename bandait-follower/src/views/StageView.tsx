@@ -2,6 +2,13 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useSync } from '../hooks/useSync'
 import { syncService } from '../services/syncService'
 import { flywheelClock } from '../services/flywheelClock'
+import SetlistJumpBanner from '../components/SetlistJumpBanner'
+import SongRibbon, { RibbonSong } from '../components/SongRibbon'
+import VFDDisplay from '../components/VFDDisplay'
+import HardwareKnob from '../components/HardwareKnob'
+import DirectorRemoteToolbar from '../components/DirectorRemoteToolbar'
+import { CommandType } from '../types/protocol'
+import { getAllSetlists } from '../db/indexedDb'
 
 interface Props {
   sessionId: string
@@ -21,7 +28,7 @@ interface SongData {
 }
 
 export default function StageView({ sessionId, onLibrary, onSettings, onDisconnect }: Props) {
-  const { connected, state, offsetMs, joinSession } = useSync()
+  const { connected, state, offsetMs, jumpAlert, setJumpAlert, sendCommand, joinSession } = useSync()
   const [health, setHealth] = useState<NetworkHealth>('good')
   const [isFlywheelAutonomous, setIsFlywheelAutonomous] = useState(false)
   const [slideProgress, setSlideProgress] = useState(0)
@@ -32,10 +39,36 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
   const [elapsedTime, setElapsedTime] = useState(0)
   const [songData, setSongData] = useState<SongData | null>(null)
 
+  // Sprint 3 State
+  const [ribbonSongs, setRibbonSongs] = useState<RibbonSong[]>([
+    { id: 'song_01', title: 'Medianoche en Pereira', bpm: 124, key: 'Am' },
+    { id: 'song_02', title: 'Ritmo de Calle', bpm: 128, key: 'Em' },
+    { id: 'song_03', title: 'Desde Lejos (Balada)', bpm: 88, key: 'G' },
+    { id: 'song_04', title: 'Fuego en Tarima', bpm: 140, key: 'Dm' },
+  ])
+  const [inEarVolume, setInEarVolume] = useState(0.8)
+  const [showDirectorControls, setShowDirectorControls] = useState(true)
 
   useEffect(() => {
     joinSession(sessionId)
   }, [sessionId, joinSession])
+
+  // Load setlist songs from offline IndexedDB if available
+  useEffect(() => {
+    getAllSetlists()
+      .then((setlists) => {
+        if (setlists.length > 0 && setlists[0].songs.length > 0) {
+          const loaded: RibbonSong[] = setlists[0].songs.map((s) => ({
+            id: s.id,
+            title: s.title,
+            bpm: s.bpm,
+            key: s.key,
+          }))
+          setRibbonSongs(loaded)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   // Network health
   useEffect(() => {
@@ -112,12 +145,10 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
   // Load song data when song changes
   useEffect(() => {
     if (state?.currentSongId) {
-      // In real app, fetch from IndexedDB or server
-      // For now, use demo data
       const demoSongs: Record<string, SongData> = {
         'song_01': {
           title: 'Medianoche en Pereira',
-          artist: 'Bandait',
+          artist: 'Los Inquietos',
           bpm: 124,
           lyrics: [
             { time: 0, text: '...' },
@@ -136,7 +167,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
         },
         'song_02': {
           title: 'Ritmo de Calle',
-          artist: 'Bandait',
+          artist: 'Banda Local',
           bpm: 128,
           lyrics: [
             { time: 0, text: '...' },
@@ -150,18 +181,39 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
             { label: 'Coro', bars: 16 },
           ],
         },
+        'song_03': {
+          title: 'Desde Lejos (Balada)',
+          artist: 'Solistas',
+          bpm: 88,
+          lyrics: [
+            { time: 0, text: '...' },
+            { time: 10.0, text: 'Desde lejos te observo' },
+            { time: 20.0, text: 'Y no puedo hablar' },
+          ],
+          segments: [
+            { label: 'Intro', bars: 4 },
+            { label: 'Verso', bars: 8 },
+          ],
+        },
       }
-      setSongData(demoSongs[state.currentSongId] || null)
+      setSongData(demoSongs[state.currentSongId] || {
+        title: `Canción ${state.currentSongId}`,
+        artist: 'Bandait Live',
+        bpm: state.bpm,
+        lyrics: [],
+        segments: [],
+      })
     } else {
       setSongData(null)
     }
-  }, [state?.currentSongId])
+  }, [state?.currentSongId, state?.bpm])
 
   const handleEmergencyStop = useCallback(() => {
+    sendCommand('PANIC')
     syncService.disconnect()
     setIsSliding(false)
     setSlideProgress(0)
-  }, [])
+  }, [sendCommand])
 
   const handleSlideStart = useCallback(() => {
     setIsSliding(true)
@@ -194,6 +246,14 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
     }
   }, [])
 
+  const handleDirectorCommand = (type: CommandType, payload?: Record<string, unknown>) => {
+    sendCommand(type, payload)
+  }
+
+  const handleSelectSongFromRibbon = (song: RibbonSong, index: number) => {
+    sendCommand('JUMP_SONG', { song_id: song.id, order_index: index })
+  }
+
   const isBeatOne = visualBeat === 1
   const beatFlashClass = visualBeat > 0 ? `beat-${visualBeat}` : ''
   const lyrics = songData?.lyrics || []
@@ -202,6 +262,12 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
 
   return (
     <div className={`stage-view ${beatFlashClass}`}>
+      {/* HIGH VISIBILITY SETLIST JUMP ALERT BANNER */}
+      <SetlistJumpBanner
+        alert={jumpAlert}
+        onDismiss={() => setJumpAlert(null)}
+      />
+
       {/* Visual Metronome — 4-border flash */}
       <div className={`metronome-border top ${isBeatOne ? 'active' : ''}`} />
       <div className={`metronome-border right ${visualBeat === 2 ? 'active' : ''}`} />
@@ -219,32 +285,74 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
         <span className="beacon-offset">{offsetMs ? `${Math.abs(offsetMs).toFixed(1)}ms` : '--'}</span>
       </div>
 
-      {/* Top Bar: Navigation */}
-      <div className="stage-topbar" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {isFlywheelAutonomous && (
-          <span
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '11px',
-              color: 'var(--accent-warning)',
-              border: '1px solid var(--accent-warning)',
-              padding: '2px 8px',
-              borderRadius: '3px',
-              letterSpacing: '1px',
-            }}
+      {/* Top Bar: Navigation & Hardware Knob */}
+      <div className="stage-topbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {isFlywheelAutonomous && (
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                color: 'var(--accent-warning)',
+                border: '1px solid var(--accent-warning)',
+                padding: '2px 8px',
+                borderRadius: '3px',
+                letterSpacing: '1px',
+              }}
+            >
+              [FLYWHEEL ACTIVO]
+            </span>
+          )}
+          <button className="btn-icon" onClick={onLibrary} title="Biblioteca">[LIB]</button>
+          <button className="btn-icon" onClick={onSettings} title="Ajustes y Estilos">[CFG]</button>
+          <button className="btn-icon" onClick={toggleFullscreen} title="Pantalla completa">[FS]</button>
+          <button
+            className="btn-icon"
+            onClick={() => setShowDirectorControls(!showDirectorControls)}
+            title="Alternar Mando Director"
           >
-            FLYWHEEL INERTIA
-          </span>
-        )}
-        <button className="btn-icon" onClick={onLibrary} title="Biblioteca">[LIB]</button>
-        <button className="btn-icon" onClick={onSettings} title="Ajustes y Estilos">[CFG]</button>
-        <button className="btn-icon" onClick={toggleFullscreen} title="Pantalla completa">[FS]</button>
-        <button className="btn-icon" onClick={onDisconnect} title="Desconectar">[SALIR]</button>
+            {showDirectorControls ? '[OCULTAR MANDO]' : '[VER MANDO]'}
+          </button>
+          <button className="btn-icon" onClick={onDisconnect} title="Desconectar">[SALIR]</button>
+        </div>
+
+        {/* IN-EAR VOLUME HARDWARE KNOB */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <HardwareKnob
+            label="IN-EAR GAIN"
+            value={inEarVolume}
+            onChange={(val) => setInEarVolume(val)}
+          />
+        </div>
       </div>
 
-      {/* Main Content */}
+      {/* HARDWARE SONG RIBBON */}
+      <SongRibbon
+        songs={ribbonSongs}
+        currentSongId={state?.currentSongId ?? null}
+        onSelectSong={handleSelectSongFromRibbon}
+      />
+
+      {/* VFD DIGITAL STAGE DISPLAY */}
+      <VFDDisplay
+        bpm={state?.bpm ?? 120}
+        bar={state?.bar ?? 1}
+        beat={visualBeat || (state?.beat ?? 1)}
+        status={state?.status ?? 'IDLE'}
+        isFlywheel={isFlywheelAutonomous}
+      />
+
+      {/* DIRECTOR CONCURRENT CONTROL TOOLBAR */}
+      {showDirectorControls && (
+        <DirectorRemoteToolbar
+          isPlaying={state?.status === 'PLAYING'}
+          currentBpm={state?.bpm ?? 120}
+          onCommand={handleDirectorCommand}
+        />
+      )}
+
+      {/* Main Stage Content */}
       <div className="stage-content">
-        {/* Song info */}
         {songData && (
           <div className="song-header">
             <h1 className="song-title">{songData.title}</h1>
@@ -252,13 +360,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
           </div>
         )}
 
-        {/* BPM Display */}
-        <div className="bpm-section">
-          <div className="bpm-value">{state?.bpm ?? '—'}</div>
-          <div className="bpm-label">BPM</div>
-        </div>
-
-        {/* Lyrics */}
+        {/* Lyrics Area */}
         <div className="lyrics-section">
           {currentLyric ? (
             <>
@@ -269,19 +371,9 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
             </>
           ) : (
             <div className="lyrics-waiting">
-              {songData ? '...' : 'Esperando canción del líder...'}
+              {songData ? '...' : 'Esperando orden del director...'}
             </div>
           )}
-        </div>
-
-        {/* Beat indicator */}
-        <div className="beat-indicator">
-          {[1, 2, 3, 4].map((b) => (
-            <div
-              key={b}
-              className={`beat-dot ${b === beat ? 'active' : ''} ${b === 1 && b === beat ? 'accent' : ''}`}
-            />
-          ))}
         </div>
 
         {/* Segments */}

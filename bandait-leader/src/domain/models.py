@@ -20,6 +20,8 @@ class MessageType(str, Enum):
     STOP = "STOP"
     PANIC = "PANIC"
     FULL_STATE = "FULL_STATE"
+    SETLIST_JUMP = "SETLIST_JUMP"
+    COMMAND_ACK = "COMMAND_ACK"
 
 
 @dataclass(frozen=True)
@@ -176,6 +178,38 @@ class ExcelMasterWorkbook:
     equipo: List[ExcelEquipoRow] = field(default_factory=list)
 
 
+class CommandType(str, Enum):
+    PLAY = "PLAY"
+    STOP = "STOP"
+    PAUSE = "PAUSE"
+    CUE_NEXT = "CUE_NEXT"
+    CUE_PREV = "CUE_PREV"
+    JUMP_SONG = "JUMP_SONG"
+    TEMPO_NUDGE = "TEMPO_NUDGE"
+    PANIC = "PANIC"
+
+
+@dataclass(frozen=True)
+class SetlistJumpAlert:
+    song_id: str
+    title: str
+    order_index: int
+    previous_song_id: Optional[str] = None
+    triggered_by: str = "Director"
+    timestamp_ns: int = 0
+
+
+@dataclass(frozen=True)
+class ConcurrentCommand:
+    command_id: str
+    command_type: CommandType
+    origin: str  # "laptop" | "director_mobile" | "foh"
+    sender_user_id: str
+    session_id: str
+    timestamp_ns: int
+    payload: dict = field(default_factory=dict)
+
+
 @dataclass(frozen=True)
 class SessionState:
     session_id: str
@@ -185,4 +219,6 @@ class SessionState:
     next_event_timestamp: int  # nanoseconds from leader monotonic clock
     bpm: int
     beat: int = 1  # 1-4
+    bar: int = 1
+    jump_alert: Optional[SetlistJumpAlert] = None
 

@@ -59,6 +59,23 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - Integridad de catálogo: el modal de *Diff Preview* evita pérdidas de cambios de último minuto en tonos o tempos al importar archivos.
   - Continuidad offline: catálogos y setlists importados se persisten directamente en IndexedDB en el cliente PWA.
 * **Verificación y Pruebas:**
-  - `bandait-leader`: Pruebas de servicio XLSX (`test_xlsx_service.py`) y servicio de autenticación multi-banda (`test_auth_service.py`) ejecutadas con éxito (100% verde).
   - `bandait-follower`: Validación estática de tipos `tsc --noEmit` y linter `eslint` completados con 0 errores y 0 advertencias.
   - Pruebas unitarias de reconciliador cliente en `xlsxService.test.ts`.
+
+### [2026-09-06] - Sprint 3 Completado: Control Remoto Concurrente, Alerta de Saltos y Ergonomía de Hardware
+* **Sprint / Módulo:** Sprint 3 / `bandait-leader` & `bandait-follower`
+* **Acción técnica realizada:**
+  - **Protocolo de Mando Concurrente Maestro (`concurrent_control.py` & `server.py`):** Implementado `ConcurrentControlManager` para arbitraje de transporte dual simultáneo (Laptop FOH y Smartphone del Director). Algoritmo Last-Write-Wins (LWW) basado en marcas temporales monotónicas con confirmación inmediata (`command_ack`) y rechazo de paquetes desactualizados. Soporte para comandos: `PLAY`, `STOP`, `PAUSE`, `CUE_NEXT`, `CUE_PREV`, `JUMP_SONG`, `TEMPO_NUDGE` (+/- 1 BPM dentro de límites seguros 40..260 BPM) y `PANIC`.
+  - **Detección y Banner de Saltos Imprevistos de Setlist (`SetlistJumpBanner.tsx`):** Detección en tiempo real de saltos no secuenciales de canciones en el repertorio activo. Emisión del evento `setlist_jump` y renderizado de un banner de alta visibilidad en los Followers con origen de la orden (`DIRECTOR MOVIL` / `LAPTOP FOH`), número y título de canción, con temporizador de auto-ocultamiento y botón `[ENTENDIDO]`.
+  - **Cinta Táctil de Repertorio (`SongRibbon.tsx`):** Componente Ribbon deslizable horizontalmente con botones de gran tamaño para navegación y disparo de canciones al tacto en vivo.
+  - **Control Rotativo de Ganancia con Limitador (`HardwareKnob.tsx`):** Knob rotativo de 270° para monitoreo in-ear con escala en dB (-60 a +6 dB) e indicador LED de limitador activo a -0.5 dBFS.
+  - **Visualizador Digital de Escenario (`VFDDisplay.tsx`):** Display de alto contraste tipo tubo fluorescente para lectura instantánea de `Bar : Beat`, `BPM` y modo de reloj (`NTP SYNC` / `FLYWHEEL`).
+  - **Barra de Transporte para Director (`DirectorRemoteToolbar.tsx`):** Toolbar de mando para tarima integrado en `StageView.tsx`.
+  - **Regla Estricta CERO EMOJIS:** Interfaz 100% libre de emojis; badges monoespaciados normalizados (`[MANDO DIRECTOR]`, `[SALTO DE REPERTORIO]`, `[PLAY // INICIAR]`, `[STOP // DETENER]`, `[PANIC]`).
+* **Impacto en Audio / Red / UI:**
+  - Control dual en vivo: el director puede disparar temas o ajustar tempo desde cualquier punto del escenario sin depender del operador de laptop.
+  - Sincronía visual ante imprevistos: si la banda cambia el orden de las canciones para responder a la audiencia, toda la agrupación visualiza el salto al instante en su pantalla.
+  - Ergonomía para directo: botones e indicadores optimizados para baja iluminación y respuesta táctil inmediata.
+* **Verificación y Pruebas:**
+  - `bandait-leader`: Pruebas unitarias de control concurrente, Last-Write-Wins, saltos de setlist, tempo nudge y panic stop en `test_concurrent_control.py` (100% verde).
+  - `bandait-follower`: Verificación estática con `tsc --noEmit` y `eslint` completadas con 0 errores y 0 advertencias.
