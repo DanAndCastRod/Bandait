@@ -50,7 +50,12 @@ export class FlywheelClock {
 
   private initAudio(): AudioContext {
     if (!this.audioCtx) {
-      const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const AudioCtxClass =
+        (typeof window !== 'undefined' && (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)) ||
+        (globalThis as unknown as { AudioContext?: typeof AudioContext }).AudioContext
+      if (!AudioCtxClass) {
+        throw new Error('AudioContext is not supported in this environment')
+      }
       this.audioCtx = new AudioCtxClass()
 
       // Safety Limiter at -0.5 dBFS (protect in-ear monitors)
