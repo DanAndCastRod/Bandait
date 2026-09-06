@@ -373,7 +373,7 @@ class LibraryView(QWidget):
                         artist = line[4:-1].strip()
 
                 lines = LRCParser.parse(content)
-                lyrics_text = "\n".join([l.text for l in lines])
+                lyrics_text = "\n".join([line_item.text for line_item in lines])
 
                 # Estimar BPM y duración
                 if lines:

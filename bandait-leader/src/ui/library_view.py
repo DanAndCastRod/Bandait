@@ -280,7 +280,7 @@ class LibraryView(QWidget):
         try:
             if path.lower().endswith(".lrc"):
                 lines = LRCParser.parse_file(path)
-                text = "\n".join([l.text for l in lines])
+                text = "\n".join([line_item.text for line_item in lines])
                 self._song_lyrics.setPlainText(text)
             else:
                 data = ChordProParser.parse_file(path)
