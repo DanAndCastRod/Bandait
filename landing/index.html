@@ -50,9 +50,13 @@
         Relojes alineados, ruteo físico ASIO, inercia autónoma Flywheel y monitoreo in-ear con limitador acústico a -0.5 dBFS.
       </p>
       <div class="hero-ctas">
-        <a href="#download" class="btn btn-filled">
+        <a href="./app/" class="btn btn-filled">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+          Abrir PWA en Vivo
+        </a>
+        <a href="#download" class="btn btn-lime">
           <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-          Descargar / Probar PWA
+          Descargas & Specs
         </a>
         <a href="https://github.com/DanAndCastRod/Bandait" target="_blank" rel="noopener" class="btn btn-cyan">
           <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -196,14 +200,22 @@
       <div class="download-cards">
         <div class="download-card android reveal">
           <div class="download-icon">
-            <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1 0 2 .9 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
           </div>
-          <h3>Android & iOS</h3>
-          <span class="version">Follower PWA Web App</span>
-          <a href="https://github.com/DanAndCastRod/Bandait/releases/latest" target="_blank" rel="noopener" class="btn btn-lime" id="downloadAndroid">
-            <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-            Abrir PWA / Descargar
-          </a>
+          <h3>Android, iOS & Web</h3>
+          <span class="version">Seguidor PWA Web App</span>
+          <p style="font-size:0.85rem;color:#888;margin-bottom:1rem;">
+            Ejecuta directamente en el navegador de tu dispositivo móvil. Sin descargas de tiendas ni demoras.
+          </p>
+          <div style="display:flex;flex-direction:column;gap:0.6rem;">
+            <a href="./app/" class="btn btn-filled" style="justify-content:center;">
+              <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+              Abrir PWA en Vivo
+            </a>
+            <a href="https://github.com/DanAndCastRod/Bandait" target="_blank" rel="noopener" class="btn btn-lime" id="downloadAndroid" style="justify-content:center;">
+              Código y Repo PWA
+            </a>
+          </div>
         </div>
         <div class="download-card windows reveal">
           <div class="download-icon">
@@ -211,9 +223,12 @@
           </div>
           <h3>Windows Desktop</h3>
           <span class="version">PySide6 + ASIO Leader</span>
-          <a href="https://github.com/DanAndCastRod/Bandait/releases/latest" target="_blank" rel="noopener" class="btn btn-cyan" id="downloadWindows">
+          <p style="font-size:0.85rem;color:#888;margin-bottom:1rem;">
+            Líder de escritorio con motor ASIO multicanal dedicado para la laptop de sala/FOH.
+          </p>
+          <a href="https://github.com/DanAndCastRod/Bandait/releases" target="_blank" rel="noopener" class="btn btn-cyan" id="downloadWindows" style="justify-content:center;">
             <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-            Descargar Leader ZIP
+            Releases en GitHub
           </a>
         </div>
       </div>

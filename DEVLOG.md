@@ -111,4 +111,15 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - Inspección de caracteres Unicode para garantizar 0 emojis en todo el árbol de `landing/`.
   - Mantenimiento de selectores y aserciones para la suite E2E de Playwright en `e2e/landing.spec.ts`.
 
+### [2026-09-07] - Despliegue Web Directo del Follower PWA
+* **Sprint / Módulo:** Despliegue Web & PWA (`landing/app/`, `bandait-follower/vite.config.ts`)
+* **Acción técnica realizada:**
+  - **Empaquetado y Despliegue Web de la PWA:** Compilada la versión de producción de `bandait-follower` con `base: './'` y desplegada directamente en `landing/app/` para que cualquier músico o director pueda usar la aplicación inmediatamente en `https://bandait.releven.cc/app/` sin necesidad de descargas de APKs viejos en GitHub Releases.
+  - **Lanzador Web en Landing Page:** Añadido botón de alta visibilidad `[ABRIR PWA EN VIVO]` en el Hero y en las tarjetas de acceso de `landing/index.html`.
+  - **Configuración de Build PWA:** Ajustada la configuración de VitePWA para compatibilidad universal en navegadores móviles y desktop con Service Worker y precaché de 9 recursos esenciales.
+* **Impacto en Audio / Red / UI:**
+  - Disponibilidad instantánea para cualquier miembro de la banda en vivo: basta con ingresar a la URL para tener el monitor de escenario, display VFD, metrónomo visual y mezclador in-ear activo.
+  - Elimina la dependencia de binarios desactualizados en GitHub Releases para el modo Seguidor.
+
+
 
