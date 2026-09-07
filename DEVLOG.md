@@ -121,5 +121,17 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - Disponibilidad instantánea para cualquier miembro de la banda en vivo: basta con ingresar a la URL para tener el monitor de escenario, display VFD, metrónomo visual y mezclador in-ear activo.
   - Elimina la dependencia de binarios desactualizados en GitHub Releases para el modo Seguidor.
 
+### [2026-09-07] - Optimización de Ergonomía Visual en Diagrama de Arquitectura
+* **Sprint / Módulo:** Landing UI (`landing/style.css`, `landing/index.html`)
+* **Acción técnica realizada:**
+  - **Reestructuración en Serie Continua:** Rediseñado el contenedor `.flow-diagram` para forzar una visualización lineal horizontal estricta y balanceada (`justify-content: space-between`, ancho máximo contenido a 1060px) en pantallas grandes, eliminando saltos de línea y fragmentaciones asimétricas de flechas.
+  - **Reducción de Huella y Escala:** Reducido el padding interno de `.flow-node` de `1.5rem 2rem` a `1.1rem 1rem` con límite de ancho proporcional (`max-width: 320px`), compactado de iconos y textos descriptivos sintéticos.
+  - **Conectores Dinámicos Bidireccionales:** Implementadas flechas responsivas (`.arrow-h` para alineación horizontal `→` en desktop y `.arrow-v` para progresión vertical `↓` en móviles), eliminando la rotación forzada `transform: rotate(90deg)`.
+  - **Insignias de Paso Secuencial:** Agregados badges monoespaciados técnicos (`[01 // FOH]`, `[02 // STAGE]`, `[03 // DIRECTOR]`).
+* **Impacto en Audio / Red / UI:**
+  - Comprensión inmediata de la topología Líder-Seguidor-Director sin saturación visual.
+  - Legibilidad perfecta y armónica tanto en smartphones como en monitores panorámicos.
+
+
 
 

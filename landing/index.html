@@ -117,27 +117,30 @@
       </p>
       <div class="flow-diagram">
         <div class="flow-node leader reveal">
+          <span class="flow-step">[01 // FOH]</span>
           <div class="flow-node-icon">
             <svg viewBox="0 0 24 24"><path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
           </div>
-          <h4>Líder Desktop (ASIO)</h4>
-          <p>Orquesta la sesión en PySide6, ejecuta ruteo ASIO multicanal físico y mantiene el reloj maestro.</p>
+          <h4>Líder Desktop</h4>
+          <p>Laptop FOH con PySide6 y ruteo ASIO. Gobierna transporte maestro y envío de reloj NTP.</p>
         </div>
-        <div class="flow-arrow reveal">→</div>
-        <div class="flow-node follower reveal">
+        <div class="flow-arrow reveal" aria-hidden="true"><span class="arrow-h">→</span><span class="arrow-v">↓</span></div>
+        <div class="flow-node follower follower-stage reveal">
+          <span class="flow-step">[02 // STAGE]</span>
           <div class="flow-node-icon">
             <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
           </div>
-          <h4>Seguidor PWA (Músicos)</h4>
-          <p>Recibe marcas de tiempo, visualiza acordes y estructura, y reproduce stems locales con limitador a -0.5 dBFS.</p>
+          <h4>Seguidor PWA</h4>
+          <p>Dispositivo del músico. Muestra letras y acordes, y reproduce audio con inercia Flywheel.</p>
         </div>
-        <div class="flow-arrow reveal">→</div>
-        <div class="flow-node follower reveal">
+        <div class="flow-arrow reveal" aria-hidden="true"><span class="arrow-h">→</span><span class="arrow-v">↓</span></div>
+        <div class="flow-node follower follower-director reveal">
+          <span class="flow-step">[03 // DIRECTOR]</span>
           <div class="flow-node-icon">
             <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
           </div>
-          <h4>Mando Concurrente (Director)</h4>
-          <p>Mando de transporte dual en vivo: disparo de temas, saltos de setlist y ajuste de tempo desde smartphone.</p>
+          <h4>Mando Director</h4>
+          <p>Smartphone en tarima con control concurrente LWW para disparo de temas y saltos en vivo.</p>
         </div>
       </div>
     </div>
