@@ -97,3 +97,18 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - `bandait-leader`: Pruebas de integración de pipeline de IA ejecutadas con éxito en `test_ai_pipeline.py` (Camelot, compatibilidad energética, ChordPro, Stem Separator y Voice Prompts).
   - `bandait-follower`: Verificación estática de tipos con `tsc --noEmit` y análisis de linter con `eslint` pasando con 0 errores y 0 advertencias. Pruebas unitarias de pre-caché y telemetría en `stemCacheService.test.ts`.
 
+### [2026-09-07] - Modernización de Landing Page: Rebranding Bandait 3.0 & Cero Emojis
+* **Sprint / Módulo:** Landing Web (`landing/index.html`, `landing/style.css`)
+* **Acción técnica realizada:**
+  - **Rebranding y Sincronización Tecnológica:** Eliminadas referencias obsoletas a Flutter, flutter_soloud y BLoC. Actualizada la propuesta técnica a la arquitectura real de Bandait 3.0: Líder PySide6 ASIO + Seguidor React 19 PWA Web Audio + Protocolo Socket.IO / NTP monotónico.
+  - **Cumplimiento Estricto CERO EMOJIS:** Erradicados todos los emojis del HTML (`⚡`, `📋`, `🔲`, `📱`, `🖥️`, `🤖`, `🪟`) y reemplazados por iconos vectoriales SVG técnicos normalizados con ajuste responsivo e inline styling.
+  - **Identidad Visual Swiss Bauhaus Lab:** Incorporadas las tipografías de alta legibilidad técnica (`Space Grotesk` + `IBM Plex Mono`).
+  - **Documentación de Capacidades en Escenario:** Detalladas las características clave: Ruteo Físico ASIO Ch 3 cable al baterista, motor Flywheel con oscilador sintetizado local, control concurrente maestro LWW, alerta de saltos de repertorio y limitador de protección auditiva a -0.5 dBFS.
+* **Impacto en Audio / Red / UI:**
+  - Comunicación fidedigna de las capacidades del sistema para ingenieros de audio, directores musicales y bandas en vivo.
+  - Alineación de diseño entre el portal web de difusión y las aplicaciones de escenario.
+* **Verificación y Pruebas:**
+  - Inspección de caracteres Unicode para garantizar 0 emojis en todo el árbol de `landing/`.
+  - Mantenimiento de selectores y aserciones para la suite E2E de Playwright en `e2e/landing.spec.ts`.
+
+

@@ -34,11 +34,33 @@
   --glow-magenta: 0 0 20px rgba(255, 0, 255, 0.3), 0 0 60px rgba(255, 0, 255, 0.1);
 
   /* Typography */
-  --font-body: 'Inter', 'Roboto', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Roboto Mono', monospace;
+  --font-body: 'Space Grotesk', 'Inter', 'Roboto', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'Roboto Mono', monospace;
 
   /* Spacing */
   --section-pad: clamp(3rem, 8vh, 6rem) clamp(1rem, 5vw, 4rem);
+}
+
+.feature-icon svg,
+.flow-node-icon svg,
+.download-icon svg {
+  display: inline-block;
+  vertical-align: middle;
+}
+.feature-icon svg {
+  width: 32px;
+  height: 32px;
+  fill: currentColor;
+}
+.flow-node-icon svg {
+  width: 36px;
+  height: 36px;
+  fill: currentColor;
+}
+.download-icon svg {
+  width: 40px;
+  height: 40px;
+  fill: currentColor;
 }
 
 html {

@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Bandait — Sistema de sincronización en tiempo real para músicos en vivo. Mantén a toda tu banda alineada en el escenario.">
+  <meta name="description" content="Bandait 3.0 — Sistema de sincronización en tiempo real y audio profesional para músicos en vivo. Sincronización NTP, inercia Flywheel, ruteo físico ASIO y monitoreo in-ear.">
   <meta name="theme-color" content="#000000">
 
-  <title>Bandait — Sync Your Stage</title>
+  <title>Bandait 3.0 — Sync Your Stage | Swiss Bauhaus Lab</title>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png">
@@ -43,16 +43,16 @@
   <!-- ====== HERO ====== -->
   <section class="hero" id="hero">
     <div class="hero-content">
-      <span class="hero-badge">v1.0 — Stage Ready</span>
+      <span class="hero-badge">v3.0 — Stage Ready // Swiss Bauhaus Lab</span>
       <h1>Sincroniza tu <span class="neon">escenario</span></h1>
       <p class="hero-tagline">
-        Sistema de sincronización en tiempo real para músicos en vivo.
-        Relojes alineados. Cero latencia percibida. Toda la banda en el mismo beat.
+        Sistema de sincronización en tiempo real y audio profesional para músicos en vivo.
+        Relojes alineados, ruteo físico ASIO, inercia autónoma Flywheel y monitoreo in-ear con limitador acústico a -0.5 dBFS.
       </p>
       <div class="hero-ctas">
         <a href="#download" class="btn btn-filled">
           <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-          Descargar
+          Descargar / Probar PWA
         </a>
         <a href="https://github.com/DanAndCastRod/Bandait" target="_blank" rel="noopener" class="btn btn-cyan">
           <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -65,31 +65,39 @@
   <!-- ====== FEATURES ====== -->
   <section class="section features" id="features">
     <div class="container">
-      <span class="section-label">// Features</span>
+      <span class="section-label">// Ingeniería en Vivo</span>
       <h2 class="section-title">Diseñado para el escenario</h2>
       <p class="section-subtitle">
-        Cada función construida pensando en manos ocupadas, luces estroboscópicas y adrenalina al máximo.
+        Construido bajo ingeniería de audio profesional: manos ocupadas, cero distracciones y resiliencia total ante caídas de red.
       </p>
       <div class="features-grid">
         <div class="feature-card reveal" data-accent="cyan">
-          <span class="feature-icon">⚡</span>
-          <h3>Sync de Relojes NTP</h3>
-          <p>No enviamos audio por WiFi. Sincronizamos relojes entre dispositivos y ejecutamos comandos en el futuro. Latencia percibida: cero.</p>
+          <span class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>
+          </span>
+          <h3>Sync de Relojes NTP & Inercia Flywheel</h3>
+          <p>Reloj maestro sincronizado vía socket y NTP con conmutación autónoma inmediata a oscilador Web Audio local si el Wi-Fi cae. Cero desfase y realineación suave de fase al reconectar.</p>
         </div>
         <div class="feature-card reveal" data-accent="lime">
-          <span class="feature-icon">📋</span>
-          <h3>Setlist Inteligente</h3>
-          <p>Gestiona tu lista de canciones con BPM, estructura de secciones y letras sincronizadas. El líder avanza, todos siguen.</p>
+          <span class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 10h-8v-2h8v2zm-4 4h-4v-2h4v2zm4-8h-8V6h8v2z"/></svg>
+          </span>
+          <h3>Setlist Inteligente & Mando Concurrente</h3>
+          <p>Mando dual simultáneo para Smartphone del Director y Laptop FOH con arbitraje Last-Write-Wins. Detección inmediata y banner de alta visibilidad para saltos de repertorio en vivo.</p>
         </div>
         <div class="feature-card reveal" data-accent="magenta">
-          <span class="feature-icon">🔲</span>
-          <h3>Metrónomo Visual</h3>
-          <p>El borde de la pantalla parpadea con el beat, visible con tu visión periférica. Beat 1 en cyan brillante, los demás atenuados.</p>
+          <span class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </span>
+          <h3>Metrónomo Visual & Ruteo Físico ASIO</h3>
+          <p>Ruteo multicanal por cable directo al baterista (Salida 3, &lt; 1.5 ms) manteniendo limpias las salidas PA (1-2). Destello perimétrico de 4 bordes para visión periférica en tarima.</p>
         </div>
         <div class="feature-card reveal" data-accent="orange">
-          <span class="feature-icon">📱</span>
-          <h3>Multiplataforma</h3>
-          <p>Android, Windows, iOS, macOS. Construido con Flutter para funcionar donde tu banda lo necesite. Un dispositivo lidera, los demás siguen.</p>
+          <span class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16v10H4zm18 12V4a2 2 0 00-2-2H4a2 2 0 00-2 2v14a2 2 0 002 2h6v-2H4v-2h16v2h-4v2h4a2 2 0 002-2zM0 20h24v2H0z"/></svg>
+          </span>
+          <h3>Multiplataforma PWA & Líder Desktop</h3>
+          <p>Líder de alto rendimiento en PySide6 para laptop de sonido y Seguidor PWA en React 19 instalable en cualquier smartphone Android o iOS sin pasar por tiendas de aplicaciones.</p>
         </div>
       </div>
     </div>
@@ -101,25 +109,31 @@
       <span class="section-label">// Arquitectura</span>
       <h2 class="section-title">Cómo funciona</h2>
       <p class="section-subtitle">
-        Topología Líder–Seguidor. Un dispositivo orquesta, los demás ejecutan localmente.
+        Topología híbrida Líder–Seguidor con control remoto concurrente y síntesis de audio local.
       </p>
       <div class="flow-diagram">
         <div class="flow-node leader reveal">
-          <div class="flow-node-icon">🖥️</div>
-          <h4>Líder</h4>
-          <p>Orquesta la sesión, controla el setlist y sincroniza el reloj maestro.</p>
+          <div class="flow-node-icon">
+            <svg viewBox="0 0 24 24"><path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
+          </div>
+          <h4>Líder Desktop (ASIO)</h4>
+          <p>Orquesta la sesión en PySide6, ejecuta ruteo ASIO multicanal físico y mantiene el reloj maestro.</p>
         </div>
         <div class="flow-arrow reveal">→</div>
         <div class="flow-node follower reveal">
-          <div class="flow-node-icon">📱</div>
-          <h4>Seguidor A</h4>
-          <p>Recibe comandos de tiempo, muestra letras y genera audio local.</p>
+          <div class="flow-node-icon">
+            <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+          </div>
+          <h4>Seguidor PWA (Músicos)</h4>
+          <p>Recibe marcas de tiempo, visualiza acordes y estructura, y reproduce stems locales con limitador a -0.5 dBFS.</p>
         </div>
         <div class="flow-arrow reveal">→</div>
         <div class="flow-node follower reveal">
-          <div class="flow-node-icon">📱</div>
-          <h4>Seguidor B</h4>
-          <p>Ve acordes, estructura y mantiene su propio metrónomo sincronizado.</p>
+          <div class="flow-node-icon">
+            <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+          </div>
+          <h4>Mando Concurrente (Director)</h4>
+          <p>Mando de transporte dual en vivo: disparo de temas, saltos de setlist y ajuste de tempo desde smartphone.</p>
         </div>
       </div>
     </div>
@@ -133,38 +147,38 @@
       <div class="specs-list">
         <div class="spec-item reveal">
           <div>
-            <span class="spec-label">Framework</span>
-            <span class="spec-value">Flutter (Dart)</span>
+            <span class="spec-label">Líder Desktop</span>
+            <span class="spec-value">PySide6 (Python 3.11) + ASIO Engine</span>
           </div>
         </div>
         <div class="spec-item reveal">
           <div>
-            <span class="spec-label">Protocolo Red</span>
-            <span class="spec-value">WebSockets + NTP Custom</span>
+            <span class="spec-label">Seguidor PWA</span>
+            <span class="spec-value">React 19 + TypeScript + Web Audio API</span>
           </div>
         </div>
         <div class="spec-item reveal">
           <div>
-            <span class="spec-label">Audio Engine</span>
-            <span class="spec-value">flutter_soloud (baja latencia)</span>
+            <span class="spec-label">Protocolo & Red</span>
+            <span class="spec-value">Socket.IO + NTP Monotónico + LWW</span>
           </div>
         </div>
         <div class="spec-item reveal">
           <div>
-            <span class="spec-label">Descubrimiento</span>
-            <span class="spec-value">mDNS + QR Code</span>
+            <span class="spec-label">Ruteo Físico</span>
+            <span class="spec-value">ASIO Multicanal (Ch 1-2 PA, Ch 3 In-Ear Baterista)</span>
           </div>
         </div>
         <div class="spec-item reveal">
           <div>
-            <span class="spec-label">Estado</span>
-            <span class="spec-value">BLoC Pattern (flutter_bloc)</span>
+            <span class="spec-label">Audio & Seguridad</span>
+            <span class="spec-value">Limitador Rígido -0.5 dBFS + Stems 4-Track</span>
           </div>
         </div>
         <div class="spec-item reveal">
           <div>
-            <span class="spec-label">Plataformas</span>
-            <span class="spec-value">Android · Windows · iOS · macOS</span>
+            <span class="spec-label">Persistencia Offline</span>
+            <span class="spec-value">IndexedDB v2 + SQLite Local ORM</span>
           </div>
         </div>
       </div>
@@ -174,28 +188,32 @@
   <!-- ====== DOWNLOAD ====== -->
   <section class="section download" id="download">
     <div class="container">
-      <span class="section-label">// Descargar</span>
-      <h2 class="section-title">Obtén Bandait</h2>
+      <span class="section-label">// Descargar & Acceso</span>
+      <h2 class="section-title">Obtén Bandait 3.0</h2>
       <p class="section-subtitle" style="margin-left:auto;margin-right:auto;">
-        Descarga la última versión para tu plataforma directamente desde GitHub Releases.
+        Accede directamente a la aplicación web Seguidor PWA o descarga el Líder de escritorio para Windows.
       </p>
       <div class="download-cards">
         <div class="download-card android reveal">
-          <div class="download-icon">🤖</div>
-          <h3>Android</h3>
-          <span class="version">APK Universal</span>
+          <div class="download-icon">
+            <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+          </div>
+          <h3>Android & iOS</h3>
+          <span class="version">Follower PWA Web App</span>
           <a href="https://github.com/DanAndCastRod/Bandait/releases/latest" target="_blank" rel="noopener" class="btn btn-lime" id="downloadAndroid">
             <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-            Descargar APK
+            Abrir PWA / Descargar
           </a>
         </div>
         <div class="download-card windows reveal">
-          <div class="download-icon">🪟</div>
-          <h3>Windows</h3>
-          <span class="version">x64 Portable</span>
+          <div class="download-icon">
+            <svg viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+          </div>
+          <h3>Windows Desktop</h3>
+          <span class="version">PySide6 + ASIO Leader</span>
           <a href="https://github.com/DanAndCastRod/Bandait/releases/latest" target="_blank" rel="noopener" class="btn btn-cyan" id="downloadWindows">
             <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-            Descargar ZIP
+            Descargar Leader ZIP
           </a>
         </div>
       </div>
@@ -204,7 +222,7 @@
 
   <!-- ====== FOOTER ====== -->
   <footer class="site-footer">
-    <span class="footer-brand">© 2025 Bandait — by <a href="https://releven.cc" target="_blank" rel="noopener">Releven</a></span>
+    <span class="footer-brand">© 2026 Bandait 3.0 — by <a href="https://releven.cc" target="_blank" rel="noopener">Releven</a></span>
     <ul class="footer-links">
       <li><a href="https://github.com/DanAndCastRod/Bandait" target="_blank" rel="noopener">GitHub</a></li>
       <li><a href="https://github.com/DanAndCastRod/Bandait/releases" target="_blank" rel="noopener">Releases</a></li>
