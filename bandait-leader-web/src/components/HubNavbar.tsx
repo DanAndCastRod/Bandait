@@ -38,21 +38,23 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
   }
 
   return (
-    <header
-      style={{
-        background: '#12151c',
-        borderBottom: '1px solid #2a3346',
-        padding: '10px 20px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '12px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-      }}
-    >
+    <>
+      <header
+        style={{
+          background: '#12151c',
+          borderBottom: '1px solid #2a3346',
+          padding: '8px clamp(10px, 2vw, 20px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          width: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
       {/* BRAND & MULTI-BAND SWITCHER */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -87,6 +89,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               BANDAIT
             </div>
             <div
+              className="hub-desktop-only"
               style={{
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: '9px',
@@ -228,8 +231,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         </div>
       </div>
 
-      {/* 4 MAIN NAVIGATION TABS */}
-      <nav style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+      {/* 4 MAIN NAVIGATION TABS (DESKTOP) */}
+      <nav className="hub-desktop-nav" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
         <button
           onClick={() => onSelectTab('playlists')}
           style={{
@@ -327,7 +330,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             background: 'transparent',
             border: '1px solid #2a3346',
             borderRadius: '4px',
-            padding: '6px 12px',
+            padding: '6px 10px',
             color: '#94a3b8',
             cursor: 'pointer',
             fontSize: '11px',
@@ -335,7 +338,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
           }}
         >
           <Download size={13} />
-          <span>EXPORTAR MAESTRO</span>
+          <span className="hub-desktop-only">EXPORTAR MAESTRO</span>
         </button>
 
         {user && (
@@ -343,10 +346,10 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
+              gap: '8px',
               background: '#1a202c',
               border: '1px solid #2a3346',
-              padding: '4px 10px 4px 6px',
+              padding: '4px 8px 4px 6px',
               borderRadius: '20px',
             }}
           >
@@ -354,13 +357,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               <img
                 src={user.avatarUrl}
                 alt={user.name}
-                style={{ width: '26px', height: '26px', borderRadius: '50%', objectFit: 'cover' }}
+                style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover' }}
               />
             ) : (
               <div
                 style={{
-                  width: '26px',
-                  height: '26px',
+                  width: '24px',
+                  height: '24px',
                   borderRadius: '50%',
                   background: '#0066ff',
                   display: 'flex',
@@ -376,10 +379,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700 }}>{user.name}</span>
+                <span style={{ fontSize: '11px', fontWeight: 700 }}>{user.name}</span>
                 <GoogleIcon size={12} />
               </div>
-              <span style={{ fontSize: '9px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+              <span
+                className="hub-desktop-only"
+                style={{ fontSize: '9px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}
+              >
                 {user.email}
               </span>
             </div>
@@ -524,5 +530,121 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         </div>
       )}
     </header>
+
+    {/* MOBILE BOTTOM NAVIGATION BAR */}
+    <nav
+      className="hub-mobile-nav"
+      style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '56px',
+        background: '#12151c',
+        borderTop: '1px solid #2a3346',
+        alignItems: 'center',
+        justifyContent: 'space-around',
+        zIndex: 999,
+        padding: '0 4px',
+        boxSizing: 'border-box',
+      }}
+    >
+      <button
+        onClick={() => onSelectTab('playlists')}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '3px',
+          height: '100%',
+          background: 'transparent',
+          border: 'none',
+          color: activeTab === 'playlists' ? '#ff4500' : '#94a3b8',
+          fontSize: '10px',
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: activeTab === 'playlists' ? 700 : 400,
+          cursor: 'pointer',
+          borderTop: activeTab === 'playlists' ? '2px solid #ff4500' : '2px solid transparent',
+        }}
+      >
+        <ListMusic size={18} />
+        <span>SETLISTS</span>
+      </button>
+
+      <button
+        onClick={() => onSelectTab('stems')}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '3px',
+          height: '100%',
+          background: 'transparent',
+          border: 'none',
+          color: activeTab === 'stems' ? '#0066ff' : '#94a3b8',
+          fontSize: '10px',
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: activeTab === 'stems' ? 700 : 400,
+          cursor: 'pointer',
+          borderTop: activeTab === 'stems' ? '2px solid #0066ff' : '2px solid transparent',
+        }}
+      >
+        <Sliders size={18} />
+        <span>STEMS</span>
+      </button>
+
+      <button
+        onClick={() => onSelectTab('members')}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '3px',
+          height: '100%',
+          background: 'transparent',
+          border: 'none',
+          color: activeTab === 'members' ? '#10b981' : '#94a3b8',
+          fontSize: '10px',
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: activeTab === 'members' ? 700 : 400,
+          cursor: 'pointer',
+          borderTop: activeTab === 'members' ? '2px solid #10b981' : '2px solid transparent',
+        }}
+      >
+        <Users size={18} />
+        <span>BANDA</span>
+      </button>
+
+      <button
+        onClick={() => onSelectTab('equipment')}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '3px',
+          height: '100%',
+          background: 'transparent',
+          border: 'none',
+          color: activeTab === 'equipment' ? '#f59e0b' : '#94a3b8',
+          fontSize: '10px',
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: activeTab === 'equipment' ? 700 : 400,
+          cursor: 'pointer',
+          borderTop: activeTab === 'equipment' ? '2px solid #f59e0b' : '2px solid transparent',
+        }}
+      >
+        <Radio size={18} />
+        <span>RACKS RF</span>
+      </button>
+    </nav>
+  </>
   )
 }

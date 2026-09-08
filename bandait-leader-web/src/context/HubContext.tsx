@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import type {
   UserProfile,
   Band,
@@ -9,9 +9,9 @@ import type {
   MemberRole,
   PlaylistSong,
 } from '../types/hub'
-import { authService } from '../services/authService'
+import { authService, DEMO_PROFILES } from '../services/authService'
 
-// INITIAL MOCK DATA PER BAND
+// INITIAL SEED DATA FOR DEMO SCENARIOS
 const INITIAL_BANDS: Band[] = [
   {
     id: 'band_01',
@@ -100,19 +100,6 @@ const INITIAL_MEMBERS: Record<string, BandMember[]> = {
       joinedAt: '2025-11-15',
     },
   ],
-  band_02: [
-    {
-      id: 'mem_10',
-      bandId: 'band_02',
-      userId: 'usr_director_01',
-      name: 'Carlos Mendoza',
-      email: 'carlos.director@bandait.live',
-      phone: '+57 310 555 0101',
-      role: 'Owner',
-      instrument: 'Piano & Acústica',
-      joinedAt: '2026-01-20',
-    },
-  ],
 }
 
 const INITIAL_PLAYLISTS: Record<string, Playlist[]> = {
@@ -120,10 +107,10 @@ const INITIAL_PLAYLISTS: Record<string, Playlist[]> = {
     {
       id: 'pl_01',
       bandId: 'band_01',
-      name: 'Gira 2026 — Show Central',
-      description: 'Setlist principal de 90 minutos con transiciones calibradas.',
+      name: 'Gira Nacional 2026 — Setlist Principal',
+      description: 'Repertorio oficial para salas y festivales. Orden inmutable salvo indicación expresa del Director.',
       createdAt: '2026-02-01',
-      updatedAt: '2026-09-05',
+      updatedAt: '2026-03-02',
       songs: [
         {
           id: 'song_01',
@@ -134,17 +121,17 @@ const INITIAL_PLAYLISTS: Record<string, Playlist[]> = {
           key: 'Am',
           showKey: 'Am',
           camelot: '8A',
-          durationSec: 245,
+          durationSec: 215,
           transitionMode: 'manual_cue',
           countInBars: 2,
-          notes: 'Inicio con intro de sintetizador. Charla de bienvenida antes del coro 2.',
+          notes: 'Inicio con intro de sintetizador y claqueta en compás 3. Alerta de solo de guitarra en c4.',
         },
         {
           id: 'song_02',
           orderIndex: 2,
-          title: 'Ritmo de Calle',
+          title: 'Ruta del Café',
           artist: 'Los Inquietos del Rock',
-          bpm: 128,
+          bpm: 130,
           key: 'Dm',
           showKey: 'Dm',
           camelot: '7A',
@@ -160,7 +147,7 @@ const INITIAL_PLAYLISTS: Record<string, Playlist[]> = {
           artist: 'Los Inquietos del Rock',
           bpm: 88,
           key: 'G',
-          showKey: 'F#', // Transportado para cantante
+          showKey: 'F#',
           camelot: '11B',
           durationSec: 280,
           transitionMode: 'manual_cue',
@@ -248,19 +235,19 @@ const INITIAL_STEMS: Record<string, SongStems> = {
         filename: 'click_124bpm_4_4.wav',
         fileSizeMb: 12.0,
         volumeDb: +1.0,
-        pan: 0,
+        pan: -1.0,
         limiterSafe: true,
         demucsStatus: 'ready',
       },
       {
         channel: 6,
         id: 'stem_voz_01',
-        name: 'Guía Vocal & Cues',
+        name: 'Guía de Voz de Tarima',
         code: '[VOZ]',
-        filename: 'cues_structure_124.wav',
-        fileSizeMb: 15.6,
-        volumeDb: +2.0,
-        pan: 0,
+        filename: 'medianoche_stage_cues.wav',
+        fileSizeMb: 14.5,
+        volumeDb: 0.0,
+        pan: 1.0,
         limiterSafe: true,
         demucsStatus: 'ready',
       },
@@ -274,29 +261,29 @@ const INITIAL_EQUIPMENT: Record<string, EquipmentItem[]> = {
       id: 'eq_01',
       bandId: 'band_01',
       category: 'interface',
-      name: 'Consola Digital FOH',
-      model: 'Soundcraft Ui24R (24ch USB/Ethernet)',
+      name: 'Interfaz ASIO FOH Master',
+      model: 'Focusrite Scarlett 18i20 3rd Gen (USB)',
       assignedTo: 'Alejandro Vélez (FOH)',
-      channelRouting: 'Salidas 1-2 PA Main • Salida 3 Drummer Click • Aux 1-4 In-Ear',
-      notes: 'Controlada vía Wi-Fi 5 GHz dedicado para evitar interferencias.',
+      channelRouting: 'Salidas 1-2 PA Principal (XLR) / Salida 3 In-Ear Baterista',
+      notes: 'Driver ASIO a 48kHz / 64 samples (latencia 1.4ms).',
     },
     {
       id: 'eq_02',
       bandId: 'band_01',
       category: 'in_ear',
-      name: 'Sistema In-Ear Cantante',
-      model: 'Sennheiser EW IEM G4',
-      assignedTo: 'Laura Valencia (Voz Líder)',
-      channelRouting: 'Aux 1 (Estéreo)',
-      rfFrequency: '518.200 MHz (Grupo 1 / Canal 4)',
-      notes: 'Receptor estéreo con auriculares Shure SE535.',
+      name: 'Transmisor In-Ear Shure PSM300',
+      model: 'P3T / P3RA Bodypack Receptor',
+      assignedTo: 'Carlos Mendoza (Director)',
+      channelRouting: 'Aux 1 (Mezcla Director)',
+      rfFrequency: '518.200 MHz (Grupo 1 / Canal 1)',
+      notes: 'Frecuencia coordinada. Sin interferencia en tarima.',
     },
     {
       id: 'eq_03',
       bandId: 'band_01',
       category: 'in_ear',
-      name: 'Sistema In-Ear Bajista',
-      model: 'Shure PSM 300 Pro',
+      name: 'Transmisor In-Ear Sennheiser G4',
+      model: 'SR IEM G4 / EK G4',
       assignedTo: 'Felipe Restrepo (Bajo)',
       channelRouting: 'Aux 2 (Mono Mix)',
       rfFrequency: '542.400 MHz (Grupo 2 / Canal 1)',
@@ -315,6 +302,140 @@ const INITIAL_EQUIPMENT: Record<string, EquipmentItem[]> = {
   ],
 }
 
+interface WorkspaceStore {
+  bands: Band[]
+  activeBandId: string
+  membersMap: Record<string, BandMember[]>
+  playlistsMap: Record<string, Playlist[]>
+  equipmentMap: Record<string, EquipmentItem[]>
+  stemsMap: Record<string, SongStems>
+}
+
+function loadUserWorkspace(currentUser: UserProfile | null): WorkspaceStore {
+  if (!currentUser) {
+    return {
+      bands: INITIAL_BANDS,
+      activeBandId: 'band_01',
+      membersMap: INITIAL_MEMBERS,
+      playlistsMap: INITIAL_PLAYLISTS,
+      equipmentMap: INITIAL_EQUIPMENT,
+      stemsMap: INITIAL_STEMS,
+    }
+  }
+
+  const storageKey = `bandait_workspace_${currentUser.id}`
+  const saved = localStorage.getItem(storageKey)
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved)
+      if (parsed.bands && parsed.bands.length > 0) {
+        return parsed
+      }
+    } catch (err) {
+      console.error('Error parsing stored workspace:', err)
+    }
+  }
+
+  // If user is a demo profile, use default demo data
+  const isDemo = DEMO_PROFILES.some((p) => p.id === currentUser.id)
+  if (isDemo) {
+    return {
+      bands: INITIAL_BANDS,
+      activeBandId: 'band_01',
+      membersMap: INITIAL_MEMBERS,
+      playlistsMap: INITIAL_PLAYLISTS,
+      equipmentMap: INITIAL_EQUIPMENT,
+      stemsMap: INITIAL_STEMS,
+    }
+  }
+
+  // Real user: create clean personal workspace
+  const cleanId = currentUser.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)
+  const primaryBandId = `band_${cleanId}_01`
+  const firstName = currentUser.name.split(' ')[0]
+
+  const initialBand: Band = {
+    id: primaryBandId,
+    name: `Banda de ${firstName}`,
+    genre: 'Live Show / En Vivo',
+    ownerId: currentUser.id,
+    currentUserRole: 'Owner',
+    membersCount: 1,
+    createdAt: new Date().toISOString().slice(0, 10),
+  }
+
+  const initialMember: BandMember = {
+    id: `mem_${cleanId}_owner`,
+    bandId: primaryBandId,
+    userId: currentUser.id,
+    name: currentUser.name,
+    email: currentUser.email,
+    role: 'Owner',
+    instrument: 'Director Musical',
+    joinedAt: new Date().toISOString().slice(0, 10),
+  }
+
+  const initialPlaylist: Playlist = {
+    id: `pl_${cleanId}_01`,
+    bandId: primaryBandId,
+    name: 'Setlist Principal — Gira 2026',
+    description: `Repertorio oficial configurado en el Web Hub para ${initialBand.name}`,
+    createdAt: new Date().toISOString().slice(0, 10),
+    updatedAt: new Date().toISOString().slice(0, 10),
+    songs: [
+      {
+        id: `song_${cleanId}_01`,
+        orderIndex: 1,
+        title: 'Tema 1 (Apertura Show)',
+        artist: initialBand.name,
+        bpm: 120,
+        key: 'Am',
+        showKey: 'Am',
+        camelot: '8A',
+        durationSec: 210,
+        transitionMode: 'manual_cue',
+        countInBars: 2,
+        notes: 'Inicio de show. Conteo de 8 pulsos por claqueta.',
+      },
+    ],
+  }
+
+  const initialEquipment: EquipmentItem[] = [
+    {
+      id: `eq_${cleanId}_01`,
+      bandId: primaryBandId,
+      category: 'interface',
+      name: 'Interfaz ASIO Multicanal FOH',
+      model: 'Interfaz USB ASIO 8x8 (64 samples)',
+      assignedTo: `${currentUser.name} (FOH)`,
+      channelRouting: 'Ch 1-2 PA Master (XLR) / Ch 3 In-Ear Baterista',
+      notes: 'Driver ASIO a 48kHz. Conexión directa por cable Neutrik a baterista.',
+    },
+    {
+      id: `eq_${cleanId}_02`,
+      bandId: primaryBandId,
+      category: 'cabling',
+      name: 'Cable Físico Baterista (Salida 3)',
+      model: 'Neutrik Jack TRS 1/4" a XLR Balanceado (10m)',
+      assignedTo: 'Batería',
+      channelRouting: 'Salida 3 de interfaz a audífonos baterista',
+      notes: 'Conexión cableada obligatoria: latencia cero y cero desconexión.',
+    },
+  ]
+
+  const newWorkspace: WorkspaceStore = {
+    bands: [initialBand],
+    activeBandId: primaryBandId,
+    membersMap: { [primaryBandId]: [initialMember] },
+    playlistsMap: { [primaryBandId]: [initialPlaylist] },
+    equipmentMap: { [primaryBandId]: initialEquipment },
+    stemsMap: INITIAL_STEMS,
+  }
+
+  localStorage.setItem(storageKey, JSON.stringify(newWorkspace))
+  return newWorkspace
+}
+
 interface HubContextType {
   user: UserProfile | null
   bands: Band[]
@@ -324,7 +445,13 @@ interface HubContextType {
   activePlaylist: Playlist | null
   songStems: SongStems | null
   equipment: EquipmentItem[]
+  googleClientId: string
+  setGoogleClientId: (clientId: string) => void
+  loginWithGoogleCredential: (credentialJwt: string) => void
+  loginWithPersonalAccount: (name: string, email: string) => void
+  loginWithDemoProfile: (profile: UserProfile) => void
   loginWithGoogle: (profile?: UserProfile) => void
+  resetWorkspaceToDemo: () => void
   logout: () => void
   switchBand: (bandId: string) => void
   createBand: (name: string, genre: string) => void
@@ -346,42 +473,94 @@ const HubContext = createContext<HubContextType | undefined>(undefined)
 
 export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(() => authService.getCurrentUser())
-  const [bands, setBands] = useState<Band[]>(INITIAL_BANDS)
-  const [activeBandId, setActiveBandId] = useState<string>(() => {
-    return localStorage.getItem('bandait_active_band') || 'band_01'
-  })
+  const [googleClientId, setGoogleClientIdState] = useState<string>(() => authService.getGoogleClientId())
 
-  const [membersMap, setMembersMap] = useState(INITIAL_MEMBERS)
-  const [playlistsMap, setPlaylistsMap] = useState(INITIAL_PLAYLISTS)
-  const [equipmentMap, setEquipmentMap] = useState(INITIAL_EQUIPMENT)
-  const [activePlaylistId, setActivePlaylistId] = useState<string>('pl_01')
+  // Load initial workspace according to user
+  const [workspace, setWorkspace] = useState<WorkspaceStore>(() => loadUserWorkspace(user))
 
-  const activeBand = bands.find((b) => b.id === activeBandId) || bands[0] || null
-  const members = activeBand ? membersMap[activeBand.id] || [] : []
-  const playlists = activeBand ? playlistsMap[activeBand.id] || [] : []
+  const activeBand = workspace.bands.find((b) => b.id === workspace.activeBandId) || workspace.bands[0] || null
+  const members = activeBand ? workspace.membersMap[activeBand.id] || [] : []
+  const playlists = activeBand ? workspace.playlistsMap[activeBand.id] || [] : []
+  const [activePlaylistId, setActivePlaylistId] = useState<string>(() => playlists[0]?.id || '')
   const activePlaylist = playlists.find((p) => p.id === activePlaylistId) || playlists[0] || null
-  const equipment = activeBand ? equipmentMap[activeBand.id] || [] : []
-  const songStems = INITIAL_STEMS['song_01'] || null
+  const equipment = activeBand ? workspace.equipmentMap[activeBand.id] || [] : []
+  const songStems = activePlaylist?.songs[0] ? workspace.stemsMap[activePlaylist.songs[0].id] || workspace.stemsMap['song_01'] : workspace.stemsMap['song_01']
 
+  // Auto-persist workspace changes per user
   useEffect(() => {
-    if (activeBand) {
-      localStorage.setItem('bandait_active_band', activeBand.id)
+    if (user) {
+      const storageKey = `bandait_workspace_${user.id}`
+      localStorage.setItem(storageKey, JSON.stringify(workspace))
     }
-  }, [activeBand])
+  }, [user, workspace])
+
+  // Sync workspace on user change
+  const applyUser = useCallback((newUser: UserProfile | null) => {
+    setUser(newUser)
+    const newWs = loadUserWorkspace(newUser)
+    setWorkspace(newWs)
+    const band = newWs.bands.find((b) => b.id === newWs.activeBandId) || newWs.bands[0]
+    if (band) {
+      const pls = newWs.playlistsMap[band.id] || []
+      if (pls.length > 0) {
+        setActivePlaylistId(pls[0].id)
+      }
+    }
+  }, [])
+
+  const setGoogleClientId = (clientId: string) => {
+    authService.setGoogleClientId(clientId)
+    setGoogleClientIdState(clientId.trim())
+  }
+
+  const loginWithGoogleCredential = (credentialJwt: string) => {
+    const loggedUser = authService.loginWithGoogleCredential(credentialJwt)
+    if (loggedUser) {
+      applyUser(loggedUser)
+    }
+  }
+
+  const loginWithPersonalAccount = (name: string, email: string) => {
+    const loggedUser = authService.loginWithPersonalAccount(name, email)
+    applyUser(loggedUser)
+  }
+
+  const loginWithDemoProfile = (profile: UserProfile) => {
+    const loggedUser = authService.loginWithDemoProfile(profile)
+    applyUser(loggedUser)
+  }
 
   const loginWithGoogle = (profile?: UserProfile) => {
-    const loggedUser = authService.loginWithGoogle(profile)
-    setUser(loggedUser)
+    if (profile) {
+      loginWithDemoProfile(profile)
+    } else {
+      // If direct Google auth clicked without profile and without Google credential, fallback to first demo
+      loginWithDemoProfile(DEMO_PROFILES[0])
+    }
+  }
+
+  const resetWorkspaceToDemo = () => {
+    if (!user) return
+    const demoWs: WorkspaceStore = {
+      bands: INITIAL_BANDS,
+      activeBandId: 'band_01',
+      membersMap: INITIAL_MEMBERS,
+      playlistsMap: INITIAL_PLAYLISTS,
+      equipmentMap: INITIAL_EQUIPMENT,
+      stemsMap: INITIAL_STEMS,
+    }
+    setWorkspace(demoWs)
+    localStorage.setItem(`bandait_workspace_${user.id}`, JSON.stringify(demoWs))
   }
 
   const logout = () => {
     authService.logout()
-    setUser(null)
+    applyUser(null)
   }
 
   const switchBand = (bandId: string) => {
-    setActiveBandId(bandId)
-    const bandPlaylists = playlistsMap[bandId] || []
+    setWorkspace((prev) => ({ ...prev, activeBandId: bandId }))
+    const bandPlaylists = workspace.playlistsMap[bandId] || []
     if (bandPlaylists.length > 0) {
       setActivePlaylistId(bandPlaylists[0].id)
     }
@@ -393,37 +572,52 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: newBandId,
       name,
       genre,
-      ownerId: user?.id || 'usr_director_01',
+      ownerId: user?.id || 'usr_personal',
       currentUserRole: 'Owner',
       membersCount: 1,
       createdAt: new Date().toISOString().slice(0, 10),
     }
 
-    setBands((prev) => [...prev, newBand])
-    setActiveBandId(newBandId)
-
-    if (user) {
-      const ownerMember: BandMember = {
-        id: `mem_${Date.now()}`,
-        bandId: newBandId,
-        userId: user.id,
-        name: user.name,
-        email: user.email,
-        role: 'Owner',
-        instrument: 'Director General',
-        joinedAt: new Date().toISOString().slice(0, 10),
-      }
-      setMembersMap((prev) => ({ ...prev, [newBandId]: [ownerMember] }))
+    const ownerMember: BandMember = {
+      id: `mem_${Date.now()}`,
+      bandId: newBandId,
+      userId: user?.id || 'usr_personal',
+      name: user?.name || 'Director General',
+      email: user?.email || '',
+      role: 'Owner',
+      instrument: 'Director General',
+      joinedAt: new Date().toISOString().slice(0, 10),
     }
+
+    setWorkspace((prev) => ({
+      ...prev,
+      bands: [...prev.bands, newBand],
+      activeBandId: newBandId,
+      membersMap: {
+        ...prev.membersMap,
+        [newBandId]: [ownerMember],
+      },
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [newBandId]: [],
+      },
+      equipmentMap: {
+        ...prev.equipmentMap,
+        [newBandId]: [],
+      },
+    }))
   }
 
   const updateMemberRole = (memberId: string, newRole: MemberRole) => {
     if (!activeBand) return
-    setMembersMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: (prev[activeBand.id] || []).map((m) =>
-        m.id === memberId ? { ...m, role: newRole } : m
-      ),
+      membersMap: {
+        ...prev.membersMap,
+        [activeBand.id]: (prev.membersMap[activeBand.id] || []).map((m) =>
+          m.id === memberId ? { ...m, role: newRole } : m
+        ),
+      },
     }))
   }
 
@@ -439,9 +633,12 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       instrument,
       joinedAt: new Date().toISOString().slice(0, 10),
     }
-    setMembersMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: [...(prev[activeBand.id] || []), newMember],
+      membersMap: {
+        ...prev.membersMap,
+        [activeBand.id]: [...(prev.membersMap[activeBand.id] || []), newMember],
+      },
     }))
   }
 
@@ -456,25 +653,31 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString().slice(0, 10),
     }
-    setPlaylistsMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: [...(prev[activeBand.id] || []), newPl],
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [activeBand.id]: [...(prev.playlistsMap[activeBand.id] || []), newPl],
+      },
     }))
     setActivePlaylistId(newPl.id)
   }
 
   const updatePlaylistSong = (songId: string, updates: Partial<PlaylistSong>) => {
     if (!activeBand || !activePlaylist) return
-    setPlaylistsMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: (prev[activeBand.id] || []).map((pl) => {
-        if (pl.id !== activePlaylist.id) return pl
-        return {
-          ...pl,
-          updatedAt: new Date().toISOString().slice(0, 10),
-          songs: pl.songs.map((s) => (s.id === songId ? { ...s, ...updates } : s)),
-        }
-      }),
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
+          if (pl.id !== activePlaylist.id) return pl
+          return {
+            ...pl,
+            updatedAt: new Date().toISOString().slice(0, 10),
+            songs: pl.songs.map((s) => (s.id === songId ? { ...s, ...updates } : s)),
+          }
+        }),
+      },
     }))
   }
 
@@ -483,19 +686,21 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const currentSongs = [...activePlaylist.songs]
     const [moved] = currentSongs.splice(fromIndex, 1)
     currentSongs.splice(toIndex, 0, moved)
-    // Reindex order
     const reindexed = currentSongs.map((s, idx) => ({ ...s, orderIndex: idx + 1 }))
 
-    setPlaylistsMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: (prev[activeBand.id] || []).map((pl) => {
-        if (pl.id !== activePlaylist.id) return pl
-        return {
-          ...pl,
-          updatedAt: new Date().toISOString().slice(0, 10),
-          songs: reindexed,
-        }
-      }),
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
+          if (pl.id !== activePlaylist.id) return pl
+          return {
+            ...pl,
+            updatedAt: new Date().toISOString().slice(0, 10),
+            songs: reindexed,
+          }
+        }),
+      },
     }))
   }
 
@@ -506,16 +711,19 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `song_${Date.now()}`,
       orderIndex: activePlaylist.songs.length + 1,
     }
-    setPlaylistsMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: (prev[activeBand.id] || []).map((pl) => {
-        if (pl.id !== activePlaylist.id) return pl
-        return {
-          ...pl,
-          updatedAt: new Date().toISOString().slice(0, 10),
-          songs: [...pl.songs, newSong],
-        }
-      }),
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
+          if (pl.id !== activePlaylist.id) return pl
+          return {
+            ...pl,
+            updatedAt: new Date().toISOString().slice(0, 10),
+            songs: [...pl.songs, newSong],
+          }
+        }),
+      },
     }))
   }
 
@@ -525,24 +733,39 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .filter((s) => s.id !== songId)
       .map((s, idx) => ({ ...s, orderIndex: idx + 1 }))
 
-    setPlaylistsMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: (prev[activeBand.id] || []).map((pl) => {
-        if (pl.id !== activePlaylist.id) return pl
-        return {
-          ...pl,
-          updatedAt: new Date().toISOString().slice(0, 10),
-          songs: filtered,
-        }
-      }),
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
+          if (pl.id !== activePlaylist.id) return pl
+          return {
+            ...pl,
+            updatedAt: new Date().toISOString().slice(0, 10),
+            songs: filtered,
+          }
+        }),
+      },
     }))
   }
 
   const updateStemTrackVolume = (channel: number, volumeDb: number) => {
     if (!songStems) return
-    songStems.tracks = songStems.tracks.map((t) =>
-      t.channel === channel ? { ...t, volumeDb } : t
-    )
+    setWorkspace((prev) => {
+      const currentSongId = activePlaylist?.songs[0]?.id || 'song_01'
+      const existing = prev.stemsMap[currentSongId] || prev.stemsMap['song_01']
+      if (!existing) return prev
+      const updatedTracks = existing.tracks.map((t) =>
+        t.channel === channel ? { ...t, volumeDb } : t
+      )
+      return {
+        ...prev,
+        stemsMap: {
+          ...prev.stemsMap,
+          [currentSongId]: { ...existing, tracks: updatedTracks },
+        },
+      }
+    })
   }
 
   const addEquipment = (itemData: Omit<EquipmentItem, 'id' | 'bandId'>) => {
@@ -552,17 +775,23 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `eq_${Date.now()}`,
       bandId: activeBand.id,
     }
-    setEquipmentMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: [...(prev[activeBand.id] || []), newItem],
+      equipmentMap: {
+        ...prev.equipmentMap,
+        [activeBand.id]: [...(prev.equipmentMap[activeBand.id] || []), newItem],
+      },
     }))
   }
 
   const removeEquipment = (id: string) => {
     if (!activeBand) return
-    setEquipmentMap((prev) => ({
+    setWorkspace((prev) => ({
       ...prev,
-      [activeBand.id]: (prev[activeBand.id] || []).filter((eq) => eq.id !== id),
+      equipmentMap: {
+        ...prev.equipmentMap,
+        [activeBand.id]: (prev.equipmentMap[activeBand.id] || []).filter((eq) => eq.id !== id),
+      },
     }))
   }
 
@@ -591,14 +820,20 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <HubContext.Provider
       value={{
         user,
-        bands,
+        bands: workspace.bands,
         activeBand,
         members,
         playlists,
         activePlaylist,
         songStems,
         equipment,
+        googleClientId,
+        setGoogleClientId,
+        loginWithGoogleCredential,
+        loginWithPersonalAccount,
+        loginWithDemoProfile,
         loginWithGoogle,
+        resetWorkspaceToDemo,
         logout,
         switchBand,
         createBand,

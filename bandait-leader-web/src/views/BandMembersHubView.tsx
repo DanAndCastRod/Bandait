@@ -30,7 +30,7 @@ export const BandMembersHubView: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* HEADER BAR */}
       <div
         style={{
@@ -80,11 +80,13 @@ export const BandMembersHubView: React.FC = () => {
 
       {/* MEMBERS TABLE */}
       <div
+        className="touch-scroll-x"
         style={{
           background: '#131720',
           border: '1px solid #2a3346',
           borderRadius: '6px',
           overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
         }}
       >
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -231,6 +233,8 @@ export const BandMembersHubView: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 9999,
+            padding: '16px',
+            boxSizing: 'border-box',
           }}
         >
           <div
@@ -238,9 +242,11 @@ export const BandMembersHubView: React.FC = () => {
               background: '#161b26',
               border: '1px solid #2a3346',
               borderRadius: '8px',
-              padding: '24px',
+              padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
               maxWidth: '440px',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
             }}
           >
             <h3 style={{ margin: '0 0 16px 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: '16px' }}>

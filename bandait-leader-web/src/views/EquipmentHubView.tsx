@@ -45,7 +45,7 @@ export const EquipmentHubView: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* HEADER BAR */}
       <div
         style={{
@@ -97,7 +97,7 @@ export const EquipmentHubView: React.FC = () => {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
           gap: '16px',
         }}
       >
@@ -204,6 +204,8 @@ export const EquipmentHubView: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 9999,
+            padding: '16px',
+            boxSizing: 'border-box',
           }}
         >
           <div
@@ -211,9 +213,11 @@ export const EquipmentHubView: React.FC = () => {
               background: '#161b26',
               border: '1px solid #2a3346',
               borderRadius: '8px',
-              padding: '24px',
+              padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
               maxWidth: '480px',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
             }}
           >
             <h3 style={{ margin: '0 0 16px 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: '16px' }}>

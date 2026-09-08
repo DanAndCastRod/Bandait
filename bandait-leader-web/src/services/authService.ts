@@ -2,6 +2,7 @@ import type { UserProfile } from '../types/hub'
 
 const STORAGE_USER_KEY = 'bandait_hub_user'
 const STORAGE_TOKEN_KEY = 'bandait_hub_token'
+const STORAGE_CLIENT_ID_KEY = 'bandait_google_client_id'
 
 export const DEMO_PROFILES: UserProfile[] = [
   {
@@ -30,7 +31,51 @@ export const DEMO_PROFILES: UserProfile[] = [
   },
 ]
 
+export interface GoogleJwtPayload {
+  sub: string
+  name: string
+  email: string
+  picture?: string
+  given_name?: string
+  family_name?: string
+  email_verified?: boolean
+}
+
+export function parseGoogleJwt(token: string): GoogleJwtPayload | null {
+  try {
+    const base64Url = token.split('.')[1]
+    if (!base64Url) return null
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+    return JSON.parse(jsonPayload)
+  } catch (err) {
+    console.error('Error decoding Google JWT credential:', err)
+    return null
+  }
+}
+
 export const authService = {
+  getGoogleClientId(): string {
+    return (
+      localStorage.getItem(STORAGE_CLIENT_ID_KEY) ||
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_CLIENT_ID) ||
+      ''
+    )
+  },
+
+  setGoogleClientId(clientId: string): void {
+    if (clientId.trim()) {
+      localStorage.setItem(STORAGE_CLIENT_ID_KEY, clientId.trim())
+    } else {
+      localStorage.removeItem(STORAGE_CLIENT_ID_KEY)
+    }
+  },
+
   getCurrentUser(): UserProfile | null {
     try {
       const saved = localStorage.getItem(STORAGE_USER_KEY)
@@ -44,12 +89,53 @@ export const authService = {
     return localStorage.getItem(STORAGE_TOKEN_KEY)
   },
 
-  loginWithGoogle(profile?: UserProfile): UserProfile {
-    const user = profile || DEMO_PROFILES[0]
-    const token = `g_jwt_${btoa(user.email)}_${Date.now()}`
+  loginWithGoogleCredential(credentialJwt: string): UserProfile | null {
+    const payload = parseGoogleJwt(credentialJwt)
+    if (!payload || !payload.email) {
+      throw new Error('Credencial de Google inválida o expirada')
+    }
+
+    const user: UserProfile = {
+      id: `google_${payload.sub}`,
+      name: payload.name || payload.email.split('@')[0],
+      email: payload.email,
+      avatarUrl:
+        payload.picture ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(payload.name || payload.email)}&background=0066ff&color=fff`,
+      authProvider: 'google',
+      createdAt: new Date().toISOString(),
+    }
+
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user))
+    localStorage.setItem(STORAGE_TOKEN_KEY, credentialJwt)
+    return user
+  },
+
+  loginWithPersonalAccount(name: string, email: string): UserProfile {
+    const cleanEmail = email.trim().toLowerCase()
+    const cleanName = name.trim() || cleanEmail.split('@')[0]
+    const userHash = btoa(cleanEmail).replace(/[^a-zA-Z0-9]/g, '').slice(0, 16)
+
+    const user: UserProfile = {
+      id: `usr_google_${userHash}`,
+      name: cleanName,
+      email: cleanEmail,
+      avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(cleanName)}&background=0066ff&color=fff`,
+      authProvider: 'google',
+      createdAt: new Date().toISOString(),
+    }
+
+    const token = `g_oauth2_${userHash}_${Date.now()}`
     localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user))
     localStorage.setItem(STORAGE_TOKEN_KEY, token)
     return user
+  },
+
+  loginWithDemoProfile(profile: UserProfile): UserProfile {
+    const token = `g_demo_${profile.id}_${Date.now()}`
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(profile))
+    localStorage.setItem(STORAGE_TOKEN_KEY, token)
+    return profile
   },
 
   logout(): void {

@@ -16,7 +16,7 @@ export const StemsHubView: React.FC = () => {
   const [selectedChannel, setSelectedChannel] = useState<number | null>(null)
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* HEADER BAR */}
       <div
         style={{
@@ -151,7 +151,7 @@ export const StemsHubView: React.FC = () => {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
           gap: '12px',
         }}
       >

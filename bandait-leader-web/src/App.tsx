@@ -22,22 +22,24 @@ const HubMainContent: React.FC = () => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
-        width: '100vw',
+        minHeight: '100dvh',
+        width: '100%',
         background: 'var(--bg-primary)',
         color: 'var(--text-primary)',
-        overflow: 'hidden',
+        overflowX: 'hidden',
       }}
     >
-      {/* TOP HEADER NAVIGATION & MULTI-BAND SWITCHER */}
+      {/* TOP HEADER NAVIGATION & MULTI-BAND SWITCHER (INCLUDES MOBILE BOTTOM BAR) */}
       <HubNavbar activeTab={activeTab} onSelectTab={setActiveTab} />
 
       {/* WORKSPACE CONTENT AREA */}
       <main
         style={{
           flex: 1,
-          overflowY: 'auto',
+          width: '100%',
           background: 'var(--bg-primary)',
+          paddingBottom: '80px', // Prevents content from being covered by mobile bottom bar
+          boxSizing: 'border-box',
         }}
       >
         {activeTab === 'playlists' && <PlaylistsHubView />}
