@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { SettingsIcon, ShieldIcon, FlywheelIcon, VolumeIcon } from '../components/Icons'
 
 export type ThemeStyle = 'theme-swiss' | 'theme-milspec' | 'theme-tokyo' | 'theme-concert'
 
@@ -11,37 +12,37 @@ interface ThemeOption {
   name: string
   subtitle: string
   fonts: string
-  colors: string
+  colors: string[]
 }
 
 const THEMES: ThemeOption[] = [
   {
     id: 'theme-swiss',
     name: 'SWISS BAUHAUS LAB',
-    subtitle: 'Predeterminado • Racionalismo métrico',
+    subtitle: 'Predeterminado • Racionalismo métrico clínico',
     fonts: 'Space Grotesk + IBM Plex Mono',
-    colors: '#000000 / #FFFFFF / #E11D48',
+    colors: ['#0A0C10', '#FFFFFF', '#FF4500', '#0066FF'],
   },
   {
     id: 'theme-milspec',
     name: 'MIL-SPEC AVIONICS HUD',
     subtitle: 'Alta visibilidad 3 metros • Fósforo ámbar',
     fonts: 'Bebas Neue + Share Tech Mono',
-    colors: '#050608 / #FFB000',
+    colors: ['#05070A', '#FFB000', '#FF8000', '#FF2200'],
   },
   {
     id: 'theme-tokyo',
     name: 'TOKYO 1989 VFD',
-    subtitle: 'Fluorescente cian • Sampler vintage',
+    subtitle: 'Fluorescente cian • Sampler vintage Akai/Roland',
     fonts: 'Orbitron + Silkscreen',
-    colors: '#03070B / #00E5FF / #FF0077',
+    colors: ['#02060A', '#00F0FF', '#FF0077', '#00FFAA'],
   },
   {
     id: 'theme-concert',
     name: 'CONCERT HALL',
-    subtitle: 'Bronce bruñido • Terciopelo sinfónico',
+    subtitle: 'Bronce bruñido • Terciopelo sinfónico monumental',
     fonts: 'Cinzel + Playfair Display',
-    colors: '#0A0708 / #D4AF37 / #9E1B32',
+    colors: ['#0A0708', '#D4AF37', '#A31D31', '#E6C875'],
   },
 ]
 
@@ -88,74 +89,109 @@ export default function SettingsView({ onBack }: Props) {
   }
 
   return (
-    <div className="settings-view" style={{ padding: '24px', height: '100%', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+    <div className="settings-view">
+      {/* HEADER */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         <button
+          type="button"
           onClick={onBack}
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--text-secondary)',
-            color: 'var(--text-primary)',
-            padding: '8px 16px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '14px',
-          }}
+          className="btn-stage btn-stage-secondary"
+          style={{ padding: '8px 16px', fontSize: '12px' }}
         >
-          [VOLVER]
+          [VOLVER AL STAGE]
         </button>
-        <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', letterSpacing: '2px' }}>
-          CONFIGURACION STAGE
-        </h2>
-        <span
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <SettingsIcon size={18} style={{ color: 'var(--accent-active)' }} />
+          <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', letterSpacing: '1.5px', margin: 0 }}>
+            CONFIGURACIÓN DEL TERMINAL
+          </h2>
+        </div>
+
+        <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
             fontFamily: 'var(--font-mono)',
             fontSize: '11px',
             color: 'var(--accent-success)',
             border: '1px solid var(--accent-success)',
-            padding: '2px 8px',
-            borderRadius: '3px',
+            background: 'rgba(16, 185, 129, 0.1)',
+            padding: '4px 10px',
+            borderRadius: 'var(--theme-radius)',
           }}
         >
-          LIMITER -0.5 dBFS OK
-        </span>
+          <ShieldIcon size={12} />
+          <span>LIMITADOR -0.5 dBFS OK</span>
+        </div>
       </div>
 
       {/* SECCION 1: TEMAS VISUALES CLIENTE */}
-      <div style={{ marginBottom: '32px' }}>
-        <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-          // ESTILO VISUAL DEL MONITOR (CLIENTE INDEPENDIENTE)
-        </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '12px' }}>
+          <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-secondary)', letterSpacing: '1px', textTransform: 'uppercase' }}>
+            // ESTILO VISUAL DEL MONITOR (PERSONALIZABLE POR MÚSICO)
+          </h3>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-disabled)' }}>
+            LOCAL STORAGE PERSISTENTE
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
           {THEMES.map((theme) => {
             const isSelected = currentTheme === theme.id
             return (
               <div
                 key={theme.id}
                 onClick={() => handleThemeChange(theme.id)}
-                style={{
-                  background: isSelected ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-                  border: isSelected ? '2px solid var(--accent-active)' : '1px solid var(--theme-border)',
-                  borderRadius: '6px',
-                  padding: '14px',
-                  cursor: 'pointer',
-                  transition: 'border-color 0.2s',
-                }}
+                className={`theme-card-preview ${isSelected ? 'active' : ''}`}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontWeight: 'bold', fontSize: '13px', letterSpacing: '1px' }}>{theme.name}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '13px', letterSpacing: '0.5px', color: 'var(--text-primary)' }}>
+                    {theme.name}
+                  </span>
                   {isSelected && (
-                    <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-focus)' }}>
-                      [ACTIVO]
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 800,
+                        background: 'var(--accent-active)',
+                        color: 'var(--bg-primary)',
+                        padding: '2px 6px',
+                        borderRadius: 'var(--theme-radius)',
+                      }}
+                    >
+                      ACTIVO
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {theme.subtitle}
                 </div>
-                <div style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                  Tipografías: {theme.fonts}
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                  <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-disabled)' }}>
+                    {theme.fonts}
+                  </div>
+                  {/* Color swatches */}
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {theme.colors.map((c, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          width: '12px',
+                          height: '12px',
+                          borderRadius: '2px',
+                          background: c,
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          display: 'inline-block',
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             )
@@ -163,16 +199,31 @@ export default function SettingsView({ onBack }: Props) {
         </div>
       </div>
 
-      {/* SECCION 2: MEZCLADOR DE MONITOREO IN-EAR */}
-      <div style={{ marginBottom: '32px' }}>
-        <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-          // MEZCLADOR PERSONAL IN-EAR (3 VIAS CON LIMITADOR -0.5 dBFS)
+      {/* SECCION 2: MEZCLADOR DE MONITOREO PERSONAL */}
+      <div>
+        <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px', letterSpacing: '1px', textTransform: 'uppercase' }}>
+          // CALIBRACIÓN DE RETORNO IN-EAR (3 VÍAS CON LIMITADOR SEGURO)
         </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '480px' }}>
+
+        <div
+          style={{
+            background: 'var(--theme-card-bg)',
+            border: '1px solid var(--theme-border)',
+            borderRadius: 'var(--theme-radius)',
+            padding: '18px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            maxWidth: '560px',
+          }}
+        >
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '12px', marginBottom: '6px' }}>
-              <span>CANAL 1: CLIC METRONOMO</span>
-              <span>{Math.round(clickVolume * 100)}%</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '11px', marginBottom: '6px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <VolumeIcon size={13} />
+                <span>CANAL 1: CLIC METRÓNOMO</span>
+              </span>
+              <span style={{ fontWeight: 700, color: 'var(--accent-active)' }}>{Math.round(clickVolume * 100)}%</span>
             </div>
             <input
               type="range"
@@ -181,14 +232,17 @@ export default function SettingsView({ onBack }: Props) {
               step="0.01"
               value={clickVolume}
               onChange={(e) => handleVolumeChange('click', parseFloat(e.target.value))}
-              style={{ width: '100%', accentColor: 'var(--accent-active)' }}
+              style={{ width: '100%', accentColor: 'var(--accent-active)', cursor: 'pointer' }}
             />
           </div>
 
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '12px', marginBottom: '6px' }}>
-              <span>CANAL 2: GUIA VOCAL / TALKBACK</span>
-              <span>{Math.round(guideVolume * 100)}%</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '11px', marginBottom: '6px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <VolumeIcon size={13} />
+                <span>CANAL 2: GUÍA VOCAL / TALKBACK</span>
+              </span>
+              <span style={{ fontWeight: 700, color: 'var(--accent-active)' }}>{Math.round(guideVolume * 100)}%</span>
             </div>
             <input
               type="range"
@@ -197,14 +251,17 @@ export default function SettingsView({ onBack }: Props) {
               step="0.01"
               value={guideVolume}
               onChange={(e) => handleVolumeChange('guide', parseFloat(e.target.value))}
-              style={{ width: '100%', accentColor: 'var(--accent-focus)' }}
+              style={{ width: '100%', accentColor: 'var(--accent-active)', cursor: 'pointer' }}
             />
           </div>
 
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '12px', marginBottom: '6px' }}>
-              <span>CANAL 3: STEMS PRE-CACHE</span>
-              <span>{Math.round(stemsVolume * 100)}%</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '11px', marginBottom: '6px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <VolumeIcon size={13} />
+                <span>CANAL 3: STEMS PRE-CACHE</span>
+              </span>
+              <span style={{ fontWeight: 700, color: 'var(--accent-active)' }}>{Math.round(stemsVolume * 100)}%</span>
             </div>
             <input
               type="range"
@@ -213,32 +270,35 @@ export default function SettingsView({ onBack }: Props) {
               step="0.01"
               value={stemsVolume}
               onChange={(e) => handleVolumeChange('stems', parseFloat(e.target.value))}
-              style={{ width: '100%', accentColor: 'var(--accent-success)' }}
+              style={{ width: '100%', accentColor: 'var(--accent-active)', cursor: 'pointer' }}
             />
           </div>
         </div>
       </div>
 
-      {/* SECCION 3: MOTOR FLYWHEEL RESILIENCIA */}
+      {/* SECCION 3: RESILIENCIA & MOTOR FLYWHEEL */}
       <div
         style={{
           border: '1px solid var(--theme-border)',
-          borderRadius: '6px',
-          padding: '16px',
-          background: 'var(--bg-surface)',
-          maxWidth: '560px',
+          borderRadius: 'var(--theme-radius)',
+          padding: '16px 20px',
+          background: 'var(--theme-card-bg)',
+          maxWidth: '640px',
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 'bold' }}>
-            MOTOR FLYWHEEL AUTONOMO
-          </span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent-success)' }}>
-            [ARMADO]
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FlywheelIcon size={16} style={{ color: 'var(--accent-warning)' }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)' }}>
+              MOTOR FLYWHEEL AUTÓNOMO (RESILIENCIA EN VIVO)
+            </span>
+          </div>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent-success)', fontWeight: 700 }}>
+            [ACTIVO]
           </span>
         </div>
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-          En caso de caída o jitter de red Wi-Fi, el oscilador local mantendrá el compás y tempo por inercia matemática sin silencios abruptos. Al reconectar, ejecutará una realineación de fase suave (*soft phase-alignment*).
+          En caso de caída o microcortes de red Wi-Fi en el escenario, el oscilador Web Audio local mantendrá el compás y pulso por inercia matemática sin silencios abruptos. Al reconectar con el líder FOH, ejecutará una realineación de fase suave (soft phase-alignment) sin romper la experiencia auditiva.
         </p>
       </div>
     </div>

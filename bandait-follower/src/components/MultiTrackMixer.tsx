@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { stemCacheService, StemType } from '../services/stemCacheService'
+import { CloseIcon, ShieldIcon, PanicIcon, DownloadIcon } from './Icons'
 
 export interface ChannelMix {
   id: StemType
@@ -43,7 +44,6 @@ export default function MultiTrackMixer({
   const [cacheStatus, setCacheStatus] = useState<string>('COMPROBANDO...')
   const [activePreset, setActivePreset] = useState<string>('EQUILIBRADO')
 
-  // Check stem cache status on mount and when songId changes
   const checkCache = useCallback(async () => {
     try {
       const res = await stemCacheService.isSongFullyCached(songId)
@@ -143,7 +143,6 @@ export default function MultiTrackMixer({
 
   const formatDb = (volume: number): string => {
     if (volume <= 0.001) return '-INF dB'
-    // 0.8 -> 0 dB; 1.0 -> +2.0 dB; 0.4 -> -6 dB
     const ratio = volume / 0.8
     const db = 20 * Math.log10(ratio)
     return `${db > 0 ? '+' : ''}${db.toFixed(1)} dB`
@@ -161,12 +160,12 @@ export default function MultiTrackMixer({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(10, 11, 14, 0.94)',
+        backgroundColor: 'rgba(5, 7, 10, 0.96)',
         zIndex: 9999,
         display: 'flex',
         flexDirection: 'column',
-        backdropFilter: 'blur(8px)',
-        padding: '16px',
+        backdropFilter: 'blur(10px)',
+        padding: '16px 20px',
         boxSizing: 'border-box',
         overflowY: 'auto',
       }}
@@ -177,9 +176,9 @@ export default function MultiTrackMixer({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          borderBottom: '2px solid var(--border-color)',
+          borderBottom: '1px solid var(--theme-border)',
           paddingBottom: '12px',
-          marginBottom: '16px',
+          marginBottom: '14px',
           flexWrap: 'wrap',
           gap: '12px',
         }}
@@ -190,57 +189,51 @@ export default function MultiTrackMixer({
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '11px',
-                background: 'var(--accent-primary)',
-                color: '#ffffff',
-                padding: '2px 6px',
-                borderRadius: '2px',
+                background: 'var(--accent-active)',
+                color: 'var(--bg-primary)',
+                padding: '3px 8px',
+                borderRadius: 'var(--theme-radius)',
                 letterSpacing: '1px',
-                fontWeight: 700,
+                fontWeight: 800,
               }}
             >
-              [IN-EAR DSP]
+              [DSP RETORNO IN-EAR]
             </span>
             <h2
               style={{
                 margin: 0,
-                fontFamily: 'var(--font-display)',
-                fontSize: '18px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '17px',
+                fontWeight: 800,
                 textTransform: 'uppercase',
                 letterSpacing: '1px',
+                color: 'var(--text-primary)',
               }}
             >
-              Mezcla Multipista & Monitoreo Personal
+              CONSOLA DE MONITOREO PERSONAL
             </h2>
           </div>
           <p
             style={{
               margin: '4px 0 0 0',
               fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              color: 'var(--text-muted)',
+              fontSize: '11px',
+              color: 'var(--text-secondary)',
             }}
           >
-            Aislamiento estéreo, balance multicanal y techo limitador acústico a -0.5 dBFS.
+            Aislamiento estéreo multicanal con techo acústico calibrado a -0.5 dBFS.
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            onClick={onClose}
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              padding: '8px 16px',
-              background: 'transparent',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            [CERRAR MEZCLADOR]
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="btn-stage btn-stage-secondary"
+          style={{ padding: '8px 16px', fontSize: '12px' }}
+        >
+          <CloseIcon size={14} />
+          <span>CERRAR</span>
+        </button>
       </div>
 
       {/* TOP STATUS & PRESETS BAR */}
@@ -251,10 +244,10 @@ export default function MultiTrackMixer({
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '12px',
-          marginBottom: '16px',
-          background: 'rgba(255, 255, 255, 0.02)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '4px',
+          marginBottom: '14px',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--theme-border)',
+          borderRadius: 'var(--theme-radius)',
           padding: '10px 14px',
         }}
       >
@@ -264,31 +257,38 @@ export default function MultiTrackMixer({
             style={{
               fontFamily: 'var(--font-mono)',
               fontSize: '11px',
-              color: 'var(--text-muted)',
+              color: 'var(--text-secondary)',
               letterSpacing: '1px',
+              fontWeight: 700,
             }}
           >
             PRESETS:
           </span>
-          {(['EQUILIBRADO', 'BATERISTA', 'CANTANTE', 'ARMONÍA'] as const).map((preset) => (
-            <button
-              key={preset}
-              onClick={() => applyPreset(preset)}
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
-                padding: '4px 10px',
-                borderRadius: '3px',
-                cursor: 'pointer',
-                background: activePreset === preset ? 'var(--accent-primary)' : 'rgba(255, 255, 255, 0.05)',
-                color: activePreset === preset ? '#ffffff' : 'var(--text-secondary)',
-                border: activePreset === preset ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-                letterSpacing: '0.5px',
-              }}
-            >
-              [{preset}]
-            </button>
-          ))}
+          {(['EQUILIBRADO', 'BATERISTA', 'CANTANTE', 'ARMONÍA'] as const).map((preset) => {
+            const isActive = activePreset === preset
+            return (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  padding: '5px 12px',
+                  borderRadius: 'var(--theme-radius)',
+                  cursor: 'pointer',
+                  background: isActive ? 'var(--accent-active)' : 'var(--bg-elevated)',
+                  color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                  border: isActive ? '1px solid var(--accent-active)' : '1px solid var(--theme-border)',
+                  letterSpacing: '0.5px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                [{preset}]
+              </button>
+            )
+          })}
         </div>
 
         {/* STEM CACHE STATUS & PRELOAD BUTTON */}
@@ -299,28 +299,23 @@ export default function MultiTrackMixer({
               fontSize: '11px',
               color: 'var(--accent-success)',
               border: '1px solid var(--accent-success)',
-              padding: '3px 8px',
-              borderRadius: '3px',
+              background: 'rgba(16, 185, 129, 0.1)',
+              padding: '4px 10px',
+              borderRadius: 'var(--theme-radius)',
             }}
           >
             {cacheStatus}
           </span>
+
           <button
+            type="button"
             onClick={handlePreload}
             disabled={isPreloading}
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '11px',
-              padding: '5px 12px',
-              background: isPreloading ? 'var(--border-color)' : 'rgba(32, 201, 151, 0.15)',
-              color: isPreloading ? 'var(--text-muted)' : 'var(--accent-success)',
-              border: '1px solid var(--accent-success)',
-              borderRadius: '3px',
-              cursor: isPreloading ? 'not-allowed' : 'pointer',
-              fontWeight: 600,
-            }}
+            className="btn-stage btn-stage-secondary"
+            style={{ padding: '6px 12px', fontSize: '11px' }}
           >
-            {isPreloading ? `[DESCARGANDO ${preloadProgress}%]` : '[PRE-CARGAR STEMS]'}
+            <DownloadIcon size={13} />
+            <span>{isPreloading ? `DESCARGANDO ${preloadProgress}%` : 'PRE-CARGAR'}</span>
           </button>
         </div>
       </div>
@@ -330,7 +325,7 @@ export default function MultiTrackMixer({
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-          gap: '12px',
+          gap: '10px',
           flex: 1,
           alignItems: 'stretch',
           marginBottom: '16px',
@@ -338,7 +333,7 @@ export default function MultiTrackMixer({
       >
         {channels.map((ch) => {
           const isAudible = hasAnySolo ? ch.solo : !ch.muted && !panicMuted
-          const isNearLimiter = ch.volume > 0.95
+          const isNearLimiter = ch.volume > 0.92
 
           return (
             <div
@@ -347,15 +342,15 @@ export default function MultiTrackMixer({
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                background: 'rgba(255, 255, 255, 0.03)',
+                background: 'var(--theme-card-bg)',
                 border: ch.solo
-                  ? '1px solid #fab005'
+                  ? '1px solid var(--accent-warning)'
                   : ch.muted
-                  ? '1px solid rgba(255, 255, 255, 0.05)'
-                  : '1px solid var(--border-color)',
-                borderRadius: '6px',
-                padding: '12px 8px',
-                opacity: isAudible ? 1 : 0.4,
+                  ? '1px solid var(--text-disabled)'
+                  : '1px solid var(--theme-border)',
+                borderRadius: 'var(--theme-radius)',
+                padding: '14px 10px',
+                opacity: isAudible ? 1 : 0.45,
                 transition: 'border-color 0.15s, opacity 0.15s',
               }}
             >
@@ -363,10 +358,10 @@ export default function MultiTrackMixer({
               <div
                 style={{
                   fontFamily: 'var(--font-mono)',
-                  fontSize: '12px',
-                  fontWeight: 700,
+                  fontSize: '13px',
+                  fontWeight: 800,
                   letterSpacing: '1px',
-                  color: isAudible ? 'var(--text-primary)' : 'var(--text-muted)',
+                  color: isAudible ? 'var(--text-primary)' : 'var(--text-disabled)',
                   marginBottom: '2px',
                 }}
               >
@@ -376,9 +371,10 @@ export default function MultiTrackMixer({
                 style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '9px',
-                  color: 'var(--text-muted)',
+                  color: 'var(--text-secondary)',
                   letterSpacing: '0.5px',
-                  marginBottom: '12px',
+                  marginBottom: '10px',
+                  textTransform: 'uppercase',
                 }}
               >
                 {ch.label}
@@ -388,9 +384,9 @@ export default function MultiTrackMixer({
               <div
                 style={{
                   fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  color: isNearLimiter ? '#f03e3e' : 'var(--accent-primary)',
-                  fontWeight: 600,
+                  fontSize: '12px',
+                  color: isNearLimiter ? 'var(--accent-danger)' : 'var(--accent-active)',
+                  fontWeight: 700,
                   marginBottom: '8px',
                 }}
               >
@@ -422,7 +418,7 @@ export default function MultiTrackMixer({
                     height: '130px',
                     width: '32px',
                     cursor: 'pointer',
-                    accentColor: isNearLimiter ? '#f03e3e' : 'var(--accent-primary)',
+                    accentColor: isNearLimiter ? 'var(--accent-danger)' : 'var(--accent-active)',
                   }}
                 />
               </div>
@@ -430,11 +426,11 @@ export default function MultiTrackMixer({
               {/* Safety Limiter Dot */}
               <div
                 style={{
-                  marginTop: '6px',
+                  marginTop: '8px',
                   marginBottom: '10px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
+                  gap: '5px',
                 }}
               >
                 <span
@@ -442,14 +438,14 @@ export default function MultiTrackMixer({
                     width: '6px',
                     height: '6px',
                     borderRadius: '50%',
-                    backgroundColor: isNearLimiter ? '#f03e3e' : 'var(--border-color)',
+                    backgroundColor: isNearLimiter ? 'var(--accent-danger)' : 'var(--theme-border)',
                   }}
                 />
                 <span
                   style={{
                     fontFamily: 'var(--font-mono)',
-                    fontSize: '8px',
-                    color: isNearLimiter ? '#f03e3e' : 'var(--text-muted)',
+                    fontSize: '9px',
+                    color: isNearLimiter ? 'var(--accent-danger)' : 'var(--text-disabled)',
                   }}
                 >
                   -0.5dB
@@ -461,14 +457,16 @@ export default function MultiTrackMixer({
                 <div
                   style={{
                     fontFamily: 'var(--font-mono)',
-                    fontSize: '8px',
-                    color: 'var(--text-muted)',
+                    fontSize: '9px',
+                    color: 'var(--text-secondary)',
                     display: 'flex',
                     justifyContent: 'space-between',
                   }}
                 >
                   <span>L</span>
-                  <span>{ch.pan === 0 ? 'C' : ch.pan > 0 ? `R${Math.round(ch.pan * 100)}` : `L${Math.round(Math.abs(ch.pan) * 100)}`}</span>
+                  <span>
+                    {ch.pan === 0 ? 'C' : ch.pan > 0 ? `R${Math.round(ch.pan * 100)}` : `L${Math.round(Math.abs(ch.pan) * 100)}`}
+                  </span>
                   <span>R</span>
                 </div>
                 <input
@@ -478,44 +476,46 @@ export default function MultiTrackMixer({
                   step="0.05"
                   value={ch.pan}
                   onChange={(e) => handlePanChange(ch.id, parseFloat(e.target.value))}
-                  style={{ width: '100%', height: '4px', cursor: 'pointer' }}
+                  style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: 'var(--text-secondary)' }}
                 />
               </div>
 
               {/* Solo & Mute Buttons */}
               <div style={{ display: 'flex', gap: '6px', width: '100%' }}>
                 <button
+                  type="button"
                   onClick={() => handleToggleSolo(ch.id)}
                   style={{
                     flex: 1,
                     fontFamily: 'var(--font-mono)',
-                    fontSize: '10px',
+                    fontSize: '11px',
                     padding: '6px 0',
                     textAlign: 'center',
                     cursor: 'pointer',
-                    borderRadius: '3px',
-                    fontWeight: 700,
-                    background: ch.solo ? '#fab005' : 'rgba(255, 255, 255, 0.05)',
+                    borderRadius: 'var(--theme-radius)',
+                    fontWeight: 800,
+                    background: ch.solo ? 'var(--accent-warning)' : 'var(--bg-surface)',
                     color: ch.solo ? '#000000' : 'var(--text-secondary)',
-                    border: ch.solo ? '1px solid #fab005' : '1px solid var(--border-color)',
+                    border: ch.solo ? '1px solid var(--accent-warning)' : '1px solid var(--theme-border)',
                   }}
                 >
                   [S]
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleToggleMute(ch.id)}
                   style={{
                     flex: 1,
                     fontFamily: 'var(--font-mono)',
-                    fontSize: '10px',
+                    fontSize: '11px',
                     padding: '6px 0',
                     textAlign: 'center',
                     cursor: 'pointer',
-                    borderRadius: '3px',
-                    fontWeight: 700,
-                    background: ch.muted ? '#f03e3e' : 'rgba(255, 255, 255, 0.05)',
+                    borderRadius: 'var(--theme-radius)',
+                    fontWeight: 800,
+                    background: ch.muted ? 'var(--accent-danger)' : 'var(--bg-surface)',
                     color: ch.muted ? '#ffffff' : 'var(--text-secondary)',
-                    border: ch.muted ? '1px solid #f03e3e' : '1px solid var(--border-color)',
+                    border: ch.muted ? '1px solid var(--accent-danger)' : '1px solid var(--theme-border)',
                   }}
                 >
                   [M]
@@ -529,7 +529,7 @@ export default function MultiTrackMixer({
       {/* MASTER SECTION FOOTER */}
       <div
         style={{
-          borderTop: '2px solid var(--border-color)',
+          borderTop: '1px solid var(--theme-border)',
           paddingTop: '14px',
           display: 'flex',
           justifyContent: 'space-between',
@@ -540,32 +540,31 @@ export default function MultiTrackMixer({
       >
         {/* EMERGENCY PANIC MUTE */}
         <button
+          type="button"
           onClick={() => setPanicMuted(!panicMuted)}
+          className="btn-stage"
           style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '11px',
+            background: panicMuted ? 'var(--accent-danger)' : 'rgba(239, 68, 68, 0.12)',
+            color: panicMuted ? '#ffffff' : 'var(--accent-danger)',
+            border: '1px solid var(--accent-danger)',
             padding: '10px 18px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 700,
-            letterSpacing: '1px',
-            background: panicMuted ? '#f03e3e' : 'rgba(240, 62, 62, 0.1)',
-            color: panicMuted ? '#ffffff' : '#f03e3e',
-            border: '2px solid #f03e3e',
+            fontSize: '12px',
           }}
         >
-          {panicMuted ? '[DESACTIVAR CORTE DE EMERGENCIA]' : '[PANIC: SILENCIAR IN-EAR]'}
+          <PanicIcon size={15} />
+          <span>{panicMuted ? 'DESACTIVAR CORTE' : 'PANIC: SILENCIAR IN-EAR'}</span>
         </button>
 
         {/* MASTER VOLUME FADER */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <div style={{ textAlign: 'right' }}>
             <div
               style={{
                 fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
+                fontSize: '10px',
                 fontWeight: 700,
                 letterSpacing: '1px',
+                color: 'var(--text-secondary)',
               }}
             >
               VOLUMEN GENERAL
@@ -573,13 +572,15 @@ export default function MultiTrackMixer({
             <div
               style={{
                 fontFamily: 'var(--font-mono)',
-                fontSize: '12px',
-                color: 'var(--accent-primary)',
+                fontSize: '13px',
+                fontWeight: 800,
+                color: 'var(--accent-active)',
               }}
             >
               {formatDb(masterVolume)}
             </div>
           </div>
+
           <input
             type="range"
             min="0"
@@ -587,20 +588,26 @@ export default function MultiTrackMixer({
             step="0.01"
             value={masterVolume}
             onChange={(e) => handleMasterChange(parseFloat(e.target.value))}
-            style={{ width: '140px', cursor: 'pointer' }}
+            style={{ width: '150px', cursor: 'pointer', accentColor: 'var(--accent-active)' }}
           />
-          <span
+
+          <div
             style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
               fontFamily: 'var(--font-mono)',
               fontSize: '10px',
-              color: 'var(--text-muted)',
-              border: '1px solid var(--border-color)',
-              padding: '4px 6px',
-              borderRadius: '3px',
+              color: 'var(--accent-success)',
+              border: '1px solid var(--accent-success)',
+              background: 'rgba(16, 185, 129, 0.1)',
+              padding: '4px 8px',
+              borderRadius: 'var(--theme-radius)',
             }}
           >
-            LIMITER -0.5 dBFS
-          </span>
+            <ShieldIcon size={12} />
+            <span>LIMITER -0.5 dBFS</span>
+          </div>
         </div>
       </div>
     </div>

@@ -28,10 +28,11 @@ export default function SongRibbon({
     <div
       style={{
         width: '100%',
-        background: 'var(--bg-elevated)',
+        background: 'var(--bg-surface)',
         borderTop: '1px solid var(--theme-border)',
         borderBottom: '1px solid var(--theme-border)',
-        padding: '8px 12px',
+        borderRadius: 'var(--theme-radius)',
+        padding: '8px 10px',
         overflowX: 'auto',
         display: 'flex',
         gap: '8px',
@@ -41,19 +42,20 @@ export default function SongRibbon({
       }}
       ref={containerRef}
     >
-      <span
+      <div
         style={{
           fontFamily: 'var(--font-mono)',
-          fontSize: '10px',
+          fontSize: '9px',
+          fontWeight: 800,
           color: 'var(--text-disabled)',
-          writingMode: 'vertical-rl',
-          transform: 'rotate(180deg)',
-          letterSpacing: '1px',
-          padding: '2px',
+          letterSpacing: '1.5px',
+          padding: '4px 6px',
+          borderRight: '1px solid var(--theme-border)',
+          whiteSpace: 'nowrap',
         }}
       >
-        RIBBON
-      </span>
+        SETLIST //
+      </div>
 
       {songs.map((song, idx) => {
         const isCurrent = song.id === currentSongId
@@ -65,28 +67,29 @@ export default function SongRibbon({
             onClick={() => !disabled && onSelectSong(song, idx)}
             disabled={disabled}
             style={{
-              background: isCurrent ? 'var(--accent-active)' : 'var(--bg-surface)',
-              color: isCurrent ? '#000000' : 'var(--text-primary)',
+              background: isCurrent ? 'var(--accent-active)' : 'var(--theme-card-bg)',
+              color: isCurrent ? 'var(--bg-primary)' : 'var(--text-primary)',
               border: isCurrent
-                ? '2px solid var(--accent-active)'
+                ? '1px solid var(--accent-active)'
                 : '1px solid var(--theme-border)',
-              borderRadius: '4px',
-              padding: '6px 12px',
+              borderRadius: 'var(--theme-radius)',
+              padding: '6px 14px',
               cursor: disabled ? 'not-allowed' : 'pointer',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'flex-start',
-              minWidth: '130px',
+              minWidth: '140px',
               flexShrink: 0,
               textAlign: 'left',
               transition: 'all 0.15s ease',
+              boxShadow: isCurrent ? '0 0 14px var(--theme-glow)' : 'none',
             }}
           >
             <div
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '10px',
-                fontWeight: 700,
+                fontWeight: 800,
                 opacity: isCurrent ? 0.9 : 0.6,
                 letterSpacing: '0.5px',
               }}
@@ -96,7 +99,7 @@ export default function SongRibbon({
 
             <div
               style={{
-                fontFamily: 'var(--font-sans)',
+                fontFamily: 'var(--font-ui)',
                 fontSize: '13px',
                 fontWeight: isCurrent ? 800 : 600,
                 whiteSpace: 'nowrap',
@@ -113,11 +116,14 @@ export default function SongRibbon({
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '10px',
-                opacity: isCurrent ? 0.85 : 0.5,
+                opacity: isCurrent ? 0.85 : 0.6,
                 marginTop: '3px',
+                display: 'flex',
+                gap: '6px',
               }}
             >
-              {song.bpm} BPM {song.key ? `• ${song.key}` : ''}
+              <span>{song.bpm} BPM</span>
+              {song.key && <span>• {song.key}</span>}
             </div>
           </button>
         )

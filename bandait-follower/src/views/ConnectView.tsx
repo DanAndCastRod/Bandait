@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { LibraryIcon, SettingsIcon, WifiIcon, QrIcon, ShieldIcon } from '../components/Icons'
 
 interface Props {
   onConnect: (sessionId: string) => void
@@ -6,10 +7,16 @@ interface Props {
   onLibrary?: () => void
 }
 
+const IP_PRESETS = [
+  { label: 'AUTO (192.168.1.100)', ip: '192.168.1.100' },
+  { label: 'DIRECTOR (192.168.0.50)', ip: '192.168.0.50' },
+  { label: 'LOCALHOST', ip: '127.0.0.1' },
+]
+
 export default function ConnectView({ onConnect, onSettings, onLibrary }: Props) {
-  const [ip, setIp] = useState(localStorage.getItem('bandait_last_ip') || '')
+  const [ip, setIp] = useState(localStorage.getItem('bandait_last_ip') || '192.168.1.100')
   const [port, setPort] = useState(localStorage.getItem('bandait_last_port') || '4040')
-  const [sessionId, setSessionId] = useState('default')
+  const [sessionId, setSessionId] = useState(localStorage.getItem('bandait_last_session') || 'default')
   const [scanning, setScanning] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -17,6 +24,7 @@ export default function ConnectView({ onConnect, onSettings, onLibrary }: Props)
     e.preventDefault()
     localStorage.setItem('bandait_last_ip', ip)
     localStorage.setItem('bandait_last_port', port)
+    localStorage.setItem('bandait_last_session', sessionId)
     onConnect(sessionId)
   }
 
@@ -31,107 +39,142 @@ export default function ConnectView({ onConnect, onSettings, onLibrary }: Props)
     setTimeout(() => {
       setScanning(false)
       onConnect('default')
-    }, 1500)
+    }, 1200)
   }
 
   return (
     <div className="connect-view">
-      <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px' }}>
-        {onLibrary && (
-          <button
-            type="button"
-            onClick={onLibrary}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--text-secondary)',
-              color: 'var(--text-secondary)',
-              padding: '6px 12px',
-              borderRadius: '4px',
-              fontSize: '11px',
-              fontFamily: 'var(--font-mono)',
-              cursor: 'pointer',
-            }}
-          >
-            [LIB]
-          </button>
-        )}
-        {onSettings && (
-          <button
-            type="button"
-            onClick={onSettings}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--text-secondary)',
-              color: 'var(--text-secondary)',
-              padding: '6px 12px',
-              borderRadius: '4px',
-              fontSize: '11px',
-              fontFamily: 'var(--font-mono)',
-              cursor: 'pointer',
-            }}
-          >
-            [CFG]
-          </button>
-        )}
+      {/* TOP RACK BAR */}
+      <div className="connect-topbar">
+        <div className="connect-rack-badge">
+          <span style={{ color: 'var(--accent-active)', fontWeight: 800 }}>BANDAIT F-3000</span>
+          <span>//</span>
+          <span>TERMINAL STAGE</span>
+        </div>
+
+        <div className="connect-actions">
+          {onLibrary && (
+            <button
+              type="button"
+              className="btn-stage-icon"
+              onClick={onLibrary}
+              title="Biblioteca de Repertorio"
+              aria-label="Biblioteca"
+            >
+              <LibraryIcon size={16} />
+            </button>
+          )}
+          {onSettings && (
+            <button
+              type="button"
+              className="btn-stage-icon"
+              onClick={onSettings}
+              title="Configuración de Temas y Audio"
+              aria-label="Configuración"
+            >
+              <SettingsIcon size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
-      <h1 className="connect-title">BANDAIT</h1>
-      <p className="connect-subtitle">Stage Monitor</p>
+      {/* MAIN HARDWARE CONNECT CARD */}
+      <div className="connect-card">
+        <div className="connect-header">
+          <h1 className="connect-title">BANDAIT</h1>
+          <p className="connect-subtitle">SISTEMA DE MONITOREO EN VIVO</p>
+        </div>
 
-      <form onSubmit={handleSubmit} className="connect-form">
-        <label className="form-label">
-          Leader IP
-          <input
-            type="text"
-            value={ip}
-            onChange={(e) => setIp(e.target.value)}
-            placeholder="192.168.1.10"
-            className="form-input"
-            required
-          />
-        </label>
+        <form onSubmit={handleSubmit} className="connect-form">
+          {/* IP INPUT */}
+          <div className="form-group">
+            <label className="form-label">
+              <span>IP DEL LÍDER FOH</span>
+              <span style={{ opacity: 0.6 }}>[UDP / TCP]</span>
+            </label>
+            <input
+              type="text"
+              value={ip}
+              onChange={(e) => setIp(e.target.value)}
+              placeholder="192.168.1.100"
+              className="form-input"
+              required
+            />
+            <div className="preset-chips">
+              {IP_PRESETS.map((preset) => (
+                <button
+                  key={preset.ip}
+                  type="button"
+                  className="preset-chip"
+                  onClick={() => setIp(preset.ip)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-        <label className="form-label">
-          Port
-          <input
-            type="text"
-            value={port}
-            onChange={(e) => setPort(e.target.value)}
-            className="form-input"
-            required
-          />
-        </label>
+          {/* PORT AND SESSION ID */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '10px' }}>
+            <div className="form-group">
+              <label className="form-label">
+                <span>PUERTO</span>
+              </label>
+              <input
+                type="text"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                className="form-input"
+                required
+              />
+            </div>
 
-        <label className="form-label">
-          Session ID
-          <input
-            type="text"
-            value={sessionId}
-            onChange={(e) => setSessionId(e.target.value)}
-            className="form-input"
-            required
-          />
-        </label>
+            <div className="form-group">
+              <label className="form-label">
+                <span>ID DE SESIÓN</span>
+              </label>
+              <input
+                type="text"
+                value={sessionId}
+                onChange={(e) => setSessionId(e.target.value)}
+                className="form-input"
+                required
+              />
+            </div>
+          </div>
 
-        <button type="submit" className="btn-primary">
-          CONNECT
+          {/* SUBMIT BUTTON */}
+          <button type="submit" className="btn-stage btn-stage-primary" style={{ marginTop: '4px' }}>
+            <WifiIcon size={18} />
+            <span>ESTABLECER ENLACE STAGE</span>
+          </button>
+        </form>
+
+        <div className="connect-divider">O ACCESO POR CREDENCIAL QR</div>
+
+        <button type="button" onClick={handleQrUpload} className="btn-stage btn-stage-secondary">
+          <QrIcon size={18} />
+          <span>{scanning ? 'PROCESANDO CÓDIGO...' : 'ESCANEAR CÓDIGO QR'}</span>
         </button>
-      </form>
 
-      <div className="connect-divider">OR</div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileChange}
+          style={{ display: 'none' }}
+        />
 
-      <button onClick={handleQrUpload} className="btn-secondary">
-        {scanning ? 'SCANNING...' : 'SCAN QR CODE'}
-      </button>
-
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={handleFileChange}
-        style={{ display: 'none' }}
-      />
+        {/* HARDWARE DIAGNOSTICS STRIP */}
+        <div className="hardware-diagnostics">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <ShieldIcon size={13} style={{ color: 'var(--accent-success)' }} />
+            <span>LIMITADOR IN-EAR -0.5 dBFS</span>
+          </div>
+          <span style={{ color: 'var(--accent-active)', fontWeight: 700 }}>FLYWHEEL ARMADO</span>
+        </div>
+      </div>
     </div>
   )
 }

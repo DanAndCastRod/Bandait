@@ -10,6 +10,15 @@ import DirectorRemoteToolbar from '../components/DirectorRemoteToolbar'
 import MultiTrackMixer from '../components/MultiTrackMixer'
 import { CommandType } from '../types/protocol'
 import { getAllSetlists } from '../db/indexedDb'
+import {
+  LibraryIcon,
+  SettingsIcon,
+  MixerIcon,
+  FullscreenIcon,
+  DisconnectIcon,
+  RemoteIcon,
+  FlywheelIcon,
+} from '../components/Icons'
 
 interface Props {
   sessionId: string
@@ -24,7 +33,8 @@ interface SongData {
   title: string
   artist: string
   bpm: number
-  lyrics: Array<{ time: number; text: string }>
+  key?: string
+  lyrics: Array<{ time: number; text: string; chord?: string }>
   segments: Array<{ label: string; bars: number }>
 }
 
@@ -40,7 +50,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
   const [elapsedTime, setElapsedTime] = useState(0)
   const [songData, setSongData] = useState<SongData | null>(null)
 
-  // Sprint 3 State
+  // Stage state
   const [ribbonSongs, setRibbonSongs] = useState<RibbonSong[]>([
     { id: 'song_01', title: 'Medianoche en Pereira', bpm: 124, key: 'Am' },
     { id: 'song_02', title: 'Ritmo de Calle', bpm: 128, key: 'Em' },
@@ -48,7 +58,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
     { id: 'song_04', title: 'Fuego en Tarima', bpm: 140, key: 'Dm' },
   ])
   const [inEarVolume, setInEarVolume] = useState(0.8)
-  const [showDirectorControls, setShowDirectorControls] = useState(true)
+  const [showDirectorControls, setShowDirectorControls] = useState(false)
   const [showMixer, setShowMixer] = useState(false)
 
   useEffect(() => {
@@ -85,7 +95,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
   useEffect(() => {
     if (beat > 0) {
       setVisualBeat(beat)
-      const timer = setTimeout(() => setVisualBeat(0), 150)
+      const timer = setTimeout(() => setVisualBeat(0), 140)
       return () => clearTimeout(timer)
     }
   }, [beat])
@@ -152,13 +162,14 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
           title: 'Medianoche en Pereira',
           artist: 'Los Inquietos',
           bpm: 124,
+          key: 'Am',
           lyrics: [
-            { time: 0, text: '...' },
-            { time: 12.5, text: 'Las luces de la ciudad se apagan' },
-            { time: 18.2, text: 'Y solo queda el eco de tu voz' },
-            { time: 24.0, text: 'Medianoche en Pereira' },
-            { time: 30.5, text: 'Donde el viento nos encontró' },
-            { time: 42.0, text: 'Verso 2: Caminamos sin dirección' },
+            { time: 0, text: '...', chord: 'Am' },
+            { time: 12.5, text: 'Las luces de la ciudad se apagan', chord: 'Dm7' },
+            { time: 18.2, text: 'Y solo queda el eco de tu voz', chord: 'G7' },
+            { time: 24.0, text: 'Medianoche en Pereira', chord: 'Cmaj7' },
+            { time: 30.5, text: 'Donde el viento nos encontró', chord: 'F' },
+            { time: 42.0, text: 'Verso 2: Caminamos sin dirección', chord: 'E7' },
           ],
           segments: [
             { label: 'Intro', bars: 8 },
@@ -171,11 +182,12 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
           title: 'Ritmo de Calle',
           artist: 'Banda Local',
           bpm: 128,
+          key: 'Em',
           lyrics: [
-            { time: 0, text: '...' },
-            { time: 8.0, text: 'El ritmo de la calle nos llama' },
-            { time: 14.5, text: 'Y la noche apenas comienza' },
-            { time: 21.0, text: 'Bailamos sin preocupación' },
+            { time: 0, text: '...', chord: 'Em' },
+            { time: 8.0, text: 'El ritmo de la calle nos llama', chord: 'C' },
+            { time: 14.5, text: 'Y la noche apenas comienza', chord: 'D' },
+            { time: 21.0, text: 'Bailamos sin preocupación', chord: 'B7' },
           ],
           segments: [
             { label: 'Intro', bars: 4 },
@@ -187,10 +199,11 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
           title: 'Desde Lejos (Balada)',
           artist: 'Solistas',
           bpm: 88,
+          key: 'G',
           lyrics: [
-            { time: 0, text: '...' },
-            { time: 10.0, text: 'Desde lejos te observo' },
-            { time: 20.0, text: 'Y no puedo hablar' },
+            { time: 0, text: '...', chord: 'G' },
+            { time: 10.0, text: 'Desde lejos te observo', chord: 'Em' },
+            { time: 20.0, text: 'Y no puedo hablar', chord: 'C' },
           ],
           segments: [
             { label: 'Intro', bars: 4 },
@@ -222,7 +235,7 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
     setSlideProgress(0)
     let progress = 0
     const interval = window.setInterval(() => {
-      progress += 2
+      progress += 2.5
       setSlideProgress(progress)
       if (progress >= 100) {
         window.clearInterval(interval)
@@ -257,13 +270,12 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
   }
 
   const isBeatOne = visualBeat === 1
-  const beatFlashClass = visualBeat > 0 ? `beat-${visualBeat}` : ''
   const lyrics = songData?.lyrics || []
   const currentLyric = lyrics[currentLyricIndex]
   const nextLyric = lyrics[currentLyricIndex + 1]
 
   return (
-    <div className={`stage-view ${beatFlashClass}`}>
+    <div className="stage-view">
       {/* HIGH VISIBILITY SETLIST JUMP ALERT BANNER */}
       <SetlistJumpBanner
         alert={jumpAlert}
@@ -276,56 +288,106 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
       <div className={`metronome-border bottom ${visualBeat === 3 ? 'active' : ''}`} />
       <div className={`metronome-border left ${visualBeat === 4 ? 'active' : ''}`} />
 
-      {/* Network Beacon */}
-      <div className={`network-beacon ${health}`}>
-        <span className="beacon-shape" />
-        <span className="beacon-text">
-          {health === 'good' && 'SYNC OK'}
-          {health === 'warning' && 'JITTER'}
-          {health === 'critical' && 'LOST'}
-        </span>
-        <span className="beacon-offset">{offsetMs ? `${Math.abs(offsetMs).toFixed(1)}ms` : '--'}</span>
-      </div>
-
-      {/* Top Bar: Navigation & Hardware Knob */}
-      <div className="stage-topbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {isFlywheelAutonomous && (
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
-                color: 'var(--accent-warning)',
-                border: '1px solid var(--accent-warning)',
-                padding: '2px 8px',
-                borderRadius: '3px',
-                letterSpacing: '1px',
-              }}
-            >
-              [FLYWHEEL ACTIVO]
+      {/* TOP RACK BAR */}
+      <div className="stage-rack-bar">
+        {/* LEFT STATUS */}
+        <div className="rack-group-left">
+          {isFlywheelAutonomous ? (
+            <span className="badge-hardware badge-flywheel">
+              <FlywheelIcon size={13} />
+              <span>FLYWHEEL ACTIVO</span>
+            </span>
+          ) : (
+            <span className="badge-hardware badge-ntp">
+              <span>NTP SYNC</span>
             </span>
           )}
-          <button className="btn-icon" onClick={onLibrary} title="Biblioteca">[LIB]</button>
-          <button className="btn-icon" onClick={onSettings} title="Ajustes y Estilos">[CFG]</button>
-          <button className="btn-icon" onClick={() => setShowMixer(true)} title="Mezclador In-Ear">[MEZCLA]</button>
-          <button className="btn-icon" onClick={toggleFullscreen} title="Pantalla completa">[FS]</button>
-          <button
-            className="btn-icon"
-            onClick={() => setShowDirectorControls(!showDirectorControls)}
-            title="Alternar Mando Director"
-          >
-            {showDirectorControls ? '[OCULTAR MANDO]' : '[VER MANDO]'}
-          </button>
-          <button className="btn-icon" onClick={onDisconnect} title="Desconectar">[SALIR]</button>
+
+          {/* Network Beacon */}
+          <div className={`network-beacon ${health}`}>
+            <span className="beacon-shape" />
+            <span>
+              {health === 'good' && 'SYNC OK'}
+              {health === 'warning' && 'JITTER'}
+              {health === 'critical' && 'LOST'}
+            </span>
+            <span style={{ opacity: 0.75, fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
+              {offsetMs ? `${Math.abs(offsetMs).toFixed(1)}ms` : '--'}
+            </span>
+          </div>
         </div>
 
-        {/* IN-EAR VOLUME HARDWARE KNOB */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <HardwareKnob
-            label="IN-EAR GAIN"
-            value={inEarVolume}
-            onChange={(val) => setInEarVolume(val)}
-          />
+        {/* RIGHT ACTIONS */}
+        <div className="rack-group-right">
+          <button
+            type="button"
+            className="btn-stage-icon"
+            onClick={onLibrary}
+            title="Biblioteca de Setlists"
+            aria-label="Biblioteca"
+          >
+            <LibraryIcon size={16} />
+          </button>
+
+          <button
+            type="button"
+            className="btn-stage-icon"
+            onClick={() => setShowMixer(true)}
+            title="Mezclador In-Ear Multipista"
+            aria-label="Mezclador"
+          >
+            <MixerIcon size={16} />
+          </button>
+
+          <button
+            type="button"
+            className={`btn-stage-icon ${showDirectorControls ? 'active' : ''}`}
+            onClick={() => setShowDirectorControls(!showDirectorControls)}
+            title="Alternar Mando del Director"
+            aria-label="Mando Director"
+          >
+            <RemoteIcon size={16} />
+          </button>
+
+          <button
+            type="button"
+            className="btn-stage-icon"
+            onClick={onSettings}
+            title="Ajustes de Temas y Audio"
+            aria-label="Configuración"
+          >
+            <SettingsIcon size={16} />
+          </button>
+
+          <button
+            type="button"
+            className="btn-stage-icon"
+            onClick={toggleFullscreen}
+            title="Pantalla Completa"
+            aria-label="Pantalla Completa"
+          >
+            <FullscreenIcon size={16} />
+          </button>
+
+          <button
+            type="button"
+            className="btn-stage-icon"
+            onClick={onDisconnect}
+            title="Desconectar y Salir"
+            aria-label="Desconectar"
+            style={{ color: 'var(--accent-danger)' }}
+          >
+            <DisconnectIcon size={16} />
+          </button>
+
+          {/* Compact In-Ear Gain Knob */}
+          <div style={{ marginLeft: '4px' }}>
+            <HardwareKnob
+              label="IN-EAR"
+              value={inEarVolume}
+              onChange={(val) => setInEarVolume(val)}
+            />
+          </div>
         </div>
       </div>
 
@@ -354,42 +416,88 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
         />
       )}
 
-      {/* Main Stage Content */}
-      <div className="stage-content">
-        {songData && (
-          <div className="song-header">
-            <h1 className="song-title">{songData.title}</h1>
-            <p className="song-artist">{songData.artist}</p>
+      {/* MAIN STAGE PROMPTER CENTER */}
+      <div className={`stage-prompter-center ${visualBeat > 0 ? 'beat-flash' : ''}`}>
+        {/* Prompter Meta Strip */}
+        <div className="prompter-meta-strip">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="prompter-song-name">
+              {songData ? songData.title : 'ESPERANDO SEÑAL DEL DIRECTOR'}
+            </span>
+            {songData?.artist && (
+              <span style={{ opacity: 0.6 }}>• {songData.artist}</span>
+            )}
           </div>
-        )}
 
-        {/* Lyrics Area */}
-        <div className="lyrics-section">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {currentLyric?.chord && (
+              <span className="prompter-chord-badge">
+                ACORDE: {currentLyric.chord}
+              </span>
+            )}
+            {songData?.key && !currentLyric?.chord && (
+              <span className="prompter-chord-badge">
+                TONO: {songData.key}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Big High-Contrast Lyrics Readout */}
+        <div className="prompter-lyrics-box">
           {currentLyric ? (
             <>
-              <div className="lyrics-current">{currentLyric.text}</div>
+              <div className="prompter-lyric-current">{currentLyric.text}</div>
               {nextLyric && (
-                <div className="lyrics-next">{nextLyric.text}</div>
+                <div className="prompter-lyric-next">{nextLyric.text}</div>
               )}
             </>
           ) : (
-            <div className="lyrics-waiting">
-              {songData ? '...' : 'Esperando orden del director...'}
+            <div className="prompter-waiting">
+              {songData ? '[EN ESPERA DE INICIO]' : '[SISTEMA LISTO // SELECCIONA CANCIÓN]'}
             </div>
           )}
         </div>
 
-        {/* Segments */}
+        {/* 4-Beat Pill Rhythm Strip */}
+        <div className="beat-indicator-strip">
+          {[1, 2, 3, 4].map((beatNum) => {
+            const isCurrentBeat = visualBeat === beatNum || (visualBeat === 0 && (state?.beat ?? 0) === beatNum)
+            const isDown = beatNum === 1
+            return (
+              <div
+                key={beatNum}
+                className={`beat-pill ${isDown ? 'downbeat' : ''} ${isCurrentBeat ? 'active' : ''}`}
+              />
+            )
+          })}
+        </div>
+
+        {/* Structural Segments Bar */}
         {songData && songData.segments.length > 0 && (
-          <div className="segments-bar">
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '4px' }}>
             {songData.segments.map((seg, i) => (
-              <span key={i} className="segment-badge">{seg.label} ({seg.bars}b)</span>
+              <span
+                key={i}
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--theme-border)',
+                  color: 'var(--text-secondary)',
+                  padding: '2px 8px',
+                  borderRadius: 'var(--theme-radius)',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                {seg.label} ({seg.bars}c)
+              </span>
             ))}
           </div>
         )}
       </div>
 
-      {/* Emergency Slide-to-Stop */}
+      {/* INDUSTRIAL EMERGENCY SLIDE-TO-STOP */}
       <div className="emergency-container">
         <div
           className="emergency-track"
@@ -405,7 +513,9 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
           >
             ■
           </div>
-          <div className="emergency-label">DESLIZAR PARA DETENER</div>
+          <div className="emergency-label">
+            &gt;&gt;&gt; DESLIZAR PARA PARADA DE EMERGENCIA &gt;&gt;&gt;
+          </div>
           {isSliding && (
             <div
               className="emergency-fill"
@@ -415,9 +525,21 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
         </div>
       </div>
 
-      {/* Connection status */}
-      <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
-        {connected ? `● CONECTADO | ${sessionId}` : '○ OFFLINE'}
+      {/* STAGE FOOTER DIAGNOSTICS */}
+      <div className="stage-footer">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span
+            style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: connected ? 'var(--accent-success)' : 'var(--accent-danger)',
+              display: 'inline-block',
+            }}
+          />
+          <span>{connected ? `ENLACE ACTIVO // SESIÓN: ${sessionId}` : 'OFFLINE // MODO AUTÓNOMO'}</span>
+        </div>
+        <span>BANDAIT 3.0 // MOTOR ACÚSTICO PRO</span>
       </div>
 
       {/* IN-EAR MULTI-TRACK STEM MIXER */}

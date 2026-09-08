@@ -91,7 +91,7 @@ export default function HardwareKnob({
             : '2px solid var(--theme-border)',
           position: 'relative',
           cursor: disabled ? 'not-allowed' : 'ns-resize',
-          boxShadow: isDragging ? '0 0 10px rgba(0, 255, 200, 0.4)' : 'none',
+          boxShadow: isDragging ? '0 0 14px var(--theme-glow)' : 'none',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',

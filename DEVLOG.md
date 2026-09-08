@@ -132,6 +132,23 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - Comprensión inmediata de la topología Líder-Seguidor-Director sin saturación visual.
   - Legibilidad perfecta y armónica tanto en smartphones como en monitores panorámicos.
 
-
-
-
+### [2026-09-08] - Rediseño Hardware-Grade y Modernización Integral de la PWA (Follower)
+* **Sprint / Módulo:** Frontend Follower PWA (`bandait-follower/`, `landing/app/`)
+* **Acción técnica realizada:**
+  - **Sistema de Iconografía Vectorial Técnico (Zero Emojis):** Creada la biblioteca de iconos normalizados `Icons.tsx` (Play, Stop, Prev, Next, Panic, Mixer, Library, Settings, Fullscreen, Disconnect, Wifi, Flywheel, Shield, Qr, Volume, etc.) eliminando totalmente el uso de emojis y textos planos no normalizados.
+  - **Reingeniería del Sistema de Tokens y 4 Temas:** Actualizado `global.css` con especificaciones clínicas de hardware:
+    1. Swiss Bauhaus Lab (Naranja Internacional `#ff4500`, Azul Cobalto `#0066ff`, chasis gris mate `#0a0c10` / `#131720`).
+    2. Mil-Spec Avionics HUD (Fósforo ámbar `#ffb000`, alta visibilidad a 3 metros bajo focos).
+    3. Tokyo 1989 VFD (Fluorescente cian `#00f0ff`, magenta sampler y resplandor de vacío).
+    4. Concert Hall (Bronce bruñido `#d4af37`, terciopelo imperial `#0a0708` / `#22181d`).
+  - **Consola de Entrada Hardware (ConnectView):** Transformada la pantalla de conexión en una terminal de patchbay con presets de IP rápidos, medidores de enlace, acceso a código QR con visor y diagnóstico del motor Flywheel e In-Ear Limiter a -0.5 dBFS.
+  - **Cabina de Escenario de Alta Ergonomía (StageView):** Rack superior con medidores de latencia/jitter NTP en tiempo real, VFD con compás/pulso y pulso lumínico downbeat, cinta de repertorio horizontal (SongRibbon), prompter gigante de letras con acompañamiento de acordes y barra de 4 pulsos rítmicos, control remoto concurrente de director y deslizador industrial de parada de emergencia.
+  - **Consola Multipista In-Ear (MultiTrackMixer):** 6 pistas completas con faders calibrados en escala dB, mute/solo LED, paneo estéreo, presets para instrumentistas (Baterista, Cantante, Armonía, Equilibrado), precarga de stems y limitador de transientes a -0.5 dBFS.
+  - **Despliegue y Build:** Recompilado el bundle de producción y desplegado a `landing/app/` con service worker y precaché de 9 recursos.
+* **Impacto en Audio / Red / UI:**
+  - Máxima legibilidad y contraste en tarima sin distracciones visuales ni consumo innecesario de batería/CPU.
+  - Cumplimiento 100% de la regla de oro: botones táctiles claros y legibles para manos ocupadas y mala iluminación.
+* **Verificación y Pruebas:**
+  - `vitest --run`: 13 de 13 pruebas unitarias aprobadas en verde.
+  - `eslint src`: 0 errores y 0 advertencias.
+  - Bundle de producción generado con éxito y sincronizado en `landing/app/`.

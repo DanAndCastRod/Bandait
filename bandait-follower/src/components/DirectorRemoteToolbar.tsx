@@ -1,4 +1,5 @@
 import { CommandType } from '../types/protocol'
+import { PlayIcon, StopIcon, PrevIcon, NextIcon, PanicIcon } from './Icons'
 
 interface Props {
   isPlaying: boolean
@@ -16,15 +17,16 @@ export default function DirectorRemoteToolbar({
   return (
     <div
       style={{
-        background: 'var(--bg-elevated)',
+        background: 'var(--theme-panel-bg)',
         border: '1px solid var(--theme-border)',
-        borderRadius: '6px',
-        padding: '12px',
+        borderRadius: 'var(--theme-radius)',
+        padding: '10px 14px',
         display: 'flex',
         flexWrap: 'wrap',
-        gap: '8px',
+        gap: '10px',
         alignItems: 'center',
         justifyContent: 'space-between',
+        backdropFilter: 'blur(8px)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -33,7 +35,7 @@ export default function DirectorRemoteToolbar({
             fontFamily: 'var(--font-mono)',
             fontSize: '11px',
             color: 'var(--accent-active)',
-            fontWeight: 700,
+            fontWeight: 800,
             letterSpacing: '1px',
           }}
         >
@@ -41,115 +43,81 @@ export default function DirectorRemoteToolbar({
         </span>
       </div>
 
-      {/* TRANSPORT BUTTONS */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+      {/* TRANSPORT CONTROLS */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
         {!isPlaying ? (
           <button
+            type="button"
             onClick={() => onCommand('PLAY')}
             disabled={disabled}
-            style={{
-              background: 'var(--accent-active)',
-              color: '#000000',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '10px 24px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '13px',
-              fontWeight: 800,
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              letterSpacing: '1px',
-            }}
+            className="btn-stage btn-stage-primary"
+            style={{ padding: '10px 20px', fontSize: '13px' }}
           >
-            [PLAY // INICIAR]
+            <PlayIcon size={16} />
+            <span>PLAY</span>
           </button>
         ) : (
           <button
+            type="button"
             onClick={() => onCommand('STOP')}
             disabled={disabled}
+            className="btn-stage"
             style={{
-              background: 'transparent',
-              border: '2px solid var(--accent-warning)',
-              color: 'var(--accent-warning)',
-              borderRadius: '4px',
-              padding: '10px 24px',
-              fontFamily: 'var(--font-mono)',
+              padding: '10px 20px',
               fontSize: '13px',
-              fontWeight: 800,
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              letterSpacing: '1px',
+              background: 'rgba(239, 68, 68, 0.15)',
+              color: 'var(--accent-danger)',
+              border: '1px solid var(--accent-danger)',
             }}
           >
-            [STOP // DETENER]
+            <StopIcon size={16} />
+            <span>STOP</span>
           </button>
         )}
 
         <button
+          type="button"
           onClick={() => onCommand('CUE_PREV')}
           disabled={disabled}
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--theme-border)',
-            color: 'var(--text-primary)',
-            borderRadius: '4px',
-            padding: '10px 14px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-          }}
+          className="btn-stage btn-stage-secondary"
+          style={{ padding: '10px 14px', fontSize: '12px' }}
+          title="Canción Anterior"
         >
-          [&lt; ANTERIOR]
+          <PrevIcon size={14} />
+          <span>ANT</span>
         </button>
 
         <button
+          type="button"
           onClick={() => onCommand('CUE_NEXT')}
           disabled={disabled}
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--theme-border)',
-            color: 'var(--text-primary)',
-            borderRadius: '4px',
-            padding: '10px 14px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-          }}
+          className="btn-stage btn-stage-secondary"
+          style={{ padding: '10px 14px', fontSize: '12px' }}
+          title="Canción Siguiente"
         >
-          [SIGUIENTE &gt;]
+          <span>SIG</span>
+          <NextIcon size={14} />
         </button>
 
         {/* TEMPO NUDGE */}
         <div style={{ display: 'flex', gap: '4px' }}>
           <button
+            type="button"
             onClick={() => onCommand('TEMPO_NUDGE', { delta_bpm: -1 })}
             disabled={disabled}
-            title="Bajar 1 BPM"
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--theme-border)',
-              color: 'var(--text-primary)',
-              borderRadius: '4px',
-              padding: '10px 10px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-            }}
+            className="btn-stage btn-stage-secondary"
+            style={{ padding: '10px 12px', fontSize: '11px' }}
+            title="Ajustar -1 BPM"
           >
             -1 BPM
           </button>
           <button
+            type="button"
             onClick={() => onCommand('TEMPO_NUDGE', { delta_bpm: 1 })}
             disabled={disabled}
-            title="Subir 1 BPM"
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--theme-border)',
-              color: 'var(--text-primary)',
-              borderRadius: '4px',
-              padding: '10px 10px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-            }}
+            className="btn-stage btn-stage-secondary"
+            style={{ padding: '10px 12px', fontSize: '11px' }}
+            title="Ajustar +1 BPM"
           >
             +1 BPM
           </button>
@@ -157,22 +125,21 @@ export default function DirectorRemoteToolbar({
 
         {/* PANIC BUTTON */}
         <button
+          type="button"
           onClick={() => onCommand('PANIC')}
           disabled={disabled}
+          className="btn-stage"
           style={{
-            background: 'transparent',
-            border: '2px solid var(--accent-danger, #FF3333)',
-            color: 'var(--accent-danger, #FF3333)',
-            borderRadius: '4px',
             padding: '10px 16px',
-            fontFamily: 'var(--font-mono)',
             fontSize: '12px',
-            fontWeight: 800,
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            letterSpacing: '1px',
+            background: 'transparent',
+            border: '2px solid var(--accent-danger)',
+            color: 'var(--accent-danger)',
+            boxShadow: '0 0 10px rgba(239, 68, 68, 0.2)',
           }}
         >
-          [PANIC]
+          <PanicIcon size={16} />
+          <span>PANIC</span>
         </button>
       </div>
     </div>

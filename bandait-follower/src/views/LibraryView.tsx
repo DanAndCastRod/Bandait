@@ -8,6 +8,7 @@ import {
   getSampleIncomingWorkbook,
 } from '../services/xlsxService'
 import { DiffPreview, ExcelMasterWorkbook } from '../types/xlsx'
+import { LibraryIcon, UploadIcon, DownloadIcon, ShieldIcon } from '../components/Icons'
 
 interface Props {
   onSelectSetlist: (id: string) => void
@@ -111,15 +112,18 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
   return (
     <div className="library-view">
       {/* HEADER */}
-      <div className="library-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <button className="btn-back" onClick={onBack} style={{ fontFamily: 'var(--font-mono)' }}>
+      <div className="library-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <button type="button" className="btn-stage btn-stage-secondary" onClick={onBack} style={{ padding: '8px 14px', fontSize: '12px' }}>
             [VOLVER]
           </button>
-          <h1 className="library-title" style={{ margin: 0 }}>BIBLIOTECA // CATÁLOGO</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <LibraryIcon size={20} style={{ color: 'var(--accent-active)' }} />
+            <h1 className="library-title" style={{ margin: 0 }}>BIBLIOTECA // CATÁLOGO</h1>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             type="file"
             ref={fileInputRef}
@@ -129,51 +133,32 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
           />
 
           <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--accent-active)',
-              color: 'var(--accent-active)',
-              padding: '8px 14px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              cursor: 'pointer',
-              borderRadius: '4px',
-            }}
+            className="btn-stage btn-stage-primary"
+            style={{ padding: '8px 14px', fontSize: '11px' }}
           >
-            [IMPORTAR ARCHIVO]
+            <UploadIcon size={14} />
+            <span>IMPORTAR LIBRO</span>
           </button>
 
           <button
+            type="button"
             onClick={handleOpenSampleImport}
-            style={{
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--theme-border)',
-              color: 'var(--text-primary)',
-              padding: '8px 14px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              cursor: 'pointer',
-              borderRadius: '4px',
-            }}
+            className="btn-stage btn-stage-secondary"
+            style={{ padding: '8px 14px', fontSize: '11px' }}
           >
-            [DIFF PREVIEW DEMO]
+            <span>DIFF PREVIEW DEMO</span>
           </button>
 
           <button
+            type="button"
             onClick={handleExportWorkbook}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--theme-border)',
-              color: 'var(--text-secondary)',
-              padding: '8px 14px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              cursor: 'pointer',
-              borderRadius: '4px',
-            }}
+            className="btn-stage btn-stage-secondary"
+            style={{ padding: '8px 14px', fontSize: '11px' }}
           >
-            [EXPORTAR JSON]
+            <DownloadIcon size={14} />
+            <span>EXPORTAR JSON</span>
           </button>
         </div>
       </div>
@@ -181,21 +166,26 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
       {/* MULTI-BAND INFO BADGE */}
       <div
         style={{
-          background: 'var(--bg-elevated)',
+          background: 'var(--bg-surface)',
           border: '1px solid var(--theme-border)',
-          borderRadius: '4px',
-          padding: '8px 14px',
+          borderRadius: 'var(--theme-radius)',
+          padding: '10px 16px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           fontSize: '11px',
           fontFamily: 'var(--font-mono)',
+          flexWrap: 'wrap',
+          gap: '8px',
         }}
       >
-        <span>
-          <span style={{ color: 'var(--text-disabled)' }}>AGRUPACIÓN ACTIVA:</span>{' '}
-          <strong style={{ color: 'var(--accent-active)' }}>LOS INQUIETOS DEL ROCK</strong>
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ShieldIcon size={14} style={{ color: 'var(--accent-success)' }} />
+          <span>
+            <span style={{ color: 'var(--text-disabled)' }}>AGRUPACIÓN ACTIVA:</span>{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>LOS INQUIETOS DEL ROCK</strong>
+          </span>
+        </div>
         <span>
           <span style={{ color: 'var(--text-disabled)' }}>ROL:</span>{' '}
           <strong style={{ color: 'var(--accent-active)' }}>[MUSIC DIRECTOR]</strong>
@@ -205,11 +195,11 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
       {statusMessage && (
         <div
           style={{
-            background: 'var(--bg-elevated)',
+            background: 'var(--bg-surface)',
             border: '1px solid var(--accent-active)',
             color: 'var(--accent-active)',
-            padding: '10px 14px',
-            borderRadius: '4px',
+            padding: '10px 16px',
+            borderRadius: 'var(--theme-radius)',
             fontSize: '12px',
             fontFamily: 'var(--font-mono)',
           }}
@@ -218,13 +208,19 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
         </div>
       )}
 
-      {loading && <div className="library-loading">Cargando setlists cacheados...</div>}
+      {loading && (
+        <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
+          Cargando setlists cacheados en memoria local...
+        </div>
+      )}
 
       {!loading && setlists.length === 0 && (
-        <div className="library-empty">
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '14px' }}>No hay setlists almacenados localmente.</p>
-          <p className="library-hint" style={{ color: 'var(--text-secondary)' }}>
-            Importa un archivo maestro o pulsa [DIFF PREVIEW DEMO] para precargar el catálogo.
+        <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '48px 24px', background: 'var(--bg-surface)', borderRadius: 'var(--theme-radius)', border: '1px dashed var(--theme-border)' }}>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--text-primary)', marginBottom: '8px' }}>
+            No hay setlists almacenados localmente en IndexedDB.
+          </p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '12px', maxWidth: '440px', margin: '0 auto' }}>
+            Importa un archivo maestro XLSX/JSON o pulsa [DIFF PREVIEW DEMO] para precargar el repertorio del show.
           </p>
         </div>
       )}
@@ -235,13 +231,25 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
             key={sl.id}
             className="setlist-card"
             onClick={() => onSelectSetlist(sl.id)}
-            style={{ cursor: 'pointer' }}
           >
-            <div className="setlist-name" style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>
+            <div className="setlist-name">
               {sl.name}
             </div>
-            <div className="setlist-meta" style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '6px' }}>
-              {sl.songs.length} canciones
+            <div className="setlist-meta">
+              {sl.songs.length} CANCIONES // SINCRONIZADO OFFLINE
+            </div>
+            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  color: 'var(--accent-active)',
+                  letterSpacing: '1px',
+                }}
+              >
+                [CARGAR EN ESCENARIO &gt;]
+              </span>
             </div>
           </div>
         ))}

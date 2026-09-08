@@ -120,7 +120,7 @@ export default function SetlistJumpBanner({
         </span>
         <span
           style={{
-            fontFamily: 'var(--font-sans)',
+            fontFamily: 'var(--font-ui)',
             fontSize: '20px',
             fontWeight: 700,
             color: 'var(--text-primary)',
