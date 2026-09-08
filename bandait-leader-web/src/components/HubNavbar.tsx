@@ -11,6 +11,7 @@ import {
   LogOut,
   ChevronDown,
   Layers,
+  X,
 } from 'lucide-react'
 
 export type HubTab = 'playlists' | 'stems' | 'members' | 'equipment'
@@ -24,6 +25,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
   const { user, bands, activeBand, switchBand, createBand, logout, exportMasterXlsxJson } = useHub()
   const [showBandMenu, setShowBandMenu] = useState(false)
   const [showNewBandModal, setShowNewBandModal] = useState(false)
+  const [showProfileModal, setShowProfileModal] = useState(false)
   const [newBandName, setNewBandName] = useState('')
   const [newBandGenre, setNewBandGenre] = useState('')
 
@@ -43,7 +45,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         style={{
           background: '#12151c',
           borderBottom: '1px solid #2a3346',
-          padding: '8px clamp(10px, 2vw, 20px)',
+          padding: '8px clamp(8px, 2vw, 16px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -56,31 +58,32 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         }}
       >
       {/* BRAND & MULTI-BAND SWITCHER */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flexShrink: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
           <div
             style={{
-              width: '28px',
-              height: '28px',
+              width: '26px',
+              height: '26px',
               background: 'linear-gradient(135deg, #ff4500, #0066ff)',
               borderRadius: '4px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 800,
-              fontSize: '14px',
+              fontSize: '13px',
               color: '#ffffff',
               fontFamily: "'IBM Plex Mono', monospace",
+              flexShrink: 0,
             }}
           >
             B
           </div>
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div
               style={{
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontWeight: 800,
-                fontSize: '14px',
+                fontSize: '13px',
                 letterSpacing: '1px',
                 color: '#ffffff',
                 lineHeight: 1.1,
@@ -103,26 +106,38 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         </div>
 
         {/* MULTI-BAND SELECTOR DROPDOWN */}
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', minWidth: 0, flexShrink: 1 }}>
           <button
             onClick={() => setShowBandMenu(!showBandMenu)}
             style={{
               background: '#1a202c',
               border: '1px solid #2a3346',
               borderRadius: '4px',
-              padding: '6px 12px',
+              padding: '5px 8px',
               color: '#ffffff',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
+              gap: '6px',
               cursor: 'pointer',
-              fontSize: '12px',
+              fontSize: '11px',
               fontFamily: "'IBM Plex Mono', monospace",
+              maxWidth: 'clamp(100px, 28vw, 220px)',
+              whiteSpace: 'nowrap',
             }}
           >
-            <Layers size={14} style={{ color: '#0066ff' }} />
-            <span style={{ fontWeight: 700 }}>{activeBand ? activeBand.name : 'Seleccionar Banda'}</span>
+            <Layers size={13} style={{ color: '#0066ff', flexShrink: 0 }} />
             <span
+              style={{
+                fontWeight: 700,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {activeBand ? activeBand.name : 'Banda'}
+            </span>
+            <span
+              className="hub-desktop-only"
               style={{
                 fontSize: '9px',
                 background: '#ff4500',
@@ -130,11 +145,12 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 padding: '1px 5px',
                 borderRadius: '2px',
                 fontWeight: 700,
+                flexShrink: 0,
               }}
             >
               [{activeBand?.currentUserRole.toUpperCase()}]
             </span>
-            <ChevronDown size={14} style={{ opacity: 0.6 }} />
+            <ChevronDown size={12} style={{ opacity: 0.6, flexShrink: 0 }} />
           </button>
 
           {showBandMenu && (
@@ -319,10 +335,11 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
       </nav>
 
       {/* ACTIONS & USER PROFILE */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
         <button
           onClick={exportMasterXlsxJson}
           title="Exportar Libro Maestro XLSX/JSON"
+          className="hub-desktop-only"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -338,73 +355,89 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
           }}
         >
           <Download size={13} />
-          <span className="hub-desktop-only">EXPORTAR MAESTRO</span>
+          <span>EXPORTAR MAESTRO</span>
         </button>
 
         {user && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              background: '#1a202c',
-              border: '1px solid #2a3346',
-              padding: '4px 8px 4px 6px',
-              borderRadius: '20px',
-            }}
-          >
-            {user.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.name}
-                style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover' }}
-              />
-            ) : (
-              <div
-                style={{
-                  width: '24px',
-                  height: '24px',
-                  borderRadius: '50%',
-                  background: '#0066ff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                }}
-              >
-                {user.name.charAt(0)}
-              </div>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            {/* USER PROFILE TRIGGER */}
+            <button
+              onClick={() => setShowProfileModal(true)}
+              title={`Usuario: ${user.name} (${user.email}) - Ver perfil`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: '#1a202c',
+                border: '1px solid #2a3346',
+                padding: '3px 8px 3px 3px',
+                borderRadius: '20px',
+                cursor: 'pointer',
+                color: '#ffffff',
+                maxWidth: '180px',
+              }}
+            >
+              {user.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.name}
+                  style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    background: '#0066ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#ffffff',
+                    flexShrink: 0,
+                  }}
+                >
+                  {user.name.charAt(0)}
+                </div>
+              )}
 
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 700 }}>{user.name}</span>
-                <GoogleIcon size={12} />
+              <div className="hub-desktop-only" style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {user.name}
+                  </span>
+                  <GoogleIcon size={12} />
+                </div>
+                <span style={{ fontSize: '9px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user.email}
+                </span>
               </div>
-              <span
-                className="hub-desktop-only"
-                style={{ fontSize: '9px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}
-              >
-                {user.email}
-              </span>
-            </div>
+            </button>
 
+            {/* DIRECT LOGOUT BUTTON ALWAYS VISIBLE */}
             <button
               onClick={logout}
               title="Cerrar Sesión Google"
               style={{
-                background: 'transparent',
-                border: 'none',
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid #ef4444',
                 color: '#ef4444',
-                cursor: 'pointer',
-                padding: '4px',
+                borderRadius: '4px',
+                padding: '5px 8px',
                 display: 'flex',
                 alignItems: 'center',
-                marginLeft: '4px',
+                gap: '4px',
+                cursor: 'pointer',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: '10px',
+                fontWeight: 700,
+                flexShrink: 0,
               }}
             >
               <LogOut size={14} />
+              <span className="hub-desktop-only">SALIR</span>
             </button>
           </div>
         )}
@@ -526,6 +559,217 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* USER PROFILE & LOGOUT MODAL */}
+      {showProfileModal && user && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div
+            style={{
+              background: '#161b26',
+              border: '1px solid #2a3346',
+              borderRadius: '8px',
+              padding: 'clamp(16px, 4vw, 24px)',
+              width: '100%',
+              maxWidth: '380px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.8)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderBottom: '1px solid #2a3346',
+                paddingBottom: '12px',
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  letterSpacing: '1px',
+                }}
+              >
+                PERFIL & SESIÓN
+              </div>
+              <button
+                onClick={() => setShowProfileModal(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '4px',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '14px',
+                background: '#0d1017',
+                padding: '14px',
+                borderRadius: '6px',
+                border: '1px solid #2a3346',
+              }}
+            >
+              {user.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.name}
+                  style={{ width: '48px', height: '48px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    background: '#0066ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '20px',
+                    fontWeight: 700,
+                    color: '#ffffff',
+                    flexShrink: 0,
+                  }}
+                >
+                  {user.name.charAt(0)}
+                </div>
+              )}
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ fontWeight: 800, fontSize: '15px', color: '#ffffff' }}>{user.name}</div>
+                <div
+                  style={{
+                    fontSize: '12px',
+                    color: '#94a3b8',
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {user.email}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                  <GoogleIcon size={12} />
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      color: '#10b981',
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontWeight: 700,
+                    }}
+                  >
+                    CUENTA VERIFICADA
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: '#12151c',
+                border: '1px solid #2a3346',
+                borderRadius: '6px',
+                padding: '12px',
+                fontSize: '11px',
+                color: '#94a3b8',
+                fontFamily: "'IBM Plex Mono', monospace",
+                lineHeight: 1.6,
+              }}
+            >
+              <div>ESPACIO DE TRABAJO LOCAL:</div>
+              <div style={{ color: '#ffffff', fontWeight: 700, wordBreak: 'break-all' }}>
+                bandait_workspace_{user.id}
+              </div>
+              <div style={{ marginTop: '4px' }}>
+                BANDA ACTIVA:{' '}
+                <span style={{ color: '#ff4500', fontWeight: 700 }}>{activeBand?.name}</span>{' '}
+                [{activeBand?.currentUserRole.toUpperCase()}]
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                setShowProfileModal(false)
+                exportMasterXlsxJson()
+              }}
+              style={{
+                background: 'transparent',
+                border: '1px solid #2a3346',
+                color: '#94a3b8',
+                borderRadius: '4px',
+                padding: '10px',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+              }}
+            >
+              <Download size={14} />
+              <span>EXPORTAR COPIA DE SEGURIDAD XLSX</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setShowProfileModal(false)
+                logout()
+              }}
+              style={{
+                background: '#ef4444',
+                border: 'none',
+                color: '#ffffff',
+                borderRadius: '4px',
+                padding: '12px',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 14px rgba(239, 68, 68, 0.4)',
+              }}
+            >
+              <LogOut size={16} />
+              <span>CERRAR SESIÓN</span>
+            </button>
           </div>
         </div>
       )}

@@ -148,7 +148,7 @@ export const PlaylistsHubView: React.FC = () => {
             }}
           >
             <Plus size={14} />
-            <span>+ NUEVO SETLIST</span>
+            <span>NUEVO SETLIST</span>
           </button>
 
           <button
