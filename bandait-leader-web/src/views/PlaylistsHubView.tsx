@@ -2,14 +2,14 @@ import React, { useState } from 'react'
 import { useHub } from '../context/HubContext'
 import type { TransitionMode } from '../types/hub'
 import {
-  FolderKanban,
+  ListMusic,
   Plus,
   ArrowUp,
   ArrowDown,
   Trash2,
   Clock,
   Music,
-  Sparkles,
+  Radio,
 } from 'lucide-react'
 
 export const PlaylistsHubView: React.FC = () => {
@@ -92,7 +92,7 @@ export const PlaylistsHubView: React.FC = () => {
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FolderKanban size={22} style={{ color: '#ff4500' }} />
+            <ListMusic size={22} style={{ color: '#ff4500' }} />
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>
               Programación de Setlists & Transiciones
             </h2>
@@ -212,7 +212,7 @@ export const PlaylistsHubView: React.FC = () => {
             SINCRONIZACIÓN CON ESCENARIO
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-            <Sparkles size={18} style={{ color: '#10b981' }} />
+            <Radio size={18} style={{ color: '#10b981' }} />
             <span style={{ fontSize: '14px', fontWeight: 700, color: '#10b981', fontFamily: "'IBM Plex Mono', monospace" }}>
               LISTO // REPOSITORIO ACTIVO
             </span>

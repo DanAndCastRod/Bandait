@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useHub } from '../context/HubContext'
 import { GoogleIcon } from './GoogleIcon'
 import {
-  FolderKanban,
+  ListMusic,
   Sliders,
   Users,
   Radio,
@@ -10,7 +10,7 @@ import {
   Plus,
   LogOut,
   ChevronDown,
-  Building2,
+  Layers,
 } from 'lucide-react'
 
 export type HubTab = 'playlists' | 'stems' | 'members' | 'equipment'
@@ -117,7 +117,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               fontFamily: "'IBM Plex Mono', monospace",
             }}
           >
-            <Building2 size={14} style={{ color: '#0066ff' }} />
+            <Layers size={14} style={{ color: '#0066ff' }} />
             <span style={{ fontWeight: 700 }}>{activeBand ? activeBand.name : 'Seleccionar Banda'}</span>
             <span
               style={{
@@ -247,7 +247,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             fontWeight: activeTab === 'playlists' ? 700 : 400,
           }}
         >
-          <FolderKanban size={15} style={{ color: activeTab === 'playlists' ? '#ff4500' : 'inherit' }} />
+          <ListMusic size={15} style={{ color: activeTab === 'playlists' ? '#ff4500' : 'inherit' }} />
           <span>PLAYLISTS</span>
         </button>
 

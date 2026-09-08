@@ -46,21 +46,19 @@
 .download-icon svg {
   display: inline-block;
   vertical-align: middle;
+  flex-shrink: 0;
 }
 .feature-icon svg {
   width: 32px;
   height: 32px;
-  fill: currentColor;
 }
 .flow-node-icon svg {
   width: 36px;
   height: 36px;
-  fill: currentColor;
 }
 .download-icon svg {
   width: 40px;
   height: 40px;
-  fill: currentColor;
 }
 
 html {
@@ -322,7 +320,7 @@ img {
 .btn svg {
   width: 18px;
   height: 18px;
-  fill: currentColor;
+  flex-shrink: 0;
 }
 
 /* --- SECTION COMMON --- */

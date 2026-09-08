@@ -2,7 +2,7 @@ import React from 'react'
 import { GoogleIcon } from './GoogleIcon'
 import { useHub } from '../context/HubContext'
 import { DEMO_PROFILES } from '../services/authService'
-import { FolderKanban, Sliders, Users, Radio, ShieldCheck } from 'lucide-react'
+import { ListMusic, Sliders, Users, Radio, ShieldCheck } from 'lucide-react'
 
 export const AuthScreen: React.FC = () => {
   const { loginWithGoogle } = useHub()
@@ -194,7 +194,7 @@ export const AuthScreen: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#94a3b8' }}>
-            <FolderKanban size={15} style={{ color: '#ff4500' }} />
+            <ListMusic size={15} style={{ color: '#ff4500' }} />
             <span>Setlists & Transición</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#94a3b8' }}>
