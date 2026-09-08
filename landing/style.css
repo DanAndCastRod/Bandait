@@ -595,6 +595,13 @@ img {
   box-shadow: var(--glow-cyan);
 }
 
+.download-card.hub {
+  border-color: var(--magenta);
+}
+.download-card.hub:hover {
+  box-shadow: var(--glow-magenta);
+}
+
 .download-icon {
   font-size: 3rem;
   margin-bottom: 1rem;
