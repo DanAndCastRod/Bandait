@@ -10,6 +10,11 @@ import type {
   PlaylistSong,
 } from '../types/hub'
 import { authService, DEMO_PROFILES } from '../services/authService'
+import {
+  syncWorkspaceToCloud,
+  fetchWorkspaceFromCloud,
+  subscribeToWorkspaceChanges,
+} from '../services/supabaseClient'
 
 // INITIAL SEED DATA FOR DEMO SCENARIOS
 const INITIAL_BANDS: Band[] = [
@@ -486,13 +491,40 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const equipment = activeBand ? workspace.equipmentMap[activeBand.id] || [] : []
   const songStems = activePlaylist?.songs[0] ? workspace.stemsMap[activePlaylist.songs[0].id] || workspace.stemsMap['song_01'] : workspace.stemsMap['song_01']
 
-  // Auto-persist workspace changes per user
+  // Auto-persist workspace changes per user (Local-First + Background Cloud Sync)
   useEffect(() => {
     if (user) {
       const storageKey = `bandait_workspace_${user.id}`
       localStorage.setItem(storageKey, JSON.stringify(workspace))
+      // Background Supabase Cloud Sync (fails silently if unconfigured or offline)
+      syncWorkspaceToCloud(user.id, workspace).catch(() => {})
     }
   }, [user, workspace])
+
+  // Real-time Cloud Sync & initial pull from Supabase
+  useEffect(() => {
+    if (!user) return
+    let isMounted = true
+
+    // Fetch cloud workspace on sign-in
+    fetchWorkspaceFromCloud(user.id).then((cloudWs) => {
+      if (isMounted && cloudWs && cloudWs.bands && cloudWs.bands.length > 0) {
+        setWorkspace(cloudWs)
+      }
+    })
+
+    // Subscribe to multi-device real-time updates
+    const unsubscribe = subscribeToWorkspaceChanges(user.id, (remoteWs) => {
+      if (isMounted && remoteWs) {
+        setWorkspace(remoteWs)
+      }
+    })
+
+    return () => {
+      isMounted = false
+      if (unsubscribe) unsubscribe()
+    }
+  }, [user])
 
   // Sync workspace on user change
   const applyUser = useCallback((newUser: UserProfile | null) => {

@@ -600,6 +600,13 @@ img {
   box-shadow: var(--glow-magenta);
 }
 
+.download-card.doc {
+  border-color: #0066ff;
+}
+.download-card.doc:hover {
+  box-shadow: 0 0 20px rgba(0, 102, 255, 0.4);
+}
+
 .download-icon {
   font-size: 3rem;
   margin-bottom: 1rem;

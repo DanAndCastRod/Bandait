@@ -12,7 +12,12 @@ import {
   ChevronDown,
   Layers,
   X,
+  BookOpen,
+  Cloud,
 } from 'lucide-react'
+import { UserManualModal } from './UserManualModal'
+import { SupabaseConfigModal } from './SupabaseConfigModal'
+import { getSupabaseConfig } from '../services/supabaseClient'
 
 export type HubTab = 'playlists' | 'stems' | 'members' | 'equipment'
 
@@ -26,6 +31,23 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
   const [showBandMenu, setShowBandMenu] = useState(false)
   const [showNewBandModal, setShowNewBandModal] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
+  const [showManualModal, setShowManualModal] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search)
+      return p.get('manual') === '1' || p.get('view') === 'manual'
+    } catch {
+      return false
+    }
+  })
+  const [showSupabaseModal, setShowSupabaseModal] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search)
+      return p.get('cloud') === '1' || p.get('supabase') === '1'
+    } catch {
+      return false
+    }
+  })
+  const isCloudConfigured = getSupabaseConfig().isConfigured
   const [newBandName, setNewBandName] = useState('')
   const [newBandGenre, setNewBandGenre] = useState('')
 
@@ -336,6 +358,50 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
 
       {/* ACTIONS & USER PROFILE */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+        {/* MANUAL & DOCS BUTTON */}
+        <button
+          onClick={() => setShowManualModal(true)}
+          title="Manual de Usuario & Guía Técnica"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            background: 'transparent',
+            border: '1px solid #2a3346',
+            borderRadius: '4px',
+            padding: '5px 8px',
+            color: '#94a3b8',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontFamily: "'IBM Plex Mono', monospace",
+          }}
+        >
+          <BookOpen size={13} style={{ color: '#0066ff' }} />
+          <span className="hub-desktop-only">MANUAL</span>
+        </button>
+
+        {/* SUPABASE CLOUD SYNC BUTTON */}
+        <button
+          onClick={() => setShowSupabaseModal(true)}
+          title={isCloudConfigured ? 'Sincronización en la Nube Activa' : 'Configurar Nube Supabase'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            background: isCloudConfigured ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
+            border: `1px solid ${isCloudConfigured ? '#10b981' : '#2a3346'}`,
+            borderRadius: '4px',
+            padding: '5px 8px',
+            color: isCloudConfigured ? '#10b981' : '#94a3b8',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontFamily: "'IBM Plex Mono', monospace",
+          }}
+        >
+          <Cloud size={13} />
+          <span className="hub-desktop-only">{isCloudConfigured ? 'NUBE OK' : 'NUBE'}</span>
+        </button>
+
         <button
           onClick={exportMasterXlsxJson}
           title="Exportar Libro Maestro XLSX/JSON"
@@ -773,6 +839,12 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
           </div>
         </div>
       )}
+
+      {/* USER MANUAL & TECHNICAL GUIDE MODAL */}
+      {showManualModal && <UserManualModal onClose={() => setShowManualModal(false)} />}
+
+      {/* SUPABASE CLOUD SYNC MODAL */}
+      {showSupabaseModal && <SupabaseConfigModal onClose={() => setShowSupabaseModal(false)} />}
     </header>
 
     {/* MOBILE BOTTOM NAVIGATION BAR */}

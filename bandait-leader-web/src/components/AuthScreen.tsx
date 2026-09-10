@@ -11,7 +11,9 @@ import {
   Settings,
   Key,
   ArrowRight,
+  BookOpen,
 } from 'lucide-react'
+import { UserManualModal } from './UserManualModal'
 
 declare global {
   interface Window {
@@ -55,6 +57,14 @@ export const AuthScreen: React.FC = () => {
   const [clientIdInput, setClientIdInput] = useState(googleClientId || '')
   const [gisLoaded, setGisLoaded] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [showManualModal, setShowManualModal] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search)
+      return p.get('manual') === '1' || p.get('view') === 'manual'
+    } catch {
+      return false
+    }
+  })
 
   const googleBtnRef = useRef<HTMLDivElement>(null)
 
@@ -191,6 +201,32 @@ export const AuthScreen: React.FC = () => {
           >
             Vincula tu cuenta de Google para administrar tus agrupaciones, setlists maestros, matrices de stems y ruteo ASIO con persistencia autónoma.
           </p>
+
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
+            <button
+              type="button"
+              onClick={() => setShowManualModal(true)}
+              style={{
+                background: 'rgba(0, 102, 255, 0.08)',
+                border: '1px solid rgba(0, 102, 255, 0.35)',
+                color: '#38bdf8',
+                padding: '7px 14px',
+                borderRadius: '4px',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: '11px',
+                fontWeight: 700,
+                letterSpacing: '0.5px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <BookOpen size={14} />
+              MANUAL TÉCNICO & GUÍA FOH
+            </button>
+          </div>
         </div>
 
         {/* ERROR NOTIFICATION */}
@@ -617,6 +653,11 @@ export const AuthScreen: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* USER MANUAL MODAL */}
+      {showManualModal && (
+        <UserManualModal onClose={() => setShowManualModal(false)} />
       )}
     </div>
   )

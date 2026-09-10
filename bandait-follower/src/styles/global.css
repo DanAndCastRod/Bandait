@@ -166,10 +166,11 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  height: 100%;
+  justify-content: flex-start;
+  min-height: 100%;
   width: 100%;
-  padding: 24px;
+  padding: 68px 16px 32px 16px;
+  box-sizing: border-box;
   position: relative;
   overflow-y: auto;
   background: radial-gradient(circle at 50% 15%, var(--bg-surface) 0%, var(--bg-primary) 70%);

@@ -407,3 +407,112 @@ export function VolumeIcon({ size = 18, className, ...props }: IconProps) {
     </svg>
   )
 }
+
+export function BookOpenIcon({ size = 18, className, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      {...props}
+    >
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
+  )
+}
+
+export function GoogleIcon({ size = 18, className, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      className={className}
+      {...props}
+    >
+      <path
+        fill="#EA4335"
+        d="M12 5c1.54 0 2.93.56 4.02 1.48l3.01-3.01C17.21 1.8 14.77 1 12 1 7.55 1 3.75 3.56 1.95 7.29l3.66 2.84C6.49 7.37 8.98 5 12 5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58l3.68 2.86c2.16-1.99 3.74-4.93 3.74-8.68z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.61 14.86c-.24-.73-.38-1.52-.38-2.36s.14-1.63.38-2.36L1.95 7.29C1.19 8.8 1 10.36 1 12s.19 3.2 1.95 4.71l3.66-1.85z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c3.24 0 5.95-1.08 7.93-2.91l-3.68-2.86c-1.07.72-2.45 1.16-4.25 1.16-3.02 0-5.51-2.37-6.39-5.13L1.95 16.1C3.75 19.83 7.55 22.4 12 22.4z"
+      />
+    </svg>
+  )
+}
+
+export function UserIcon({ size = 18, className, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      {...props}
+    >
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  )
+}
+
+export function LogOutIcon({ size = 18, className, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      {...props}
+    >
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  )
+}
+
+export function CloudIcon({ size = 18, className, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      {...props}
+    >
+      <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+    </svg>
+  )
+}

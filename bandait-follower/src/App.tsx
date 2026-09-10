@@ -3,6 +3,7 @@ import StageView from './views/StageView'
 import ConnectView from './views/ConnectView'
 import LibraryView from './views/LibraryView'
 import SettingsView, { ThemeStyle } from './views/SettingsView'
+import { FollowerManualModal } from './components/FollowerManualModal'
 
 export type AppView = 'connect' | 'stage' | 'library' | 'settings'
 
@@ -10,6 +11,7 @@ function App() {
   const [view, setView] = useState<AppView>('connect')
   const [previousView, setPreviousView] = useState<AppView>('connect')
   const [sessionId, setSessionId] = useState('')
+  const [showManualModal, setShowManualModal] = useState(false)
 
   // Initialize theme on client (Swiss Bauhaus Lab as default)
   useEffect(() => {
@@ -50,6 +52,7 @@ function App() {
           onConnect={handleConnect}
           onSettings={handleToSettings}
           onLibrary={handleToLibrary}
+          onManual={() => setShowManualModal(true)}
         />
       )}
       {view === 'stage' && (
@@ -70,6 +73,11 @@ function App() {
         <SettingsView
           onBack={handleSettingsBack}
         />
+      )}
+
+      {/* STAGE TECHNICAL MANUAL MODAL */}
+      {showManualModal && (
+        <FollowerManualModal onClose={() => setShowManualModal(false)} />
       )}
     </div>
   )
