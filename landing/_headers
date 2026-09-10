@@ -1,0 +1,9 @@
+/app/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/app/registerSW.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/app/manifest.webmanifest
+  Content-Type: application/manifest+json; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
