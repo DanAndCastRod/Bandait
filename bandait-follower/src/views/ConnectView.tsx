@@ -83,7 +83,7 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
     } catch {
       // Graceful fallback for non-browser/restricted URL parsing
     }
-  }, [onConnect])
+  }, [onConnect, sessionId])
 
   // 2. Check Supabase auth session if configured
   useEffect(() => {

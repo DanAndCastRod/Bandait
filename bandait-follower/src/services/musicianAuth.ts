@@ -17,6 +17,11 @@ export interface MusicianProfile {
   lastSync?: string
 }
 
+interface CustomMetaEnv {
+  VITE_SUPABASE_URL?: string
+  VITE_SUPABASE_ANON_KEY?: string
+}
+
 const STORAGE_PROFILE_KEY = 'bandait_musician_profile'
 const STORAGE_SUPABASE_URL = 'bandait_supabase_url'
 const STORAGE_SUPABASE_KEY = 'bandait_supabase_anon_key'
@@ -57,10 +62,19 @@ export const DEFAULT_PROFILE: MusicianProfile = {
 
 let clientInstance: SupabaseClient | null = null
 
+function getMetaEnv(): CustomMetaEnv {
+  try {
+    return (import.meta as unknown as { env?: CustomMetaEnv }).env || {}
+  } catch {
+    return {}
+  }
+}
+
 export function getSupabaseFollowerClient(): SupabaseClient | null {
   if (clientInstance) return clientInstance
-  const url = localStorage.getItem(STORAGE_SUPABASE_URL) || (import.meta as any).env?.VITE_SUPABASE_URL || ''
-  const anonKey = localStorage.getItem(STORAGE_SUPABASE_KEY) || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || ''
+  const env = getMetaEnv()
+  const url = localStorage.getItem(STORAGE_SUPABASE_URL) || env.VITE_SUPABASE_URL || ''
+  const anonKey = localStorage.getItem(STORAGE_SUPABASE_KEY) || env.VITE_SUPABASE_ANON_KEY || ''
 
   if (!url || !anonKey) return null
 
@@ -81,7 +95,7 @@ export function getMusicianProfile(): MusicianProfile {
   try {
     const raw = localStorage.getItem(STORAGE_PROFILE_KEY)
     if (!raw) return DEFAULT_PROFILE
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw) as Partial<MusicianProfile>
     return {
       ...DEFAULT_PROFILE,
       ...parsed,
@@ -117,8 +131,8 @@ export async function signInMusicianWithGoogle(): Promise<{ error: Error | null 
       },
     })
     return { error: error || null }
-  } catch (err: any) {
-    return { error: err }
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err : new Error(String(err)) }
   }
 }
 
