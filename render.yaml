@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: bandait-portal
+    env: static
+    buildCommand: ""
+    staticPublishPath: ./landing
+    routes:
+      - type: rewrite
+        source: /hub/*
+        destination: /hub/index.html
+      - type: rewrite
+        source: /app/*
+        destination: /app/index.html
