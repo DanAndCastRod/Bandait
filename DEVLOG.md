@@ -101,7 +101,7 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Sprint / Módulo:** Landing Web (`landing/index.html`, `landing/style.css`)
 * **Acción técnica realizada:**
   - **Rebranding y Sincronización Tecnológica:** Eliminadas referencias obsoletas a Flutter, flutter_soloud y BLoC. Actualizada la propuesta técnica a la arquitectura real de Bandait 3.0: Líder PySide6 ASIO + Seguidor React 19 PWA Web Audio + Protocolo Socket.IO / NTP monotónico.
-  - **Cumplimiento Estricto CERO EMOJIS:** Erradicados todos los emojis del HTML (`⚡`, `📋`, `🔲`, `📱`, `🖥️`, `🤖`, `🪟`) y reemplazados por iconos vectoriales SVG técnicos normalizados con ajuste responsivo e inline styling.
+  - **Cumplimiento Estricto CERO EMOJIS:** Erradicados todos los emojis del HTML (rayos, portapapeles, pantallas, telefonos, robots, ventanas) y reemplazados por iconos vectoriales SVG técnicos normalizados con ajuste responsivo e inline styling.
   - **Identidad Visual Swiss Bauhaus Lab:** Incorporadas las tipografías de alta legibilidad técnica (`Space Grotesk` + `IBM Plex Mono`).
   - **Documentación de Capacidades en Escenario:** Detalladas las características clave: Ruteo Físico ASIO Ch 3 cable al baterista, motor Flywheel con oscilador sintetizado local, control concurrente maestro LWW, alerta de saltos de repertorio y limitador de protección auditiva a -0.5 dBFS.
 * **Impacto en Audio / Red / UI:**
@@ -152,3 +152,24 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - `vitest --run`: 13 de 13 pruebas unitarias aprobadas en verde.
   - `eslint src`: 0 errores y 0 advertencias.
   - Bundle de producción generado con éxito y sincronizado en `landing/app/`.
+
+### [2026-09-10] - Sincronización Híbrida Supabase, Manual Técnico Interactivo y Despliegue Cloudflare
+* **Sprint / Módulo:** Web Admin Hub & Follower PWA (`bandait-leader-web/`, `bandait-follower/`, `landing/`)
+* **Acción técnica realizada:**
+  - **Manual Técnico Interactivo & Topología de Red:** Implementados `UserManualModal.tsx` en Web Hub y `FollowerManualModal.tsx` en Follower PWA con 5 módulos de ingeniería (Puesta en marcha, Topología FOH/Stage, Ruteo ASIO Ch 1-2 PA Ch 3 In-Ear, Sincronización NTP/Flywheel y Roles de banda). Soporte para apertura directa vía deep link `?manual=1` o `?view=manual` tanto en la app autenticada como en el portal de bienvenida.
+  - **Identidad de Músico y Enlace QR de Escenario:** Implementado parser tolerante a fallos (`qrDiscovery.ts`) y auto-unión por parámetros de URL (`?session=...&ip=...&port=...&role=...&auto=1`) en `ConnectView.tsx`. Servicio `musicianAuth.ts` con persistencia en `localStorage` y vinculación opcional de Google OAuth para guardar mezclas intraurales personalizadas.
+  - **Sincronización Híbrida Cloud con Supabase:** Integrado cliente `@supabase/supabase-js` con persistencia offline-first (`bandait_workspaces`), modal de configuración en vivo (`SupabaseConfigModal.tsx`), health check y suscripción a cambios en tiempo real sin bloquear el flujo local.
+  - **Reglas Perimetrales Cloudflare:** Despliegue verificado en producción sobre `bandait.releven.cc`. Incorporadas reglas de ruteo SPA en `landing/_redirects` (`/hub/*` y `/app/*`) y cabeceras de no-caché para Service Workers en `landing/_headers`.
+  - **Ergonomía Responsiva y Cero Emojis:** Corregido el solapamiento en mobile para pantallas de 375px en `global.css`. Verificación estricta de 0 caracteres emoji en todo el código y artefactos.
+* **Impacto en Audio / Red / UI:**
+  - Resiliencia garantizada en directo: la banda puede operar 100% desconectada de internet en el router local, sincronizando cambios a Supabase en segundo plano cuando haya conectividad.
+  - Enlace de escenario sin fricción: el músico escanea el QR y queda configurado en 1 segundo con su rol y canal de monitoreo.
+  - Cero dropouts y actualización transparente de PWA en móviles mediante cabeceras Edge controladas.
+* **Verificación y Pruebas:**
+  - `vitest run` en `bandait-follower`: 13 de 13 pruebas unitarias aprobadas.
+  - Linter `eslint`: 0 errores y 0 advertencias tras normalización estricta de tipos.
+  - TypeScript build (`tsc -b && vite build`) exitoso en `bandait-leader-web` y `bandait-follower`.
+  - Auditoría de caracteres Unicode completada: 0 emojis detectados.
+  - Pruebas visuales en navegador headless con Chromium (375x812 y 1200x800).
+  - GitHub Actions CI (Run 34434506979) aprobado en verde (Leader Python + Follower PWA).
+
