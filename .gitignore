@@ -25,10 +25,17 @@ Thumbs.db
 # Bioscode
 .bioscode/
 
-# Database
+# Test reports (Playwright / vitest)
+playwright-report/
+test-results/
+blob-report/
+coverage/
+
+# Database (incl. backups written by leader migrations)
 *.db
 *.sqlite
 *.sqlite3
+*.db.bak-*
 
 # Recordings
 recordings/
@@ -36,6 +43,7 @@ recordings/
 # Environment
 .env
 .env.local
+.env.*.local
 
 # Python
 *.spec
