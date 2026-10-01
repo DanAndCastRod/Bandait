@@ -32,7 +32,8 @@ La suite web está consolidada en el directorio `landing/` y opera sobre la red 
 
 ### Rutas y Reglas Edge
 * **Ruteo SPA:** Definido en `landing/_redirects` para que rutas internas (`/hub/*` y `/app/*`) no devuelvan error 404 al recargar el navegador.
-* **Service Workers:** Cabeceras en `landing/_headers` con directiva `Cache-Control: public, max-age=0, must-revalidate` para `sw.js` y `registerSW.js`, garantizando actualización inmediata en smartphones de músicos.
+* **Caché:** `landing/_headers` marca `sw.js`, `manifest.webmanifest` y `index.html` del follower con `Cache-Control: public, max-age=0, must-revalidate`, para que los teléfonos tomen cada despliegue de inmediato. Los assets con hash (`/app/assets/*`) son `immutable`.
+* **Política de privacidad:** `landing/privacidad/index.html`, publicada en `https://bandait.releven.cc/privacidad/`. Google la exige para publicar la app OAuth (sección 2.1). Si cambia el tratamiento de datos, actualízala junto con su fecha.
 
 ---
 
@@ -49,7 +50,11 @@ Además existen el **perfil local** (nombre + correo como etiqueta, sin verifica
 
 ### 2.1. Login de nube: Google como proveedor de Supabase (recomendado)
 
-1. En [Google Cloud Console -> APIs y servicios -> Credenciales](https://console.cloud.google.com/apis/credentials), configura la pantalla de consentimiento (alcances `openid`, `email`, `profile`) y crea un **ID de cliente de OAuth 2.0** de tipo *Aplicación web*.
+1. En [Google Cloud Console](https://console.cloud.google.com), con una cuenta personal (no la de una organización corporativa, cuyas políticas pueden limitar el login a su dominio), abre **Google Auth Platform**:
+   - **Branding:** nombre `Bandait`, correo de asistencia, página principal `https://bandait.releven.cc`, política de privacidad `https://bandait.releven.cc/privacidad/`. Dominios autorizados: `releven.cc` y `<tu-proyecto>.supabase.co`. Sin la URL de política de privacidad, Google no deja pasar la app a producción.
+   - **Audience:** tipo *External*. En *Testing* solo entran los *test users*; con *Publish app* entra cualquier cuenta de Google. Con solo los alcances básicos no hace falta verificación.
+   - **Data Access:** alcances `openid`, `.../auth/userinfo.email` y `.../auth/userinfo.profile`.
+   - **Clients:** crea un **ID de cliente de OAuth 2.0** de tipo *Aplicación web*.
 2. En **URIs de redireccionamiento autorizados** agrega exactamente la *Callback URL* que muestra Supabase en *Authentication -> Sign In / Providers -> Google*:
    ```text
    https://<tu-proyecto>.supabase.co/auth/v1/callback
@@ -196,8 +201,14 @@ El Hub publicado en `/hub/` es el bundle compilado de `bandait-leader-web/`. Las
 cd bandait-leader-web
 cp .env.example .env.local      # .env.local esta ignorado por git
 # completar VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY y, si se usa, VITE_GOOGLE_CLIENT_ID
-npm run build                   # genera dist/; copiar dist/ a landing/hub/ es un paso aparte
+cd ..
+npm run build:landing -- hub    # compila y reemplaza landing/hub; luego commit + merge a main = despliegue
 ```
+
+Proyecto de producción (desde el 2026-10-01): `bandait-cloud`, URL `https://xftzxzwopwzjmttrwtga.supabase.co`. Sus valores públicos (URL y *publishable key*) están **versionados** en `bandait-leader-web/.env.production`, para que cualquier `build:landing -- hub` salga con nube, en cualquier máquina:
+- Vite solo carga ese archivo en `vite build`; el servidor de desarrollo y los e2e siguen en modo local.
+- Un `.env.local` sobrescribe esos valores, por ejemplo para apuntar a un proyecto de pruebas.
+- El CI falla si `.env.production` contiene una línea con `sb_secret_`.
 
 | Variable | Valor | Obligatoria |
 |---|---|---|
@@ -335,7 +346,7 @@ Los workspaces que solo existen en `localStorage` de un navegador (perfil local 
 
 ## 4. Política Estricta de Bitácora Técnica (DEVLOG)
 
-Cualquier cambio arquitectónico, de ruteo de audio, sincronización de red o interfaz gráfica **DEBE** registrarse en [`DEVLOG.md`](file:///data/data/com.termux/files/home/proyectos_personales/Bandait/DEVLOG.md).
+Cualquier cambio arquitectónico, de ruteo de audio, sincronización de red o interfaz gráfica **DEBE** registrarse en [`DEVLOG.md`](../DEVLOG.md).
 
 Toda entrada en `DEVLOG.md` debe respetar obligatoriamente la plantilla de 5 puntos:
 

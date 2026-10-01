@@ -304,3 +304,48 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Si la laptop sale por una red corporativa o VPN, elegir la IP de la Wi-Fi de escenario en Red > Conectar músicos.
   3. Los demás pendientes de la entrada anterior siguen abiertos, salvo el 1 (resuelto aquí) y el 5 (CLAUDE.md, hecho).
 
+### [2026-10-01] - Hub publicado con nube (Supabase de producción) y política de privacidad
+* **Sprint / Módulo:** `bandait-leader-web`, `landing/`, CI, `docs/DEPLOY.md`. Agente: Claude Code (Opus 5.5).
+* **Estado encontrado:**
+  - El usuario fusionó el PR #12, que quedó desplegado en Cloudflare, sin haber creado todavía un proyecto de Supabase. Por lo tanto, la política insegura antigua nunca se aplicó y no hubo datos expuestos.
+  - Ya creó el proyecto `bandait-cloud` y ejecutó el SQL de seguridad.
+  - Google no le dejó pasar la app OAuth a producción: "se requiere ... una URL de política de privacidad válida". Bandait no tenía esa página.
+* **Acción técnica realizada:**
+  - **Política de privacidad:** nueva `landing/privacidad/index.html`, publicada en `https://bandait.releven.cc/privacidad/`.
+    - Describe solo lo que el código trata: la cuenta de Google vía Supabase Auth; el workspace, incluida la lista de integrantes con nombre, correo, teléfono, rol e instrumento; los datos locales; y los datos de escenario, que solo viajan por la LAN.
+    - Encargados: Supabase, Google (login y Google Fonts) y Cloudflare. Sin analítica: se verificó que no hay scripts de terceros.
+    - Borrado por solicitud en 30 días, porque el hub no tiene borrado de cuenta en la app. Referencia a la Ley 1581 de 2012.
+    - Contacto por GitHub Issues sin datos personales; el usuario puede cambiarlo por un correo.
+    - Enlazada desde el footer de la landing y desde la pantalla de acceso del hub, junto al botón de Google.
+  - **Nube del hub:** `bandait-leader-web/.env.production` se versiona con la URL y la *publishable key* del proyecto. Son valores públicos por diseño: viajan en el bundle.
+    - Vite solo lo carga en `build`, así que dev y e2e siguen en modo local.
+    - Se descartó dejarlo solo en `.env.local`: un build desde otra máquina habría publicado el hub sin nube sin avisar.
+    - Nueva guardia de CI: falla si una línea no comentada de `.env.production` contiene `sb_secret_`.
+  - `landing/hub` recompilado con nube.
+  - Se corrigió el favicon de la landing: apuntaba a un `favicon.png` que no existe (404 previo).
+  - `docs/DEPLOY.md`:
+    - campos de Branding y Audience de Google Auth Platform, incluida la URL de privacidad;
+    - el proyecto de producción;
+    - `build:landing -- hub` en lugar de "copiar dist a mano";
+    - se quitó la mención a `registerSW.js`;
+    - se corrigió el enlace roto (`file:///data/...`) al DEVLOG.
+* **Verificación y Pruebas (resultado literal):**
+  - Tabla sin sesión, con la publishable key: `{"code":"42501",...,"message":"permission denied for table bandait_workspaces"}` y `HTTP 401`. Correcto.
+    - El mensaje sugiere `GRANT SELECT ... TO anon`: **no** se debe aplicar, porque abriría la tabla.
+  - `GET /auth/v1/settings`: `google: False`. El proveedor Google todavía no está activo en Supabase; es un pendiente del usuario.
+  - Hub compilado y servido en local:
+    - el botón "CONTINUAR CON GOOGLE (NUBE)" queda habilitado y redirige a `.../auth/v1/authorize?provider=google&...&code_challenge_method=s256`;
+    - Supabase responde `{"code":400,"error_code":"validation_failed","msg":"Unsupported provider: provider is not enabled"}`, lo que es consistente con el punto anterior.
+  - Hub: lint limpio; `verify:logic` → `23 ok, 0 fallas`; build correcto; el bundle contiene la URL y la key (1 coincidencia de cada una).
+  - E2E sin variables locales, en las mismas condiciones que el CI: `npx playwright test --project=landing --project=leader-web` → `24 passed`.
+  - La guardia de CI se probó en los dos sentidos: pasa con el archivo real y falla con una línea `VITE_X=sb_secret_abc`.
+  - NO VERIFICADO: el login completo con Google, que queda bloqueado hasta activar el proveedor, y el realtime entre dos dispositivos.
+* **Errores propios:**
+  - Para actualizar `main` local ejecuté `git switch main && git pull`. El `main` local seguía en `29eb4ac`, donde `bandait-follower/node_modules` aún estaba versionado: el switch reescribió esos archivos ignorados con la versión vieja y el pull los borró del disco (quedaron 6 entradas).
+  - Se recuperó con `npm ci` (`added 550 packages`).
+  - Lo correcto era `git checkout -B main origin/main` desde la rama de trabajo.
+* **Pendientes (usuario):**
+  1. Supabase → Authentication → Sign In / Providers → Google: activar y guardar el Client ID y el Client secret.
+  2. Google Auth Platform → Branding: poner la URL de privacidad `https://bandait.releven.cc/privacidad/` (disponible tras fusionar este cambio) y luego **Publish app**.
+  3. Probar el login en `/hub/` y el botón "COMPROBAR SEGURIDAD DE LA TABLA" del panel NUBE.
+
