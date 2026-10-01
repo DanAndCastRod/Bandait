@@ -4,6 +4,8 @@ name: Release (lider Windows)
 # - Tag vX.Y.Z (debe coincidir con APP_VERSION, ver bandait-leader/scripts/version.py):
 #   build, smoke test del .exe empaquetado, instalador y GitHub Release.
 # - workflow_dispatch: lo mismo sin Release (solo artefactos del workflow).
+# - pull_request que toque el lider o este workflow: lo mismo sin Release, para verificar
+#   antes del merge que el .exe empaquetado arranca y que el instalador compila.
 # Sin secretos ni firma: el instalador sale sin firmar (SmartScreen avisa al usuario).
 # El unico token es el GITHUB_TOKEN automatico, para publicar el Release.
 
@@ -11,6 +13,14 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bandait-leader/**'
+      - 'landing/app/**'
+      - '.github/workflows/release.yml'
+      - 'LICENSE'
+      - 'NOTICE.md'
 
 permissions:
   contents: read
