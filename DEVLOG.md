@@ -173,3 +173,134 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - Pruebas visuales en navegador headless con Chromium (375x812 y 1200x800).
   - GitHub Actions CI (Run 34434506979) aprobado en verde (Leader Python + Follower PWA).
 
+### [2026-09-30] - Auditoría de estado real, cableado de escenario (protocolo v3), seguridad Supabase/OAuth e higiene del repo
+* **Sprint / Módulo:** Transversal (`bandait-leader`, `bandait-follower`, `bandait-leader-web`, `bandait-protocol`, CI y raíz). Rama `fix/stage-wiring-hygiene`, sin commit al cerrar la entrada. Agente: Claude Code (Opus 5.5), con tres subagentes en paralelo, uno por paquete.
+* **Estado encontrado (auditoría sobre `29eb4ac`):**
+  - Las entradas anteriores dan por completados los Sprints 1-4, pero el código no lo respaldaba. `src/ui/main_window.py:51` creaba `BandaitServer` y nunca llamaba `start()`, así que ningún follower podía conectarse. `closeEvent` llamaba `server.stop()`, que no existía.
+  - Faltaba cableado entre líder y follower:
+    - El follower nunca llamaba `syncLeaderPhase`.
+    - El líder enviaba `current_song_id` y el follower leía `currentSongId`.
+    - El hub enviaba `command` y el líder leía `type`, así que todo comando caía en PLAY.
+    - El móvil firmaba con `Date.now()` y el líder con su reloj monotónico, lo que rompía last-write-wins.
+  - El CI enmascaraba fallos: `pytest ... || true` y `npm run test -- --run || true`. Localmente, el líder daba 12 fallos de 77:
+    - 4 por `Signal(int, int)` con nanosegundos (OverflowError);
+    - 8 por `no such column: setlists.band_id`, ya que no había migraciones.
+  - Supabase y OAuth eran inseguros o no funcionaban:
+    - El hub publicado traía un client ID de Google de relleno (`123456789-abcdef...`), verificado contra `bandait.releven.cc`.
+    - La identidad era `btoa(email)`, sin verificar.
+    - `docs/DEPLOY.md` indicaba la política RLS `using (true) with check (true)`, que deja cualquier workspace legible y escribible con la anon key.
+  - Repo: `bandait-follower/node_modules` estaba versionado (14,753 archivos), igual que `bandait-leader/bandait.db`, logs de Flutter sueltos en la raíz y un workflow de release Flutter que fallaba con cualquier tag.
+  - Stubs confirmados: OTP WhatsApp/SMS, Demucs, mezclador in-ear sin audio, XLSX solo JSON, escaneo QR simulado y prompts de voz sin audio.
+* **Acción técnica realizada:**
+  - **Contrato normativo** `bandait-protocol/CONTRACT_V3.md`, con fixtures en `bandait-protocol/fixtures/v3_messages.json`:
+    - snake_case en el cable, `anchor_ns` y `bar_offset`, `state_version` y `leader_instance_id`;
+    - deduplicación por `command_id`, LWW por recepción en el líder, PLAY idempotente y guardia `expected_song_id`;
+    - `START_LEAD_MS = 250` y anchors no retroactivos;
+    - reloj del líder `time.perf_counter_ns()`.
+    - Se eliminó el evento `broadcast_state`, que permitía a cualquier cliente sobrescribir la sesión.
+  - **Líder:**
+    - El servidor arranca y se detiene ordenadamente; un camino único de transporte; el clic de audio está enganchado en fase al anchor vía `outputBufferDacTime`.
+    - Migraciones aditivas con respaldo `.bak-*` y ruta de BD única (`BANDAIT_DB`); los tests ya no tocan la BD real.
+    - Nuevos: `src/headless.py`, el diálogo de dispositivos de audio (salida 3 para el baterista) y `scripts/sync_latency_bench.py`.
+    - Se eliminaron `network/bandait_server.py` y 4 módulos de UI sin importadores.
+  - **Follower:**
+    - Módulo frontera `src/protocol/wire.ts` y programador con lookahead en Web Audio, con Flywheel y corrección suave acotada.
+    - Filtro de reloj de mínimo retardo y estados LOCKED/DEGRADED/UNSTABLE/FLYWHEEL/LOST.
+    - La sesión vive a nivel de App y sobrevive a la navegación.
+    - QR real, ACTIVAR AUDIO para iOS y Wake Lock.
+    - PANIC por rol: un músico solo silencia su equipo; el director detiene a la banda.
+  - **Hub:**
+    - Supabase Auth (Google, PKCE) es la única identidad con nube; la clave de fila es `auth.uid()`.
+    - Sincronización: descarga primero, gana el más nuevo con respaldo local, debounce de 1500 ms, sin eco de realtime, y se rechazan las llaves `service_role`.
+    - GIS solo como perfil local, MODO DEMO explícito y exportación renombrada a JSON.
+    - `docs/DEPLOY.md` trae el SQL seguro y una migración opcional de filas antiguas.
+  - **Higiene:**
+    - Se dejan de versionar `node_modules`, `bandait.db`, `playwright-report/` y `test-results/`, y se eliminan los archivos sueltos.
+    - `TODO.md` (Flutter) pasa a `_archive/flutter_legacy/` y se elimina `release-builds.yml`.
+    - CI sin `|| true`, con job nuevo para el hub, Node 22 y librerías de sistema para Qt offscreen.
+    - Nuevo `npm run build:landing` para regenerar `landing/app` y `landing/hub`.
+    - Playwright con puertos fijos y specs vacíos eliminados.
+* **Impacto en Audio / Red / UI:**
+  - Primera versión en la que líder y follower intercambian transporte de verdad. Prueba cruzada contra el líder headless:
+    - error de fase 0.0000 ms;
+    - con el reloj `perf_counter`, jitter filtrado de 0.02-0.10 ms y LOCKED 12/12 mientras PLAYING.
+  - Hallazgo de reloj: en Windows con Python 3.11, `time.monotonic_ns()` tiene una resolución de 15.6 ms. Con ese reloj se medían 2.0-4.6 ms de jitter que no venían de la red.
+* **Verificación y Pruebas (resultado literal):**
+  - Líder: `ruff check src tests` → `All checks passed!`; `QT_QPA_PLATFORM=offscreen python -m pytest -q` → `149 passed`.
+  - Follower: lint y `tsc --noEmit` sin salida; `vitest run` → `Tests 94 passed (94)`; `npm run build` → `precache 11 entries`.
+  - Hub: lint sin salida; `npm run verify:logic` → `23 ok, 0 fallas`; build correcto. El SQL de `DEPLOY.md` se probó sobre PGlite con roles simulados (`19 ok, 0 fallas`, según el subagente; no lo re-ejecuté).
+  - E2E (Playwright), por proyecto:
+    - landing → `13 passed`, tras actualizar `e2e/landing.spec.ts`, que fallaba desde el cambio de la landing del 2026-09-09;
+    - leader-web → `11 passed`;
+    - follower → `23 passed`, con el spec reescrito, y `46 passed` con `--repeat-each=2`, ambos según el subagente.
+    - El spec nuevo del follower expuso dos bugs de la app, ya corregidos: el QR de director entraba como músico, y había scroll horizontal a 375/320 px.
+    - La corrida conjunta final de los tres proyectos la detuvo Claude Code por memoria baja del equipo; no se relanzó.
+  - NO VERIFICADO:
+    - salida ASIO real y alineación acústica FOH contra los teléfonos;
+    - iOS (audio, cámara, Wake Lock);
+    - Supabase y Google reales;
+    - el CI en Linux, porque no se hizo push.
+* **Decisiones:**
+  - Protocolo en snake_case con un único módulo frontera por cliente, en lugar de camelCase en el cable, porque los esquemas existentes ya eran snake_case.
+  - LWW por instante de recepción del líder: los relojes de los clientes no son confiables para ordenar.
+  - `perf_counter_ns` en lugar de `monotonic_ns`, por la resolución medida en Windows.
+  - El hub no controla el transporte, porque una página HTTPS no puede abrir `ws://` a la LAN. El mando del director vive en el follower.
+  - Los bundles de `landing/` se siguen versionando, ya que Cloudflare Pages publica `landing/` tal cual, y se regeneran con script.
+* **Errores propios registrados:**
+  - La primera corrida de pruebas del líder (antes de los cambios) abrió la BD real `~/Documents/Bandait/bandait.db`. Los datos siguen intactos (3 canciones, 1 setlist, 1 gig). `create_all` pudo crear las tablas vacías `users` y `bands`; no se puede confirmar porque no se revisó antes.
+  - El contrato inicial pedía `time.monotonic_ns()` y un umbral de jitter de 2 ms; ambos se corrigieron tras medir.
+  - El fixture `command_ack_rejected` tenía un `state_version` (44) incoherente con su estado embebido (42); se corrigió y se ajustó la prueba del follower.
+  - Los tres subagentes se cortaron una vez por el límite de uso y se reanudaron con su contexto.
+* **Pendientes:**
+  1. Decidir cómo se sirve el follower en escenario. Desde `https://bandait.releven.cc/app/`, Chrome 154 marca `ws://<ip-lan>` como Mixed Content y la conexión no llegó al líder (verificado). Safari y Firefox bloquean contenido mixto (no verificado aquí).
+  2. El usuario debe ejecutar el SQL de `docs/DEPLOY.md` §3.3 en Supabase y configurar los proveedores de Google y Supabase y las variables `VITE_*`. Hasta entonces, si se aplicó la política antigua, la tabla sigue expuesta.
+  3. Al primer arranque del líder con interfaz se migrará la BD real, con respaldo previo.
+  4. Funcionalidad pendiente: OTP, Demucs y reproducción de stems, XLSX real, `transition_mode` (conteo y gapless), distribución de letras, roles con RLS por banda, NTP por UDP y un pipeline de release para el líder.
+  5. `CLAUDE.md` describe el proyecto como Flutter: está desactualizado y falta decidir si se actualiza.
+
+### [2026-09-30] - Follower servido por el líder en la LAN (opción A), CLAUDE.md y PR
+* **Sprint / Módulo:** `bandait-leader` (red/UI), `bandait-follower` (conexión), documentación. Agente: Claude Code (Opus 5.5) con dos subagentes.
+* **Decisión del usuario:** el usuario eligió la opción A para resolver el pendiente 1 de la entrada anterior. Las alternativas descartadas fueron:
+  - (B) HTTPS en la LAN con certificado autofirmado: cada teléfono tendría que aceptarlo, una fricción inaceptable en tarima;
+  - (C) certificados reales en un subdominio LAN: requiere infraestructura DNS; queda como mejora futura.
+  - Especificado en `bandait-protocol/CONTRACT_V3.md` §8.
+* **Acción técnica realizada:**
+  - **Líder:**
+    - `src/network/http_app.py` sirve `landing/app` y `GET /leader-info.json` en el puerto de Socket.IO, con protección contra path traversal (11 casos probados).
+    - `src/network/lan.py` elige la IP LAN, con la ruta por defecto primero, los adaptadores virtuales al final y una forma de forzarla manualmente.
+    - El diálogo "Conectar músicos" muestra dos QR, para músicos y director.
+    - Se eliminó `network/discovery.py`, que estaba en camelCase y nadie montaba.
+    - Se añadió la dependencia `psutil`.
+  - **Follower:**
+    - Detecta cuándo lo sirve el líder (`leader-info.json`) y permite unirse con un toque.
+    - Guardia HTTPS: nunca abre `ws://` hacia la LAN desde HTTPS y ofrece ABRIR DESDE EL LIDER.
+    - En HTTP: sin service worker y con la cámara nativa para el QR. Para mantener la pantalla encendida usa un video silencioso en bucle con los clips de `nosleep.js` (MIT; 12.5 KB), con reproductor propio.
+    - Las fuentes web dejaron de bloquear el render: sin internet, la app quedaba en blanco.
+    - Se añadió un favicon.
+  - **Cloudflare (`landing/_headers`):** se quitó la regla de `registerSW.js`, que ya no existe; `index.html` va sin caché y `assets/*`, que llevan hash, son `immutable`.
+  - `CLAUDE.md` se reescribió con el stack real, la ruta de cada paquete, los comandos de verificación, el despliegue y las reglas de reloj, protocolo y escenario. En `AGENTS.md` §4 se corrigieron los comandos de prueba (`npm test` dejaba vitest en modo watch).
+* **Impacto en Audio / Red / UI:** los teléfonos ya pueden unirse a un show real escaneando un QR con la cámara nativa, sin certificados ni instalación.
+* **Verificación y Pruebas (resultado literal):**
+  - **Fallo encontrado en la verificación final y corregido:** con el equipo cargado (memoria baja), `test_headless_entrypoint_join_play_and_graceful_stop` falló con "El servidor de red no pudo arrancar: tiempo de arranque agotado". El hilo tardaba más de 5 s en importar uvicorn y `BandaitServer.start()` apagaba un servidor que sí iba a arrancar: en una laptop FOH en frío, eso deja a la banda sin sincronización.
+    - Corrección en `src/network/server.py`: uvicorn se importa antes de lanzar el hilo y el plazo sube a 15 s.
+    - Un arranque lento ya no se mata: queda en "starting" y pasa a "running" desde el hilo cuando uvicorn escucha; si el hilo muere, se reporta el error.
+    - Prueba de regresión: `test_slow_start_is_not_killed`.
+  - Líder: `ruff` → `All checks passed!`; pytest → `184 passed`. Con curl sobre el headless (según el subagente):
+    - `/` responde 200 `text/html` sin caché;
+    - `/leader-info.json` responde 200 `application/json`;
+    - los assets responden con su tipo correcto e `immutable`;
+    - los intentos de traversal responden 404.
+  - Follower (según el subagente): vitest `116 passed`; e2e follower `28 passed`, y `56 passed` con `--repeat-each=2`.
+  - Prueba real propia: líder headless con `--lan-ip 192.168.1.5` y Chrome entrando por `http://192.168.1.5:4044/?...&role=director` (contexto no seguro, `isSecureContext=false`):
+    - la página cargó desde el líder y se unió sola como director;
+    - el líder registró al seguidor;
+    - PLAY respondió "PLAY ACEPTADO (PLAY)";
+    - el compás avanzó `017:04 → 018:01 → 018:02 → 018:03` a 120 BPM, con estado SINCRONIZADO, RTT 1.7 ms y jitter 0.0 ms;
+    - STOP devolvió al líder a IDLE;
+    - el único error de consola era `favicon.ico` 404, ya corregido.
+  - NO VERIFICADO: iPhone y Android reales (audio, pantalla encendida, redirección HTTPS) y el build del ejecutable con PyInstaller.
+* **Pendientes:**
+  1. Probar en teléfonos reales sobre la Wi-Fi de escenario.
+  2. Si la laptop sale por una red corporativa o VPN, elegir la IP de la Wi-Fi de escenario en Red > Conectar músicos.
+  3. Los demás pendientes de la entrada anterior siguen abiertos, salvo el 1 (resuelto aquí) y el 5 (CLAUDE.md, hecho).
+

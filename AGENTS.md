@@ -24,5 +24,9 @@ está estrictamente especificado y blindado en dicho plan maestro.
 - El estado de la red (NTP, Beat, Compás, Transporte, Acordes) NUNCA debe acoplarse con las clases o estilos de renderizado visual.
 
 ## 4. VERIFICACIÓN DE PRUEBAS
-- PySide6 Leader: `pytest bandait-leader/tests` (deben mantenerse verdes las 57+ pruebas).
-- React Follower: `npm test` en `bandait-follower`.
+El CI no enmascara fallos (nunca agregar `|| true`). El contrato de red es `bandait-protocol/CONTRACT_V3.md`.
+- PySide6 Leader: `cd bandait-leader && ruff check src tests && QT_QPA_PLATFORM=offscreen python -m pytest -q`
+- React Follower: `cd bandait-follower && npm run lint && npx vitest run && npm run build` (`npm test` deja vitest en modo watch).
+- Web Hub: `cd bandait-leader-web && npm run lint && npm run verify:logic && npm run build`
+- E2E: `npx playwright test` desde la raíz.
+- Bundles publicados (`landing/app`, `landing/hub`): regenerar con `npm run build:landing`; Cloudflare publica `landing/` tal cual desde `main`.

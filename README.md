@@ -35,18 +35,27 @@ Bandait 3.0 es un sistema operativo en vivo de ultra-baja latencia para agrupaci
 
 ---
 
-## 3. Hoja de Ruta de Sprints
+## 3. Estado real de implementación (2026-09-30)
 
-1. **Sprint 1 (En curso):** Higiene legacy Flutter (`_archive/flutter_legacy/`), corrección de fase `beat = 1` en `clock_service.py`, motor ASIO multicanal en `engine.py`, navegación PWA con tema Swiss Lab y base Flywheel.
-2. **Sprint 2:** Web Admin Hub, autenticación WhatsApp/Google, roles multi-banda y servicio XLSX con *Diff Preview*.
-3. **Sprint 3:** Protocolo de control remoto concurrente, banner de alerta de saltos de setlist y componentes táctiles de hardware.
-4. **Sprint 4:** Pre-caché IndexedDB de stems, pipeline de IA en nube (Demucs) y asistente Camelot.
+La hoja de ruta de sprints está en el plan maestro. Lo que de verdad funciona hoy, verificado con pruebas y no solo descrito, es:
+
+- **Núcleo de escenario (líder + follower):** el líder arranca su servidor Socket.IO, el transporte pasa por un único camino (laptop y director móvil), el follower programa el clic en Web Audio a partir del anchor del líder, con Flywheel y corrección suave de fase. El protocolo está fijado en [`bandait-protocol/CONTRACT_V3.md`](bandait-protocol/CONTRACT_V3.md).
+- **En escenario:** el líder sirve el follower por HTTP en la LAN (`http://<ip-lan>:4040/`) y muestra dos QR, uno para músicos y otro para el director (menú Red > Conectar músicos). El sitio HTTPS `/app/` no puede conectarse a la LAN (contenido mixto) y redirige al líder.
+- **Web Hub:** CRUD local-first; sincronización en la nube solo con Supabase Auth (Google) y RLS por usuario. Requiere ejecutar el SQL de `docs/DEPLOY.md` y configurar las variables `VITE_*`.
+- **Pendiente** (stub o sin implementar): OTP por WhatsApp/SMS, Demucs/stems en nube, reproducción de stems en el mezclador in-ear, importación XLSX real, detección de acordes/BPM, prompts de voz con audio, lógica de `transition_mode` (conteo y gapless), distribución de letras, roles con permisos del lado del servidor y servidor NTP por UDP.
+- Bugs abiertos y advertencias: [`bugs.md`](bugs.md). Historial: [`DEVLOG.md`](DEVLOG.md).
 
 ---
 
 ## 4. Guía para Nuevos Chats de Agentes (Antigravity / agy)
 
 Si inicias una sesión en este repositorio desde otro chat de `agy`:
-1. Lee `docs/PLAN_BANDAIT_3.0_MASTER.md` antes de proponer cambios arquitectónicos.
+1. Lee `docs/PLAN_BANDAIT_3.0_MASTER.md` antes de proponer cambios arquitectónicos, y `bandait-protocol/CONTRACT_V3.md` antes de tocar la red.
 2. Consulta `AGENTS.md` para las reglas de desarrollo, pruebas y restricciones visuales.
-3. Verifica el estado de las pruebas con `pytest bandait-leader/tests` y `npm test --prefix bandait-follower`.
+3. Verifica el estado de las pruebas (el CI no enmascara fallos):
+   - Líder: `cd bandait-leader && ruff check src tests && QT_QPA_PLATFORM=offscreen python -m pytest -q`
+   - Follower: `cd bandait-follower && npm run lint && npx vitest run && npm run build`
+   - Hub: `cd bandait-leader-web && npm run lint && npm run verify:logic && npm run build`
+   - E2E: `npx playwright test` desde la raíz.
+4. Líder sin interfaz gráfica, para probar followers: `cd bandait-leader && python -m src.headless --port 4040`.
+5. Los bundles publicados en `landing/app` y `landing/hub` se regeneran con `npm run build:landing` desde la raíz; no se copian a mano.
