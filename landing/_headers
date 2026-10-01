@@ -1,8 +1,11 @@
 /app/sw.js
   Cache-Control: public, max-age=0, must-revalidate
 
-/app/registerSW.js
+/app/index.html
   Cache-Control: public, max-age=0, must-revalidate
+
+/app/assets/*
+  Cache-Control: public, max-age=31536000, immutable
 
 /app/manifest.webmanifest
   Content-Type: application/manifest+json; charset=utf-8

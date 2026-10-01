@@ -4,6 +4,7 @@
   "private": true,
   "description": "Bandait — Sistema de sincronización en tiempo real para músicos en vivo",
   "scripts": {
+    "build:landing": "node scripts/build-landing.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

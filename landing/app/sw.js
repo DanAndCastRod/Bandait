@@ -67,21 +67,22 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-25613826'], (function (workbox) { 'use strict';
+define(['./workbox-611d2886'], (function (workbox) { 'use strict';
 
-  self.skipWaiting();
-  workbox.clientsClaim();
+  self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+      self.skipWaiting();
+    }
+  });
+
   /**
    * The precacheAndRoute() method efficiently caches and responds to
    * requests for URLs in the manifest.
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
-    "url": "registerSW.js",
-    "revision": "402b66900e731ca748771b6fc5e7a068"
-  }, {
     "url": "index.html",
-    "revision": "a7ef0e3b528b9c34881f438a3b866013"
+    "revision": "c2c78608762edc0e0b58fa506f663f6b"
   }, {
     "url": "icon-512x512.png",
     "revision": "543274b33f3ef9f6669b27201b9b04a3"
@@ -89,10 +90,16 @@ define(['./workbox-25613826'], (function (workbox) { 'use strict';
     "url": "icon-192x192.png",
     "revision": "d0dd4dc9e5afc9e4f8cd064eb05c3ae6"
   }, {
-    "url": "assets/index-BkfVizs6.js",
+    "url": "assets/index-J9hqZxoH.js",
     "revision": null
   }, {
-    "url": "assets/index-B2ql4Eux.css",
+    "url": "assets/index-DeEg3qc2.js",
+    "revision": null
+  }, {
+    "url": "assets/index-CV8p2N2-.css",
+    "revision": null
+  }, {
+    "url": "assets/index-BrUpEEpZ.js",
     "revision": null
   }, {
     "url": "icon-192x192.png",
@@ -106,10 +113,18 @@ define(['./workbox-25613826'], (function (workbox) { 'use strict';
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html")));
-  workbox.registerRoute(/^https:\/\/fonts\.googleapis\.com\/.*/i, new workbox.CacheFirst({
-    "cacheName": "google-fonts-cache",
-    plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 10,
+  workbox.registerRoute(/^https:\/\/fonts\.googleapis\.com\/.*/i, new workbox.StaleWhileRevalidate({
+    "cacheName": "google-fonts-stylesheets",
+    plugins: [new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    })]
+  }), 'GET');
+  workbox.registerRoute(/^https:\/\/fonts\.gstatic\.com\/.*/i, new workbox.CacheFirst({
+    "cacheName": "google-fonts-webfonts",
+    plugins: [new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    }), new workbox.ExpirationPlugin({
+      maxEntries: 60,
       maxAgeSeconds: 31536000
     })]
   }), 'GET');
