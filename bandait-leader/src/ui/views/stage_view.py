@@ -124,6 +124,18 @@ class StageView(QWidget):
         self._jump_timer.setSingleShot(True)
         self._jump_timer.timeout.connect(self.jump_alert.hide)
 
+        # Aviso persistente mientras el setlist en vivo está vacío (no se borra solo).
+        self.setlist_notice = QLabel("")
+        self.setlist_notice.setObjectName("setlistNotice")
+        self.setlist_notice.setFont(QFont("Inter", 15, QFont.Bold))
+        self.setlist_notice.setAlignment(Qt.AlignCenter)
+        self.setlist_notice.setWordWrap(True)
+        self.setlist_notice.setStyleSheet(
+            "color: #000000; background: #FFAA00; padding: 10px 16px;"
+        )
+        self.setlist_notice.hide()
+        layout.addWidget(self.setlist_notice)
+
         # === ÁREA PRINCIPAL: Letra y metrónomo ===
         main_area = QHBoxLayout()
         main_area.setContentsMargins(40, 20, 40, 20)
@@ -338,6 +350,17 @@ class StageView(QWidget):
         self.jump_alert.setText(f"SALTO: {title} (tema {order_index + 1})")
         self.jump_alert.show()
         self._jump_timer.start(5000)
+
+    def set_setlist_notice(self, text):
+        """Mostrar (texto) u ocultar (None / "") el aviso de setlist vacío."""
+        text = text or ""
+        if text == self.setlist_notice.text() and self.setlist_notice.isHidden() != bool(text):
+            return  # no re-layout on every state update
+        self.setlist_notice.setText(text)
+        self.setlist_notice.setVisible(bool(text))
+
+    def setlist_notice_text(self) -> str:
+        return self.setlist_notice.text() if not self.setlist_notice.isHidden() else ""
 
     def _flash_border(self):
         """Flash de borde en beat 1 — simulación de frame OLED."""

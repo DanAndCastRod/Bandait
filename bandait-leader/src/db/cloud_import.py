@@ -6,8 +6,8 @@ Rules (Phase 1, one-way hub -> leader):
   read-only mirror: the hub is the only place to edit them.
 - The leader mirrors exactly the chosen band: cloud songs, setlists and voice
   configs that are not in it any more (deleted in the hub, or of another band)
-  are removed. Rows with ``source = 'local'`` (or setlists without
-  ``cloud_id``) are never touched.
+  are removed. Rows with ``source = 'local'`` or ``'demo'`` (or setlists
+  without ``cloud_id``) are never touched.
 - A song id that collides with a local song gets the local id
   ``cloud-<hub id>`` instead: local data always wins its id.
 - Everything runs in one ``BEGIN IMMEDIATE`` transaction: the database ends up
@@ -226,7 +226,8 @@ def _apply(conn, content) -> ImportReport:
                 n += 1
                 pk = f"{base}#{n}"
         stamp = _parse_ts(playlist.updated_at) or _parse_ts(playlist.created_at)
-        values = {"name": playlist.name, "cloud_id": playlist.id, "band_cloud_id": band.id, "band_id": None}
+        values = {"name": playlist.name, "cloud_id": playlist.id, "band_cloud_id": band.id, "band_id": None,
+                  "source": "cloud"}
         if stamp is not None:
             values["updated_at"] = stamp
         if pk in cloud_setlist_pks:

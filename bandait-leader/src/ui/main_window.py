@@ -25,11 +25,12 @@ from src.audio.audio_engine import AudioEngine, AudioUnavailable
 from src.cloud.controller import CloudController
 from src.core.leader_config import load_settings, save_settings
 from src.core.paths import get_db_path, recordings_dir
-from src.db.seed import seed_database
+from src.db.seed import count_demo_rows, load_demo_data, remove_demo_data
 from src.network.server import BandaitServer
 from src.sync.clock_service import ClockService
 from src.sync.leader_clock import CLOCK_NAME, leader_clock_resolution_ns
 from src.ui.views.ai_view import AIView
+from src.ui.dialogs.account_select import songs_label
 from src.ui.views.library_view import LibraryView
 from src.ui.views.stage_view import StageView
 from src.ui.widgets.mixer import MixerWidget
@@ -39,6 +40,24 @@ from src.ui.widgets.transport import TransportWidget
 logger = logging.getLogger(__name__)
 
 APP_VERSION = "2.1.0"
+
+# Persistent notices while the live setlist has no songs (stage view + status bar).
+EMPTY_SETLIST_NOTICE = (
+    "SETLIST VACIO: agrega canciones en bandait.releven.cc/hub (CANCIONES y SETLISTS) "
+    "y luego Cuenta > Sincronizar ahora"
+)
+NO_SETLIST_NOTICE = (
+    "SIN SETLIST EN VIVO: elige uno en Cuenta > Elegir setlist "
+    "(o créalo en bandait.releven.cc/hub y luego Cuenta > Sincronizar ahora)"
+)
+NO_SETLIST_SIGNED_OUT_NOTICE = (
+    "SIN SETLIST EN VIVO: inicia sesión en Cuenta > Iniciar sesión con Google y elige un setlist"
+)
+STATUS_EMPTY_SETLIST = "SETLIST VACIO: agrega canciones en el hub y sincroniza"
+STATUS_NO_SETLIST = "SIN SETLIST EN VIVO"
+
+# BANDAIT_DEMO=1 loads the demo songs at startup (never automatic otherwise).
+DEMO_ENV = "BANDAIT_DEMO"
 
 REJECT_MESSAGES = {
     "conflict": "Otro dispositivo cambió el setlist antes: se ignoró la orden",
@@ -78,11 +97,14 @@ class MainWindow(QMainWindow):
         # Setlist to load at the next IDLE (a sync or a choice arrived while playing).
         self._pending_live_setlist = None
 
-        # Seed database with sample data if empty (DB path honors BANDAIT_DB)
-        try:
-            seed_database()
-        except Exception as e:
-            print(f"[DB] Seed error (non-critical): {e}")
+        # Demo data only on request (BANDAIT_DEMO=1 or Ayuda > Cargar canciones de
+        # demostración). Seeding every empty database made an empty hub setlist
+        # look like "the songs did not sync" (DB path honors BANDAIT_DB).
+        if os.environ.get(DEMO_ENV) == "1":
+            try:
+                load_demo_data()
+            except Exception as e:
+                logger.warning("No se pudieron cargar los datos de demostración: %s", e)
 
         # Servicios
         self.clock_service = ClockService()
@@ -129,6 +151,7 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._apply_styles()
         self._setup_menu()
+        self._update_setlist_notice()
 
         if start_services:
             self.start_services()
@@ -262,6 +285,14 @@ class MainWindow(QMainWindow):
         self.status_cloud.setStyleSheet("color: #666666;")
         self.status_bar.addWidget(self.status_cloud)
 
+        # Persistent: QStatusBar.showMessage() hides normal widgets, not permanent ones.
+        self.status_setlist = QLabel("")
+        self.status_setlist.setStyleSheet(
+            "color: #000000; background: #FFAA00; font-weight: bold; padding: 1px 8px; border-radius: 3px;"
+        )
+        self.status_setlist.hide()
+        self.status_bar.addPermanentWidget(self.status_setlist)
+
         self.connect_btn = QPushButton("Conectar músicos")
         self.connect_btn.setToolTip("QR para que los teléfonos abran la app desde este líder")
         self.connect_btn.setStyleSheet(
@@ -391,6 +422,7 @@ class MainWindow(QMainWindow):
         self.library_view = LibraryView()
         self.library_view.song_selected.connect(self._on_song_selected)
         self.library_view.setlist_activated.connect(self._activate_setlist)
+        self.library_view.demo_remove_requested.connect(self._remove_demo_data)
         self.tabs.addTab(self.library_view, "Biblioteca")
 
         # Tab 4: IA
@@ -504,6 +536,14 @@ class MainWindow(QMainWindow):
         view_menu.addAction(fullscreen_action)
 
         help_menu = menubar.addMenu("A&yuda")
+        self.action_demo_load = QAction("Cargar canciones de &demostración...", self)
+        self.action_demo_load.setToolTip("3 canciones, 1 setlist y 1 evento marcados DEMO, para probar Bandait")
+        self.action_demo_load.triggered.connect(self._load_demo_data)
+        help_menu.addAction(self.action_demo_load)
+        self.action_demo_remove = QAction("&Quitar datos de demostración...", self)
+        self.action_demo_remove.triggered.connect(self._remove_demo_data)
+        help_menu.addAction(self.action_demo_remove)
+        help_menu.addSeparator()
         self.action_about = QAction("&Acerca de Bandait", self)
         self.action_about.triggered.connect(self._show_about)
         help_menu.addAction(self.action_about)
@@ -790,12 +830,28 @@ class MainWindow(QMainWindow):
         self.audio_engine.mixer.set_master_volume(db)
 
     # ------------------------------------------------------------------ setlist / songs
-    def _load_initial_setlist(self):
-        ids = self.library_view.setlist_ids()
+    def _initial_setlist_target(self):
+        """Setlist for startup (and after removing the demo data).
+
+        With a hub band chosen only that band's setlists count: the chosen one,
+        even when it is empty, else the band's first one; never a demo or local
+        setlist. Without a band: the saved one, else the first in the library."""
         wanted = self._settings.active_setlist_id
-        setlist_id = wanted if wanted in ids else (ids[0] if ids else None)
+        band_id = self._settings.cloud_band_id
+        if band_id:
+            band_setlists = self.library_view.cloud_setlist_ids(band_id)
+            if wanted in band_setlists:
+                return wanted
+            return band_setlists[0] if band_setlists else None
+        ids = self.library_view.setlist_ids()
+        return wanted if wanted in ids else (ids[0] if ids else None)
+
+    def _load_initial_setlist(self):
+        setlist_id = self._initial_setlist_target()
         if setlist_id:
             self._activate_setlist(setlist_id, persist=False)
+        else:
+            self._clear_live_setlist()
 
     def _activate_setlist(self, setlist_id: str, persist: bool = True):
         """Único camino al setlist en vivo: DB -> entradas -> server.set_setlist.
@@ -806,12 +862,46 @@ class MainWindow(QMainWindow):
         self._pending_live_setlist = None
         self.server.set_setlist(entries)
         self.library_view.mark_active_setlist(setlist_id)
-        self.mini_label.setText(f"Setlist en vivo: {len(entries)} canciones")
-        if not entries:
-            self.status_bar.showMessage("El setlist cargado no tiene canciones", 6000)
+        name = self.library_view.setlist_name(setlist_id)
+        count = songs_label(len(entries))
+        self.mini_label.setText(f"Setlist en vivo: {name} ({count})" if name else f"Setlist en vivo: {count}")
+        self._update_setlist_notice()
         if persist:
             self._settings.active_setlist_id = setlist_id
             self._save_settings()
+
+    def _clear_live_setlist(self):
+        """No live setlist (call it with the band stopped): phones show no songs
+        and the persistent notice says what to do."""
+        self._live_entries = []
+        self._live_setlist_id = None
+        self._pending_live_setlist = None
+        self.server.set_setlist([])
+        self.library_view.mark_active_setlist(None)
+        self.mini_label.setText("Setlist en vivo: ninguno")
+        self._update_setlist_notice()
+
+    def _update_setlist_notice(self):
+        """Persistent notice (stage view + status bar) while the live setlist is
+        empty. Never a timed message: it stays until there are songs."""
+        if self._live_setlist_id is None:
+            stage = NO_SETLIST_NOTICE if self.cloud.is_signed_in() else NO_SETLIST_SIGNED_OUT_NOTICE
+            status = STATUS_NO_SETLIST
+        elif not self._live_entries:
+            stage, status = EMPTY_SETLIST_NOTICE, STATUS_EMPTY_SETLIST
+        else:
+            stage = status = ""
+        try:
+            self.stage_view.set_setlist_notice(stage)
+            self.status_setlist.setText(status)
+            self.status_setlist.setToolTip(stage)
+            self.status_setlist.setVisible(bool(status))
+        except Exception as e:  # a notice must never break loading a setlist
+            logger.warning("No se pudo mostrar el aviso de setlist: %s", e)
+
+    def setlist_notice(self) -> str:
+        """Text of the persistent notice ("" when the live setlist has songs)."""
+        return self.stage_view.setlist_notice_text()
 
     def _live_entry(self, song_id):
         return next((e for e in self._live_entries if e.get("song_id") == song_id), None)
@@ -907,9 +997,21 @@ class MainWindow(QMainWindow):
             self.cloud.start_sync(self._settings.cloud_band_id, user_initiated=False)
             self._refresh_cloud_status()
 
+    def _cloud_band_mode(self) -> bool:
+        """Signed in with a hub band chosen: the library hides the demo rows."""
+        return bool(self._settings.cloud_band_id) and self.cloud.is_signed_in()
+
+    def _refresh_library_mode(self):
+        try:
+            self.library_view.set_cloud_mode(self._cloud_band_mode())
+        except Exception as e:
+            logger.warning("No se pudo actualizar la biblioteca: %s", e)
+
     def _refresh_cloud_menu(self):
         """Signed out: only "Iniciar sesión". Signed in: sync, pickers, sign out.
         The actions belong to the window, so clear() never deletes them."""
+        self._refresh_library_mode()
+        self._update_setlist_notice()
         menu = self.account_menu
         menu.clear()
         if not self.cloud.is_signed_in():
@@ -973,6 +1075,7 @@ class MainWindow(QMainWindow):
     def _refresh_library(self):
         """La importación escribe con su propia conexión: releer la biblioteca."""
         view = self.library_view
+        self._refresh_library_mode()
         try:
             session = getattr(view, "_db_session", None)
             if session is not None:
@@ -1014,19 +1117,100 @@ class MainWindow(QMainWindow):
 
         # Setlist to (re)load: the one chosen for the show if it is in this band,
         # else the live one when it came from the hub (its content may have changed).
+        # A hub band is chosen now: a demo or local setlist never stays live.
         band_setlists = set(report.setlist_ids.values())
         live = self._live_setlist_id
         wanted = self._settings.active_setlist_id
         target = wanted if wanted in band_setlists else (live if live in band_setlists else None)
+        ask = bool(outcome.user_initiated and band_setlists and target is None)
+        if target is None and band_setlists:
+            ordered = [sid for sid in self.library_view.cloud_setlist_ids(outcome.band_id) if sid in band_setlists]
+            target = ordered[0] if ordered else sorted(band_setlists)[0]
         if target:
             self._request_live_setlist(target, persist=False, reason="Setlist actualizado desde el hub")
+        elif live is not None and self._transport_idle():
+            self._clear_live_setlist()
+            self.status_bar.showMessage(
+                "Esta banda no tiene setlists en el hub: créalos en bandait.releven.cc/hub y sincroniza", 12000,
+            )
         elif live and live not in self.library_view.setlist_ids():
             self.status_bar.showMessage(
                 "El setlist en vivo ya no está en la biblioteca: sigue cargado hasta que elijas otro "
                 "(Cuenta > Elegir setlist)", 12000,
             )
-        if outcome.user_initiated and band_setlists and target is None:
+        if ask:
             QTimer.singleShot(0, self._cloud_choose_setlist)
+
+    # ------------------------------------------------------------------ demo data
+    def _load_demo_data(self):
+        answer = QMessageBox.question(
+            self,
+            "Canciones de demostración",
+            "¿Cargar 3 canciones, 1 setlist y 1 evento de demostración?\n\n"
+            "Quedan marcados DEMO en la Biblioteca y no se mezclan con las canciones del hub. "
+            "Se quitan con Ayuda > Quitar datos de demostración.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            added = load_demo_data(get_db_path())
+        except Exception as e:
+            logger.exception("No se pudieron cargar los datos de demostración")
+            self.status_bar.showMessage(f"No se pudieron cargar los datos de demostración: {e}", 10000)
+            return
+        self._refresh_library()
+        self.library_view.set_show_demo(True)  # the user just asked for them
+        if added:
+            self.status_bar.showMessage(f"Datos de demostración cargados ({added} filas, marcadas DEMO)", 8000)
+        else:
+            self.status_bar.showMessage("Los datos de demostración ya estaban cargados", 6000)
+
+    def _remove_demo_data(self):
+        try:
+            counts = count_demo_rows(get_db_path())
+        except Exception as e:
+            self.status_bar.showMessage(f"No se pudo leer la base de datos: {e}", 10000)
+            return
+        if counts.total == 0:
+            self.status_bar.showMessage("No hay datos de demostración", 6000)
+            return
+        live_is_demo = bool(self._live_setlist_id) and (
+            self.library_view.setlist_origin_of(self._live_setlist_id) == "demo"
+        )
+        live_uses_demo = live_is_demo or any(e.get("source") == "demo" for e in self._live_entries)
+        if live_uses_demo and not self._transport_idle():
+            self.status_bar.showMessage(
+                "El setlist en vivo usa canciones de demostración: detén la banda antes de quitarlas", 10000
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Quitar datos de demostración",
+            f"Se borran {counts.songs} canciones, {counts.setlists} setlists, {counts.gigs} eventos y "
+            f"{counts.members} miembros marcados DEMO.\n\n"
+            "Antes se guarda una copia de la base de datos. Las canciones del hub y las tuyas no se tocan.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            result = remove_demo_data(get_db_path())
+        except Exception as e:
+            logger.exception("No se pudieron quitar los datos de demostración")
+            self.status_bar.showMessage(f"No se pudieron quitar los datos de demostración: {e}", 10000)
+            return
+        self._refresh_library()
+        if live_is_demo:
+            self._load_initial_setlist()
+        elif live_uses_demo:
+            self._activate_setlist(self._live_setlist_id, persist=False)  # drop the removed songs
+        backup = os.path.basename(result.backup) if result.backup else "-"
+        self.status_bar.showMessage(
+            f"Datos de demostración quitados ({result.total} filas). Copia de la base: {backup}", 10000
+        )
 
     def _on_cloud_signed_out(self, message: str):
         self._refresh_cloud_menu()

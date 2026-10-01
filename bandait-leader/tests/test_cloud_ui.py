@@ -114,16 +114,22 @@ def test_account_menu_and_status_when_signed_out(make_window):
 def test_startup_sync_runs_in_background_and_loads_the_chosen_setlist(make_window, qtbot, fake_supabase):
     import threading
 
+    from src.db.seed import load_demo_data
+
     fake_supabase.workspace = fixture()
     user = seed_session(fake_supabase)
     choose_show(user.id)
+    load_demo_data()  # demo songs on this laptop must never stand in for the band's setlist
     # Hold the workspace read until the window exists: if startup waited on the
     # network, make_window() would never return before the gate opens.
     fake_supabase.rest_gate = threading.Event()
     try:
         win = make_window()
-        # the local setlist is live at once; the cloud one arrives when the sync ends
-        assert win.server.get_state()["setlist"]
+        # Nothing of the band is in the local DB yet: no setlist is live (never the
+        # demo one) and the persistent notice says so. The cloud one arrives with the sync.
+        assert win.server.get_state()["setlist"] == []
+        assert win._live_setlist_id is None
+        assert win.setlist_notice().startswith("SIN SETLIST EN VIVO")
         assert "sincronizado" not in win.status_cloud.text()
     finally:
         fake_supabase.rest_gate.set()
@@ -139,6 +145,73 @@ def test_startup_sync_runs_in_background_and_loads_the_chosen_setlist(make_windo
     assert [a.text() for a in win.account_menu.actions() if not a.isSeparator()] == [
         "&Sincronizar ahora", "Elegir &banda...", "Elegir se&tlist...", "&Cerrar sesión (musico@example.com)"]
     assert fake_supabase.rest_writes == []
+    assert win.setlist_notice() == "" and win.status_setlist.isHidden()
+    # Signed in with a hub band: demo rows hidden by default, the toggle shows them.
+    lv = win.library_view
+    assert set(lv.visible_song_ids()) == {SONG_1, SONG_2}
+    assert CLOUD_SETLIST in lv.visible_setlist_ids() and "setlist-001" not in lv.visible_setlist_ids()
+    assert not lv.show_demo_check.isHidden() and not lv.remove_demo_btn.isHidden()
+    lv.show_demo_check.setChecked(True)
+    assert {"song-001", "song-002", "song-003", SONG_1, SONG_2} == set(lv.visible_song_ids())
+    badges = {lv.songs_table.item(row, 0).text(): lv.songs_table.item(row, 5).text()
+              for row in range(lv.songs_table.rowCount())}
+    assert badges["Medianoche en Pereira"] == "DEMO" and badges["Intro"] == "NUBE"
+
+
+def test_empty_hub_setlist_stays_live_with_a_persistent_notice(make_window, qtbot, fake_supabase):
+    """The user's real case (2026-10-01): the chosen hub setlist has no songs. It is
+    loaded anyway (never a demo or local one instead) and a notice stays visible."""
+    import threading
+
+    from src.db.seed import load_demo_data
+    from src.ui.main_window import EMPTY_SETLIST_NOTICE, STATUS_EMPTY_SETLIST
+
+    raw = fixture()
+    raw["playlistsMap"]["band_01"][0]["songs"] = []
+    fake_supabase.workspace = raw
+    user = seed_session(fake_supabase)
+    choose_show(user.id)
+    load_demo_data()
+    win = make_window()
+    qtbot.waitUntil(lambda: win._live_setlist_id == CLOUD_SETLIST, timeout=15000)
+    assert win.server.get_state()["setlist"] == []
+    assert win.setlist_notice() == EMPTY_SETLIST_NOTICE
+    assert win.status_setlist.text() == STATUS_EMPTY_SETLIST and not win.status_setlist.isHidden()
+    win.status_bar.showMessage("otro aviso", 50)  # a timed message must not hide it
+    qtbot.wait(200)
+    assert not win.status_setlist.isHidden() and win.setlist_notice() == EMPTY_SETLIST_NOTICE
+    win.close()
+    # Next start, before any sync: the chosen hub setlist is preferred even though it is empty.
+    fake_supabase.rest_gate = threading.Event()
+    try:
+        again = make_window()
+        assert again._live_setlist_id == CLOUD_SETLIST
+        assert again.server.get_state()["setlist"] == []
+        assert again.setlist_notice() == EMPTY_SETLIST_NOTICE
+    finally:
+        fake_supabase.rest_gate.set()
+    qtbot.waitUntil(lambda: not again.cloud.sync_running(), timeout=15000)
+    assert again._live_setlist_id == CLOUD_SETLIST
+
+
+def test_setlist_picker_shows_song_counts_and_warns_on_an_empty_one(qapp):
+    from src.ui.dialogs.account_select import EMPTY_SETLIST_WARNING, SetlistSelectorDialog
+
+    dialog = SetlistSelectorDialog(
+        [{"id": "a", "name": "Al revés - Album", "songs": 0},
+         {"id": "b", "name": "Show", "songs": 1},
+         {"id": "c", "name": "Gira", "songs": 12}],
+        band_name="Banda", current="a",
+    )
+    texts = [dialog.list.item(i).text() for i in range(dialog.list.count())]
+    assert texts == ["Al revés - Album (0 canciones)", "Show (1 canción)", "Gira (12 canciones)"]
+    assert dialog.selected_setlist_id() == "a" and dialog.selected_is_empty()
+    assert dialog.empty_warning.text() == EMPTY_SETLIST_WARNING
+    dialog.list.setCurrentRow(2)
+    assert not dialog.selected_is_empty()
+    dialog.list.setCurrentRow(0)
+    assert dialog.selected_is_empty() and dialog.accept_btn.isEnabled()  # can still be chosen
+    dialog.deleteLater()
 
 
 def test_offline_startup_uses_the_cached_copy(make_window, qtbot, fake_supabase):

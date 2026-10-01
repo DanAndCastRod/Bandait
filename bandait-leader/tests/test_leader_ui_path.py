@@ -13,6 +13,10 @@ from src.ui.main_window import MainWindow
 
 @pytest.fixture
 def window(qapp):
+    # The GUI no longer seeds the database: opt in to the 3 demo songs.
+    from src.db.seed import seed_database
+
+    seed_database()
     win = MainWindow()
     yield win
     win.close()
@@ -24,7 +28,7 @@ def test_services_start_and_setlist_is_live(window, qtbot):
     assert window.server.is_running(), window.server.status_message
     assert window.clock_service.is_running()
     state = window.server.get_state()
-    assert len(state["setlist"]) == 3  # seeded DB setlist pushed into the server
+    assert len(state["setlist"]) == 3  # demo setlist (opted in) pushed into the server
     assert state["current_song_id"] == "song-001"
     assert "Audio: no disponible" in window.status_audio.text()  # disabled in tests, still visible
 

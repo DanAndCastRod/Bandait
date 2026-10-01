@@ -3,9 +3,13 @@ Bandait DAW — Medidor de Nivel (VU Meter)
 Widget personalizado con colores dinámicos según nivel.
 """
 
+import math
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtCore import Qt, QTimer, QRect
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont
+
+from ._paint import safe_paint
 
 
 class VUMeter(QWidget):
@@ -34,7 +38,13 @@ class VUMeter(QWidget):
         self._timer.start(16)  # ~60fps
 
     def set_level(self, level: float):
-        """Actualizar nivel (0.0 a 1.0)."""
+        """Actualizar nivel (0.0 a 1.0). NaN o basura cuentan como silencio."""
+        try:
+            level = float(level)
+        except (TypeError, ValueError):
+            level = 0.0
+        if math.isnan(level):
+            level = 0.0
         self._level = max(0.0, min(1.0, level))
         if self._level > self._peak:
             self._peak = self._level
@@ -42,11 +52,13 @@ class VUMeter(QWidget):
         self.update()
 
     def _decay_peak(self):
+        before = self._peak
         if self._peak_hold_frames > 0:
             self._peak_hold_frames -= 1
         else:
             self._peak = max(0.0, self._peak - self._peak_decay)
-        self.update()
+        if self._peak != before:  # silence: no 60 fps repaint of an idle meter
+            self.update()
 
     def _db_to_color(self, db: float) -> QColor:
         """Convertir dB a color."""
@@ -59,8 +71,8 @@ class VUMeter(QWidget):
         else:
             return self.COLOR_PEAK
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
+    @safe_paint
+    def paintEvent(self, event, painter):
         painter.setRenderHint(QPainter.Antialiasing)
 
         w = self.width()
@@ -117,5 +129,3 @@ class VUMeter(QWidget):
         color = self._db_to_color(db_val)
         painter.setPen(color)
         painter.drawText(0, h - 14, w, 12, Qt.AlignCenter, f"{db_val}dB")
-
-        painter.end()

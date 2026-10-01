@@ -1,11 +1,15 @@
 """
 Bandait DAW — Vista de Biblioteca
 Gestión de canciones, setlists y eventos con persistencia SQLite real.
+
+Cada canción y setlist muestra su origen (NUBE / LOCAL / DEMO). Con una banda
+del hub elegida, los datos de demostración se ocultan salvo que se pida verlos.
+Las canciones de la nube son de solo lectura: se editan en el hub.
 """
 
 import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
     QTableWidget, QTableWidgetItem, QLineEdit, QComboBox,
     QTabWidget, QFrame, QHeaderView, QMessageBox, QFileDialog
 )
@@ -17,6 +21,25 @@ from src.db.models import init_db, load_setlist_entries, Song, Setlist
 from src.infrastructure.parsers.lrc_parser import LRCParser
 from src.infrastructure.parsers.chordpro_parser import ChordProParser
 
+# origin -> (badge text, color)
+ORIGIN_BADGES = {
+    "cloud": ("NUBE", "#00FFFF"),
+    "local": ("LOCAL", "#9A9A9A"),
+    "demo": ("DEMO", "#FFAA00"),
+}
+CLOUD_READ_ONLY_MESSAGE = "Esta canción viene del hub: edítala en bandait.releven.cc/hub y sincroniza."
+
+
+def song_origin(song) -> str:
+    source = getattr(song, "source", None) or "local"
+    return source if source in ("cloud", "demo") else "local"
+
+
+def setlist_origin(setlist) -> str:
+    if getattr(setlist, "cloud_id", None):
+        return "cloud"  # imported before setlists.source existed: cloud_id decides
+    return "demo" if getattr(setlist, "source", None) == "demo" else "local"
+
 
 class LibraryView(QWidget):
     """Biblioteca musical con canciones, setlists y eventos persistentes."""
@@ -25,6 +48,7 @@ class LibraryView(QWidget):
     setlist_selected = Signal(str)  # setlist id (solo muestra detalle)
     setlist_activated = Signal(str)  # setlist id cargado como setlist en vivo
     import_requested = Signal(str)
+    demo_remove_requested = Signal()  # la ventana confirma, respalda y borra
 
     NOT_AVAILABLE = "No disponible en esta version"
 
@@ -32,6 +56,12 @@ class LibraryView(QWidget):
         super().__init__(parent)
         self._db_session = None
         self._setlist_ids: list = []
+        self._setlist_meta: dict = {}  # id -> {"name", "origin", "band_cloud_id", "songs"}
+        self._song_ids: list = []
+        self._song_origins: list = []
+        self._song_query = ""
+        self._setlist_query = ""
+        self._cloud_mode = False  # signed in with a hub band: demo hidden by default
         self._active_setlist_id = None
         self._setup_db()
         self._setup_ui()
@@ -56,10 +86,30 @@ class LibraryView(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         # === TÍTULO ===
+        header = QHBoxLayout()
         title = QLabel("BIBLIOTECA MUSICAL")
         title.setFont(QFont("Inter", 18, QFont.Bold))
         title.setStyleSheet("color: #F0F0F0;")
-        layout.addWidget(title)
+        header.addWidget(title)
+        header.addStretch()
+
+        # Datos de demostración: los controles solo aparecen cuando existen.
+        self.show_demo_check = QCheckBox("Mostrar demostración")
+        self.show_demo_check.setToolTip("Mostrar las canciones y setlists marcados DEMO")
+        self.show_demo_check.setStyleSheet("color: #FFAA00;")
+        self.show_demo_check.toggled.connect(lambda _on: self._apply_filters())
+        self.show_demo_check.setVisible(False)
+        header.addWidget(self.show_demo_check)
+
+        self.remove_demo_btn = QPushButton("Quitar datos de demostración")
+        self.remove_demo_btn.setObjectName("danger")
+        self.remove_demo_btn.setToolTip(
+            "Borra solo lo marcado DEMO (antes guarda una copia de la base). Lo del hub y lo tuyo no se toca."
+        )
+        self.remove_demo_btn.clicked.connect(self.demo_remove_requested.emit)
+        self.remove_demo_btn.setVisible(False)
+        header.addWidget(self.remove_demo_btn)
+        layout.addLayout(header)
 
         # === TABS ===
         self.tabs = QTabWidget()
@@ -121,7 +171,7 @@ class LibraryView(QWidget):
         self.songs_table = QTableWidget()
         self.songs_table.setColumnCount(6)
         self.songs_table.setHorizontalHeaderLabels([
-            "Título", "Artista", "BPM", "Tonalidad", "Duración", "Último uso"
+            "Título", "Artista", "BPM", "Tonalidad", "Duración", "Origen"
         ])
         self.songs_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.songs_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
@@ -172,7 +222,7 @@ class LibraryView(QWidget):
         self.setlists_table = QTableWidget()
         self.setlists_table.setColumnCount(5)
         self.setlists_table.setHorizontalHeaderLabels([
-            "Nombre", "Canciones", "Duración", "Último evento", "Estado"
+            "Nombre", "Canciones", "Duración", "Origen", "Estado"
         ])
         self.setlists_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.setlists_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -281,17 +331,23 @@ class LibraryView(QWidget):
         try:
             songs = self._db_session.query(Song).all()
             self.songs_table.setRowCount(len(songs))
+            self._song_ids = [song.id for song in songs]
+            self._song_origins = [song_origin(song) for song in songs]
             for i, song in enumerate(songs):
                 self.songs_table.setItem(i, 0, self._create_item(song.title))
                 self.songs_table.setItem(i, 1, self._create_item(song.artist or ""))
                 self.songs_table.setItem(i, 2, self._create_bpm_item(str(song.bpm)))
                 self.songs_table.setItem(i, 3, self._create_item(song.key or ""))
-                duration_str = f"{int(song.duration_seconds // 60)}:{int(song.duration_seconds % 60):02d}"
+                seconds = song.duration_seconds or 0
+                duration_str = f"{int(seconds // 60)}:{int(seconds % 60):02d}"
                 self.songs_table.setItem(i, 4, self._create_item(duration_str))
-                self.songs_table.setItem(i, 5, self._create_item("Reciente"))
+                self.songs_table.setItem(i, 5, self._create_badge_item(self._song_origins[i]))
         except Exception as e:
             print(f"[DB] Error cargando canciones: {e}")
             self.songs_table.setRowCount(0)
+            self._song_ids = []
+            self._song_origins = []
+        self._apply_filters()
 
     def _load_setlists_from_db(self):
         """Cargar setlists desde SQLite."""
@@ -303,15 +359,99 @@ class LibraryView(QWidget):
             print(f"[DB] Error cargando setlists: {e}")
             setlists = []
         self._setlist_ids = [sl.id for sl in setlists]
+        self._setlist_meta = {}
         self.setlists_table.setRowCount(len(setlists))
         for i, sl in enumerate(setlists):
-            self.setlists_table.setItem(i, 0, self._create_item(sl.name))
             n_songs = len(sl.songs) if sl.songs else 0
+            origin = setlist_origin(sl)
+            self._setlist_meta[sl.id] = {
+                "name": sl.name or "", "origin": origin, "band_cloud_id": sl.band_cloud_id, "songs": n_songs,
+            }
+            self.setlists_table.setItem(i, 0, self._create_item(sl.name))
             self.setlists_table.setItem(i, 1, self._create_item(str(n_songs)))
             self.setlists_table.setItem(i, 2, self._create_item("—"))
-            self.setlists_table.setItem(i, 3, self._create_item("—"))
+            self.setlists_table.setItem(i, 3, self._create_badge_item(origin))
             self.setlists_table.setItem(i, 4, self._create_item(""))
         self._refresh_active_marker()
+        self._apply_filters()
+
+    # === ORIGEN Y DATOS DE DEMOSTRACIÓN ===
+    def set_cloud_mode(self, active: bool):
+        """Con sesión y banda del hub, lo DEMO se oculta (salvo "Mostrar demostración")."""
+        active = bool(active)
+        if active != self._cloud_mode:
+            self._cloud_mode = active
+            self.show_demo_check.setChecked(False)
+        self._apply_filters()
+
+    def set_show_demo(self, show: bool):
+        self.show_demo_check.setChecked(bool(show))
+        self._apply_filters()
+
+    def demo_hidden(self) -> bool:
+        return self._cloud_mode and not self.show_demo_check.isChecked()
+
+    def has_demo_rows(self) -> bool:
+        return "demo" in self._song_origins or any(
+            meta["origin"] == "demo" for meta in self._setlist_meta.values()
+        )
+
+    def song_ids(self) -> list:
+        return list(self._song_ids)
+
+    def visible_song_ids(self) -> list:
+        return [sid for row, sid in enumerate(self._song_ids) if not self.songs_table.isRowHidden(row)]
+
+    def visible_setlist_ids(self) -> list:
+        return [sid for row, sid in enumerate(self._setlist_ids) if not self.setlists_table.isRowHidden(row)]
+
+    def song_origin_of(self, song_id: str):
+        try:
+            return self._song_origins[self._song_ids.index(song_id)]
+        except ValueError:
+            return None
+
+    def setlist_origin_of(self, setlist_id: str):
+        meta = self._setlist_meta.get(setlist_id)
+        return meta["origin"] if meta else None
+
+    def setlist_name(self, setlist_id: str) -> str:
+        meta = self._setlist_meta.get(setlist_id)
+        return meta["name"] if meta else ""
+
+    def cloud_setlist_ids(self, band_cloud_id: str) -> list:
+        """Hub setlists of one band, in the picker's order (name, id)."""
+        rows = [
+            (meta["name"], sid) for sid, meta in self._setlist_meta.items()
+            if meta["origin"] == "cloud" and meta["band_cloud_id"] == band_cloud_id
+        ]
+        return [sid for _name, sid in sorted(rows)]
+
+    def _row_matches(self, table, row: int, query: str, columns) -> bool:
+        if not query:
+            return True
+        for col in columns:
+            item = table.item(row, col)
+            if item is not None and query in item.text().lower():
+                return True
+        return False
+
+    def _apply_filters(self):
+        """Búsqueda + ocultar DEMO. Solo oculta filas: los índices siguen valiendo."""
+        hide_demo = self.demo_hidden()
+        song_query = self._song_query.lower()
+        for row in range(self.songs_table.rowCount()):
+            demo = row < len(self._song_origins) and self._song_origins[row] == "demo"
+            match = self._row_matches(self.songs_table, row, song_query, range(4))
+            self.songs_table.setRowHidden(row, (hide_demo and demo) or not match)
+        setlist_query = self._setlist_query.lower()
+        for row, sid in enumerate(self._setlist_ids):
+            demo = self.setlist_origin_of(sid) == "demo"
+            match = self._row_matches(self.setlists_table, row, setlist_query, (0,))
+            self.setlists_table.setRowHidden(row, (hide_demo and demo) or not match)
+        has_demo = self.has_demo_rows()
+        self.show_demo_check.setVisible(has_demo and self._cloud_mode)
+        self.remove_demo_btn.setVisible(has_demo)
 
     # === SETLIST EN VIVO ===
     def setlist_ids(self) -> list:
@@ -352,10 +492,8 @@ class LibraryView(QWidget):
             self.setlist_activated.emit(setlist_id)
 
     def _on_search_setlists(self, text: str):
-        for row in range(self.setlists_table.rowCount()):
-            item = self.setlists_table.item(row, 0)
-            match = bool(item) and text.lower() in item.text().lower()
-            self.setlists_table.setRowHidden(row, not match)
+        self._setlist_query = text or ""
+        self._apply_filters()
 
     def get_song_data_by_id(self, song_id: str) -> dict:
         """Datos de una cancion por id (cancion actual del transporte)."""
@@ -396,17 +534,23 @@ class LibraryView(QWidget):
         item.setForeground(QColor(0, 255, 255))
         return item
 
+    def _create_badge_item(self, origin: str) -> QTableWidgetItem:
+        text, color = ORIGIN_BADGES.get(origin, ORIGIN_BADGES["local"])
+        item = QTableWidgetItem(text)
+        item.setFont(QFont("JetBrains Mono", 10, QFont.Bold))
+        item.setForeground(QColor(color))
+        item.setTextAlignment(Qt.AlignCenter)
+        item.setToolTip({
+            "cloud": "Viene del hub (solo lectura): se edita en bandait.releven.cc/hub",
+            "demo": "Dato de demostración: se quita con 'Quitar datos de demostración'",
+        }.get(origin, "Solo en este equipo"))
+        return item
+
     # === EVENT HANDLERS ===
     def _on_search_songs(self, text: str):
         """Filtrar canciones por búsqueda."""
-        for row in range(self.songs_table.rowCount()):
-            match = False
-            for col in range(4):
-                item = self.songs_table.item(row, col)
-                if item and text.lower() in item.text().lower():
-                    match = True
-                    break
-            self.songs_table.setRowHidden(row, not match)
+        self._song_query = text or ""
+        self._apply_filters()
 
     def _on_song_selected(self):
         selected = self.songs_table.selectedItems()
@@ -544,6 +688,11 @@ class LibraryView(QWidget):
                     Song.title == song.title,
                     Song.artist == song.artist
                 ).first()
+                if existing is not None and song_origin(existing) == "cloud":
+                    # The hub is the source of truth: refuse before asking, never
+                    # say "actualizada" for an edit the ORM guard would discard.
+                    QMessageBox.information(self, "Canción del hub", CLOUD_READ_ONLY_MESSAGE)
+                    return
                 if existing:
                     reply = QMessageBox.question(
                         self, "Canción existente",
@@ -576,7 +725,11 @@ class LibraryView(QWidget):
 
         title = self.songs_table.item(row, 0).text()
 
-        # Buscar en DB por título
+        # Por el id de la fila (dos canciones pueden tener el mismo título)
+        if row < len(self._song_ids):
+            data = self.get_song_data_by_id(self._song_ids[row])
+            if data:
+                return data
         if self._db_session:
             song = self._db_session.query(Song).filter(Song.title == title).first()
             if song:
