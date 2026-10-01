@@ -1,0 +1,161 @@
+{
+  "_doc": "Ejemplos canonicos del protocolo Bandait v3. Ver ../CONTRACT_V3.md. Las pruebas del lider y del follower validan forma y tipos contra este archivo.",
+  "join_session_request": {
+    "session_id": "default",
+    "client_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
+    "role": "musician",
+    "alias": "Bajo",
+    "protocol_version": 3
+  },
+  "join_session_ack": {
+    "status": "joined",
+    "session_id": "default",
+    "protocol_version": 3,
+    "leader_instance_id": "0b7e3f2a-5c19-4d8e-9a61-7f2c4b8d1e05",
+    "leader_time_ns": 241953600000000
+  },
+  "sync_request": {
+    "client_send_ms": 18234.125
+  },
+  "sync_request_ack": {
+    "client_send_ms": 18234.125,
+    "leader_time_ns": 241953601000000
+  },
+  "control_command_play": {
+    "session_id": "default",
+    "command_id": "2b9f0c4e-8d1a-4f6b-b3c7-5e2a9d0f1a44",
+    "type": "PLAY",
+    "origin": "director_mobile",
+    "sender_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
+    "payload": {}
+  },
+  "control_command_cue_next": {
+    "session_id": "default",
+    "command_id": "9a0e7d21-6c3b-4b8e-8f19-2d5c7a1e0b66",
+    "type": "CUE_NEXT",
+    "origin": "laptop_foh",
+    "sender_id": "leader-desktop",
+    "payload": { "expected_song_id": "song_01" }
+  },
+  "control_command_jump_song": {
+    "session_id": "default",
+    "command_id": "c41d8e2a-0f7b-4e3c-a9d6-71b2e5f0c388",
+    "type": "JUMP_SONG",
+    "origin": "director_mobile",
+    "sender_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
+    "payload": { "song_id": "song_07" }
+  },
+  "control_command_tempo_nudge": {
+    "session_id": "default",
+    "command_id": "e7a3b9c0-1d2f-4a5e-8b6c-9f0d1e2a3b77",
+    "type": "TEMPO_NUDGE",
+    "origin": "director_mobile",
+    "sender_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
+    "payload": { "delta_bpm": 1 }
+  },
+  "state_playing": {
+    "protocol_version": 3,
+    "leader_instance_id": "0b7e3f2a-5c19-4d8e-9a61-7f2c4b8d1e05",
+    "session_id": "default",
+    "status": "PLAYING",
+    "state_version": 42,
+    "current_song_id": "song_01",
+    "current_order_index": 0,
+    "bpm": 120,
+    "beats_per_bar": 4,
+    "anchor_ns": 241953859000000,
+    "bar_offset": 1,
+    "paused_bar": null,
+    "leader_time_ns": 241953609000000,
+    "setlist": [
+      { "song_id": "song_01", "title": "Intro", "bpm": 120, "order_index": 0, "transition_mode": "manual_cue" },
+      { "song_id": "song_02", "title": "Segunda", "bpm": 96, "order_index": 1, "transition_mode": "auto_count_in" },
+      { "song_id": "song_07", "title": "Septima", "bpm": 140, "order_index": 2, "transition_mode": "gapless" }
+    ],
+    "last_command": { "command_id": "2b9f0c4e-8d1a-4f6b-b3c7-5e2a9d0f1a44", "type": "PLAY", "origin": "director_mobile" }
+  },
+  "state_idle": {
+    "protocol_version": 3,
+    "leader_instance_id": "0b7e3f2a-5c19-4d8e-9a61-7f2c4b8d1e05",
+    "session_id": "default",
+    "status": "IDLE",
+    "state_version": 1,
+    "current_song_id": null,
+    "current_order_index": null,
+    "bpm": 120,
+    "beats_per_bar": 4,
+    "anchor_ns": null,
+    "bar_offset": 1,
+    "paused_bar": null,
+    "leader_time_ns": 241953600000000,
+    "setlist": [],
+    "last_command": null
+  },
+  "state_paused": {
+    "protocol_version": 3,
+    "leader_instance_id": "0b7e3f2a-5c19-4d8e-9a61-7f2c4b8d1e05",
+    "session_id": "default",
+    "status": "PAUSED",
+    "state_version": 43,
+    "current_song_id": "song_01",
+    "current_order_index": 0,
+    "bpm": 120,
+    "beats_per_bar": 4,
+    "anchor_ns": null,
+    "bar_offset": 1,
+    "paused_bar": 9,
+    "leader_time_ns": 241970000000000,
+    "setlist": [
+      { "song_id": "song_01", "title": "Intro", "bpm": 120, "order_index": 0, "transition_mode": "manual_cue" }
+    ],
+    "last_command": { "command_id": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e99", "type": "PAUSE", "origin": "laptop_foh" }
+  },
+  "command_ack_accepted": {
+    "command_id": "2b9f0c4e-8d1a-4f6b-b3c7-5e2a9d0f1a44",
+    "accepted": true,
+    "duplicate": false,
+    "action_taken": "PLAY",
+    "reason": null,
+    "state_version": 42,
+    "state": "<<state_playing>>"
+  },
+  "command_ack_rejected": {
+    "command_id": "9a0e7d21-6c3b-4b8e-8f19-2d5c7a1e0b66",
+    "accepted": false,
+    "duplicate": false,
+    "action_taken": "none",
+    "reason": "conflict",
+    "state_version": 42,
+    "state": "<<state_playing>>"
+  },
+  "beat_beacon": {
+    "session_id": "default",
+    "state_version": 42,
+    "anchor_ns": 241953859000000,
+    "bpm": 120,
+    "beats_per_bar": 4,
+    "bar_offset": 1,
+    "leader_time_ns": 241955859000000
+  },
+  "setlist_jump": {
+    "session_id": "default",
+    "song_id": "song_07",
+    "title": "Septima",
+    "order_index": 2,
+    "previous_song_id": "song_01",
+    "triggered_by": "director_mobile",
+    "timestamp_ns": 241960000000000
+  },
+  "follower_joined": {
+    "sid": "Zq3x9Lk2",
+    "client_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
+    "alias": "Bajo",
+    "role": "musician"
+  },
+  "follower_left": {
+    "sid": "Zq3x9Lk2",
+    "client_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
+    "alias": "Bajo",
+    "role": "musician"
+  }
+}

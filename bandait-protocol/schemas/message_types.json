@@ -1,30 +1,404 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "message_types.json",
   "title": "MessageTypes",
-  "description": "Enumeration of all Socket.IO event names used in the Bandait protocol.",
+  "description": "Bandait protocol v3 Socket.IO events and payloads (CONTRACT_V3.md sections 3-5). snake_case keys only. There is no broadcast_state event: clients can never write the session state. HTTP: GET /leader-info.json (definitions/leader_info) and the follower bundle at / on the same port.",
   "type": "object",
   "properties": {
-    "client_to_server": {
+    "client_to_leader": {
       "type": "array",
-      "items": { "type": "string", "enum": [
-        "join_session",
-        "sync_request",
-        "panic",
-        "request_full_state"
-      ]}
+      "items": {
+        "type": "string",
+        "enum": [
+          "join_session",
+          "sync_request",
+          "control_command"
+        ]
+      }
     },
-    "server_to_client": {
+    "leader_to_clients": {
       "type": "array",
-      "items": { "type": "string", "enum": [
-        "sync_response",
-        "state_update",
-        "full_state",
-        "song_load",
-        "play_at",
-        "stop_at",
-        "panic_ack",
-        "error"
-      ]}
+      "items": {
+        "type": "string",
+        "enum": [
+          "full_state",
+          "state_update",
+          "beat_beacon",
+          "setlist_jump",
+          "follower_joined",
+          "follower_left"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "CommandType": {
+      "type": "string",
+      "enum": [
+        "PLAY",
+        "STOP",
+        "PAUSE",
+        "RESUME",
+        "CUE_NEXT",
+        "CUE_PREV",
+        "JUMP_SONG",
+        "TEMPO_NUDGE",
+        "PANIC"
+      ]
+    },
+    "Role": {
+      "type": "string",
+      "enum": [
+        "musician",
+        "director",
+        "foh",
+        "hub"
+      ]
+    },
+    "Origin": {
+      "type": "string",
+      "enum": [
+        "director_mobile",
+        "laptop_foh",
+        "hub"
+      ]
+    },
+    "join_session": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "client_id",
+        "role",
+        "alias",
+        "protocol_version"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/Role"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 3
+        }
+      },
+      "additionalProperties": false
+    },
+    "join_session_ack": {
+      "type": "object",
+      "required": [
+        "status",
+        "session_id",
+        "protocol_version",
+        "leader_instance_id",
+        "leader_time_ns"
+      ],
+      "properties": {
+        "status": {
+          "const": "joined"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 3
+        },
+        "leader_instance_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "UUID generated once per leader process (CONTRACT_V3 section 4). Leaders always send it; if it changes, the leader restarted and state_version tracking starts over."
+        },
+        "leader_time_ns": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sync_request": {
+      "type": "object",
+      "required": [
+        "client_send_ms"
+      ],
+      "properties": {
+        "client_send_ms": {
+          "type": "number",
+          "description": "Follower performance.now(); opaque to the leader."
+        }
+      },
+      "additionalProperties": false
+    },
+    "sync_request_ack": {
+      "type": "object",
+      "required": [
+        "client_send_ms",
+        "leader_time_ns"
+      ],
+      "properties": {
+        "client_send_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Echo of the request value (null if it was not a number)."
+        },
+        "leader_time_ns": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "control_command": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "command_id",
+        "type",
+        "origin",
+        "sender_id",
+        "payload"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Client UUID. Retries with the same id are idempotent (60 s window)."
+        },
+        "type": {
+          "type": "string",
+          "description": "CommandType. Unknown values are rejected with reason invalid_type."
+        },
+        "origin": {
+          "$ref": "#/definitions/Origin"
+        },
+        "sender_id": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object",
+          "description": "JUMP_SONG: {song_id} or {order_index} (0-based). CUE_NEXT/CUE_PREV: {expected_song_id} optional. TEMPO_NUDGE: {delta_bpm} integer.",
+          "properties": {
+            "song_id": {
+              "type": "string"
+            },
+            "order_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "expected_song_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "delta_bpm": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "command_ack": {
+      "type": "object",
+      "required": [
+        "command_id",
+        "accepted",
+        "duplicate",
+        "action_taken",
+        "reason",
+        "state_version",
+        "state"
+      ],
+      "properties": {
+        "command_id": {
+          "type": "string"
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "duplicate": {
+          "type": "boolean"
+        },
+        "action_taken": {
+          "type": "string",
+          "description": "e.g. PLAY, RESUME, noop_already_playing, none"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "invalid_type",
+            "conflict",
+            "no_setlist",
+            "out_of_range"
+          ]
+        },
+        "state_version": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "session_state.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    "beat_beacon": {
+      "type": "object",
+      "description": "Once per bar, at each downbeat, while status == PLAYING.",
+      "required": [
+        "session_id",
+        "state_version",
+        "anchor_ns",
+        "bpm",
+        "beats_per_bar",
+        "bar_offset",
+        "leader_time_ns"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "state_version": {
+          "type": "integer"
+        },
+        "anchor_ns": {
+          "type": "integer"
+        },
+        "bpm": {
+          "type": "number"
+        },
+        "beats_per_bar": {
+          "type": "integer"
+        },
+        "bar_offset": {
+          "type": "integer"
+        },
+        "leader_time_ns": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "setlist_jump": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "song_id",
+        "title",
+        "order_index",
+        "previous_song_id",
+        "triggered_by",
+        "timestamp_ns"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "song_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "order_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "previous_song_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "triggered_by": {
+          "type": "string"
+        },
+        "timestamp_ns": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "follower_event": {
+      "type": "object",
+      "description": "Payload of follower_joined and follower_left.",
+      "required": [
+        "sid",
+        "client_id",
+        "alias",
+        "role"
+      ],
+      "properties": {
+        "sid": {
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/Role"
+        }
+      },
+      "additionalProperties": false
+    },
+    "leader_info": {
+      "type": "object",
+      "description": "GET /leader-info.json on the leader (CONTRACT_V3 section 8). Content-Type application/json, Cache-Control no-store.",
+      "required": [
+        "protocol_version",
+        "leader_instance_id",
+        "session_id",
+        "ip",
+        "port",
+        "follower_url",
+        "director_url"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 3
+        },
+        "leader_instance_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "ip": {
+          "type": "string",
+          "format": "ipv4",
+          "description": "Primary LAN IPv4 of the leader (default-route interface, no loopback/link-local/virtual)."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "follower_url": {
+          "type": "string",
+          "description": "http://<ip>:<port>/?ip=<ip>&port=<port>&session=<session_id>&auto=1"
+        },
+        "director_url": {
+          "type": "string",
+          "description": "follower_url plus &role=director"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -1,43 +1,171 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "session_state.json",
   "title": "SessionState",
-  "description": "Shared protocol state broadcast from Leader to all Followers.",
+  "description": "Bandait protocol v3 session state (CONTRACT_V3.md section 4). Sent as full_state, state_update and inside command_ack. All *_ns fields are the leader's high-resolution clock (time.perf_counter_ns()) in integer nanoseconds.",
   "type": "object",
-  "required": ["session_id", "leader_ip", "status", "current_song_id", "next_event_timestamp", "bpm", "beat"],
+  "required": [
+    "protocol_version",
+    "leader_instance_id",
+    "session_id",
+    "status",
+    "state_version",
+    "current_song_id",
+    "current_order_index",
+    "bpm",
+    "beats_per_bar",
+    "anchor_ns",
+    "bar_offset",
+    "paused_bar",
+    "leader_time_ns",
+    "setlist",
+    "last_command"
+  ],
   "properties": {
-    "session_id": {
-      "type": "string",
-      "description": "Unique session identifier."
+    "protocol_version": {
+      "const": 3
     },
-    "leader_ip": {
+    "leader_instance_id": {
       "type": "string",
-      "description": "IPv4 address of the leader device."
+      "format": "uuid",
+      "description": "UUID generated once per leader process (CONTRACT_V3 section 4). Leaders always send it; if it changes, the leader restarted and state_version tracking starts over."
+    },
+    "session_id": {
+      "type": "string"
     },
     "status": {
       "type": "string",
-      "enum": ["IDLE", "COUNTING", "PLAYING", "PAUSED"],
-      "description": "Current transport state."
+      "enum": [
+        "IDLE",
+        "COUNTING",
+        "PLAYING",
+        "PAUSED"
+      ]
+    },
+    "state_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Strictly increasing per leader process. Clients discard states with a version not newer than the last applied."
     },
     "current_song_id": {
-      "type": ["string", "null"],
-      "description": "Active song identifier or null if none loaded."
+      "type": [
+        "string",
+        "null"
+      ]
     },
-    "next_event_timestamp": {
-      "type": "integer",
-      "description": "Absolute monotonic nanosecond timestamp on the leader clock when the next musical event (e.g. beat 1) must occur."
+    "current_order_index": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "0-based index in setlist."
     },
     "bpm": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 500,
-      "description": "Current tempo in beats per minute."
+      "type": "number",
+      "exclusiveMinimum": 0
     },
-    "beat": {
+    "beats_per_bar": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "anchor_ns": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Leader time of beat 1 of bar bar_offset. null unless PLAYING/COUNTING. A new anchor is always >= leader_time_ns + 250 ms and never retroactive."
+    },
+    "bar_offset": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 4,
-      "description": "Current beat within the bar (1-4)."
+      "description": "Bar number at anchor_ns (starts at 1)."
+    },
+    "paused_bar": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Bar where PAUSE happened; null unless PAUSED."
+    },
+    "leader_time_ns": {
+      "type": "integer",
+      "description": "Leader clock when the message was built."
+    },
+    "setlist": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SetlistEntry"
+      }
+    },
+    "last_command": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/definitions/LastCommand"
+        }
+      ]
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "definitions": {
+    "SetlistEntry": {
+      "type": "object",
+      "required": [
+        "song_id",
+        "title",
+        "bpm",
+        "order_index",
+        "transition_mode"
+      ],
+      "properties": {
+        "song_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "bpm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "order_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transition_mode": {
+          "type": "string",
+          "enum": [
+            "manual_cue",
+            "auto_count_in",
+            "gapless"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LastCommand": {
+      "type": "object",
+      "required": [
+        "command_id",
+        "type",
+        "origin"
+      ],
+      "properties": {
+        "command_id": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "message_types.json#/definitions/CommandType"
+        },
+        "origin": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }
