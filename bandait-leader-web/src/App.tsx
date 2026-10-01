@@ -9,6 +9,8 @@ import { PlaylistsHubView } from './views/PlaylistsHubView'
 import { StemsHubView } from './views/StemsHubView'
 import { BandMembersHubView } from './views/BandMembersHubView'
 import { EquipmentHubView } from './views/EquipmentHubView'
+import { SongsHubView } from './views/SongsHubView'
+import { VoiceHubView } from './views/VoiceHubView'
 import './styles/global.css'
 
 const mono = "'IBM Plex Mono', monospace"
@@ -145,6 +147,8 @@ const HubMainContent: React.FC = () => {
           control de transporte del director vive en el follower PWA, servido desde la LAN.
         */}
         {activeTab === 'playlists' && <PlaylistsHubView />}
+        {activeTab === 'songs' && <SongsHubView />}
+        {activeTab === 'voice' && <VoiceHubView />}
         {activeTab === 'stems' && <StemsHubView />}
         {activeTab === 'members' && <BandMembersHubView />}
         {activeTab === 'equipment' && <EquipmentHubView />}

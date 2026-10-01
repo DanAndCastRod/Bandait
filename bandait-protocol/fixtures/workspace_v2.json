@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "activeBandId": "band_01",
+  "bands": [
+    {
+      "id": "band_01",
+      "name": "Banda de Prueba",
+      "genre": "Rock",
+      "ownerId": "11111111-1111-4111-8111-111111111111",
+      "currentUserRole": "Owner",
+      "membersCount": 1,
+      "createdAt": "2026-10-01T00:00:00.000Z"
+    }
+  ],
+  "membersMap": { "band_01": [] },
+  "equipmentMap": { "band_01": [] },
+  "stemsMap": {},
+  "songsMap": {
+    "band_01": [
+      {
+        "id": "7b0e6c1e-4f5a-4c7d-9a1b-2c3d4e5f6a01",
+        "title": "Intro",
+        "artist": "Banda de Prueba",
+        "bpm": 120,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "key": "Am",
+        "camelot": "8A",
+        "durationSec": 64,
+        "sections": [
+          { "id": "s-01", "kind": "intro", "label": "Intro", "bars": 4, "chordpro": "[Am]  [F]  [C]  [G]" },
+          { "id": "s-02", "kind": "verse", "label": "Estrofa 1", "bars": 8, "chordpro": "[Am]Hoy vuelvo a [F]casa\n[C]con la noche en [G]calma" },
+          { "id": "s-03", "kind": "chorus", "label": "Coro", "bars": 8, "chordpro": "[F]Canta [G]fuerte, [Am]canta" },
+          { "id": "s-04", "kind": "outro", "label": "Final", "bars": 4, "chordpro": "", "cueText": null }
+        ],
+        "notes": "",
+        "updatedAt": "2026-10-01T00:00:00.000Z"
+      },
+      {
+        "id": "7b0e6c1e-4f5a-4c7d-9a1b-2c3d4e5f6a02",
+        "title": "Segunda",
+        "artist": "Banda de Prueba",
+        "bpm": 96,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "key": "D",
+        "sections": [],
+        "updatedAt": "2026-10-01T00:00:00.000Z"
+      }
+    ]
+  },
+  "playlistsMap": {
+    "band_01": [
+      {
+        "id": "pl_01",
+        "bandId": "band_01",
+        "name": "Show de prueba",
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "updatedAt": "2026-10-01T00:00:00.000Z",
+        "songs": [
+          {
+            "id": "it_01",
+            "songId": "7b0e6c1e-4f5a-4c7d-9a1b-2c3d4e5f6a01",
+            "orderIndex": 0,
+            "title": "Intro",
+            "artist": "Banda de Prueba",
+            "bpm": 120,
+            "key": "Am",
+            "showKey": "Am",
+            "camelot": "8A",
+            "durationSec": 64,
+            "transitionMode": "manual_cue",
+            "countInBars": 1,
+            "countInVoice": true,
+            "gapSec": 0
+          },
+          {
+            "id": "it_02",
+            "songId": "7b0e6c1e-4f5a-4c7d-9a1b-2c3d4e5f6a02",
+            "orderIndex": 1,
+            "title": "Segunda",
+            "artist": "Banda de Prueba",
+            "bpm": 96,
+            "key": "D",
+            "showKey": "D",
+            "camelot": "10B",
+            "durationSec": 180,
+            "transitionMode": "auto_count_in",
+            "countInBars": 2,
+            "countInVoice": true,
+            "gapSec": 3
+          }
+        ]
+      }
+    ]
+  },
+  "voiceMap": {
+    "band_01": {
+      "enabled": true,
+      "provider": "azure",
+      "voice": "es-CO-SalomeNeural",
+      "rate": "+0%",
+      "countIn": true,
+      "sectionCues": true,
+      "cueLeadBars": 1,
+      "output": "drummer"
+    }
+  }
+}

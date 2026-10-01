@@ -48,8 +48,15 @@ export interface Band {
 
 export type TransitionMode = 'manual_cue' | 'auto_count_in' | 'gapless'
 
+/**
+ * Item de un setlist (bandait-protocol/WORKSPACE_V2.md, seccion 3).
+ * `title`, `artist` y `key` son copia de respaldo para mostrar; la fuente de verdad es la
+ * Song de la libreria referida por `songId`. `bpm` y `showKey` son los de ESTE show.
+ */
 export interface PlaylistSong {
   id: string
+  /** v2: id de la Song de la libreria de la misma banda. */
+  songId: string
   orderIndex: number
   title: string
   artist: string
@@ -58,9 +65,72 @@ export interface PlaylistSong {
   showKey: string
   camelot: string
   durationSec: number
+  /** Como se ENTRA a este item (lo ejecuta el lider). */
   transitionMode: TransitionMode
+  /** 0..4 compases de conteo antes del compas 1. */
   countInBars: number
+  /** v2: conteo hablado en esos compases (true por defecto). */
+  countInVoice: boolean
+  /** v2: pausa en segundos antes de un auto_count_in (0..30). */
+  gapSec: number
   notes?: string
+}
+
+/** Tipos de seccion (WORKSPACE_V2.md, seccion 2). */
+export type SectionKind =
+  | 'intro'
+  | 'verse'
+  | 'pre_chorus'
+  | 'chorus'
+  | 'bridge'
+  | 'solo'
+  | 'interlude'
+  | 'outro'
+  | 'break'
+  | 'custom'
+
+export interface SongSection {
+  id: string
+  kind: SectionKind
+  label: string
+  /** Duracion en compases (entero >= 1). */
+  bars: number
+  /** Cuerpo ChordPro de la seccion, sin directivas {start_of_*}. Puede ser "". */
+  chordpro: string
+  /** Aviso hablado: ausente = texto por defecto segun kind; null = sin aviso; string = ese texto. */
+  cueText?: string | null
+}
+
+/** Cancion de la libreria de una banda. El lider usa `id` (y el de cada seccion) como clave estable. */
+export interface Song {
+  id: string
+  title: string
+  artist: string
+  /** 40..260 */
+  bpm: number
+  beatsPerBar: number
+  beatUnit: number
+  key: string
+  camelot?: string
+  durationSec?: number
+  sections: SongSection[]
+  notes?: string
+  updatedAt: string
+}
+
+export type VoiceOutput = 'drummer' | 'all_in_ear'
+
+/** Conteos y avisos de voz de una banda (WORKSPACE_V2.md, seccion 5). */
+export interface VoiceConfig {
+  enabled: boolean
+  provider: 'azure'
+  voice: string
+  /** Prosodia SSML, "+0%".."+50%". */
+  rate: string
+  countIn: boolean
+  sectionCues: boolean
+  cueLeadBars: 1 | 2
+  output: VoiceOutput
 }
 
 export interface Playlist {
@@ -109,27 +179,47 @@ export interface EquipmentItem {
   notes?: string
 }
 
-/** Workspace completo de un usuario: lo que se guarda en localStorage y en la fila de Supabase. */
+/**
+ * Workspace completo de un usuario en su forma v2 (bandait-protocol/WORKSPACE_V2.md): lo que
+ * se guarda en localStorage y en la fila de Supabase, y lo que descarga el lider de escritorio.
+ * Siempre pasa por `migrateWorkspace` (services/workspaceSchema.ts) al cargarse.
+ * Los campos desconocidos se conservan: un hub mas nuevo puede agregar campos.
+ */
 export interface WorkspaceStore {
+  schemaVersion: number
   bands: Band[]
   activeBandId: string
   membersMap: Record<string, BandMember[]>
   playlistsMap: Record<string, Playlist[]>
   equipmentMap: Record<string, EquipmentItem[]>
   stemsMap: Record<string, SongStems>
+  songsMap: Record<string, Song[]>
+  voiceMap: Record<string, VoiceConfig>
+}
+
+/** Forma minima aceptada al cargar (v1 o v2, antes de migrar). */
+export type WorkspaceInput = Omit<WorkspaceStore, 'schemaVersion' | 'songsMap' | 'voiceMap'> & {
+  schemaVersion?: unknown
+  songsMap?: unknown
+  voiceMap?: unknown
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Validacion defensiva de forma (datos de localStorage o de la nube pueden venir corruptos). */
-export function isWorkspaceStore(value: unknown): value is WorkspaceStore {
+/**
+ * Validacion defensiva de forma (datos de localStorage, de la nube o de un JSON importado
+ * pueden venir corruptos). Acepta v1 y v2; la validacion completa de v2 esta en
+ * `validateWorkspace` (services/workspaceSchema.ts).
+ */
+export function isWorkspaceShape(value: unknown): value is WorkspaceInput {
   if (!isPlainObject(value)) return false
   const bands = value.bands
   if (!Array.isArray(bands) || bands.length === 0) return false
   if (!bands.every((b) => isPlainObject(b) && typeof b.id === 'string' && typeof b.name === 'string')) return false
   if (typeof value.activeBandId !== 'string') return false
+  // songsMap / voiceMap con forma invalida no invalidan el workspace: la migracion los repara.
   return (
     isPlainObject(value.membersMap) &&
     isPlainObject(value.playlistsMap) &&

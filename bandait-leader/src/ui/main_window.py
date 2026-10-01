@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QKeyEvent, QAction
 
 from src.audio.audio_engine import AudioEngine, AudioUnavailable
+from src.cloud.controller import CloudController
 from src.core.leader_config import load_settings, save_settings
 from src.core.paths import get_db_path, recordings_dir
 from src.db.seed import seed_database
@@ -71,6 +72,11 @@ class MainWindow(QMainWindow):
         self._live_song_id = None
         self._shutdown_done = False
         self._settings = load_settings()
+        # Entries of the live setlist as loaded (transition + section data for wave 2).
+        self._live_entries: list = []
+        self._live_setlist_id = None
+        # Setlist to load at the next IDLE (a sync or a choice arrived while playing).
+        self._pending_live_setlist = None
 
         # Seed database with sample data if empty (DB path honors BANDAIT_DB)
         try:
@@ -109,6 +115,12 @@ class MainWindow(QMainWindow):
         self.audio_engine.stopped.connect(self._on_audio_stopped)
         self.audio_engine.levels.connect(self._on_audio_levels)
 
+        # Cuenta del hub: red y base de datos en hilos propios, resultados por señal.
+        self.cloud = CloudController(self._settings, parent=self)
+        self.cloud.sync_started.connect(self._refresh_cloud_status)
+        self.cloud.sync_finished.connect(self._on_cloud_sync_finished)
+        self.cloud.signed_out.connect(self._on_cloud_signed_out)
+
         # Timer compartido para UI (30fps)
         self._ui_timer = QTimer(self)
         self._ui_timer.timeout.connect(self._update_ui)
@@ -126,10 +138,11 @@ class MainWindow(QMainWindow):
         """Arrancar reloj, setlist en vivo, servidor de red y audio. Nada aquí
         tumba la ventana: cada fallo queda visible en la barra de estado."""
         self.clock_service.start()
-        self._load_initial_setlist()
+        self._load_initial_setlist()  # local DB first: the show never waits for the network
         self.server.start()
         self._on_server_status(self.server.status, self.server.status_message)
         self._start_audio()
+        self._cloud_startup()
 
     def _start_audio(self):
         try:
@@ -147,6 +160,10 @@ class MainWindow(QMainWindow):
             return
         self._shutdown_done = True
         self._ui_timer.stop()
+        try:
+            self.cloud.shutdown()
+        except Exception as e:
+            print(f"[NUBE] Error al detener: {e}")
         try:
             self.audio_engine.shutdown()
         except Exception as e:
@@ -240,6 +257,10 @@ class MainWindow(QMainWindow):
         self.status_followers = QLabel("Seguidores: 0")
         self.status_followers.setStyleSheet("color: #666666;")
         self.status_bar.addWidget(self.status_followers)
+
+        self.status_cloud = QLabel("NUBE: sin sesión")
+        self.status_cloud.setStyleSheet("color: #666666;")
+        self.status_bar.addWidget(self.status_cloud)
 
         self.connect_btn = QPushButton("Conectar músicos")
         self.connect_btn.setToolTip("QR para que los teléfonos abran la app desde este líder")
@@ -460,6 +481,22 @@ class MainWindow(QMainWindow):
         self.action_connect.triggered.connect(self._open_connect_musicians)
         net_menu.addAction(self.action_connect)
 
+        # The menu holds only what makes sense for the session (rebuilt on every
+        # change). Every action also guards itself: a click at the wrong moment
+        # only shows a message.
+        self.account_menu = menubar.addMenu("&Cuenta")
+        self.action_cloud_login = QAction("Iniciar sesión con &Google", self)
+        self.action_cloud_login.triggered.connect(self._cloud_login)
+        self.action_cloud_sync = QAction("&Sincronizar ahora", self)
+        self.action_cloud_sync.triggered.connect(self._cloud_sync_now)
+        self.action_cloud_band = QAction("Elegir &banda...", self)
+        self.action_cloud_band.triggered.connect(self._cloud_choose_band)
+        self.action_cloud_setlist = QAction("Elegir se&tlist...", self)
+        self.action_cloud_setlist.triggered.connect(self._cloud_choose_setlist)
+        self.action_cloud_logout = QAction("&Cerrar sesión", self)
+        self.action_cloud_logout.triggered.connect(self._cloud_logout)
+        self._refresh_cloud_menu()
+
         view_menu = menubar.addMenu("&Ver")
         fullscreen_action = QAction("&Pantalla Completa", self)
         fullscreen_action.setShortcut("F11")
@@ -615,12 +652,21 @@ class MainWindow(QMainWindow):
         last = state.get("last_command") or {}
         if last.get("type") == "PANIC":
             self.status_bar.showMessage(f"PANIC desde {last.get('origin')}: transporte detenido", 8000)
+        if status == "IDLE" and self._pending_live_setlist:
+            # Una sincronización terminó mientras sonaba: se aplica al detener.
+            QTimer.singleShot(0, self._apply_pending_live_reload)
 
     def _show_live_song(self, song_id, state: dict):
         if not song_id:
             self.stage_view.set_song(title="Sin canción")
             return
         data = self.library_view.get_song_data_by_id(song_id)
+        entry = self._live_entry(song_id)
+        if data and entry and entry.get("sections"):
+            # Secciones reales del hub (compases), no las adivinadas del texto.
+            data = dict(data)
+            data["sections"] = [{"label": s["label"], "bars": s["bars"]} for s in entry["sections"]]
+            data["beats_per_bar"] = entry.get("beats_per_bar", 4)
         if data:
             self._current_song = data
             self._load_song_to_timeline(data)
@@ -752,7 +798,12 @@ class MainWindow(QMainWindow):
             self._activate_setlist(setlist_id, persist=False)
 
     def _activate_setlist(self, setlist_id: str, persist: bool = True):
+        """Único camino al setlist en vivo: DB -> entradas -> server.set_setlist.
+        Las entradas llevan transición, conteo y secciones (CONTRACT_V3 9)."""
         entries = self.library_view.get_setlist_entries(setlist_id)
+        self._live_entries = entries
+        self._live_setlist_id = setlist_id
+        self._pending_live_setlist = None
         self.server.set_setlist(entries)
         self.library_view.mark_active_setlist(setlist_id)
         self.mini_label.setText(f"Setlist en vivo: {len(entries)} canciones")
@@ -761,6 +812,9 @@ class MainWindow(QMainWindow):
         if persist:
             self._settings.active_setlist_id = setlist_id
             self._save_settings()
+
+    def _live_entry(self, song_id):
+        return next((e for e in self._live_entries if e.get("song_id") == song_id), None)
 
     def _on_song_selected(self, song_id: int):
         """Vista previa en el timeline. No mueve el transporte de la banda."""
@@ -771,11 +825,12 @@ class MainWindow(QMainWindow):
     def _load_song_to_timeline(self, song_data: dict):
         self.timeline.clear_sections()
         sections = song_data.get("sections", [])
+        beats_per_bar = song_data.get("beats_per_bar", 4) or 4
         beat_pos = 0
         for section in sections:
             label = section.get("label", "Sección")
             bars = section.get("bars", 8)
-            beats = bars * 4
+            beats = bars * beats_per_bar
             self.timeline.add_section(label, beat_pos, beats)
             beat_pos += beats
         if not sections:
@@ -809,6 +864,248 @@ class MainWindow(QMainWindow):
         label, ok = QInputDialog.getText(self, "Agregar Sección", "Nombre de la sección:")
         if ok and label:
             self.timeline.add_section(label, 0, 16)
+
+    # ------------------------------------------------------------------ live setlist changes
+    def _transport_idle(self) -> bool:
+        return self._live_state().get("status", "IDLE") == "IDLE"
+
+    def _request_live_setlist(self, setlist_id: str, persist: bool, reason: str = ""):
+        """Cargar ahora si la banda está detenida; si suena, al próximo IDLE.
+        Nunca se cambia el setlist debajo de una canción que está sonando."""
+        if persist:
+            self._settings.active_setlist_id = setlist_id
+            self._save_settings()
+        if self._transport_idle():
+            self._activate_setlist(setlist_id, persist=False)
+            return
+        self._pending_live_setlist = setlist_id
+        self.status_bar.showMessage(f"{reason or 'Setlist actualizado'}: se carga al detener la banda", 10000)
+
+    def _apply_pending_live_reload(self):
+        setlist_id = self._pending_live_setlist
+        if not setlist_id or not self._transport_idle():
+            return
+        if setlist_id in self.library_view.setlist_ids():
+            self._activate_setlist(setlist_id, persist=False)
+            self.status_bar.showMessage("Setlist en vivo actualizado", 6000)
+        else:
+            self._pending_live_setlist = None
+
+    # ------------------------------------------------------------------ cuenta (nube)
+    def _cloud_startup(self):
+        """Con sesión guardada: sincronizar en segundo plano. Sin red, la copia local
+        ya está en la base y el show arranca igual."""
+        user = self.cloud.restore()
+        if user is not None and self._settings.cloud_user_id not in (None, user.id):
+            # The saved band belongs to another account.
+            self._settings.cloud_band_id = None
+            self._settings.cloud_user_id = user.id
+            self._save_settings()
+        self._refresh_cloud_menu()
+        self._refresh_cloud_status()
+        if user is not None:
+            self.cloud.start_sync(self._settings.cloud_band_id, user_initiated=False)
+            self._refresh_cloud_status()
+
+    def _refresh_cloud_menu(self):
+        """Signed out: only "Iniciar sesión". Signed in: sync, pickers, sign out.
+        The actions belong to the window, so clear() never deletes them."""
+        menu = self.account_menu
+        menu.clear()
+        if not self.cloud.is_signed_in():
+            menu.addAction(self.action_cloud_login)
+            return
+        user = self.cloud.user
+        who = (user.email or user.name) if user else ""
+        self.action_cloud_logout.setText(f"&Cerrar sesión ({who})" if who else "&Cerrar sesión")
+        for action in (self.action_cloud_sync, self.action_cloud_band, self.action_cloud_setlist):
+            menu.addAction(action)
+        menu.addSeparator()
+        menu.addAction(self.action_cloud_logout)
+
+    def _refresh_cloud_status(self):
+        text, color, tooltip = self.cloud.status()
+        self.status_cloud.setText(text)
+        self.status_cloud.setStyleSheet(f"color: {color};")
+        self.status_cloud.setToolTip(tooltip)
+
+    def _require_cloud_session(self) -> bool:
+        if self.cloud.is_signed_in():
+            return True
+        self.status_bar.showMessage("Primero inicia sesión: Cuenta > Iniciar sesión con Google", 8000)
+        return False
+
+    def _cloud_login(self):
+        if self.cloud.is_signed_in():
+            self.status_bar.showMessage("Ya hay una sesión iniciada", 5000)
+            return
+        from src.ui.dialogs.account_login import LoginDialog
+
+        dialog = LoginDialog(self.cloud, parent=self)
+        dialog.start()
+        dialog.exec()
+        result = dialog.result
+        self._refresh_cloud_menu()
+        self._refresh_cloud_status()
+        if result is None or not result.ok or result.user is None:
+            return
+        if self._settings.cloud_user_id != result.user.id:
+            self._settings.cloud_user_id = result.user.id
+            self._settings.cloud_band_id = None
+            self._save_settings()
+        if not result.persisted:
+            self.status_bar.showMessage(
+                "No se pudo guardar la sesión en el Administrador de credenciales: dura hasta cerrar Bandait",
+                12000,
+            )
+        self.cloud.start_sync(self._settings.cloud_band_id, user_initiated=True)
+        self._refresh_cloud_status()
+
+    def _cloud_sync_now(self):
+        if not self._require_cloud_session():
+            return
+        if self.cloud.sync_running():
+            self.status_bar.showMessage("Ya hay una sincronización en curso", 5000)
+            return
+        self.cloud.start_sync(self._settings.cloud_band_id, user_initiated=True)
+        self._refresh_cloud_status()
+
+    def _refresh_library(self):
+        """La importación escribe con su propia conexión: releer la biblioteca."""
+        view = self.library_view
+        try:
+            session = getattr(view, "_db_session", None)
+            if session is not None:
+                session.expire_all()
+            view._load_songs_from_db()
+            view._load_setlists_from_db()
+            view.mark_active_setlist(self._live_setlist_id)
+        except Exception as e:
+            logger.warning("No se pudo refrescar la biblioteca: %s", e)
+
+    def _on_cloud_sync_finished(self, outcome):
+        self._refresh_cloud_menu()
+        self._refresh_cloud_status()
+        if outcome.revoked:
+            return  # _on_cloud_signed_out shows the message
+        report = outcome.report
+        if report is None:
+            if outcome.needs_band_choice and outcome.user_initiated and outcome.snapshot is not None:
+                QTimer.singleShot(0, self._cloud_choose_band)
+            else:
+                self.status_bar.showMessage(outcome.message, 12000)
+            return
+        user = self.cloud.user
+        if outcome.band_id and (outcome.band_id != self._settings.cloud_band_id
+                                or (user and self._settings.cloud_user_id != user.id)):
+            self._settings.cloud_band_id = outcome.band_id
+            self._settings.cloud_user_id = user.id if user else self._settings.cloud_user_id
+            self._save_settings()
+        self._refresh_library()
+        message = outcome.message
+        if outcome.source == "cache":
+            message += " (copia local: sin conexión)"
+        if outcome.warnings:
+            message += f" - {len(outcome.warnings)} avisos (ver la barra NUBE)"
+            self.status_cloud.setToolTip(
+                self.status_cloud.toolTip() + "\n\nAvisos:\n" + "\n".join(outcome.warnings[:15])
+            )
+        self.status_bar.showMessage(message, 10000)
+
+        # Setlist to (re)load: the one chosen for the show if it is in this band,
+        # else the live one when it came from the hub (its content may have changed).
+        band_setlists = set(report.setlist_ids.values())
+        live = self._live_setlist_id
+        wanted = self._settings.active_setlist_id
+        target = wanted if wanted in band_setlists else (live if live in band_setlists else None)
+        if target:
+            self._request_live_setlist(target, persist=False, reason="Setlist actualizado desde el hub")
+        elif live and live not in self.library_view.setlist_ids():
+            self.status_bar.showMessage(
+                "El setlist en vivo ya no está en la biblioteca: sigue cargado hasta que elijas otro "
+                "(Cuenta > Elegir setlist)", 12000,
+            )
+        if outcome.user_initiated and band_setlists and target is None:
+            QTimer.singleShot(0, self._cloud_choose_setlist)
+
+    def _on_cloud_signed_out(self, message: str):
+        self._refresh_cloud_menu()
+        self._refresh_cloud_status()
+        self.status_bar.showMessage(message, 12000)
+
+    def _cloud_choose_band(self):
+        if not self._require_cloud_session():
+            return
+        snapshot = self.cloud.last_snapshot
+        if snapshot is None:
+            self.status_bar.showMessage("Todavía no hay datos del hub en este equipo: sincronizando...", 8000)
+            self._cloud_sync_now()
+            return
+        from src.cloud.workspace import band_summaries
+        from src.ui.dialogs.account_select import BandSelectorDialog
+
+        current = self._settings.cloud_band_id or snapshot.workspace.active_band_id
+        dialog = BandSelectorDialog(band_summaries(snapshot.workspace), current=current, parent=self)
+        if not dialog.exec():
+            return
+        band_id = dialog.selected_band_id()
+        if not band_id:
+            return
+        if self.cloud.sync_running():
+            self.status_bar.showMessage("Espera a que termine la sincronización e intenta de nuevo", 8000)
+            return
+        user = self.cloud.user
+        self._settings.cloud_band_id = band_id
+        self._settings.cloud_user_id = user.id if user else None
+        self._save_settings()
+        self.cloud.start_import(band_id, user_initiated=True)
+        self._refresh_cloud_status()
+
+    def _cloud_choose_setlist(self):
+        if not self._require_cloud_session():
+            return
+        band_id = self._settings.cloud_band_id
+        if not band_id:
+            self._cloud_choose_band()
+            return
+        from src.db.cloud_import import read_cloud_setlists
+        from src.ui.dialogs.account_select import SetlistSelectorDialog
+
+        try:
+            setlists = read_cloud_setlists(get_db_path(), band_id)
+        except Exception as e:
+            self.status_bar.showMessage(f"No se pudieron leer los setlists: {e}", 8000)
+            return
+        snapshot = self.cloud.last_snapshot
+        content = snapshot.workspace.band(band_id) if snapshot else None
+        band_name = content.band.name if content else ""
+        dialog = SetlistSelectorDialog(setlists, band_name=band_name,
+                                       current=self._live_setlist_id, parent=self)
+        if not dialog.exec():
+            return
+        setlist_id = dialog.selected_setlist_id()
+        if not setlist_id:
+            return
+        if setlist_id not in self.library_view.setlist_ids():
+            self._refresh_library()
+        self._request_live_setlist(setlist_id, persist=True, reason="Setlist elegido")
+
+    def _cloud_logout(self):
+        if not self._require_cloud_session():
+            return
+        user = self.cloud.user
+        who = (user.email or user.name) if user else "esta cuenta"
+        answer = QMessageBox.question(
+            self,
+            "Cerrar sesión",
+            f"¿Cerrar la sesión de {who} en este equipo?\n\n"
+            "Las canciones y setlists ya descargados se quedan aquí para tocar. "
+            "La sesión del hub en el navegador no se cierra.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.cloud.sign_out()
 
     # ------------------------------------------------------------------ keyboard
     def keyPressEvent(self, event: QKeyEvent):

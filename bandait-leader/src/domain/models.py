@@ -224,12 +224,34 @@ LEADER_INSTANCE_ID = str(uuid.uuid4())
 
 
 @dataclass(frozen=True)
+class SetlistSection:
+    """One song section on a setlist entry (CONTRACT_V3 9.1). Bars, not seconds."""
+
+    id: str
+    kind: str
+    label: str
+    bars: int
+    start_bar: int  # 1-based, cumulative
+    chordpro: str = ""
+    cue_text: Optional[str] = None  # resolved spoken cue; None = no cue
+
+
+@dataclass(frozen=True)
 class SetlistEntry:
     song_id: str
     title: str
     bpm: float
     order_index: int
     transition_mode: str = TransitionMode.MANUAL_CUE.value
+    # How the band enters this item and what the song contains (WORKSPACE_V2 3-4,
+    # CONTRACT_V3 9). Carried for wave 2; not on the wire yet, so ``to_wire`` and
+    # the SessionState schema are unchanged.
+    count_in_bars: int = 0
+    count_in_voice: bool = True
+    gap_sec: float = 0.0
+    beats_per_bar: int = 4
+    total_bars: Optional[int] = None  # None: no known end (manual_cue only)
+    sections: Tuple[SetlistSection, ...] = ()
 
     def to_wire(self) -> dict:
         return {

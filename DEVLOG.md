@@ -372,3 +372,135 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - en el líder: permitir Python en el firewall en redes privadas, marcar la Wi-Fi de escenario como red privada y elegir su IP en Conectar músicos.
 * **Pendiente (al cierre del refinamiento):** reescribir ambos manuales desde el comportamiento verificado en ese momento, marcar como PENDIENTE lo que no exista, regenerar `landing/` con `npm run build:landing` y verificar los textos en el e2e.
 
+### [2026-10-01] - Fase 1, primera tanda: instalador GPL, audio en tiempo real, login del líder y librería de canciones
+* **Sprint / Módulo:** `bandait-leader`, `bandait-leader-web`, `bandait-follower/public`, `bandait-protocol`, `landing/`, CI y releases, documentación. Rama `feat/phase1-wave1`. Agente: Claude Code (Opus 5.5), con tres subagentes en paralelo y propiedad de archivos separada.
+* **Decisiones del usuario (2026-10-01):**
+  - **Licencia GPL-3.0-or-later.** El SDK de ASIO pasó a licencia dual propietaria/GPLv3 el 2025-10-15, Link es GPLv2+ y PySide6 es LGPL.
+  - **Solo Windows + ASIO.**
+  - **Instalador sin firma por ahora.**
+  - **Texto a voz con Azure AI Speech F0.** La llave está en ClipVault, en la entrada `bandait-instance-azure-speech`; nunca pasó por el chat.
+  - **Supabase se documenta como proveedor externo.** El resto corre en Cloudflare: los servicios nuevos de voz y audio irán en Workers + R2.
+  - Se descartaron:
+    - XLSX;
+    - mezcla in-ear con stems, Demucs y detección de acordes/BPM, que quedan para más adelante;
+    - OTP, porque el login con Google ya resuelve el acceso.
+* **Investigación previa (resumen):**
+  - **Empaquetado.**
+    - PyInstaller `--onedir` con Inno Setup sigue siendo la mejor opción.
+    - Nuitka y `pyside6-deploy` no dan beneficio en tiempo real, porque el callback de PortAudio sigue esperando el GIL.
+    - Sin firma, SmartScreen bloquea el instalador. Azure Artifact Signing no está disponible para personas en Colombia. Las opciones a futuro son SignPath (gratis para código abierto, condiciones por confirmar), un certificado OV o la Microsoft Store (MSIX); falta probar ASIO dentro de MSIX.
+  - **Releven.**
+    - El Worker de medios de URiT (R2) es el candidato para guardar pistas en la nube, pero se estaba escribiendo ese mismo día y no está desplegado.
+    - Releven no tiene nada reutilizable para identidad (usa JWT propio), correo saliente ni texto a voz.
+    - `RELEVEN_ECOSYSTEM.md` tiene credenciales en texto plano. El repo es privado, pero conviene rotarlas.
+  - **Azure F0, medido con la llave real:**
+    - hay dos voces es-CO (Salomé y Gonzalo) y cada solicitud tarda entre 0.8 y 1.35 s;
+    - la frase "Uno. Dos. Tres. Cuatro." dura 5.3 s, cuando a 120 BPM cuatro beats duran 2 s;
+    - las palabras sueltas duran entre 145 y 431 ms.
+    - De ahí salió la regla de una palabra por beat con elección automática de velocidad (WORKSPACE_V2 §5.1).
+* **Acción técnica realizada:**
+  - **Especificación.**
+    - `bandait-protocol/WORKSPACE_V2.md` y `fixtures/workspace_v2.json`: el documento que el hub guarda en Supabase pasa a ser un contrato hub → líder, con librería de canciones, secciones en compases, ChordPro por sección, transiciones por ítem, configuración de voz y migración v1 → v2 con ids deterministas.
+    - `CONTRACT_V3.md` §9: contenido de canción por HTTP, estado COUNTING, transiciones automáticas y avisos de voz, para la segunda tanda.
+    - `docs/DEPLOY.md`: tabla de qué corre en cada servicio y relación con Releven.
+  - **Instalador y audio (subagente A).**
+    - Archivo `LICENSE` (GPL-3.0) y `NOTICE.md` con cada componente, su licencia y su fuente; el build falla si falta uno.
+    - `resources/icon.ico`.
+    - `build_exe.py`: rutas de datos, información de versión, backend de keyring incluido, Qt sin módulos usados (de 229.6 a 141.9 MB).
+    - `installer.iss`: instalación por máquina, regla del firewall solo para redes privadas al instalar y retirada al desinstalar.
+    - `release.yml`: con tags `v*` o lanzamiento manual, compila, corre `--smoke-test` sobre el `.exe` y arma el instalador; con un tag, publica el Release con SHA256SUMS.
+    - Dos fallas de ASIO corregidas en `src/audio/portaudio_setup.py`:
+      - `SD_ENABLE_ASIO=0` igual activaba ASIO;
+      - un `portaudio.dll` en el PATH tapaba al incluido en el paquete.
+    - `src/audio/rt_policy.py`: temporizador de 1 ms, `setswitchinterval(0.001)`, sin estrangulamiento de energía y `gc.freeze()`.
+    - El callback ya no reserva memoria por bloque.
+  - **Login del líder y sincronización (subagente B-líder).**
+    - `src/cloud/`: PKCE con el navegador del sistema y retorno a `127.0.0.1:53682`-`53684`; el refresh token se guarda en el Administrador de credenciales de Windows.
+    - Lectura del workspace v1/v2 por PostgREST, de solo lectura, con caché atómica para tocar sin internet.
+    - Importación a SQLite en una sola transacción con `cloud_id`; las canciones locales no se tocan.
+    - Los ids de v1 se calculan con un port exacto de la función del hub, verificado contra la migración real del hub en Node.
+    - Menú "Cuenta" y estado `NUBE` en la barra de estado.
+  - **Hub (subagente B-hub).**
+    - Pestaña CANCIONES:
+      - editor de secciones en compases;
+      - "Pegar ChordPro completo" con detección de secciones;
+      - vista previa con acordes sobre las sílabas.
+    - Setlist con referencias a la librería, BPM y tono por show y transiciones con conteo.
+    - Pestaña VOZ Y CONTEOS.
+    - Migración v1 → v2 idempotente y sin eco de sincronización.
+    - Importar y exportar el JSON completo.
+  - **Hecho por mí (lead):**
+    - **Íconos del PWA reales.** `bandait-follower/public/icon-{192,512}.png` eran **archivos de texto de 122 bytes** ("Placeholder: Replace with actual...") y estaban así en producción. Ahora salen de la imagen original de 1024 px sobre negro puro con `scripts/make_icon.py --pwa`, y la imagen original pasó a ser la primera fuente del script.
+    - Dependencia `mutagen` (GPL-2.0-or-later) agregada: el líder la usa para la duración de los MP3 y no se incluía en el `.exe`.
+* **Fallas encontradas fuera del alcance pedido (subagente A):**
+  - En el `.exe` sin consola, `sys.stdout` es `None` y uvicorn 0.51 llama `sys.stdout.isatty()`: **el servidor de red nunca habría arrancado para los usuarios**. Corregido en `src/main.py`, que redirige los streams estándar a devnull.
+* **Mediciones (subagente A):**
+  - Callback de 256 frames × 8 canales:
+
+    | | Mediana por bloque | Memoria reservada por bloque |
+    |---|---|---|
+    | Antes | 30.6 µs | 17.7 KB |
+    | Después | 19.9 µs | 0.6 KB |
+
+  - Traspaso del GIL con otro hilo compitiendo:
+
+    | Configuración | Retraso p50 | xruns |
+    |---|---|---|
+    | Temporizador por defecto | 15-17 ms | 48-72 |
+    | Temporizador de 1 ms + intervalo de 1 ms | 1.1-1.6 ms | 0 |
+
+  - `gc.collect` completo: 29-61 ms antes de `gc.freeze()` y 0 ms después.
+  - Arranque del `.exe`: 3.2-5.9 s.
+* **Verificación y Pruebas (corridas propias en la rama integrada, resultado literal):**
+  - **Líder:**
+    - `ruff check src tests` → `All checks passed!`
+    - `QT_QPA_PLATFORM=offscreen python -m pytest -q` → `290 passed`
+    - Detalle de la corrida que falló (paso a paso en "Prueba inestable", abajo):
+      - una primera corrida dio `1 failed, 289 passed`, con fallo en `test_startup_sync_runs_in_background_and_loads_the_chosen_setlist`;
+      - esa prueba pasó 3/3 sola;
+      - tras la corrección, el módulo con las pruebas de auth pasó 5/5 (`34 passed`).
+  - **Hub:** lint limpio; `verify:logic` → `23 ok, 0 fallas` y `34 ok, 0 fallas`; build correcto.
+  - **Follower:** lint y `tsc` limpios; vitest → `Tests 116 passed (116)`.
+  - **Bundles:** regenerados con `npm run build:landing`.
+  - **E2E:** `npx playwright test` (landing + leader-web + follower) → `58 passed (1.1m)`.
+  - **`.exe` empaquetado:** `--smoke-test` → `exit=0` (según el subagente A). Reporta:
+    - `WinVaultKeyring`;
+    - las DLL de PortAudio con y sin ASIO incluidas;
+    - el follower servido desde el `.exe`;
+    - Socket.IO con `101 Switching Protocols`.
+  - **CI del PR #15, job "Instalador Windows" en `windows-latest`.** Falló dos veces antes de pasar:
+    1. `test_license_is_the_full_gpl3_text`:
+       - el runner hace checkout con `core.autocrlf` y `LICENSE` pasó a CRLF, con un hash distinto del oficial;
+       - se reprodujo en local: con CRLF el SHA-256 es `230184f6…`, igual que en el CI, y normalizado es `3972dc97…`;
+       - corrección: `.gitattributes` con `eol=lf` para LICENSE, NOTICE y fixtures, y la prueba normaliza los fines de línea.
+    2. `ERROR: NOTICE.md no menciona: charset-normalizer`:
+       - el entorno limpio del CI incluye ese paquete y el local no;
+       - se agregó a NOTICE y el verificador del propio script ya no reporta faltantes con la lista exacta del CI.
+    - **Tercera corrida: todos los pasos en verde:**
+      - `Build listo: ...BandaitLeader.exe (version 2.1.0, 134.4 MB)`;
+      - el smoke test del `.exe` empaquetado pasa;
+      - `Successful compile (27.703 sec)` de Inno Setup;
+      - artefacto `BandaitLeader-2.1.0-windows` de 102 MB; el paso del Release se salta en un PR, como corresponde.
+    - Lección: compilar el instalador en el PR detectó dos fallas que el entorno local no podía mostrar.
+  - **Prueba inestable:**
+    - la prueba exigía que crear la ventana tardara menos de 10 s, y eso dependía de la carga de la máquina;
+    - se reemplazó por una compuerta (`FakeSupabase.rest_gate`) que retiene la lectura del workspace hasta que la ventana existe. Así se demuestra que el arranque no espera la red sin depender del reloj;
+    - el fallo no se reprodujo en 5 corridas, pero no se puede afirmar que esa fuera la única causa.
+* **Errores propios:** el 2026-10-01 apunté el favicon de la landing a `app/icon-192x192.png` sin revisar que fuera una imagen: era el placeholder de texto. Queda corregido con los íconos reales.
+* **Pendientes:**
+  1. **Usuario:** agregar en Supabase → Authentication → URL Configuration → Redirect URLs estas tres:
+     - `http://127.0.0.1:53682/callback`
+     - `http://127.0.0.1:53683/callback`
+     - `http://127.0.0.1:53684/callback`
+
+     El GoTrue actual acepta loopback sin la lista, pero se documentan por compatibilidad.
+  2. **Usuario:** probar el login real siguiendo los pasos de `bandait-leader/README.md` ("Cuenta y sincronización"). NO VERIFICADO aquí.
+  3. Verificar en GitHub el build del instalador (ISCC) con el lanzamiento manual de `release.yml`. NO VERIFICADO localmente, porque Inno Setup no está instalado.
+  4. Segunda tanda:
+     - `normalize_setlist` debe conservar los campos nuevos;
+     - `/songs/<id>.json` y el prompter por compás;
+     - COUNTING y transiciones automáticas;
+     - Worker de voz en Cloudflare con R2 y reproducción de avisos en la salida de cue;
+     - `library_view` debe mostrar el origen de cada canción y bloquear "reemplazar" en las que vienen de la nube.
+  5. Migrar `google-generativeai`, que perdió soporte el 2025-11-30, a `google-genai`. Hoy la vista IA queda "offline" en el `.exe`.
+

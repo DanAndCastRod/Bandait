@@ -173,3 +173,42 @@ follower lo sirve el propio líder por HTTP en la LAN**, en el mismo puerto que 
   lo detecta con `window.isSecureContext`, no lanza errores y usa alternativas: video
   inline silencioso en bucle para mantener la pantalla encendida, y la cámara nativa
   para el QR.
+
+## 9. Contenido de canción, conteo y transiciones (v3.1, Fase 1, en implementación)
+
+Fuente de los datos: el workspace v2 sincronizado desde el hub (`WORKSPACE_V2.md`).
+
+### 9.1 Contenido de canción por HTTP del líder
+
+`GET /songs/<song_id>.json` (mismo puerto, `Cache-Control: no-cache`, con `ETag`):
+
+```
+{song_id, title, artist, bpm, beats_per_bar, key, show_key, total_bars | null,
+ sections: [{id, kind, label, bars, start_bar, chordpro, cue_text | null}],
+ content_etag}
+```
+
+- `start_bar` empieza en 1 y es acumulativo.
+- `setlist[]` del SessionState agrega `content_etag` por ítem.
+- El follower descarga todo el setlist al unirse y vuelve a pedir un ítem cuando cambia su `content_etag`. Así el prompter sigue funcionando en Flywheel, sin red.
+
+### 9.2 Conteo (COUNTING)
+
+- Un conteo de `n` compases se modela con la misma matemática de la sección 6: `anchor_ns` es el inicio del conteo y `bar_offset = 1 - n`. Los compases ≤ 0 son de conteo y el compás 1 es el primero de la canción.
+- Mientras `bar < 1`, `status = "COUNTING"`. En el límite del compás 1, el líder emite `state_update` con `status = "PLAYING"` sin cambiar el anchor, lo que no es retroactivo.
+- PLAY sobre un ítem con `countInBars > 0` arranca en COUNTING. Se mantienen la regla de los 250 ms de margen y la de no reiniciar fase si ya está sonando.
+
+### 9.3 Transiciones automáticas
+
+- El líder conoce `total_bars` de la canción actual. Al cruzar el último compás, aplica el `transitionMode` del ítem siguiente (WORKSPACE_V2 §4).
+- `gapless` re-ancla en el límite exacto, con el BPM nuevo y `bar_offset = 1`.
+- `auto_count_in` re-ancla tras `gapSec`, con `bar_offset = 1 - countInBars`.
+- `manual_cue` pasa a IDLE con la siguiente canción como `current_song_id`.
+- Todo cambio de canción emite `setlist_jump` solo si el salto no es secuencial. Las transiciones automáticas sí son secuenciales.
+
+### 9.4 Avisos de voz
+
+- Los audios se generan **antes del show**. En vivo nunca se llama a la API.
+- El líder los reproduce por la salida de cue: `output = "drummer"` usa la salida 3 y `"all_in_ear"` usa las salidas de in-ear configuradas. Cada palabra arranca en su beat (WORKSPACE_V2 §5.1).
+- El aviso de una sección suena en el beat 1 del compás `start_bar - cueLeadBars`.
+- Los audios se sirven también por `GET /cues/<sha256>.wav`, para que en una versión futura los teléfonos puedan reproducirlos.

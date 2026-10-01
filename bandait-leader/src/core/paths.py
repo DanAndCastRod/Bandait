@@ -1,6 +1,7 @@
 """Single source of truth for every file path the leader reads or writes.
 
-All user data (database, recordings, config) lives under ``bandait_home()``.
+All user data (database, recordings, config, cloud cache) lives under
+``bandait_home()``.
 Environment overrides, in priority order:
 
 - ``BANDAIT_DB``: full path of the SQLite database file.
@@ -40,6 +41,16 @@ def recordings_dir() -> str:
 def config_path() -> str:
     """JSON file with persisted leader settings (audio device, routing, setlist)."""
     return str(bandait_home() / "leader_config.json")
+
+
+def cloud_dir() -> str:
+    """Data downloaded from the Web Hub. Never tokens: the session lives in keyring."""
+    return str(bandait_home() / "cloud")
+
+
+def cloud_workspace_cache_path() -> str:
+    """Last good workspace snapshot from Supabase (offline fallback at the venue)."""
+    return str(bandait_home() / "cloud" / "workspace.json")
 
 
 def ensure_parent_dir(path: str) -> None:

@@ -18,10 +18,14 @@ and starts click k at the frame where ``anchor_ns + k * beat_ns`` falls, so the
 FOH click and the followers' clicks land on the same leader instant.
 
 Realtime rules for the callback: no locks, no queues, no logging, no prints,
-no sample-buffer allocation (everything is preallocated). Python itself still
-creates small int/float objects; that is unavoidable in a Python callback.
-Communication with the Qt thread uses single-writer attributes and counters
-that the Qt thread polls.
+no sample-buffer allocation (everything is preallocated, the click and accent
+waveforms are rendered once and read-only), no numpy reductions (they malloc
+an iterator buffer per call: the VU meters copy the block and the Qt thread
+does the math). Python itself still creates small int/float/view objects;
+they die inside the block, so the callback neither grows memory nor feeds the
+garbage collector (tests/test_audio_realtime.py checks both). Communication
+with the Qt thread uses single-writer attributes and counters that the Qt
+thread polls. Process-wide GIL and GC policy: ``rt_policy``.
 
 Routing: Salidas 1-2 = PA (FOH), Salida 3 (channel index 2) = drummer click.
 Fallback on devices with fewer than 3 outputs: the drummer click has nowhere to
@@ -41,19 +45,24 @@ from src.sync.leader_clock import leader_now_ns
 from src.sync.transport_math import EMPTY_SCHEDULE, Schedule, next_click
 
 from .mixer import Mixer
+from .portaudio_setup import ensure_sounddevice
 from .recorder import RecordingEngine
 from .track import Track
 
-try:  # PortAudio may be missing on CI machines; the leader must still start.
-    import sounddevice as sd
-except Exception:  # pragma: no cover - depends on the host
-    sd = None
+# PortAudio may be missing (CI) or broken; the leader must still start. The
+# first caller decides the DLL: src/main.py passes the saved ASIO setting
+# before this module is imported; tests and headless use the environment.
+sd = ensure_sounddevice().module
 
 MAX_OPEN_OUTPUTS = 64
 DRUMMER_CHANNEL = 2  # Salida 3
+METER_CHANNELS = 4  # VU meters for Salidas 1-4
+_MAX_BLOCK = 4096  # preallocated frames; PortAudio honors the fixed blocksize we ask for
 _LATE_TOLERANCE_NS = 5_000_000
 _OFFSET_LEAK_NS = 2_000
 _OFFSET_RESET_NS = 50_000_000
+_ONE = np.float32(1.0)
+_MINUS_ONE = np.float32(-1.0)
 
 
 class AudioUnavailable(RuntimeError):
@@ -122,20 +131,28 @@ class AudioEngine(QObject):
         self._out_latency_ns = 0
         self._ns_per_frame = 1e9 / float(sample_rate)
 
-        # Click waveforms (accent on beat 1) and playback state.
+        # Click waveforms (accent on beat 1), rendered once and read-only: the
+        # callback only slices them. Playback state below.
         self._click_duration = int(0.05 * sample_rate)  # 50 ms
         self._click = self._generate_click()
         self._click_accent = self._click.copy()
         self._click_normal = (self._click * 0.6).astype(np.float32)
+        for arr in (self._click, self._click_accent, self._click_normal):
+            arr.setflags(write=False)
         self._click_arr = self._click_normal
         self._click_pos = self._click_duration  # >= len means idle
         self._last_click_ns = -1
         self._schedule_was_set = False
 
-        # Callback -> Qt thread (single writer each, polled by a timer).
-        self._levels_ms = np.zeros(4, dtype=np.float64)
-        self._scratch = np.zeros((max(block_size, 4096), 4), dtype=np.float32)
-        self._zero_input = np.zeros((max(block_size, 4096), 1), dtype=np.float32)
+        # Callback -> Qt thread (single writer each, polled by a timer). The
+        # callback copies up to 4 outputs here; the Qt thread computes levels.
+        cap = max(block_size, _MAX_BLOCK)
+        self._meter_buf = np.zeros((cap, METER_CHANNELS), dtype=np.float32)
+        self._meter_frames = 0
+        self._meter_channels = 0
+        self._zero_input = np.zeros((cap, 1), dtype=np.float32)
+        self._zero_input.setflags(write=False)
+        self._zero_block = self._zero_input[:block_size]  # cached view for the usual size
         self._levels_seq = 0
         self._levels_seen = 0
         self._click_seq = 0
@@ -363,14 +380,16 @@ class AudioEngine(QObject):
         (leader time). Separated from the callback so tests can drive it."""
         nch = outdata.shape[1]
         if indata is None:
-            if self._zero_input.shape[0] < frames:
-                self._zero_input = np.zeros((frames, 1), dtype=np.float32)
-            src = self._zero_input[:frames]
+            src = self._zero_block
+            if src.shape[0] != frames:
+                if self._zero_input.shape[0] < frames:  # one-off growth, never in steady state
+                    self._zero_input = np.zeros((frames, 1), dtype=np.float32)
+                src = self._zero_input[:frames]
         else:
             src = indata
         mixed = self.mixer.process(src)
-        if mixed.shape[1] == nch:
-            outdata[:] = mixed
+        if mixed.shape == outdata.shape:
+            np.copyto(outdata, mixed)
         else:
             outdata.fill(0.0)
             k = min(nch, mixed.shape[1])
@@ -421,14 +440,18 @@ class AudioEngine(QObject):
             self._schedule_was_set = False
             self._click_pos = click_len
 
-        np.clip(outdata, -1.0, 1.0, out=outdata)
+        # Hard limit. Two ufuncs with out=: np.clip goes through a Python
+        # wrapper that allocates on every call.
+        np.minimum(outdata, _ONE, out=outdata)
+        np.maximum(outdata, _MINUS_ONE, out=outdata)
 
-        # Levels (mean square of up to 4 outputs) for the VU meters.
-        k = nch if nch < 4 else 4
-        if self._scratch.shape[0] >= frames:
-            sq = self._scratch[:frames, :k]
-            np.square(outdata[:, :k], out=sq)
-            np.mean(sq, axis=0, out=self._levels_ms[:k])
+        # VU meters: copy up to 4 outputs; the Qt thread computes the levels
+        # (a numpy reduction here would malloc ~5-17 KB per block).
+        k = nch if nch < METER_CHANNELS else METER_CHANNELS
+        if frames <= self._meter_buf.shape[0]:
+            np.copyto(self._meter_buf[:frames, :k], outdata[:, :k])
+            self._meter_frames = frames
+            self._meter_channels = k
             self._levels_seq += 1
 
         if self._recording and indata is not None:
@@ -451,12 +474,25 @@ class AudioEngine(QObject):
             self.beat.emit(int(self._click_beat), float(self._bpm))
         if self._levels_seq != self._levels_seen:
             self._levels_seen = self._levels_seq
-            out = []
-            for ms in self._levels_ms:
-                rms = float(np.sqrt(ms)) if ms > 0 else 0.0
-                db = 20 * np.log10(max(rms, 1e-10))
-                out.append(max(0.0, min(1.0, (db + 60) / 60)))
-            self.levels.emit(out)
+            self.levels.emit(self._meter_levels())
+
+    def _meter_levels(self) -> list:
+        """Levels 0.0-1.0 (-60..0 dBFS RMS) of Salidas 1-4 from the last block.
+        Qt thread. The callback may be writing the buffer meanwhile: a torn read
+        only moves a meter for one frame, never the audio."""
+        frames = min(int(self._meter_frames), self._meter_buf.shape[0])
+        k = min(int(self._meter_channels), METER_CHANNELS)
+        out = [0.0] * METER_CHANNELS
+        if frames <= 0 or k <= 0:
+            return out
+        block = self._meter_buf[:frames, :k].astype(np.float64)
+        mean_sq = np.mean(block * block, axis=0)
+        for ch in range(k):
+            ms = float(mean_sq[ch])
+            rms = float(np.sqrt(ms)) if ms > 0 else 0.0
+            db = 20 * np.log10(max(rms, 1e-10))
+            out[ch] = max(0.0, min(1.0, (db + 60) / 60))
+        return out
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> None:

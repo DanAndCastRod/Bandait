@@ -1,5 +1,5 @@
 PySide6>=6.6.0
-sounddevice>=0.4.6
+sounddevice>=0.5.4  # first release with the 2025-11-14 rebuild of the ASIO DLL
 numpy>=1.24.0
 soundfile>=0.12.1
 python-socketio>=5.9.0
@@ -19,3 +19,4 @@ openpyxl>=3.1.0
 aiohttp>=3.9  # python-socketio AsyncClient (integration tests)
 jsonschema>=4.18  # protocol schema tests
 psutil>=5.9  # LAN interface names for the advertised IP
+mutagen>=1.47  # MP3 duration on library import (GPL-2.0-or-later)

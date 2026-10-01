@@ -2,7 +2,8 @@
 
 ``process`` runs inside the audio callback: it works on preallocated buffers
 and never allocates sample buffers (block sizes up to ``block_size``; a larger
-block grows the buffers once, outside the steady state).
+block grows the buffers once, outside the steady state). Only ufuncs with
+``out=`` and views: no reductions, no temporaries.
 """
 
 import numpy as np
@@ -83,10 +84,16 @@ class Mixer:
             if buf.shape[0] < n_frames:
                 continue
             np.multiply(buf[:n_frames], track.volume, out=scratch)
+            # Walk only the set bits (a 64-output ASIO card would otherwise
+            # cost 64 Python iterations per track per block).
             mask = track.output_channels
-            for ch in range(self.output_channels):
-                if mask & (1 << ch):
+            ch = 0
+            n_out = self.output_channels
+            while mask and ch < n_out:
+                if mask & 1:
                     out[:, ch] += scratch
+                mask >>= 1
+                ch += 1
 
         if self.monitor_input and n_input_ch > 0:
             if input_block.ndim == 1:

@@ -1,9 +1,10 @@
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js'
-import { isWorkspaceStore, type UserProfile, type WorkspaceStore } from '../types/hub'
+import type { UserProfile, WorkspaceStore } from '../types/hub'
 import { checkSupabasePublicKey, checkSupabaseUrl } from './jwt'
 import { computeAuthRedirectUrl } from './identity'
 import { uuidv4 } from './uuid'
 import type { CloudAdapter, CloudError, CloudRow, FetchResult, RemoteHint, WriteResult } from './workspaceSync'
+import { loadWorkspaceDocument } from './workspaceSchema'
 
 /**
  * Supabase en el Web Admin Hub.
@@ -280,14 +281,15 @@ function readSyncField(workspace: unknown, field: string): string | null {
   return typeof value === 'string' ? value : null
 }
 
+/**
+ * Fila de la nube -> datos para el motor. `data` sale YA migrado a v2 (sin `_sync`), asi la
+ * reconciliacion compara v2 contra v2: como la migracion es determinista, una fila v1 y la
+ * copia local que ya se migro desde ese mismo v1 quedan "en sincronia" y no se escribe nada.
+ * `raw` queda intacto para los respaldos.
+ */
 export function toWorkspaceCloudRow(record: { workspace: unknown; updated_at: unknown }): CloudRow<WorkspaceStore> {
   const raw = record.workspace
-  let data: WorkspaceStore | null = null
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const rest: Record<string, unknown> = { ...(raw as Record<string, unknown>) }
-    delete rest._sync
-    data = isWorkspaceStore(rest) ? rest : null
-  }
+  const data = loadWorkspaceDocument(raw)
   return {
     data,
     raw,

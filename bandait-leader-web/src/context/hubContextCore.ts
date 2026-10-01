@@ -6,8 +6,10 @@ import type {
   MemberRole,
   Playlist,
   PlaylistSong,
+  Song,
   SongStems,
   UserProfile,
+  VoiceConfig,
 } from '../types/hub'
 import type { EngineStatus, SyncBackup, SyncNotice } from '../services/workspaceSync'
 import type { RoleChangeCheck } from '../services/roles'
@@ -40,6 +42,10 @@ export interface HubContextType {
   activePlaylist: Playlist | null
   songStems: SongStems | null
   equipment: EquipmentItem[]
+  /** Libreria de canciones de la banda activa (songsMap[bandId]). */
+  songs: Song[]
+  /** Conteos y avisos de voz de la banda activa (voiceMap[bandId]). */
+  voiceConfig: VoiceConfig
 
   // Identidad
   googleClientId: string
@@ -86,8 +92,18 @@ export interface HubContextType {
   updateStemTrackVolume: (channel: number, volumeDb: number) => void
   addEquipment: (item: Omit<EquipmentItem, 'id' | 'bandId'>) => void
   removeEquipment: (id: string) => void
-  /** Descarga la banda activa como JSON (el XLSX real esta pendiente). */
+  /** Crea una cancion en la libreria de la banda activa (id UUID v4 nuevo). */
+  createSong: (data: Omit<Song, 'id' | 'updatedAt'>) => Song | null
+  /** Guarda una cancion existente conservando su id y el de sus secciones. */
+  saveSong: (song: Song) => void
+  duplicateSong: (songId: string) => Song | null
+  /** Borra la cancion y los items de setlist que la usan. */
+  deleteSong: (songId: string) => void
+  updateVoiceConfig: (updates: Partial<VoiceConfig>) => void
+  /** Descarga la banda activa como JSON, con el workspace v2 completo en `workspace`. */
   exportWorkspaceJson: () => void
+  /** Reemplaza el workspace por el de un JSON exportado (se migra y valida). */
+  importWorkspaceJson: (text: string) => { ok: boolean; message: string }
 }
 
 export const HubContext = createContext<HubContextType | undefined>(undefined)
