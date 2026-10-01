@@ -85,10 +85,10 @@ define(['./workbox-611d2886'], (function (workbox) { 'use strict';
     "revision": "c2c78608762edc0e0b58fa506f663f6b"
   }, {
     "url": "icon-512x512.png",
-    "revision": "543274b33f3ef9f6669b27201b9b04a3"
+    "revision": "f86adfe197bdb87b77dde9a523ca64af"
   }, {
     "url": "icon-192x192.png",
-    "revision": "d0dd4dc9e5afc9e4f8cd064eb05c3ae6"
+    "revision": "82e6aade6f13ed48392d711e7a1655be"
   }, {
     "url": "assets/index-J9hqZxoH.js",
     "revision": null
@@ -103,10 +103,10 @@ define(['./workbox-611d2886'], (function (workbox) { 'use strict';
     "revision": null
   }, {
     "url": "icon-192x192.png",
-    "revision": "d0dd4dc9e5afc9e4f8cd064eb05c3ae6"
+    "revision": "82e6aade6f13ed48392d711e7a1655be"
   }, {
     "url": "icon-512x512.png",
-    "revision": "543274b33f3ef9f6669b27201b9b04a3"
+    "revision": "f86adfe197bdb87b77dde9a523ca64af"
   }, {
     "url": "manifest.webmanifest",
     "revision": "c1cefa2548fda6d49fe86410f8a9386d"
