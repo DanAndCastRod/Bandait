@@ -72,8 +72,13 @@ test.describe('Landing Page', () => {
     const downloadSection = page.locator('#download');
     await expect(downloadSection).toBeVisible();
 
+    // Repositorio (codigo + tarjeta Android) y pagina de Releases
     const downloadLinks = downloadSection.locator('a[href*="github.com"]');
-    await expect(downloadLinks).toHaveCount(2);
+    await expect(downloadLinks).toHaveCount(3);
+
+    // Lanzadores web del Hub y del PWA follower
+    await expect(downloadSection.locator('a[href="./hub/"]')).toBeVisible();
+    await expect(downloadSection.locator('a[href="./app/"]').first()).toBeVisible();
 
     // Verificar que los botones de descarga tienen IDs correctos
     await expect(page.locator('#downloadAndroid')).toBeVisible();
@@ -106,9 +111,9 @@ test.describe('Landing Page', () => {
 
   test('la navegacion tiene los links correctos', async ({ page }) => {
     const navLinks = page.locator('.nav-links a');
-    await expect(navLinks).toHaveCount(4);
+    await expect(navLinks).toHaveCount(6);
 
-    const expectedLinks = ['Features', 'Cómo Funciona', 'Specs', 'Descargar'];
+    const expectedLinks = ['Features', 'Cómo Funciona', 'Specs', 'Descargar', 'Web Hub', 'Manual'];
     for (const text of expectedLinks) {
       await expect(page.locator('.nav-links a', { hasText: text })).toBeVisible();
     }
