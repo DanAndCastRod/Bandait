@@ -92,8 +92,9 @@ class TestVisualStartup:
 
         window.close()
 
-    def test_library_has_seed_data(self, app):
-        """Library loads seed data from DB."""
+    def test_library_has_seed_data(self, app, monkeypatch):
+        """Demo data is opt-in: BANDAIT_DEMO=1 loads it, marked DEMO."""
+        monkeypatch.setenv("BANDAIT_DEMO", "1")
         window = MainWindow()
         lv = window.library_view
 
@@ -103,7 +104,19 @@ class TestVisualStartup:
         # Check first song
         first_title = lv.songs_table.item(0, 0).text()
         assert len(first_title) > 0
+        assert lv.songs_table.item(0, 5).text() == "DEMO"
 
+        window.close()
+
+    def test_no_demo_data_without_opt_in(self, app):
+        """A fresh install starts empty: no mock songs pretending to be the band's."""
+        window = MainWindow()
+        lv = window.library_view
+        assert lv.songs_table.rowCount() == 0
+        assert lv.setlist_ids() == []
+        assert window.server.get_state()["setlist"] == []
+        assert window.setlist_notice().startswith("SIN SETLIST EN VIVO")
+        assert window.status_setlist.text() == "SIN SETLIST EN VIVO"
         window.close()
 
     def test_qss_loaded(self, app):

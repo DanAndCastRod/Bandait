@@ -4,9 +4,26 @@ Vista de arreglo con secciones de canción, playhead, zoom.
 Interactivo: drag secciones, zoom rueda ratón, click para posicionar.
 """
 
+import math
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QSizePolicy
 from PySide6.QtCore import Qt, QRect, QTimer, Signal, QPoint
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QMouseEvent, QWheelEvent, QKeyEvent
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QMouseEvent, QPolygon, QWheelEvent, QKeyEvent
+
+from ._paint import safe_paint
+
+# Bounds that keep every coordinate inside Qt's 32-bit int (QRect, QPoint):
+# a bad duration or zoom must never turn into an OverflowError while painting.
+MAX_DURATION_S = 24 * 3600.0
+_X_LIMIT = 1_000_000
+
+
+def _finite(value, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
 
 
 class SectionItem:
@@ -68,15 +85,15 @@ class TimelineWidget(QWidget):
         self._timer.timeout.connect(self._update_playhead)
 
     def set_bpm(self, bpm: int):
-        self._bpm = max(40, min(300, bpm))
+        self._bpm = max(40.0, min(300.0, _finite(bpm, self._bpm)))
         self.update()
 
     def set_duration(self, seconds: float):
-        self._duration = max(1.0, seconds)
+        self._duration = max(1.0, min(MAX_DURATION_S, _finite(seconds, self._duration)))
         self.update()
 
     def set_position(self, seconds: float):
-        self._position = max(0.0, min(self._duration, seconds))
+        self._position = max(0.0, min(self._duration, _finite(seconds, 0.0)))
         self.update()
 
     def add_section(self, label: str, start_beat: int, duration_beats: int,
@@ -108,8 +125,9 @@ class TimelineWidget(QWidget):
 
     def _seconds_to_x(self, seconds: float) -> int:
         beat_duration = 60.0 / self._bpm
-        total_beats = seconds / beat_duration
-        return int(self._header_height + total_beats * self._beat_width * self._zoom)
+        total_beats = _finite(seconds, 0.0) / beat_duration
+        x = self._header_height + total_beats * self._beat_width * self._zoom
+        return int(max(-_X_LIMIT, min(_X_LIMIT, x)))
 
     def _x_to_seconds(self, x: int) -> float:
         beat_duration = 60.0 / self._bpm
@@ -120,8 +138,8 @@ class TimelineWidget(QWidget):
         beats = (x - self._header_height) / (self._beat_width * self._zoom)
         return int(beats)
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
+    @safe_paint
+    def paintEvent(self, event, painter):
         painter.setRenderHint(QPainter.Antialiasing)
 
         w = self.width()
@@ -135,12 +153,14 @@ class TimelineWidget(QWidget):
         painter.setPen(QPen(QColor(30, 30, 30), 1))
         painter.drawLine(0, self._ruler_height, w, self._ruler_height)
 
-        # Marcas de tiempo
+        # Marcas de tiempo: solo los beats visibles (no todos los de la canción).
         beat_duration = 60.0 / self._bpm
         total_beats = int(self._duration / beat_duration)
+        first_beat = max(0, self._x_to_beat(0))
+        last_beat = min(total_beats, self._x_to_beat(w) + 1)
         painter.setFont(QFont("JetBrains Mono", 9))
 
-        for beat in range(total_beats + 1):
+        for beat in range(first_beat, last_beat + 1):
             x = self._seconds_to_x(beat * beat_duration)
             if x < 0 or x > w:
                 continue
@@ -201,13 +221,14 @@ class TimelineWidget(QWidget):
             painter.setPen(QPen(QColor(255, 0, 0), 2))
             painter.drawLine(playhead_x, 0, playhead_x, h)
 
-            # Triángulo en la parte superior
+            # Triángulo en la parte superior. drawPolygon exige QPolygon/QPoint:
+            # una lista plana de ints lanza TypeError y tumbaba la app al tocar.
             painter.setBrush(QBrush(QColor(255, 0, 0)))
-            painter.drawPolygon([
-                playhead_x - 6, 0,
-                playhead_x + 6, 0,
-                playhead_x, 8
-            ])
+            painter.drawPolygon(QPolygon([
+                QPoint(playhead_x - 6, 0),
+                QPoint(playhead_x + 6, 0),
+                QPoint(playhead_x, 8),
+            ]))
 
         # === TIEMPO ACTUAL ===
         painter.setFont(QFont("JetBrains Mono", 10))
@@ -222,8 +243,6 @@ class TimelineWidget(QWidget):
         painter.setFont(QFont("JetBrains Mono", 8))
         painter.setPen(QColor(102, 102, 102))
         painter.drawText(w - 80, h - 8, f"Zoom: {self._zoom:.1f}x")
-
-        painter.end()
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:

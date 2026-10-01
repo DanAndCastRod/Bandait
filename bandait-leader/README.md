@@ -42,6 +42,7 @@ Si el puerto está ocupado sale con código 2 y lo dice.
 | `BANDAIT_FOLLOWER_DIR` | Carpeta del follower compilado (por defecto `../landing/app`) |
 | `BANDAIT_AUDIO_DISABLED=1` | No abre ningún stream de PortAudio (pruebas, CI) |
 | `BANDAIT_ASIO=1` | Carga el PortAudio con ASIO de `sounddevice` (también desde el diálogo de audio) |
+| `BANDAIT_DEMO=1` | Carga las canciones de demostración al arrancar (si no, solo con *Ayuda > Cargar canciones de demostración*) |
 
 ## Cómo llegan los músicos (contrato v3, sección 8)
 
@@ -97,6 +98,15 @@ control_command (Socket.IO) ─┘        │
 modelo define y la base vieja no tiene. Antes de cualquier `ALTER` copia el archivo
 a `<nombre>.bak-AAAAMMDDHHMMSS`. Nunca borra ni recrea la base.
 
+**Datos de demostración.** La GUI ya no siembra la base sola: las 3 canciones, el setlist,
+el evento y los miembros de ejemplo (`src/db/seed.py`) se cargan solo con `BANDAIT_DEMO=1`
+o con *Ayuda > Cargar canciones de demostración*. Quedan con `source = 'demo'` (columna
+también en `setlists`, `gigs` y `band_members`) y la Biblioteca los marca `DEMO`. La misma
+migración marca como demo las filas que sembraron versiones anteriores, solo si el id y el
+título o nombre siguen iguales (lo que el usuario renombró queda como suyo).
+*Biblioteca > Quitar datos de demostración* (o el menú *Ayuda*) pide confirmación, copia la
+base y borra solo las filas `demo`.
+
 ## Cuenta y sincronización
 
 El líder descarga lo que la banda preparó en el Web Hub (`https://bandait.releven.cc/hub/`)
@@ -127,8 +137,12 @@ independiente de la versión del servidor.
 2. Elige la banda que toca este equipo. Si la cuenta tiene una sola, se elige sola.
 3. Elige el setlist del show: queda en vivo para los músicos.
 
-Después, cada arranque sincroniza en segundo plano: el setlist local suena de inmediato y
-no espera a la red. *Cuenta > Sincronizar ahora* repite la descarga a pedido. Si una
+Después, cada arranque sincroniza en segundo plano: el setlist elegido, de la copia local,
+queda en vivo de inmediato y no espera a la red. Con una banda del hub elegida nunca se
+carga en su lugar un setlist de demostración o local, aunque el elegido esté vacío: en ese
+caso un aviso fijo en Escenario y en la barra de estado dice qué hacer en el hub. La
+Biblioteca muestra el origen de cada canción y setlist (`NUBE` / `LOCAL` / `DEMO`) y, con
+sesión y banda, oculta lo `DEMO` salvo que se marque "Mostrar demostración". *Cuenta > Sincronizar ahora* repite la descarga a pedido. Si una
 actualización llega mientras la banda toca, se aplica al próximo STOP: nunca se cambia el
 setlist debajo de una canción que está sonando.
 
@@ -152,7 +166,9 @@ El detalle y los avisos de datos mal formados aparecen en el tooltip.
 
 **Reglas de la importación.**
 
-- Las canciones de la nube son de solo lectura en el líder.
+- Las canciones de la nube son de solo lectura en el líder. Importar un archivo con el
+  mismo título y artista que una canción del hub se rechaza antes de preguntar
+  "¿Reemplazar?" y remite al hub.
 - Lo que se borra en el hub, o pertenece a otra banda, se borra aquí, pero solo si vino de
   la nube.
 - Las canciones y setlists locales nunca se tocan. Si un id del hub choca con una canción
@@ -194,7 +210,12 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 
 `tests/conftest.py` redirige `BANDAIT_HOME`, `BANDAIT_DB`, `HOME` y `USERPROFILE` a
 carpetas temporales y apaga el audio; la sesión falla si la base real del usuario
-cambia. `tests/test_protocol_v3.py` usa un cliente Socket.IO real contra el servidor
+cambia (también si otro Bandait abierto en el equipo la escribe durante la corrida).
+
+Todo `paintEvent` propio lleva `@safe_paint` (`src/ui/widgets/_paint.py`): una excepción
+al dibujar dejaba el `QPainter` activo y Qt abortaba el proceso. `tests/test_paint_guard.py`
+lo reproduce en un subproceso y `tests/test_paint_smoke.py` dibuja cada widget en los
+estados del escenario (offscreen). `tests/test_protocol_v3.py` usa un cliente Socket.IO real contra el servidor
 en un puerto efímero y valida cada payload contra los fixtures.
 
 ## Instalador y releases

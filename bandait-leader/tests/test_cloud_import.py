@@ -59,7 +59,7 @@ def dump(db):
 @pytest.fixture
 def db(tmp_path):
     path = str(tmp_path / "bandait.db")
-    seed_database(path)  # local songs and a local setlist, as on a real laptop
+    seed_database(path)  # non-hub songs and setlist (source 'demo'): the importer must keep them
     return path
 
 
@@ -74,7 +74,7 @@ def test_import_is_idempotent_and_keeps_local_songs(db):
     Session = init_db(db)
     with Session() as s:
         sources = {song.id: song.source for song in s.query(Song).all()}
-        assert sources == {"song-001": "local", "song-002": "local", "song-003": "local",
+        assert sources == {"song-001": "demo", "song-002": "demo", "song-003": "demo",
                            SONG_1: "cloud", SONG_2: "cloud"}
         local_rows = [r for r in dump(db)["songs"] if r[0].startswith("song-")]
         assert local_rows == [r for r in before_local]
@@ -169,7 +169,7 @@ def test_v1_row_then_hub_v2_upload_maps_onto_the_same_rows(db):
         cloud = s.query(Song).filter(Song.source == "cloud").all()
         assert sorted(x.id for x in cloud) == sorted(derived.values())  # no duplicates
         assert len(s.get(Song, derived["Intro"]).sections) == 4  # the v2 edit arrived
-        assert s.query(Song).filter(Song.source == "local").count() == 3
+        assert s.query(Song).filter(Song.source == "demo").count() == 3  # non-hub rows untouched
 
 
 def test_cloud_id_colliding_with_a_local_song_gets_its_own_id(db):
@@ -180,7 +180,7 @@ def test_cloud_id_colliding_with_a_local_song_gets_its_own_id(db):
     assert report.song_ids["song-001"] == "cloud-song-001"
     Session = init_db(db)
     with Session() as s:
-        assert s.get(Song, "song-001").source == "local"
+        assert s.get(Song, "song-001").source == "demo"  # the non-hub row keeps its id
         assert s.get(Song, "song-001").title == "Medianoche en Pereira"
         assert s.get(Song, "cloud-song-001").title == "Intro"
         entries = load_setlist_entries(s, report.setlist_ids["pl_01"])

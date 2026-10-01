@@ -119,7 +119,8 @@ class Song(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     # Cloud (Web Hub) metadata. source == "cloud" rows are a read-only mirror of the
     # hub: only src/db/cloud_import.py writes them (see _guard_cloud_songs).
-    source: Mapped[str] = mapped_column(String, default="local")  # "local" | "cloud"
+    # "demo" rows come from src/db/seed.py and can be removed in one action.
+    source: Mapped[str] = mapped_column(String, default="local")  # "local" | "cloud" | "demo"
     cloud_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Song.id in the hub
     band_cloud_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     cloud_updated_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -206,6 +207,9 @@ class Setlist(Base):
     # Set only for setlists imported from the hub (Playlist.id and Band.id there).
     cloud_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     band_cloud_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # "local" | "cloud" | "demo". A hub setlist is recognised by cloud_id first
+    # (rows imported before this column existed still say "local").
+    source: Mapped[str] = mapped_column(String, default="local")
 
     band: Mapped[Optional["Band"]] = relationship("Band", back_populates="setlists")
     songs: Mapped[List["Song"]] = relationship(
@@ -237,6 +241,7 @@ class BandMember(Base):
     color: Mapped[str] = mapped_column(String, default="#00FFFF")
     email: Mapped[str] = mapped_column(String, default="")
     phone: Mapped[str] = mapped_column(String, default="")
+    source: Mapped[str] = mapped_column(String, default="local")  # "local" | "demo"
 
     band: Mapped[Optional["Band"]] = relationship("Band", back_populates="members")
     gigs: Mapped[List["Gig"]] = relationship(
@@ -267,6 +272,7 @@ class Gig(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String, default="planned")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    source: Mapped[str] = mapped_column(String, default="local")  # "local" | "demo"
 
     setlist: Mapped[Optional["Setlist"]] = relationship("Setlist", back_populates="gigs")
     members: Mapped[List["BandMember"]] = relationship(
@@ -328,6 +334,78 @@ def _backup_path(db_path: str) -> str:
     return candidate
 
 
+def backup_db(db_path: str) -> str:
+    """Consistent copy of the database next to it (``<db>.bak-<stamp>``), made
+    with SQLite's online backup (safe while other connections are open)."""
+    backup = _backup_path(db_path)
+    src = sqlite3.connect(db_path)
+    try:
+        dst = sqlite3.connect(backup)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    return backup
+
+
+DEMO_SOURCE = "demo"
+
+# Rows that src/db/seed.py has always created: table -> (label column, {id: label}).
+# Ids and titles never changed (git history of seed.py). The migration marks a row
+# as demo only when BOTH still match, so a row the user renamed stays theirs.
+DEMO_SIGNATURES = {
+    "songs": ("title", {
+        "song-001": "Medianoche en Pereira",
+        "song-002": "Ritmo de Calle",
+        "song-003": "Desde Lejos",
+    }),
+    "setlists": ("name", {"setlist-001": "Set de Ensayo - Mayo 2026"}),
+    "gigs": ("name", {"gig-001": "Concierto Bar La Esquina"}),
+    "band_members": ("name", {
+        "member-001": "Daniel Castañeda",
+        "member-002": "Andrés López",
+        "member-003": "María García",
+    }),
+}
+
+
+def plan_demo_marks(db_path: str) -> List[tuple]:
+    """UPDATEs (sql, params) that mark untouched seed rows as ``source='demo'``.
+
+    They run after the ALTERs of the same migration, so a missing ``source``
+    column (added with DEFAULT 'local') is fine. Hub rows and rows already
+    marked are never selected."""
+    if not os.path.exists(db_path):
+        return []
+    con = sqlite3.connect(db_path)
+    try:
+        existing = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        updates: List[tuple] = []
+        for table, (label, rows) in DEMO_SIGNATURES.items():
+            if table not in existing:
+                continue
+            have = {row[1] for row in con.execute(f'PRAGMA table_info("{table}")')}
+            if "id" not in have or label not in have:
+                continue
+            still_local = "COALESCE(source, 'local') = 'local'" if "source" in have else "1 = 1"
+            for row_id, value in rows.items():
+                hit = con.execute(
+                    f'SELECT 1 FROM "{table}" WHERE id = ? AND "{label}" = ? AND {still_local}',
+                    (row_id, value),
+                ).fetchone()
+                if hit:
+                    updates.append((
+                        f'UPDATE "{table}" SET source = ? WHERE id = ? AND "{label}" = ? '
+                        "AND COALESCE(source, 'local') = 'local'",
+                        (DEMO_SOURCE, row_id, value),
+                    ))
+        return updates
+    finally:
+        con.close()
+
+
 def plan_migrations(db_path: str) -> List[str]:
     """ALTER statements needed to add model columns missing from an existing DB."""
     if not os.path.exists(db_path):
@@ -364,32 +442,30 @@ def plan_migrations(db_path: str) -> List[str]:
 
 
 def migrate_db(db_path: str) -> Optional[str]:
-    """Idempotent additive migration. Backs the file up before any ALTER.
+    """Idempotent additive migration. Backs the file up before any change.
 
-    Returns the backup path when a migration ran, None when nothing was needed.
-    Never drops or rewrites existing data.
+    Adds missing model columns and marks the untouched seed rows as demo
+    (``plan_demo_marks``). Returns the backup path when a migration ran, None
+    when nothing was needed. Never drops or deletes existing data.
     """
     statements = plan_migrations(db_path)
-    if not statements:
+    marks = plan_demo_marks(db_path)
+    if not statements and not marks:
         return None
-    backup = _backup_path(db_path)
-    src = sqlite3.connect(db_path)
-    try:
-        dst = sqlite3.connect(backup)
-        try:
-            src.backup(dst)
-        finally:
-            dst.close()
-    finally:
-        src.close()
+    backup = backup_db(db_path)
     con = sqlite3.connect(db_path)
     try:
-        with con:  # one transaction: all columns or none
+        with con:  # one transaction: every change or none
             for ddl in statements:
                 con.execute(ddl)
+            for sql, params in marks:
+                con.execute(sql, params)
     finally:
         con.close()
-    logger.warning("DB migrada (%d columnas nuevas). Respaldo: %s", len(statements), backup)
+    logger.warning(
+        "DB migrada (%d columnas nuevas, %d filas de demostración marcadas). Respaldo: %s",
+        len(statements), len(marks), backup,
+    )
     return backup
 
 
