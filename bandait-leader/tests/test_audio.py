@@ -80,14 +80,11 @@ def test_recorder_lifecycle(qapp):
     recorder = RecordingEngine(sample_rate=48000)
     assert not recorder.is_recording()
 
-    # Mock recordings folder
-    import shutil
-    if os.path.exists("recordings"):
-        shutil.rmtree("recordings")
-
     folder = recorder.start("test_session", n_channels=2)
     assert recorder.is_recording()
     assert os.path.exists(folder)
+    # Default folder lives under BANDAIT_HOME (a tmp dir in tests), never in cwd.
+    assert os.path.abspath(folder).startswith(os.path.abspath(os.environ["BANDAIT_HOME"]))
 
     # Simulate a block
     block = np.random.randn(256, 2).astype(np.float32) * 0.1
@@ -99,9 +96,9 @@ def test_recorder_lifecycle(qapp):
 
     recorder.stop()
     assert not recorder.is_recording()
-
-    # Cleanup
-    shutil.rmtree("recordings", ignore_errors=True)
+    import soundfile as sf
+    data, sr = sf.read(os.path.join(folder, "track_ch1.flac"))
+    assert sr == 48000 and len(data) == 256
 
 
 def test_metronome_bpm_calculation(qapp):

@@ -1,7 +1,8 @@
 """Pure domain models (immutable dataclasses)."""
 
+import uuid
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from enum import Enum
 
 
@@ -179,46 +180,147 @@ class ExcelMasterWorkbook:
 
 
 class CommandType(str, Enum):
+    """CONTRACT_V3 section 3. Anything else is rejected with ``invalid_type``."""
+
     PLAY = "PLAY"
     STOP = "STOP"
     PAUSE = "PAUSE"
+    RESUME = "RESUME"
     CUE_NEXT = "CUE_NEXT"
     CUE_PREV = "CUE_PREV"
     JUMP_SONG = "JUMP_SONG"
     TEMPO_NUDGE = "TEMPO_NUDGE"
     PANIC = "PANIC"
 
+    @classmethod
+    def parse(cls, value: object) -> Optional["CommandType"]:
+        """Strict parse: exact upper-case names only, never a fallback."""
+        if not isinstance(value, str):
+            return None
+        try:
+            return cls(value)
+        except ValueError:
+            return None
+
+
+class CommandOrigin(str, Enum):
+    DIRECTOR_MOBILE = "director_mobile"
+    LAPTOP_FOH = "laptop_foh"
+    HUB = "hub"
+
+
+class ClientRole(str, Enum):
+    MUSICIAN = "musician"
+    DIRECTOR = "director"
+    FOH = "foh"
+    HUB = "hub"
+
+
+PROTOCOL_VERSION = 3
+
+# CONTRACT_V3 section 4: one UUID per leader process. state_version restarts at 1
+# when the leader restarts; followers detect the restart by this id changing.
+LEADER_INSTANCE_ID = str(uuid.uuid4())
+
+
+@dataclass(frozen=True)
+class SetlistEntry:
+    song_id: str
+    title: str
+    bpm: float
+    order_index: int
+    transition_mode: str = TransitionMode.MANUAL_CUE.value
+
+    def to_wire(self) -> dict:
+        return {
+            "song_id": self.song_id,
+            "title": self.title,
+            "bpm": self.bpm,
+            "order_index": self.order_index,
+            "transition_mode": self.transition_mode,
+        }
+
+
+@dataclass(frozen=True)
+class LastCommand:
+    command_id: str
+    type: str
+    origin: str
+
+    def to_wire(self) -> dict:
+        return {"command_id": self.command_id, "type": self.type, "origin": self.origin}
+
 
 @dataclass(frozen=True)
 class SetlistJumpAlert:
     song_id: str
     title: str
-    order_index: int
+    order_index: int  # 0-based, same as SessionState.current_order_index
     previous_song_id: Optional[str] = None
-    triggered_by: str = "Director"
+    triggered_by: str = "laptop_foh"
     timestamp_ns: int = 0
+
+    def to_wire(self, session_id: str) -> dict:
+        return {
+            "session_id": session_id,
+            "song_id": self.song_id,
+            "title": self.title,
+            "order_index": self.order_index,
+            "previous_song_id": self.previous_song_id,
+            "triggered_by": self.triggered_by,
+            "timestamp_ns": self.timestamp_ns,
+        }
 
 
 @dataclass(frozen=True)
 class ConcurrentCommand:
+    """A validated transport command.
+
+    ``received_ns`` is the leader clock at receipt. It is the only time used for
+    ordering (last-write-wins, rule 10); client clocks never participate.
+    """
+
     command_id: str
     command_type: CommandType
-    origin: str  # "laptop" | "director_mobile" | "foh"
-    sender_user_id: str
+    origin: str
+    sender_id: str
     session_id: str
-    timestamp_ns: int
+    received_ns: int
     payload: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class SessionState:
-    session_id: str
-    leader_ip: str
-    status: SessionStatus
-    current_song_id: Optional[str]
-    next_event_timestamp: int  # nanoseconds from leader monotonic clock
-    bpm: int
-    beat: int = 1  # 1-4
-    bar: int = 1
-    jump_alert: Optional[SetlistJumpAlert] = None
+    """CONTRACT_V3 SessionState. ``leader_time_ns`` is stamped by ``to_wire``."""
 
+    session_id: str
+    status: SessionStatus = SessionStatus.IDLE
+    state_version: int = 1
+    current_song_id: Optional[str] = None
+    current_order_index: Optional[int] = None
+    bpm: float = 120
+    beats_per_bar: int = 4
+    anchor_ns: Optional[int] = None
+    bar_offset: int = 1
+    paused_bar: Optional[int] = None
+    setlist: Tuple[SetlistEntry, ...] = ()
+    last_command: Optional[LastCommand] = None
+
+    def to_wire(self, leader_time_ns: int) -> dict:
+        return {
+            "protocol_version": PROTOCOL_VERSION,
+            "leader_instance_id": LEADER_INSTANCE_ID,
+            "session_id": self.session_id,
+            "status": self.status.value,
+            "state_version": self.state_version,
+            "current_song_id": self.current_song_id,
+            "current_order_index": self.current_order_index,
+            "bpm": self.bpm,
+            "beats_per_bar": self.beats_per_bar,
+            "anchor_ns": self.anchor_ns,
+            "bar_offset": self.bar_offset,
+            "paused_bar": self.paused_bar,
+            "leader_time_ns": int(leader_time_ns),
+            "setlist": [entry.to_wire() for entry in self.setlist],
+            "last_command": self.last_command.to_wire() if self.last_command else None,
+        }

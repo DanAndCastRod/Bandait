@@ -1,149 +1,121 @@
-"""Tests for NTP-like clock synchronization."""
+"""ClockService: NTP-style math and the Qt-side transport mirror."""
 
 import time
-import pytest
+
 from src.sync.clock_service import ClockService, SyncResult
+from src.sync.leader_clock import leader_now_ns
+from src.sync.transport_math import Segment
+
+
+def _state(version, status="PLAYING", anchor=None, bpm=120, bar_offset=1, paused_bar=None):
+    return {
+        "protocol_version": 3,
+        "session_id": "default",
+        "status": status,
+        "state_version": version,
+        "current_song_id": "s1",
+        "current_order_index": 0,
+        "bpm": bpm,
+        "beats_per_bar": 4,
+        "anchor_ns": anchor,
+        "bar_offset": bar_offset,
+        "paused_bar": paused_bar,
+        "leader_time_ns": leader_now_ns(),
+        "setlist": [],
+        "last_command": None,
+    }
 
 
 def test_ntp_algorithm_basic(qapp):
-    """Test basic NTP offset calculation with simulated symmetric delay."""
+    """Basic NTP offset calculation with simulated symmetric delay."""
     clock = ClockService(mode="follower")
-
-    # Simulate: t0=0, t1=50, t2=50, t3=100 (symmetric 50ms each way)
-    # RTT = (100 - 0) - (50 - 50) = 100ms
-    # Offset = ((50 - 0) + (50 - 100)) / 2 = (50 + (-50)) / 2 = 0ms
-    clock.record_sync_request()
-    time.sleep(0.01)  # Small processing delay
-    leader_time_ns = time.monotonic_ns()
-    clock.record_sync_response(leader_time_ns)
-
-    # After enough samples, offset should converge
     for _ in range(15):
-        t0 = time.monotonic_ns()
-        time.sleep(0.001)  # 1ms simulated network
-        t1 = time.monotonic_ns()
-        time.sleep(0.001)
-        t2 = time.monotonic_ns()
         clock.record_sync_request()
-        clock.record_sync_response(t1)
-
+        time.sleep(0.001)
+        clock.record_sync_response(leader_now_ns())
     offset = clock.get_stable_offset_ms()
-    # Offset should be small (near zero for local test)
-    if offset is not None:
-        assert abs(offset) < 10.0, f"Offset too large: {offset}ms"
+    assert offset is not None
+    assert abs(offset) < 2.0, f"Offset too large: {offset}ms"
 
 
 def test_median_filtering_outliers(qapp):
-    """Test that outlier RTT samples are filtered correctly."""
     clock = ClockService(mode="follower", sync_window=10)
-
-    # Inject 8 normal samples + 2 extreme outliers
-    base_time = time.monotonic_ns()
-    results = []
-    for i in range(8):
-        results.append(SyncResult(rtt_ms=2.0, offset_ms=5.0, timestamp_ns=base_time + i * 1e9))
-    # Outliers
-    results.append(SyncResult(rtt_ms=200.0, offset_ms=100.0, timestamp_ns=base_time + 8 * 1e9))
-    results.append(SyncResult(rtt_ms=150.0, offset_ms=-80.0, timestamp_ns=base_time + 9 * 1e9))
-
+    base_time = leader_now_ns()
+    results = [SyncResult(rtt_ms=2.0, offset_ms=5.0, timestamp_ns=base_time + i) for i in range(8)]
+    results.append(SyncResult(rtt_ms=200.0, offset_ms=100.0, timestamp_ns=base_time + 8))
+    results.append(SyncResult(rtt_ms=150.0, offset_ms=-80.0, timestamp_ns=base_time + 9))
     for r in results:
-        clock.sync_result.emit(r)
         clock._results.append(r)
-        if len(clock._results) > 10:
-            clock._results.pop(0)
-
     clock._compute_stable_offset()
     offset = clock.get_stable_offset_ms()
-
-    if offset is not None:
-        # Should be close to 5.0, not affected by outliers
-        assert 3.0 < offset < 7.0, f"Offset {offset}ms not robust to outliers"
+    assert offset is not None and 3.0 < offset < 7.0
 
 
 def test_leader_time_monotonic(qapp):
-    """Verify leader time uses monotonic clock."""
     clock = ClockService(mode="leader")
     t1 = clock.get_leader_time_ns()
     time.sleep(0.05)
     t2 = clock.get_leader_time_ns()
     assert t2 >= t1
-    diff_ms = (t2 - t1) / 1e6
-    assert 40.0 < diff_ms < 100.0  # Should be ~50ms
+    assert 45.0 < (t2 - t1) / 1e6 < 200.0
 
 
-def test_start_playback_forces_beat_one_and_resets_phase(qapp):
-    """START must force beat=1 and reset clock phase."""
-    clock = ClockService(mode="leader")
-    state = clock.start_playback(bpm=120)
-
-    assert state["status"] == "PLAYING"
-    assert state["beat"] == 1
-    assert state["bar"] == 1
-    assert state["bpm"] == 120
-    assert clock.current_beat == 1
-    assert clock.phase_start_ns is not None
-    assert state["next_event_timestamp"] == clock.phase_start_ns
-
-
-def test_resume_playback_forces_beat_one_and_resets_phase(qapp):
-    """RESUME must force beat=1 and re-align clock phase."""
-    clock = ClockService(mode="leader")
-    clock._current_bar = 5
-    clock._current_beat = 3
-    clock._status = "PAUSED"
-
-    state = clock.resume_playback(bpm=130)
-
-    assert state["status"] == "PLAYING"
-    assert state["beat"] == 1
-    assert state["bar"] == 5
-    assert state["bpm"] == 130
-    assert clock.current_beat == 1
-    assert clock.phase_start_ns is not None
+def test_ns_signals_do_not_overflow(qapp):
+    """Regression: Signal(int) is 32-bit in C++; ns timestamps overflow after 2.1 s."""
+    clock = ClockService()
+    got = {}
+    clock.transport_state_changed.connect(lambda s, b, a: got.setdefault("transport", (s, b, a)))
+    clock.phase_reset.connect(lambda bar, a: got.setdefault("phase", (bar, a)))
+    clock.schedule_changed.connect(lambda sched: got.setdefault("schedule", sched))
+    clock.session_state_changed.connect(lambda st: got.setdefault("state", st))
+    anchor = leader_now_ns() + 250_000_000
+    assert anchor > 2**31
+    sched = (Segment(anchor, 120, 4, 1),)
+    assert clock.apply_session_state(_state(5, anchor=anchor), sched)
+    assert got["transport"] == ("PLAYING", 1, anchor)
+    assert got["phase"] == (1, anchor)
+    assert got["schedule"] == sched
+    assert got["state"]["anchor_ns"] == anchor
 
 
-def test_handle_transport_command_start_and_resume(qapp):
-    """handle_transport_command properly handles START and RESUME commands."""
-    clock = ClockService(mode="leader")
-
-    start_res = clock.handle_transport_command("START", bpm=140)
-    assert start_res["status"] == "PLAYING"
-    assert start_res["beat"] == 1
-    assert start_res["bpm"] == 140
-
-    pause_res = clock.handle_transport_command("PAUSE")
-    assert pause_res["status"] == "PAUSED"
-
-    resume_res = clock.handle_transport_command("RESUME")
-    assert resume_res["status"] == "PLAYING"
-    assert resume_res["beat"] == 1
+def test_stale_versions_are_ignored(qapp):
+    clock = ClockService()
+    anchor = leader_now_ns()
+    assert clock.apply_session_state(_state(7, anchor=anchor), (Segment(anchor, 120, 4, 1),))
+    assert not clock.apply_session_state(_state(6, status="IDLE"))
+    assert clock.status == "PLAYING" and clock.state_version == 7
+    assert clock.apply_session_state(_state(8, status="PAUSED", paused_bar=4))
+    assert clock.status == "PAUSED" and clock.schedule == () and clock.paused_bar == 4
 
 
 def test_calculate_beat_at_time_phase_locked(qapp):
-    """Test calculation of bar and beat locked to phase clock."""
-    clock = ClockService(mode="leader")
-    clock.start_playback(bpm=120, beats_per_bar=4)
-    start_ns = clock.phase_start_ns
-    beat_ns = int((60.0 / 120) * 1e9)  # 500ms per beat
+    clock = ClockService()
+    anchor = leader_now_ns() + 250_000_000
+    beat = 500_000_000
+    clock.apply_session_state(_state(1, anchor=anchor, bar_offset=5), (Segment(anchor, 120, 4, 5),))
+    assert clock.calculate_beat_at_time(anchor - 1) is None
+    assert clock.calculate_beat_at_time(anchor) == (5, 1)
+    assert clock.calculate_beat_at_time(anchor + beat + 1000) == (5, 2)
+    assert clock.calculate_beat_at_time(anchor + 4 * beat + 1000) == (6, 1)
+    assert abs(clock.position_seconds(anchor + beat) - (4 * 4 * 0.5 + 0.5)) < 1e-6
 
-    # At exact start: bar 1, beat 1
-    bar, beat, next_ns = clock.calculate_beat_at_time(start_ns)
-    assert bar == 1
-    assert beat == 1
-    assert next_ns == start_ns + beat_ns
 
-    # Halfway into beat 1: still beat 1
-    bar, beat, _ = clock.calculate_beat_at_time(start_ns + beat_ns // 2)
-    assert bar == 1
-    assert beat == 1
+def test_beat_updated_emitted_once_per_beat(qapp):
+    clock = ClockService()
+    anchor = leader_now_ns() - 10  # already sounding
+    beats = []
+    clock.beat_updated.connect(lambda bar, beat, bpm: beats.append((bar, beat)))
+    clock.apply_session_state(_state(1, anchor=anchor), (Segment(anchor, 120, 4, 1),))
+    clock._tick()
+    clock._tick()
+    assert beats == [(1, 1)]
 
-    # At beat 2: bar 1, beat 2
-    bar, beat, _ = clock.calculate_beat_at_time(start_ns + beat_ns + 1000)
-    assert bar == 1
-    assert beat == 2
 
-    # At bar 2 beat 1 (beat index 4)
-    bar, beat, _ = clock.calculate_beat_at_time(start_ns + 4 * beat_ns + 1000)
-    assert bar == 2
-    assert beat == 1
-
+def test_new_leader_instance_resets_version_tracking(qapp):
+    clock = ClockService()
+    first = dict(_state(40, status="IDLE"), leader_instance_id="11111111-1111-4111-8111-111111111111")
+    assert clock.apply_session_state(first)
+    restarted = dict(_state(1, status="IDLE"), leader_instance_id="22222222-2222-4222-8222-222222222222")
+    assert clock.apply_session_state(restarted)  # version 1 accepted: the leader restarted
+    assert clock.state_version == 1
+    assert not clock.apply_session_state(dict(restarted))  # same instance, same version: stale

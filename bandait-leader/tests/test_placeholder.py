@@ -1,8 +1,11 @@
-"""Placeholder until real tests are implemented."""
+"""Smoke test: the core leader modules import with the src.* layout."""
 
 
 def test_imports():
-    from domain import models
-    from sync import clock_service
-    from network import bandait_server
+    from src.domain import models
+    from src.network import server
+    from src.sync import clock_service
+
     assert models.SessionStatus.PLAYING == "PLAYING"
+    assert hasattr(server, "BandaitServer")
+    assert hasattr(clock_service, "ClockService")

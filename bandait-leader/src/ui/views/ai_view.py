@@ -51,7 +51,7 @@ class AIWorker(QThread):
                 else:
                     response = self._assistant.chat(self.prompt)
 
-                self.response_ready.emit(f"🤖 **Asistente Bandait**:\n\n{response}")
+                self.response_ready.emit(f"**Asistente Bandait**:\n\n{response}")
             else:
                 # Modo offline — respuestas locales inteligentes
                 self._offline_response()
@@ -66,37 +66,37 @@ class AIWorker(QThread):
 
         if self.mode == "analyze":
             response = (
-                "📊 **Análisis de Ensayo (Modo Offline)**\n\n"
+                "**Análisis de Ensayo (Modo Offline)**\n\n"
                 "Basado en los datos locales disponibles:\n\n"
-                "✅ Tempo general estable\n"
-                "💡 Consejo: Practicar transiciones entre secciones\n"
-                "📝 Nota: Conecta una API key de Google Cloud para análisis avanzado"
+                "Tempo general estable\n"
+                "Consejo: Practicar transiciones entre secciones\n"
+                "Nota: Conecta una API key de Google Cloud para análisis avanzado"
             )
         elif self.mode == "setlist":
             if self.songs_data:
                 songs_list = "\n".join(f"{i+1}. {s.get('title', '?')} ({s.get('bpm', 120)} BPM)"
                                         for i, s in enumerate(self.songs_data[:8]))
                 response = (
-                    f"🎵 **Setlist Sugerido (Modo Offline)**\n\n"
+                    f"**Setlist Sugerido (Modo Offline)**\n\n"
                     f"Canciones disponibles:\n{songs_list}\n\n"
-                    f"💡 Consejo: Alternar tempos para mantener energía\n"
-                    f"📝 Conecta Google Cloud para sugerencias inteligentes"
+                    f"Consejo: Alternar tempos para mantener energía\n"
+                    f"Conecta Google Cloud para sugerencias inteligentes"
                 )
             else:
                 response = (
-                    "🎵 **Setlist (Modo Offline)**\n\n"
+                    "**Setlist (Modo Offline)**\n\n"
                     "No hay canciones en la biblioteca.\n"
                     "Importa canciones primero para generar setlists."
                 )
         else:
             response = (
-                f"🤖 **Asistente Bandait (Modo Offline)**\n\n"
+                f"**Asistente Bandait (Modo Offline)**\n\n"
                 f"Entiendo: *{self.prompt[:60]}...*\n\n"
                 f"Como asistente musical, te sugiero:\n"
                 f"1. Revisar el tempo actual con el metrónomo\n"
                 f"2. Practicar secciones difíciles a velocidad reducida\n"
                 f"3. Grabar el ensayo para revisión posterior\n\n"
-                f"📝 Para análisis avanzado, configura tu API key de Google Cloud:\n"
+                f"Para análisis avanzado, configura tu API key de Google Cloud:\n"
                 f"   `set BANDAIT_GOOGLE_API_KEY=tu-clave`"
             )
 
@@ -119,7 +119,7 @@ class AIView(QWidget):
         # === HEADER ===
         header = QHBoxLayout()
 
-        title = QLabel("🤖 ASISTENTE DE ENSAYOS")
+        title = QLabel("ASISTENTE DE ENSAYOS")
         title.setFont(QFont("Inter", 18, QFont.Bold))
         title.setStyleSheet("color: #FF00FF;")
         header.addWidget(title)
@@ -129,10 +129,10 @@ class AIView(QWidget):
         # Selector de modo
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([
-            "💬 Chat General",
-            "📊 Análisis de Ensayo",
-            "🎵 Sugerir Setlist",
-            "📝 Transcribir Notas"
+            "Chat General",
+            "Análisis de Ensayo",
+            "Sugerir Setlist",
+            "Transcribir Notas"
         ])
         self.mode_combo.setMinimumWidth(200)
         header.addWidget(self.mode_combo)
@@ -170,7 +170,7 @@ class AIView(QWidget):
         self.message_input.returnPressed.connect(self._send_message)
         input_layout.addWidget(self.message_input)
 
-        send_btn = QPushButton("➤ Enviar")
+        send_btn = QPushButton("Enviar")
         send_btn.setObjectName("primary")
         send_btn.setMinimumWidth(100)
         send_btn.clicked.connect(self._send_message)
@@ -186,10 +186,10 @@ class AIView(QWidget):
         actions_layout.setSpacing(8)
 
         quick_actions = [
-            ("📊 Analizar último ensayo", "analyze"),
-            ("🎵 Sugerir setlist", "setlist"),
-            ("📝 Crear notas de ensayo", "notes"),
-            ("🎚 Revisar tempo", "tempo"),
+            ("Analizar último ensayo", "analyze"),
+            ("Sugerir setlist", "setlist"),
+            ("Crear notas de ensayo", "notes"),
+            ("Revisar tempo", "tempo"),
         ]
 
         for label, mode in quick_actions:
@@ -212,14 +212,14 @@ class AIView(QWidget):
         layout.addWidget(actions_frame)
 
         # === ESTADO ===
-        self.status_label = QLabel("🟢 Listo - Conectado a Google Cloud")
+        self.status_label = QLabel("Listo")
         self.status_label.setFont(QFont("Inter", 10))
         self.status_label.setStyleSheet("color: #666666;")
         layout.addWidget(self.status_label)
 
         # Mensaje de bienvenida
         self._add_message(
-            "🤖 **Asistente Bandait**\n\n"
+            "**Asistente Bandait**\n\n"
             "¡Hola! Soy tu asistente musical. Puedo ayudarte con:\n"
             "• Analizar grabaciones de ensayo\n"
             "• Sugerir setlists para eventos\n"
@@ -274,7 +274,7 @@ class AIView(QWidget):
         if not text:
             return
 
-        self._add_message(f"👤 **Tú**: {text}", is_user=True)
+        self._add_message(f"**Tú**: {text}", is_user=True)
         self.message_input.clear()
 
         # Determinar modo
@@ -285,17 +285,16 @@ class AIView(QWidget):
         elif current_mode == 2:
             mode = "setlist"
 
-        self.status_label.setText("🟡 Pensando...")
+        self.status_label.setText("Pensando...")
         self.status_label.setStyleSheet("color: #FFAA00;")
 
         # Obtener canciones disponibles para contexto
         songs_data = []
         try:
+            from src.core.paths import get_db_path
             from src.db.models import Song
             from src.db.models import init_db
-            import os
-            db_path = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "bandait.db")
-            Session = init_db(db_path)
+            Session = init_db(get_db_path())
             session = Session()
             songs = session.query(Song).limit(20).all()
             songs_data = [s.to_dict() for s in songs]
@@ -311,16 +310,16 @@ class AIView(QWidget):
 
     def _on_response(self, response: str):
         self._add_message(response, is_user=False)
-        self.status_label.setText("🟢 Listo")
+        self.status_label.setText("Listo")
         self.status_label.setStyleSheet("color: #666666;")
 
     def _on_error(self, error: str):
         self._add_message(
-            f"❌ **Error**: {error}\n\n"
+            f"**Error**: {error}\n\n"
             f"Verifica tu conexión a internet y la configuración de la API key.",
             is_user=False
         )
-        self.status_label.setText("🔴 Error de conexión")
+        self.status_label.setText("Error de conexión")
         self.status_label.setStyleSheet("color: #FF0000;")
 
     def _quick_action(self, mode: str):

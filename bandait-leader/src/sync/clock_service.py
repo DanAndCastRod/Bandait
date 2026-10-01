@@ -1,10 +1,27 @@
-"""High-precision clock synchronization service using NTP-like algorithm."""
+"""Leader clock service: time base, NTP-style follower math and the Qt-side
+mirror of the transport.
 
-import time
+Transport flow (one path for every origin):
+
+    ConcurrentControlManager.process_command  (any thread, under its lock)
+      -> BandaitServer publishes StateUpdate  (queued Qt signal)
+      -> ClockService.apply_update            (Qt main thread)
+      -> AudioEngine.set_schedule             (Qt main thread, lock-free swap)
+
+ClockService never decides transport semantics; it applies what the manager
+published and derives the bar/beat display from the same anchor the followers
+use. Every Signal argument that can carry nanoseconds is declared ``object``:
+a C++ ``int`` is 32 bits and overflows after 2.1 s.
+"""
+
 import statistics
 from dataclasses import dataclass
-from typing import Callable, Optional
-from PySide6.QtCore import QObject, Signal, QThread
+from typing import Optional
+
+from PySide6.QtCore import QObject, QTimer, Signal
+
+from src.sync.leader_clock import leader_now_ns
+from src.sync.transport_math import EMPTY_SCHEDULE, Schedule, position_at
 
 
 @dataclass(frozen=True)
@@ -17,26 +34,13 @@ class SyncResult:
 
 
 class _ClockWorker(QObject):
-    """Worker that runs sync logic in a dedicated thread."""
+    """NTP-style sample bookkeeping (follower mode)."""
 
-    beacon = Signal()
-    synced = Signal(SyncResult)
+    synced = Signal(object)  # SyncResult
 
-    def __init__(self, interval_ms: int = 1000) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._interval_ms = interval_ms
-        self._running = False
         self._request_time_ns: Optional[int] = None
-        self._pending_callback: Optional[Callable[[], int]] = None
-
-    def start(self) -> None:
-        self._running = True
-        while self._running:
-            self.beacon.emit()
-            time.sleep(self._interval_ms / 1000.0)
-
-    def stop(self) -> None:
-        self._running = False
 
     def record_request(self, request_time_ns: int) -> None:
         self._request_time_ns = request_time_ns
@@ -47,36 +51,34 @@ class _ClockWorker(QObject):
         t0 = self._request_time_ns
         t1 = leader_time_ns
         t2 = response_time_ns
-        t3 = time.monotonic_ns()
+        t3 = leader_now_ns()
 
         rtt_ns = (t3 - t0) - (t2 - t1)
         offset_ns = ((t1 - t0) + (t2 - t3)) // 2
 
-        result = SyncResult(
-            rtt_ms=rtt_ns / 1e6,
-            offset_ms=offset_ns / 1e6,
-            timestamp_ns=t3,
-        )
+        result = SyncResult(rtt_ms=rtt_ns / 1e6, offset_ms=offset_ns / 1e6, timestamp_ns=t3)
         self.synced.emit(result)
         self._request_time_ns = None
 
 
 class ClockService(QObject):
-    """Provides NTP-style clock synchronization for followers."""
+    """Leader time base plus the Qt-side transport mirror."""
 
-    # Emitted every ~1s when acting as server (leader)
+    # Emitted every ~1 s while started (heartbeat for UI health indicators).
     beacon = Signal()
-
-    # Emitted when a sync exchange completes (follower mode)
-    sync_result = Signal(SyncResult)
-
-    # Emitted when a stable offset is computed
+    # Emitted when a sync exchange completes (follower mode).
+    sync_result = Signal(object)  # SyncResult
+    # Emitted when a stable offset is computed.
     offset_stable = Signal(float)  # offset_ms
 
-    # Transport phase signals
-    beat_updated = Signal(int, int, float)  # bar, beat (1-4), bpm
-    transport_state_changed = Signal(str, int, int)  # status, beat, timestamp_ns
-    phase_reset = Signal(int, int)  # beat=1, timestamp_ns
+    # Transport signals (Qt main thread only). ns values are Python ints: object.
+    beat_updated = Signal(int, int, float)  # bar, beat (1..beats_per_bar), bpm
+    transport_state_changed = Signal(str, int, object)  # status, beat, anchor_ns | None
+    phase_reset = Signal(int, object)  # bar_offset, anchor_ns
+    schedule_changed = Signal(object)  # Schedule (tuple of Segment)
+    session_state_changed = Signal(object)  # wire SessionState dict
+
+    UI_TICK_MS = 15
 
     def __init__(
         self,
@@ -91,37 +93,61 @@ class ClockService(QObject):
         self._outlier_threshold = outlier_threshold
         self._results: list[SyncResult] = []
         self._stable_offset_ms: Optional[float] = None
-        self._worker: Optional[_ClockWorker] = None
-        self._thread: Optional[QThread] = None
-
-        # Transport clock phase management
-        self._status = "IDLE"
-        self._bpm = 120
-        self._beats_per_bar = 4
-        self._current_beat = 1
-        self._current_bar = 1
-        self._phase_start_ns: Optional[int] = None
-        self._next_event_timestamp_ns: int = 0
-
-    def start(self) -> None:
-        self._worker = _ClockWorker()
-        self._worker.beacon.connect(self._on_beacon)
+        self._worker: Optional[_ClockWorker] = _ClockWorker()
         self._worker.synced.connect(self._on_synced)
-        self._thread = QThread(self)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.start)
-        self._thread.start()
+
+        # Transport mirror (written only on the Qt main thread).
+        self._status = "IDLE"
+        self._bpm: float = 120
+        self._beats_per_bar = 4
+        self._anchor_ns: Optional[int] = None
+        self._bar_offset = 1
+        self._paused_bar: Optional[int] = None
+        self._state_version = 0
+        self._leader_instance_id: Optional[str] = None
+        self._schedule: Schedule = EMPTY_SCHEDULE
+        self._wire_state: Optional[dict] = None
+        self._last_position: Optional[tuple[int, int]] = None
+
+        self._beacon_timer: Optional[QTimer] = None
+        self._ui_timer: Optional[QTimer] = None
+
+    # ------------------------------------------------------------------ lifecycle
+    def start(self) -> None:
+        """Start the heartbeat and the beat display ticker. Idempotent."""
+        if self._beacon_timer is None:
+            self._beacon_timer = QTimer(self)
+            self._beacon_timer.timeout.connect(self.beacon.emit)
+        if self._ui_timer is None:
+            self._ui_timer = QTimer(self)
+            self._ui_timer.setTimerType(self._precise_timer_type())
+            self._ui_timer.timeout.connect(self._tick)
+        self._beacon_timer.start(1000)
+        self._ui_timer.start(self.UI_TICK_MS)
 
     def stop(self) -> None:
-        if self._worker:
-            self._worker.stop()
-        if self._thread:
-            self._thread.quit()
-            self._thread.wait(5000)
+        for timer in (self._beacon_timer, self._ui_timer):
+            if timer is not None:
+                timer.stop()
 
-    def _on_beacon(self) -> None:
-        self.beacon.emit()
+    def is_running(self) -> bool:
+        return self._ui_timer is not None and self._ui_timer.isActive()
 
+    @staticmethod
+    def _precise_timer_type():
+        from PySide6.QtCore import Qt
+
+        return Qt.PreciseTimer
+
+    # ------------------------------------------------------------------ time base
+    def get_leader_time_ns(self) -> int:
+        """Current leader time in nanoseconds. Thread-safe (no state)."""
+        return leader_now_ns()
+
+    def get_leader_time_ms(self) -> float:
+        return leader_now_ns() / 1e6
+
+    # ------------------------------------------------------------------ follower NTP math
     def _on_synced(self, result: SyncResult) -> None:
         self.sync_result.emit(result)
         self._results.append(result)
@@ -144,22 +170,12 @@ class ClockService(QObject):
             self._stable_offset_ms = stable
             self.offset_stable.emit(stable)
 
-    def get_leader_time_ns(self) -> int:
-        """Return current leader time in nanoseconds (monotonic)."""
-        return time.monotonic_ns()
-
-    def get_leader_time_ms(self) -> float:
-        """Return current leader time in milliseconds."""
-        return time.monotonic_ns() / 1e6
-
     def convert_to_local(self, leader_time_ms: float) -> float:
-        """Convert a leader timestamp to local time using stable offset."""
         if self._stable_offset_ms is None:
             return leader_time_ms
         return leader_time_ms - self._stable_offset_ms
 
     def convert_to_leader(self, local_time_ms: float) -> float:
-        """Convert a local timestamp to leader time using stable offset."""
         if self._stable_offset_ms is None:
             return local_time_ms
         return local_time_ms + self._stable_offset_ms
@@ -168,172 +184,132 @@ class ClockService(QObject):
         return self._stable_offset_ms
 
     def record_sync_request(self) -> int:
-        """Record local time before sending sync request. Returns request time."""
-        t0 = time.monotonic_ns()
+        t0 = leader_now_ns()
         if self._worker:
             self._worker.record_request(t0)
         return t0
 
     def record_sync_response(self, leader_time_ns: int) -> None:
-        """Process sync response from leader."""
-        t2 = time.monotonic_ns()
+        t2 = leader_now_ns()
         if self._worker:
             self._worker.record_response(t2, leader_time_ns)
+
+    # ------------------------------------------------------------------ transport mirror
+    def apply_update(self, update) -> bool:
+        """Apply a manager ``StateUpdate`` (Qt main thread). Stale versions are ignored."""
+        return self.apply_session_state(update.wire_state, update.schedule)
+
+    def apply_session_state(self, wire_state: dict, schedule: Optional[Schedule] = None) -> bool:
+        try:
+            version = int(wire_state.get("state_version", 0))
+        except (TypeError, ValueError, AttributeError):
+            return False
+        instance = wire_state.get("leader_instance_id")
+        if instance != self._leader_instance_id:
+            # A different leader process: its state_version restarted at 1.
+            self._leader_instance_id = instance
+            self._state_version = 0
+        if version <= self._state_version:
+            return False
+        prev_status = self._status
+        prev_anchor = self._anchor_ns
+        self._state_version = version
+        self._wire_state = wire_state
+        self._status = str(wire_state.get("status", "IDLE"))
+        self._bpm = wire_state.get("bpm", self._bpm) or self._bpm
+        self._beats_per_bar = int(wire_state.get("beats_per_bar", 4) or 4)
+        self._anchor_ns = wire_state.get("anchor_ns")
+        self._bar_offset = int(wire_state.get("bar_offset", 1) or 1)
+        self._paused_bar = wire_state.get("paused_bar")
+        new_schedule = tuple(schedule) if schedule is not None else EMPTY_SCHEDULE
+        if self._status != "PLAYING":
+            new_schedule = EMPTY_SCHEDULE
+        if new_schedule != self._schedule:
+            self._schedule = new_schedule
+            self.schedule_changed.emit(new_schedule)
+        if self._anchor_ns is not None and self._anchor_ns != prev_anchor:
+            self.phase_reset.emit(self._bar_offset, self._anchor_ns)
+        if self._status != prev_status or self._anchor_ns != prev_anchor:
+            beat = 1
+            self.transport_state_changed.emit(self._status, beat, self._anchor_ns)
+        if self._status != "PLAYING":
+            self._last_position = None
+        self.session_state_changed.emit(wire_state)
+        self._tick()
+        return True
+
+    def _tick(self) -> None:
+        if not self._schedule:
+            return
+        pos = position_at(self._schedule, leader_now_ns())
+        if pos is None or pos == self._last_position:
+            return
+        self._last_position = pos
+        self.beat_updated.emit(pos[0], pos[1], float(self._bpm))
+
+    def calculate_beat_at_time(self, time_ns: Optional[int] = None) -> Optional[tuple[int, int]]:
+        """(bar, beat) at leader time t from the applied schedule, None if silent."""
+        if time_ns is None:
+            time_ns = leader_now_ns()
+        return position_at(self._schedule, time_ns)
+
+    def position_seconds(self, time_ns: Optional[int] = None) -> float:
+        """Approximate song position for display (bars before the anchor + elapsed)."""
+        if self._status == "PAUSED" and self._paused_bar is not None:
+            return max(0, self._paused_bar) * self._beats_per_bar * 60.0 / float(self._bpm)
+        if self._status != "PLAYING" or not self._schedule:
+            return 0.0
+        if time_ns is None:
+            time_ns = leader_now_ns()
+        seg = self._schedule[-1]
+        for candidate in self._schedule:
+            if candidate.anchor_ns <= time_ns:
+                seg = candidate
+        before = (seg.bar_offset - 1) * seg.beats_per_bar * 60.0 / float(seg.bpm)
+        return max(0.0, before + (time_ns - seg.anchor_ns) / 1e9)
 
     @property
     def status(self) -> str:
         return self._status
 
     @property
-    def current_beat(self) -> int:
-        return self._current_beat
-
-    @property
-    def current_bar(self) -> int:
-        return self._current_bar
-
-    @property
-    def bpm(self) -> int:
+    def bpm(self) -> float:
         return self._bpm
 
     @property
-    def next_event_timestamp_ns(self) -> int:
-        return self._next_event_timestamp_ns
+    def beats_per_bar(self) -> int:
+        return self._beats_per_bar
 
     @property
-    def phase_start_ns(self) -> Optional[int]:
-        return self._phase_start_ns
+    def anchor_ns(self) -> Optional[int]:
+        return self._anchor_ns
 
-    def start_playback(
-        self,
-        bpm: Optional[int] = None,
-        lead_in_ms: float = 0.0,
-        beats_per_bar: int = 4,
-    ) -> dict:
-        """Start playback, forcing beat = 1 and resetting clock phase."""
-        if bpm is not None:
-            self._bpm = max(20, min(500, int(bpm)))
-        self._beats_per_bar = max(1, beats_per_bar)
-        self._current_beat = 1
-        self._current_bar = 1
-        self._status = "PLAYING"
+    @property
+    def bar_offset(self) -> int:
+        return self._bar_offset
 
-        now_ns = self.get_leader_time_ns()
-        lead_in_ns = int(lead_in_ms * 1e6)
-        self._phase_start_ns = now_ns + lead_in_ns
-        self._next_event_timestamp_ns = self._phase_start_ns
+    @property
+    def paused_bar(self) -> Optional[int]:
+        return self._paused_bar
 
-        self.phase_reset.emit(1, self._phase_start_ns)
-        self.beat_updated.emit(1, 1, float(self._bpm))
-        self.transport_state_changed.emit("PLAYING", 1, self._phase_start_ns)
+    @property
+    def state_version(self) -> int:
+        return self._state_version
 
-        return {
-            "status": "PLAYING",
-            "bpm": self._bpm,
-            "beat": 1,
-            "bar": 1,
-            "next_event_timestamp": self._next_event_timestamp_ns,
-        }
+    @property
+    def schedule(self) -> Schedule:
+        return self._schedule
 
-    def resume_playback(
-        self,
-        bpm: Optional[int] = None,
-        lead_in_ms: float = 0.0,
-    ) -> dict:
-        """Resume playback, forcing beat = 1 and resetting clock phase."""
-        if bpm is not None:
-            self._bpm = max(20, min(500, int(bpm)))
-        self._current_beat = 1
-        self._status = "PLAYING"
+    @property
+    def session_state(self) -> Optional[dict]:
+        return self._wire_state
 
-        now_ns = self.get_leader_time_ns()
-        lead_in_ns = int(lead_in_ms * 1e6)
-        self._phase_start_ns = now_ns + lead_in_ns
-        self._next_event_timestamp_ns = self._phase_start_ns
+    @property
+    def current_beat(self) -> int:
+        return self._last_position[1] if self._last_position else 1
 
-        self.phase_reset.emit(1, self._phase_start_ns)
-        self.beat_updated.emit(self._current_bar, 1, float(self._bpm))
-        self.transport_state_changed.emit("PLAYING", 1, self._phase_start_ns)
-
-        return {
-            "status": "PLAYING",
-            "bpm": self._bpm,
-            "beat": 1,
-            "bar": self._current_bar,
-            "next_event_timestamp": self._next_event_timestamp_ns,
-        }
-
-    def stop_playback(self) -> dict:
-        """Stop playback and reset transport phase."""
-        self._status = "IDLE"
-        self._current_beat = 1
-        self._current_bar = 1
-        self._phase_start_ns = None
-        self._next_event_timestamp_ns = 0
-
-        self.transport_state_changed.emit("IDLE", 1, 0)
-
-        return {
-            "status": "IDLE",
-            "bpm": self._bpm,
-            "beat": 1,
-            "bar": 1,
-            "next_event_timestamp": 0,
-        }
-
-    def pause_playback(self) -> dict:
-        """Pause playback preserving current position."""
-        self._status = "PAUSED"
-        now_ns = self.get_leader_time_ns()
-        self.transport_state_changed.emit("PAUSED", self._current_beat, now_ns)
-
-        return {
-            "status": "PAUSED",
-            "bpm": self._bpm,
-            "beat": self._current_beat,
-            "bar": self._current_bar,
-            "next_event_timestamp": 0,
-        }
-
-    def handle_transport_command(
-        self,
-        command: str,
-        bpm: Optional[int] = None,
-        lead_in_ms: float = 0.0,
-    ) -> dict:
-        """Unified command handler enforcing clock phase reset on START and RESUME."""
-        cmd = command.strip().upper()
-        if cmd in ("START", "PLAY"):
-            return self.start_playback(bpm=bpm, lead_in_ms=lead_in_ms)
-        elif cmd == "RESUME":
-            return self.resume_playback(bpm=bpm, lead_in_ms=lead_in_ms)
-        elif cmd == "STOP":
-            return self.stop_playback()
-        elif cmd == "PAUSE":
-            return self.pause_playback()
-        else:
-            raise ValueError(f"Unknown transport command: {command}")
-
-    def calculate_beat_at_time(self, time_ns: Optional[int] = None) -> tuple[int, int, int]:
-        """Calculate (bar, beat, next_event_timestamp_ns) from phase clock."""
-        if self._phase_start_ns is None or self._status != "PLAYING":
-            return (self._current_bar, self._current_beat, self._next_event_timestamp_ns)
-
-        if time_ns is None:
-            time_ns = self.get_leader_time_ns()
-
-        elapsed_ns = time_ns - self._phase_start_ns
-        if elapsed_ns < 0:
-            return (1, 1, self._phase_start_ns)
-
-        beat_duration_ns = int((60.0 / self._bpm) * 1e9)
-        total_beats = elapsed_ns // beat_duration_ns
-        current_beat = int((total_beats % self._beats_per_bar) + 1)
-        current_bar = int((total_beats // self._beats_per_bar) + 1)
-        next_event_ns = self._phase_start_ns + int((total_beats + 1) * beat_duration_ns)
-
-        self._current_beat = current_beat
-        self._current_bar = current_bar
-        self._next_event_timestamp_ns = next_event_ns
-
-        return (current_bar, current_beat, next_event_ns)
+    @property
+    def current_bar(self) -> int:
+        if self._last_position:
+            return self._last_position[0]
+        return self._paused_bar if self._paused_bar is not None else self._bar_offset

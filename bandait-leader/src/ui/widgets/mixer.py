@@ -139,6 +139,9 @@ class ChannelStrip(QWidget):
             }
         """)
         self.pan_slider.valueChanged.connect(self._on_pan)
+        # El mezclador no aplica paneo todavia: control deshabilitado y visible.
+        self.pan_slider.setEnabled(False)
+        self.pan_slider.setToolTip("Paneo: no disponible en esta version")
         layout.addWidget(self.pan_slider)
 
         self.pan_display = QLabel("C")

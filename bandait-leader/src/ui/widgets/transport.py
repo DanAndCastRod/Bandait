@@ -12,14 +12,21 @@ from PySide6.QtGui import QFont
 
 
 class TransportWidget(QWidget):
-    """Barra de transporte profesional tipo DAW."""
+    """Barra de transporte profesional tipo DAW.
+
+    El widget solo expresa intenciones (play, pausa, stop, tempo). El estado que
+    muestra lo fija la ventana principal desde el SessionState del lider, de modo
+    que los botones nunca muestran un estado que el transporte no tiene.
+    """
 
     play_clicked = Signal()
+    pause_clicked = Signal()
     stop_clicked = Signal()
     rec_clicked = Signal()
     loop_clicked = Signal(bool)
     tap_tempo_clicked = Signal()
-    bpm_changed = Signal(int)
+    bpm_changed = Signal(int)  # BPM pedido por el usuario (TAP)
+    tempo_nudge_clicked = Signal(int)  # delta_bpm (+1 / -1)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,9 +36,9 @@ class TransportWidget(QWidget):
         self._bpm = 120
         self._seconds = 0.0
         self._tap_times = []
+        self._status = "IDLE"
 
         self._setup_ui()
-        self._setup_timer()
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
@@ -181,6 +188,31 @@ class TransportWidget(QWidget):
         """)
         self.tap_btn.clicked.connect(self._on_tap_tempo)
         bpm_header.addWidget(self.tap_btn)
+
+        nudge_style = """
+            QPushButton {
+                min-width: 28px; min-height: 20px;
+                font-size: 10px;
+                border: 1px solid #666666;
+                color: #666666;
+                border-radius: 2px;
+                padding: 2px 4px;
+            }
+            QPushButton:hover {
+                border-color: #00FFFF;
+                color: #00FFFF;
+            }
+        """
+        self.nudge_down_btn = QPushButton("-1")
+        self.nudge_down_btn.setToolTip("Bajar 1 BPM en el siguiente compas")
+        self.nudge_down_btn.setStyleSheet(nudge_style)
+        self.nudge_down_btn.clicked.connect(lambda: self.tempo_nudge_clicked.emit(-1))
+        bpm_header.addWidget(self.nudge_down_btn)
+        self.nudge_up_btn = QPushButton("+1")
+        self.nudge_up_btn.setToolTip("Subir 1 BPM en el siguiente compas")
+        self.nudge_up_btn.setStyleSheet(nudge_style)
+        self.nudge_up_btn.clicked.connect(lambda: self.tempo_nudge_clicked.emit(1))
+        bpm_header.addWidget(self.nudge_up_btn)
         bpm_layout.addLayout(bpm_header)
 
         self.bpm_display = QLabel("120")
@@ -218,8 +250,11 @@ class TransportWidget(QWidget):
         status_layout.setContentsMargins(12, 8, 12, 8)
 
         # Loop
-        self.loop_btn = QPushButton("⟲ BUCLE")
+        self.loop_btn = QPushButton("BUCLE")
         self.loop_btn.setCheckable(True)
+        # Sin implementacion de bucle en el transporte v3: deshabilitado y visible.
+        self.loop_btn.setEnabled(False)
+        self.loop_btn.setToolTip("Bucle: no disponible en esta version")
         self.loop_btn.setFont(QFont("Inter", 9, QFont.Bold))
         self.loop_btn.setStyleSheet("""
             QPushButton {
@@ -265,16 +300,6 @@ class TransportWidget(QWidget):
         layout.addWidget(status_frame)
         layout.addStretch()
 
-    def _setup_timer(self):
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._update_time)
-        self._timer.setInterval(33)  # ~30fps
-
-    def _update_time(self):
-        if self._is_playing:
-            self._seconds += 0.033
-            self._update_time_display()
-
     def _update_time_display(self):
         minutes = int(self._seconds) // 60
         seconds = int(self._seconds) % 60
@@ -282,36 +307,51 @@ class TransportWidget(QWidget):
         self.time_display.setText(f"{minutes:02d}:{seconds:02d}.{millis:03d}")
 
     def _on_play(self):
-        self._is_playing = self.play_btn.isChecked()
-        if self._is_playing:
-            self._timer.start()
-            self.status_label.setText("Reproduciendo")
-            self.status_label.setStyleSheet("color: #CCFF00;")
-            self.play_clicked.emit()
+        # The click toggled the checkable button; the real state comes back
+        # through set_transport_status(), so restore what the leader says now.
+        self.play_btn.setChecked(self._status == "PLAYING")
+        if self._status == "PLAYING":
+            self.pause_clicked.emit()
         else:
-            self._timer.stop()
-            self.status_label.setText("Pausado")
-            self.status_label.setStyleSheet("color: #FFAA00;")
+            self.play_clicked.emit()
 
     def _on_stop(self):
-        self._is_playing = False
-        self._timer.stop()
-        self._seconds = 0.0
-        self._update_time_display()
-        self.play_btn.setChecked(False)
-        self.status_label.setText("Detenido")
-        self.status_label.setStyleSheet("color: #FF0000;")
         self.stop_clicked.emit()
 
+    def set_transport_status(self, status: str):
+        """Reflejar el estado del lider (IDLE / PLAYING / PAUSED / COUNTING)."""
+        self._status = status
+        self._is_playing = status == "PLAYING"
+        self.play_btn.setChecked(self._is_playing)
+        if status == "PLAYING":
+            self.play_btn.setToolTip("Pausar (Espacio)")
+            if not self._is_recording:
+                self.status_label.setText("Reproduciendo")
+                self.status_label.setStyleSheet("color: #CCFF00;")
+        elif status == "PAUSED":
+            self.play_btn.setToolTip("Continuar en el siguiente compas (Espacio)")
+            if not self._is_recording:
+                self.status_label.setText("Pausado")
+                self.status_label.setStyleSheet("color: #FFAA00;")
+        else:
+            self.play_btn.setToolTip("Reproducir (Espacio)")
+            if not self._is_recording:
+                self.status_label.setText("Detenido")
+                self.status_label.setStyleSheet("color: #666666;")
+
     def _on_rec(self):
-        self._is_recording = self.rec_btn.isChecked()
-        if self._is_recording:
-            self.status_label.setText("● GRABANDO")
+        self.set_recording_state(self.rec_btn.isChecked())
+        self.rec_clicked.emit()
+
+    def set_recording_state(self, recording: bool):
+        """Reflejar el estado de grabación sin emitir señales."""
+        self._is_recording = recording
+        self.rec_btn.setChecked(recording)
+        if recording:
+            self.status_label.setText("GRABANDO")
             self.status_label.setStyleSheet("color: #FF0000; font-weight: bold;")
         else:
-            self.status_label.setText("Listo")
-            self.status_label.setStyleSheet("color: #666666;")
-        self.rec_clicked.emit()
+            self.set_transport_status(self._status)
 
     def _on_loop(self):
         self._is_looping = self.loop_btn.isChecked()
@@ -358,21 +398,36 @@ class TransportWidget(QWidget):
         """))
 
     def set_bpm(self, bpm: int):
-        self._bpm = max(40, min(300, bpm))
+        """BPM pedido por el usuario (TAP): se emite para que el lider lo aplique."""
+        self._bpm = max(40, min(260, int(bpm)))
         self.bpm_display.setText(str(self._bpm))
         self.bpm_changed.emit(self._bpm)
+
+    def display_bpm(self, bpm: float):
+        """Mostrar el BPM del SessionState sin emitir senales."""
+        self._bpm = bpm
+        text = str(int(bpm)) if float(bpm).is_integer() else f"{bpm:.1f}"
+        self.bpm_display.setText(text)
 
     def set_time(self, seconds: float):
         self._seconds = seconds
         self._update_time_display()
 
     def set_beat(self, beat: int):
-        """Actualizar indicador de beat (1-4)."""
-        for i, led in enumerate(self.beat_indicators):
-            if i == beat - 1:
-                led.setStyleSheet("color: #CCFF00;")
-            else:
-                led.setStyleSheet("color: #333333;")
+        """Actualizar indicador de beat (1-4). Solo toca los dos LEDs que cambian."""
+        prev = getattr(self, "_lit_beat", None)
+        if prev == beat:
+            return
+        if prev is not None and 0 < prev <= len(self.beat_indicators):
+            self.beat_indicators[prev - 1].setStyleSheet("color: #333333;")
+        if 0 < beat <= len(self.beat_indicators):
+            self.beat_indicators[beat - 1].setStyleSheet("color: #CCFF00;")
+        self._lit_beat = beat
+
+    def clear_beat(self):
+        for led in self.beat_indicators:
+            led.setStyleSheet("color: #333333;")
+        self._lit_beat = None
 
     def set_network_status(self, ok: bool, message: str = ""):
         if ok:
