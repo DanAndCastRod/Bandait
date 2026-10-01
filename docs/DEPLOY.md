@@ -30,6 +30,30 @@ La suite web está consolidada en el directorio `landing/` y opera sobre la red 
 +----------------------------------+        +-----------------------------------+
 ```
 
+### Qué corre en cada servicio (revisado el 2026-10-01)
+
+| Función | Proveedor | Detalle | Estado |
+|---|---|---|---|
+| Hosting de `/`, `/hub/`, `/app/` y `/privacidad/` | **Cloudflare Pages** | Proyecto `bandait`; publica `landing/` tal cual desde `main` | Producción |
+| Dominio y DNS (`bandait.releven.cc`) | **Cloudflare** | Zona `releven.cc`, compartida con el ecosistema Releven | Producción |
+| Reglas edge: rutas SPA y caché | **Cloudflare Pages** | `landing/_redirects` y `landing/_headers` | Producción |
+| Login de nube | **Supabase Auth**, con Google como proveedor | PKCE. El Client ID y el secreto de Google viven solo en Supabase | Producción |
+| Base de datos de workspaces | **Supabase Postgres** (`bandait-cloud`, `https://xftzxzwopwzjmttrwtga.supabase.co`) | Tabla `bandait_workspaces`, una fila por cuenta, con RLS por `auth.uid()` (sección 3.3) | Producción |
+| Sincronización entre dispositivos | **Supabase Realtime** | Solo avisa; el cliente vuelve a leer su fila | Producción |
+| Cuenta Google (OAuth, Branding, privacidad) | **Google Auth Platform** | App publicada; política en `/privacidad/` | Producción |
+| Tipografías | **Google Fonts** | Si no hay internet, se usan las fuentes de respaldo | Producción |
+| Código, CI y releases del líder | **GitHub** (repo público, Actions) | CI en producción; releases del `.exe` en Fase 1 | CI activo |
+| Texto a voz para conteos y avisos | **Azure AI Speech**, capa F0 | Recurso `bandait-instance-azure-speech`: voces `es-CO-SalomeNeural` y `es-CO-GonzaloNeural`. La llave está en ClipVault; en producción irá solo como secreto del Worker | Probado el 2026-10-01; integración en Fase 1 |
+| Proxy de voz y caché de audios de conteo | **Cloudflare Workers + R2** | Guarda la llave de Azure, valida la sesión de Supabase y cachea los audios | Planeado (Fase 1) |
+| Pistas de acompañamiento | En la laptop del líder | Nube futura candidata: Worker de medios de URiT (R2) del ecosistema Releven, con bucket privado propio | Fase 2 |
+| Show en vivo | **Red local del escenario** | El líder sirve el follower y Socket.IO por HTTP en la LAN. No usa la nube | Producción |
+
+**Supabase frente a la regla "todo en Cloudflare" del ecosistema Releven.** Decisión del usuario del 2026-10-01: Supabase se mantiene para identidad y datos y queda documentado como proveedor externo, igual que Wompi para los pagos de Releven. Todo lo demás corre en Cloudflare: hosting, dominio, reglas edge y los servicios nuevos (proxy de voz y almacenamiento de audio).
+
+**Relación con Releven.** `ecosystem.releven.cc` es el panel privado donde cada banda trabaja dentro de Releven, con backend Django y JWT propio. Bandait es un inquilino externo con identidad propia (Supabase) y no comparte cuentas con ese panel. Integraciones candidatas a futuro:
+- el Worker de medios de URiT para las pistas, cuando esté desplegado;
+- importar los metadatos de `RepertoireTrack` (BPM, tono, compás, duración) según `shared/contracts/urit-content/track.schema.json`.
+
 ### Rutas y Reglas Edge
 * **Ruteo SPA:** Definido en `landing/_redirects` para que rutas internas (`/hub/*` y `/app/*`) no devuelvan error 404 al recargar el navegador.
 * **Caché:** `landing/_headers` marca `sw.js`, `manifest.webmanifest` y `index.html` del follower con `Cache-Control: public, max-age=0, must-revalidate`, para que los teléfonos tomen cada despliegue de inmediato. Los assets con hash (`/app/assets/*`) son `immutable`.
