@@ -276,6 +276,8 @@ html, body, #root {
 }
 
 .form-input {
+  width: 100%;
+  min-width: 0; /* never wider than its grid/flex cell (375/320 px phones) */
   background: var(--bg-surface);
   border: 1px solid var(--theme-border);
   border-radius: var(--theme-radius);
@@ -562,6 +564,13 @@ html, body, #root {
   animation: pulse-warn 1s infinite;
 }
 
+/* DEGRADED: amber, steady. UNSTABLE uses .warning (amber, pulsing). */
+.network-beacon.degraded {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--accent-warning);
+  border: 1px solid var(--accent-warning);
+}
+
 .network-beacon.critical {
   background: rgba(239, 68, 68, 0.15);
   color: var(--accent-danger);
@@ -801,11 +810,13 @@ html, body, #root {
   font-weight: 800;
   color: var(--text-primary);
   letter-spacing: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .setlist-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 16px;
   margin-top: 8px;
 }
@@ -914,6 +925,16 @@ html, body, #root {
     gap: 8px;
   }
 
+  .library-view,
+  .settings-view {
+    padding: 16px 12px;
+  }
+
+  .library-title {
+    font-size: 20px;
+    letter-spacing: 1px;
+  }
+
   .prompter-lyric-current {
     font-size: 28px;
   }
@@ -925,4 +946,245 @@ html, body, #root {
   .connect-title {
     font-size: 30px;
   }
+}
+
+/* ==========================================================================
+   RAF-DRIVEN BEAT VISUALS (no React state per beat)
+   useBeatVisuals sets data-border / data-downbeat and the .pulse class on
+   .stage-view; these rules light the borders, pills and VFD.
+   ========================================================================== */
+
+.stage-view.pulse[data-border="top"] .metronome-border.top,
+.stage-view.pulse[data-border="right"] .metronome-border.right,
+.stage-view.pulse[data-border="bottom"] .metronome-border.bottom,
+.stage-view.pulse[data-border="left"] .metronome-border.left {
+  opacity: 1;
+}
+
+.stage-view.pulse[data-border="top"] .metronome-border.top {
+  background: var(--accent-success);
+  box-shadow: 0 0 32px var(--accent-success);
+}
+
+.stage-view.pulse .stage-prompter-center {
+  box-shadow: inset 0 0 50px var(--theme-glow);
+}
+
+.vfd-display {
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--theme-radius);
+  padding: 12px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.08s ease;
+  position: relative;
+}
+
+.stage-view.pulse[data-downbeat="1"] .vfd-display {
+  box-shadow: 0 0 20px var(--theme-glow);
+}
+
+.vfd-caption {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-disabled);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+}
+
+.vfd-digits {
+  font-size: 34px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -1px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.05s ease;
+}
+
+.stage-view[data-downbeat="1"] .vfd-beat {
+  color: var(--accent-active);
+}
+
+.stage-view.pulse[data-downbeat="1"] .vfd-beat {
+  text-shadow: 0 0 16px var(--accent-active);
+}
+
+/* ACTIVAR AUDIO (iOS needs a user gesture before Web Audio plays) */
+.audio-arm-banner {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #000000;
+  background: var(--accent-warning);
+  border: 2px solid var(--accent-warning);
+  border-radius: var(--theme-radius);
+  cursor: pointer;
+  animation: pulse-warn 1.2s infinite;
+}
+
+.audio-arm-banner.muted {
+  color: #ffffff;
+  background: var(--accent-danger);
+  border-color: var(--accent-danger);
+}
+
+.audio-arm-banner.muted.confirming {
+  color: #000000;
+  background: var(--accent-warning);
+  border-color: var(--accent-warning);
+}
+
+.audio-arm-banner.unsupported {
+  cursor: default;
+  color: var(--accent-warning);
+  background: transparent;
+  animation: none;
+}
+
+/* Setlist jump banner auto-dismiss bar (CSS animation, no React ticks) */
+.jump-banner-progress {
+  width: 100%;
+  height: 100%;
+  background: var(--accent-warning);
+  transform-origin: left center;
+  animation-name: jump-banner-shrink;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes jump-banner-shrink {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+/* QR scanner panel (ConnectView) */
+.qr-scanner-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--theme-radius);
+}
+
+.qr-camera-view {
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--theme-radius);
+  background: #000000;
+}
+
+.qr-scanner-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.qr-scanner-note.error {
+  color: var(--accent-danger);
+}
+
+.emergency-handle {
+  transition: none;
+}
+
+/* Screen may sleep (Wake Lock unavailable) */
+.wakelock-warning {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--accent-warning);
+  border: 1px dashed var(--accent-warning);
+  border-radius: var(--theme-radius);
+  padding: 3px 8px;
+}
+
+/* Served by the leader over HTTP on the LAN (contract section 8) */
+.served-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--accent-success);
+  border-radius: var(--theme-radius);
+  background: rgba(16, 185, 129, 0.08);
+  font-family: var(--font-mono);
+}
+
+.served-banner-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--accent-success);
+  overflow-wrap: anywhere;
+}
+
+.served-banner-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* HTTPS page cannot reach ws:// on the LAN: offer the leader-served follower */
+.https-guard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 2px solid var(--accent-warning);
+  border-radius: var(--theme-radius);
+  background: rgba(245, 158, 11, 0.08);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.https-guard strong {
+  color: var(--accent-warning);
+  letter-spacing: 1px;
+}
+
+.https-guard-url {
+  font-size: 10px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* Insecure context (plain HTTP): no in-app camera, use the phone's camera app */
+.qr-native-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--theme-border);
+  border-radius: var(--theme-radius);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  text-align: center;
 }

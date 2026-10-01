@@ -9,6 +9,9 @@ export default defineConfig({
     VitePWA({
       minify: false,
       registerType: 'autoUpdate',
+      // Registered by src/services/serviceWorker.ts only in secure contexts:
+      // the follower served by the leader over plain HTTP must not try it.
+      injectRegister: false,
       manifest: {
         name: 'Bandait Follower',
         short_name: 'Bandait',
@@ -35,12 +38,28 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
+            // Font CSS: serve cached immediately, refresh in the background.
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'google-fonts-stylesheets',
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          },
+          {
+            // Font files (woff2) referenced by that CSS: immutable, cache first.
+            // Status 0 covers opaque cross-origin responses.
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'google-fonts-cache',
+              cacheName: 'google-fonts-webfonts',
+              cacheableResponse: {
+                statuses: [0, 200]
+              },
               expiration: {
-                maxEntries: 10,
+                maxEntries: 60,
                 maxAgeSeconds: 60 * 60 * 24 * 365
               }
             }

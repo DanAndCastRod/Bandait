@@ -1,52 +1,39 @@
+import { Ref } from 'react'
 import { FlywheelIcon, WifiIcon } from './Icons'
+import { TransportStatus } from '../types/protocol'
+import { LINK_STATE_LABEL, LinkState } from '../services/linkState'
 
 interface Props {
-  bpm: number
-  bar: number
-  beat: number
-  status: 'IDLE' | 'COUNTING' | 'PLAYING' | 'PAUSED'
-  isFlywheel?: boolean
+  bpm: number | null
+  status: TransportStatus | null
+  linkState: LinkState
+  /** bar and beat text are written by useBeatVisuals (rAF), not by React. */
+  barRef: Ref<HTMLSpanElement>
+  beatRef: Ref<HTMLSpanElement>
 }
 
-export default function VFDDisplay({
-  bpm,
-  bar,
-  beat,
-  status,
-  isFlywheel = false,
-}: Props) {
-  const isDownbeat = beat === 1 && status === 'PLAYING'
+const STATUS_LABEL: Record<TransportStatus, string> = {
+  IDLE: 'DETENIDO',
+  COUNTING: 'CONTEO',
+  PLAYING: 'EN VIVO',
+  PAUSED: 'PAUSA',
+}
+
+export default function VFDDisplay({ bpm, status, linkState, barRef, beatRef }: Props) {
+  const playing = status === 'PLAYING' || status === 'COUNTING'
+  const flywheel = linkState === 'FLYWHEEL'
+  const linkColor =
+    linkState === 'LOCKED'
+      ? 'var(--accent-success)'
+      : linkState === 'LOST'
+        ? 'var(--accent-danger)'
+        : 'var(--accent-warning)'
 
   return (
-    <div
-      style={{
-        background: 'var(--theme-card-bg)',
-        border: '1px solid var(--theme-border)',
-        borderRadius: 'var(--theme-radius)',
-        padding: '12px 18px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '12px',
-        boxShadow: isDownbeat ? '0 0 20px var(--theme-glow)' : 'inset 0 0 15px rgba(0, 0, 0, 0.4)',
-        transition: 'box-shadow 0.08s ease',
-        position: 'relative',
-      }}
-    >
+    <div className="vfd-display">
       {/* BAR : BEAT DISPLAY */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '10px',
-            color: 'var(--text-disabled)',
-            letterSpacing: '1.5px',
-            fontWeight: 700,
-          }}
-        >
-          COMPÁS // PULSO
-        </span>
+        <span className="vfd-caption">COMPÁS // PULSO</span>
         <div
           style={{
             display: 'flex',
@@ -56,46 +43,15 @@ export default function VFDDisplay({
             marginTop: '2px',
           }}
         >
-          <span
-            style={{
-              fontSize: '34px',
-              fontWeight: 800,
-              color: 'var(--text-primary)',
-              letterSpacing: '-1px',
-              lineHeight: 1,
-            }}
-          >
-            {String(bar).padStart(3, '0')}
-          </span>
+          <span ref={barRef} className="vfd-digits" />
           <span style={{ fontSize: '26px', color: 'var(--text-disabled)', fontWeight: 300 }}>:</span>
-          <span
-            style={{
-              fontSize: '34px',
-              fontWeight: 800,
-              color: isDownbeat ? 'var(--accent-active)' : 'var(--text-primary)',
-              textShadow: isDownbeat ? '0 0 16px var(--accent-active)' : 'none',
-              transition: 'color 0.05s ease',
-              lineHeight: 1,
-            }}
-          >
-            {String(beat).padStart(2, '0')}
-          </span>
+          <span ref={beatRef} className="vfd-digits vfd-beat" />
         </div>
       </div>
 
       {/* BPM DISPLAY */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '10px',
-            color: 'var(--text-disabled)',
-            letterSpacing: '1.5px',
-            fontWeight: 700,
-          }}
-        >
-          TEMPO
-        </span>
+        <span className="vfd-caption">TEMPO</span>
         <div
           style={{
             fontFamily: 'var(--font-mono)',
@@ -107,14 +63,12 @@ export default function VFDDisplay({
             lineHeight: 1,
           }}
         >
-          {bpm}{' '}
-          <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-            BPM
-          </span>
+          {bpm === null ? '---' : Number.isInteger(bpm) ? bpm : bpm.toFixed(1)}{' '}
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 600 }}>BPM</span>
         </div>
       </div>
 
-      {/* STATUS & SYNC MODE BADGES */}
+      {/* STATUS & LINK BADGES */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
         <div
           style={{
@@ -123,17 +77,13 @@ export default function VFDDisplay({
             fontWeight: 800,
             padding: '4px 10px',
             borderRadius: 'var(--theme-radius)',
-            border:
-              status === 'PLAYING'
-                ? '1px solid var(--accent-active)'
-                : '1px solid var(--text-disabled)',
-            color:
-              status === 'PLAYING' ? 'var(--accent-active)' : 'var(--text-disabled)',
-            background: status === 'PLAYING' ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+            border: playing ? '1px solid var(--accent-active)' : '1px solid var(--text-disabled)',
+            color: playing ? 'var(--accent-active)' : 'var(--text-disabled)',
+            background: playing ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
             letterSpacing: '1px',
           }}
         >
-          [{status}]
+          [{status ? STATUS_LABEL[status] : 'SIN ESTADO'}]
         </div>
 
         <div
@@ -144,20 +94,11 @@ export default function VFDDisplay({
             fontFamily: 'var(--font-mono)',
             fontSize: '10px',
             fontWeight: 700,
-            color: isFlywheel ? 'var(--accent-warning)' : 'var(--accent-success)',
+            color: linkColor,
           }}
         >
-          {isFlywheel ? (
-            <>
-              <FlywheelIcon size={12} />
-              <span>[FLYWHEEL INERCIA]</span>
-            </>
-          ) : (
-            <>
-              <WifiIcon size={12} />
-              <span>[NTP CLOCK SINCRONIZADO]</span>
-            </>
-          )}
+          {flywheel ? <FlywheelIcon size={12} /> : <WifiIcon size={12} />}
+          <span>[{LINK_STATE_LABEL[linkState]}]</span>
         </div>
       </div>
     </div>

@@ -1,35 +1,64 @@
-import { CommandType } from '../types/protocol'
-import { PlayIcon, StopIcon, PrevIcon, NextIcon, PanicIcon } from './Icons'
+import { TransportStatus } from '../types/protocol'
+import { CommandFeedback, CommandRun } from '../hooks/useCommandRunner'
+import { PlayIcon, StopIcon, PauseIcon, PrevIcon, NextIcon, PanicIcon } from './Icons'
 
 interface Props {
-  isPlaying: boolean
-  currentBpm: number
-  onCommand: (type: CommandType, payload?: Record<string, unknown>) => void
-  disabled?: boolean
+  status: TransportStatus | null
+  currentBpm: number | null
+  run: CommandRun
+  onPanic: () => void
+  /** Null when the leader can receive commands; otherwise the visible reason. */
+  disabledReason: string | null
+  feedback: CommandFeedback | null
 }
 
+/**
+ * Remote transport for the musical director. StageView only mounts it for
+ * role "director". Every press shows pending and then the leader's ack
+ * (accepted, or rejected with its reason).
+ */
 export default function DirectorRemoteToolbar({
-  isPlaying,
+  status,
   currentBpm,
-  onCommand,
-  disabled = false,
+  run,
+  onPanic,
+  disabledReason,
+  feedback,
 }: Props) {
+  const offline = disabledReason !== null
+  const busy = feedback?.phase === 'pending'
+  const blocked = offline || busy
+  const playing = status === 'PLAYING' || status === 'COUNTING'
+  const paused = status === 'PAUSED'
+
+  const feedbackColor =
+    feedback?.phase === 'accepted'
+      ? 'var(--accent-success)'
+      : feedback?.phase === 'pending'
+        ? 'var(--text-secondary)'
+        : 'var(--accent-danger)'
+
   return (
     <div
       style={{
         background: 'var(--theme-panel-bg)',
-        border: '1px solid var(--theme-border)',
+        border: `1px solid ${offline ? 'var(--accent-danger)' : 'var(--theme-border)'}`,
         borderRadius: 'var(--theme-radius)',
         padding: '10px 14px',
         display: 'flex',
-        flexWrap: 'wrap',
-        gap: '10px',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backdropFilter: 'blur(8px)',
+        flexDirection: 'column',
+        gap: '8px',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '10px',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
         <span
           style={{
             fontFamily: 'var(--font-mono)',
@@ -39,109 +68,150 @@ export default function DirectorRemoteToolbar({
             letterSpacing: '1px',
           }}
         >
-          [MANDO DIRECTOR // {currentBpm} BPM]
+          [MANDO DIRECTOR // {currentBpm ?? '---'} BPM]
         </span>
-      </div>
 
-      {/* TRANSPORT CONTROLS */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {!isPlaying ? (
+        {/* TRANSPORT CONTROLS */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {!playing && !paused && (
+            <button
+              type="button"
+              onClick={() => run('PLAY')}
+              disabled={blocked}
+              className="btn-stage btn-stage-primary"
+              style={{ padding: '10px 20px', fontSize: '13px' }}
+            >
+              <PlayIcon size={16} />
+              <span>PLAY</span>
+            </button>
+          )}
+          {playing && (
+            <button
+              type="button"
+              onClick={() => run('PAUSE')}
+              disabled={blocked}
+              className="btn-stage btn-stage-secondary"
+              style={{ padding: '10px 16px', fontSize: '13px' }}
+            >
+              <PauseIcon size={16} />
+              <span>PAUSA</span>
+            </button>
+          )}
+          {paused && (
+            <button
+              type="button"
+              onClick={() => run('RESUME')}
+              disabled={blocked}
+              className="btn-stage btn-stage-primary"
+              style={{ padding: '10px 16px', fontSize: '13px' }}
+            >
+              <PlayIcon size={16} />
+              <span>REANUDAR</span>
+            </button>
+          )}
+          {(playing || paused) && (
+            <button
+              type="button"
+              onClick={() => run('STOP')}
+              disabled={blocked}
+              className="btn-stage"
+              style={{
+                padding: '10px 20px',
+                fontSize: '13px',
+                background: 'rgba(239, 68, 68, 0.15)',
+                color: 'var(--accent-danger)',
+                border: '1px solid var(--accent-danger)',
+              }}
+            >
+              <StopIcon size={16} />
+              <span>STOP</span>
+            </button>
+          )}
+
           <button
             type="button"
-            onClick={() => onCommand('PLAY')}
-            disabled={disabled}
-            className="btn-stage btn-stage-primary"
-            style={{ padding: '10px 20px', fontSize: '13px' }}
+            onClick={() => run('CUE_PREV')}
+            disabled={blocked}
+            className="btn-stage btn-stage-secondary"
+            style={{ padding: '10px 14px', fontSize: '12px' }}
+            title="Canción anterior"
           >
-            <PlayIcon size={16} />
-            <span>PLAY</span>
+            <PrevIcon size={14} />
+            <span>ANT</span>
           </button>
-        ) : (
+
           <button
             type="button"
-            onClick={() => onCommand('STOP')}
-            disabled={disabled}
+            onClick={() => run('CUE_NEXT')}
+            disabled={blocked}
+            className="btn-stage btn-stage-secondary"
+            style={{ padding: '10px 14px', fontSize: '12px' }}
+            title="Canción siguiente"
+          >
+            <span>SIG</span>
+            <NextIcon size={14} />
+          </button>
+
+          {/* TEMPO NUDGE */}
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button
+              type="button"
+              onClick={() => run('TEMPO_NUDGE', { deltaBpm: -1 })}
+              disabled={blocked}
+              className="btn-stage btn-stage-secondary"
+              style={{ padding: '10px 12px', fontSize: '11px' }}
+              title="Ajustar -1 BPM"
+            >
+              -1 BPM
+            </button>
+            <button
+              type="button"
+              onClick={() => run('TEMPO_NUDGE', { deltaBpm: 1 })}
+              disabled={blocked}
+              className="btn-stage btn-stage-secondary"
+              style={{ padding: '10px 12px', fontSize: '11px' }}
+              title="Ajustar +1 BPM"
+            >
+              +1 BPM
+            </button>
+          </div>
+
+          {/* PANIC: never blocked by a pending command, only by being offline */}
+          <button
+            type="button"
+            onClick={onPanic}
+            disabled={offline}
             className="btn-stage"
             style={{
-              padding: '10px 20px',
-              fontSize: '13px',
-              background: 'rgba(239, 68, 68, 0.15)',
+              padding: '10px 16px',
+              fontSize: '12px',
+              background: 'transparent',
+              border: '2px solid var(--accent-danger)',
               color: 'var(--accent-danger)',
-              border: '1px solid var(--accent-danger)',
+              boxShadow: '0 0 10px rgba(239, 68, 68, 0.2)',
             }}
           >
-            <StopIcon size={16} />
-            <span>STOP</span>
-          </button>
-        )}
-
-        <button
-          type="button"
-          onClick={() => onCommand('CUE_PREV')}
-          disabled={disabled}
-          className="btn-stage btn-stage-secondary"
-          style={{ padding: '10px 14px', fontSize: '12px' }}
-          title="Canción Anterior"
-        >
-          <PrevIcon size={14} />
-          <span>ANT</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onCommand('CUE_NEXT')}
-          disabled={disabled}
-          className="btn-stage btn-stage-secondary"
-          style={{ padding: '10px 14px', fontSize: '12px' }}
-          title="Canción Siguiente"
-        >
-          <span>SIG</span>
-          <NextIcon size={14} />
-        </button>
-
-        {/* TEMPO NUDGE */}
-        <div style={{ display: 'flex', gap: '4px' }}>
-          <button
-            type="button"
-            onClick={() => onCommand('TEMPO_NUDGE', { delta_bpm: -1 })}
-            disabled={disabled}
-            className="btn-stage btn-stage-secondary"
-            style={{ padding: '10px 12px', fontSize: '11px' }}
-            title="Ajustar -1 BPM"
-          >
-            -1 BPM
-          </button>
-          <button
-            type="button"
-            onClick={() => onCommand('TEMPO_NUDGE', { delta_bpm: 1 })}
-            disabled={disabled}
-            className="btn-stage btn-stage-secondary"
-            style={{ padding: '10px 12px', fontSize: '11px' }}
-            title="Ajustar +1 BPM"
-          >
-            +1 BPM
+            <PanicIcon size={16} />
+            <span>PANIC</span>
           </button>
         </div>
+      </div>
 
-        {/* PANIC BUTTON */}
-        <button
-          type="button"
-          onClick={() => onCommand('PANIC')}
-          disabled={disabled}
-          className="btn-stage"
+      {(offline || feedback) && (
+        <div
+          role="status"
+          aria-live="polite"
           style={{
-            padding: '10px 16px',
-            fontSize: '12px',
-            background: 'transparent',
-            border: '2px solid var(--accent-danger)',
-            color: 'var(--accent-danger)',
-            boxShadow: '0 0 10px rgba(239, 68, 68, 0.2)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '11px',
+            fontWeight: 700,
+            letterSpacing: '0.5px',
+            color: offline ? 'var(--accent-danger)' : feedbackColor,
           }}
         >
-          <PanicIcon size={16} />
-          <span>PANIC</span>
-        </button>
-      </div>
+          {offline ? `MANDO DESHABILITADO: ${disabledReason}` : feedback?.text}
+        </div>
+      )}
     </div>
   )
 }

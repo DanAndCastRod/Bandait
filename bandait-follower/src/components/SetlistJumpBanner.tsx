@@ -1,48 +1,41 @@
-import { useEffect, useState } from 'react'
-import { SetlistJumpAlert } from '../types/protocol'
+import { useEffect, useRef } from 'react'
+import { SetlistJump } from '../types/protocol'
 
 interface Props {
-  alert: SetlistJumpAlert | null
+  alert: SetlistJump | null
   onDismiss: () => void
   autoDismissMs?: number
 }
 
-export default function SetlistJumpBanner({
-  alert,
-  onDismiss,
-  autoDismissMs = 6000,
-}: Props) {
-  const [progress, setProgress] = useState(100)
+const ORIGIN_LABEL: Record<SetlistJump['triggeredBy'], string> = {
+  laptop_foh: 'LAPTOP FOH',
+  director_mobile: 'DIRECTOR MOVIL',
+  hub: 'HUB',
+}
+
+/**
+ * High-visibility banner for a non-sequential setlist jump. The auto-dismiss
+ * timer depends only on the alert itself: onDismiss is read through a ref, so
+ * parent re-renders during playback cannot restart it. The progress bar is a
+ * CSS animation (no React state per frame).
+ */
+export default function SetlistJumpBanner({ alert, onDismiss, autoDismissMs = 6000 }: Props) {
+  const onDismissRef = useRef(onDismiss)
+  useEffect(() => {
+    onDismissRef.current = onDismiss
+  }, [onDismiss])
 
   useEffect(() => {
     if (!alert) return
-
-    setProgress(100)
-    const startTime = Date.now()
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime
-      const remaining = Math.max(0, 100 - (elapsed / autoDismissMs) * 100)
-      setProgress(remaining)
-      if (remaining <= 0) {
-        clearInterval(interval)
-        onDismiss()
-      }
-    }, 50)
-
-    return () => clearInterval(interval)
-  }, [alert, autoDismissMs, onDismiss])
+    const timer = setTimeout(() => onDismissRef.current(), autoDismissMs)
+    return () => clearTimeout(timer)
+  }, [alert, autoDismissMs])
 
   if (!alert) return null
 
-  const originLabel =
-    alert.triggered_by === 'laptop'
-      ? 'LAPTOP FOH'
-      : alert.triggered_by === 'director_mobile'
-        ? 'DIRECTOR MOVIL'
-        : alert.triggered_by.toUpperCase()
-
   return (
     <div
+      role="alert"
       style={{
         position: 'fixed',
         top: '12px',
@@ -85,12 +78,13 @@ export default function SetlistJumpBanner({
               color: 'var(--text-secondary)',
             }}
           >
-            ORIGEN: [{originLabel}]
+            ORIGEN: [{ORIGIN_LABEL[alert.triggeredBy]}]
           </span>
         </div>
 
         <button
-          onClick={onDismiss}
+          type="button"
+          onClick={() => onDismissRef.current()}
           style={{
             background: 'transparent',
             border: '1px solid var(--text-secondary)',
@@ -116,7 +110,7 @@ export default function SetlistJumpBanner({
             color: 'var(--accent-warning)',
           }}
         >
-          TEMA #{String(alert.order_index).padStart(2, '0')}:
+          TEMA #{String(alert.orderIndex + 1).padStart(2, '0')}:
         </span>
         <span
           style={{
@@ -131,7 +125,7 @@ export default function SetlistJumpBanner({
         </span>
       </div>
 
-      {/* AUTO DISMISS PROGRESS BAR */}
+      {/* AUTO DISMISS PROGRESS BAR (CSS animation, keyed per alert) */}
       <div
         style={{
           width: '100%',
@@ -143,12 +137,9 @@ export default function SetlistJumpBanner({
         }}
       >
         <div
-          style={{
-            width: `${progress}%`,
-            height: '100%',
-            background: 'var(--accent-warning)',
-            transition: 'width 0.05s linear',
-          }}
+          key={`${alert.songId}-${alert.timestampNs}`}
+          className="jump-banner-progress"
+          style={{ animationDuration: `${autoDismissMs}ms` }}
         />
       </div>
     </div>
