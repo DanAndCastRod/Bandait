@@ -41,7 +41,8 @@ La hoja de ruta de sprints está en el plan maestro. Lo que de verdad funciona h
 
 - **Núcleo de escenario (líder + follower):** el líder arranca su servidor Socket.IO, el transporte pasa por un único camino (laptop y director móvil), el follower programa el clic en Web Audio a partir del anchor del líder, con Flywheel y corrección suave de fase. El protocolo está fijado en [`bandait-protocol/CONTRACT_V3.md`](bandait-protocol/CONTRACT_V3.md).
 - **En escenario:** el líder sirve el follower por HTTP en la LAN (`http://<ip-lan>:4040/`) y muestra dos QR, uno para músicos y otro para el director (menú Red > Conectar músicos). El sitio HTTPS `/app/` no puede conectarse a la LAN (contenido mixto) y redirige al líder.
-- **Web Hub:** CRUD local-first; sincronización en la nube solo con Supabase Auth (Google) y RLS por usuario. Requiere ejecutar el SQL de `docs/DEPLOY.md` y configurar las variables `VITE_*`.
+- **Web Hub:** CRUD local-first, con nube en producción desde el 2026-10-01 (Supabase Auth con Google y RLS por usuario; proyecto y pasos en `docs/DEPLOY.md`).
+- **Manuales de usuario desactualizados (pendiente de cierre):** los modales "Manual de usuario y guía técnica" del hub y "Manual de escenario" del follower describen el plan, no el comportamiento real. Por decisión del usuario, se reescriben **al final del refinamiento de la plataforma**; el detalle de lo que hay que corregir está en `DEVLOG.md` (entrada del 2026-10-01, "Manuales").
 - **Pendiente** (stub o sin implementar): OTP por WhatsApp/SMS, Demucs/stems en nube, reproducción de stems en el mezclador in-ear, importación XLSX real, detección de acordes/BPM, prompts de voz con audio, lógica de `transition_mode` (conteo y gapless), distribución de letras, roles con permisos del lado del servidor y servidor NTP por UDP.
 - Bugs abiertos y advertencias: [`bugs.md`](bugs.md). Historial: [`DEVLOG.md`](DEVLOG.md).
 
