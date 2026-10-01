@@ -1,0 +1,6 @@
+# Archivos cuyo contenido exacto importa: siempre LF, tambien en checkouts de Windows
+# con core.autocrlf (el texto legal se compara por hash con el oficial de gnu.org, y los
+# fixtures del protocolo los leen pruebas en Linux y Windows).
+LICENSE text eol=lf
+NOTICE.md text eol=lf
+bandait-protocol/fixtures/*.json text eol=lf

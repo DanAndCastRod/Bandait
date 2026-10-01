@@ -54,7 +54,10 @@ def test_tag_check(capsys):
 
 
 def test_license_is_the_full_gpl3_text():
-    data = (REPO / "LICENSE").read_bytes()
+    # Compare the text, not the checkout's line endings: a Windows checkout with
+    # core.autocrlf turns LF into CRLF (CI failed on exactly that on 2026-10-01).
+    # .gitattributes pins LICENSE to LF; this keeps the test honest either way.
+    data = (REPO / "LICENSE").read_bytes().replace(b"\r\n", b"\n")
     assert hashlib.sha256(data).hexdigest() == GPL3_SHA256
     assert data.lstrip().startswith(b"GNU GENERAL PUBLIC LICENSE")
 
