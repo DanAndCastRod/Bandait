@@ -15,6 +15,22 @@ from PySide6.QtWidgets import (
 )
 
 from src.audio.audio_engine import DRUMMER_CHANNEL, AudioEngine
+from src.audio.portaudio_setup import PortAudioSetup, last_setup
+
+
+def asio_status_text(asio_devices_found: bool, setup: Optional[PortAudioSetup]) -> str:
+    """One line for FOH about ASIO in this session."""
+    if asio_devices_found:
+        return "ASIO detectado."
+    if setup is not None and setup.asio_loaded:
+        return (
+            "PortAudio con ASIO cargado, pero no hay dispositivos ASIO: instale o "
+            "reinstale el controlador ASIO de su interfaz y reinicie Bandait."
+        )
+    return (
+        "ASIO no esta cargado en esta sesion. Active la casilla y reinicie para "
+        "usar la version de PortAudio con ASIO."
+    )
 
 
 @dataclass(frozen=True)
@@ -82,14 +98,20 @@ class AudioDevicesDialog(QDialog):
         self.asio_check = QCheckBox("Habilitar ASIO (requiere reiniciar Bandait)")
         self.asio_check.setChecked(enable_asio)
         layout.addWidget(self.asio_check)
-        asio_note = QLabel(
-            "ASIO detectado." if self._asio_loaded else
-            "ASIO no esta cargado en esta sesion. Active la casilla y reinicie para "
-            "usar la version de PortAudio con ASIO."
-        )
-        asio_note.setWordWrap(True)
-        asio_note.setStyleSheet("color: #666666;")
-        layout.addWidget(asio_note)
+        self.asio_note = QLabel(asio_status_text(self._asio_loaded, last_setup()))
+        self.asio_note.setWordWrap(True)
+        self.asio_note.setStyleSheet("color: #666666;")
+        layout.addWidget(self.asio_note)
+
+        # PortAudio problems found at startup (foreign portaudio.dll on PATH,
+        # ASIO requested but not loaded, no PortAudio at all), in amber.
+        setup = last_setup()
+        pa_warnings = setup.warnings() if setup is not None else []
+        self.portaudio_warning = QLabel("\n".join(pa_warnings))
+        self.portaudio_warning.setWordWrap(True)
+        self.portaudio_warning.setStyleSheet("color: #FFAA00;")
+        self.portaudio_warning.setVisible(bool(pa_warnings))
+        layout.addWidget(self.portaudio_warning)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Aplicar")
