@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Política de privacidad de Bandait: qué datos se tratan al usar el Web Hub y el follower, para qué, con quién y cómo solicitar su borrado.">
+  <meta name="theme-color" content="#000000">
+  <title>Política de privacidad — Bandait</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="../app/icon-192x192.png">
+  <link rel="stylesheet" href="../style.css">
+
+  <style>
+    .legal {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: clamp(6rem, 12vh, 8rem) 16px 4rem;
+      color: var(--off-white);
+      font-family: var(--font-body);
+      line-height: 1.65;
+    }
+    .legal h1 {
+      font-size: clamp(1.8rem, 5vw, 2.6rem);
+      line-height: 1.15;
+      margin: 0 0 0.5rem;
+    }
+    .legal .updated {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--cyan);
+      margin: 0 0 2.5rem;
+    }
+    .legal h2 {
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--lime);
+      border-top: 1px solid var(--disabled-grey);
+      padding-top: 1.5rem;
+      margin: 2.5rem 0 0.75rem;
+    }
+    .legal p, .legal li { font-size: 1rem; }
+    .legal ul { padding-left: 1.25rem; }
+    .legal li { margin: 0.35rem 0; }
+    .legal a { color: var(--cyan); overflow-wrap: anywhere; }
+    .legal strong { color: #FFFFFF; }
+    .legal .back {
+      display: inline-block;
+      margin-top: 3rem;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="logo" href="../" style="text-decoration:none;color:inherit;">BAND<span>AIT</span></a>
+  </header>
+
+  <main class="legal">
+    <h1>Política de privacidad</h1>
+    <p class="updated">Última actualización: 1 de octubre de 2026</p>
+
+    <p>Bandait es un sistema de sincronización para bandas en vivo: un líder en la laptop de la mesa de sonido, una app para los teléfonos de los músicos (follower) y un Web Hub para preparar bandas, setlists y equipo. Esta política explica qué datos personales se tratan al usar Bandait en <a href="https://bandait.releven.cc">bandait.releven.cc</a>, para qué se usan y cómo pedir su borrado.</p>
+
+    <h2>1. Responsable</h2>
+    <p>Bandait es un proyecto de <a href="https://releven.cc" target="_blank" rel="noopener">Releven</a>. El canal de contacto está en la sección 10.</p>
+
+    <h2>2. Qué datos se tratan</h2>
+    <ul>
+      <li><strong>Datos de tu cuenta</strong>, solo si inicias sesión en el Web Hub con Google: correo electrónico, nombre, foto de perfil e identificador de tu cuenta de Google. Los recibe y guarda nuestro proveedor de autenticación (Supabase). Bandait no recibe ni guarda tu contraseña de Google.</li>
+      <li><strong>Contenido de tu espacio de trabajo</strong>: bandas, setlists, canciones, equipo, configuración de stems y la lista de integrantes que tú escribes (nombre, correo, teléfono, rol e instrumento). Si agregas datos de otras personas, debes contar con su autorización.</li>
+      <li><strong>Datos en tu propio dispositivo</strong>: el Web Hub guarda una copia de tu espacio de trabajo en el almacenamiento local del navegador para funcionar sin conexión. El follower guarda tu alias, tu rol, tu tema visual y un identificador aleatorio del dispositivo. Estos datos no salen de tu navegador salvo para sincronizarse como se describe abajo.</li>
+      <li><strong>Datos de escenario</strong>: durante un ensayo o concierto, el líder y los teléfonos intercambian datos de sincronización (tempo, compás, comandos de transporte, alias y rol) dentro de la red local del escenario. No pasan por servidores de Bandait.</li>
+    </ul>
+
+    <h2>3. Para qué se usan</h2>
+    <p>Únicamente para operar Bandait: iniciar sesión, guardar tu espacio de trabajo y sincronizarlo entre tus dispositivos. <strong>No vendemos datos, no mostramos publicidad, no usamos herramientas de analítica de terceros y no hacemos perfiles.</strong></p>
+
+    <h2>4. Con quién se comparten</h2>
+    <p>Solo con los proveedores necesarios para que el servicio funcione, que actúan como encargados del tratamiento:</p>
+    <ul>
+      <li><strong>Supabase</strong>: autenticación y base de datos donde se guarda tu espacio de trabajo.</li>
+      <li><strong>Google</strong>: inicio de sesión con tu cuenta de Google. Además, las tipografías se cargan desde Google Fonts, que recibe la dirección IP de tu navegador.</li>
+      <li><strong>Cloudflare</strong>: alojamiento y entrega del sitio, con registros técnicos de acceso.</li>
+    </ul>
+    <p>Estos proveedores pueden procesar datos fuera de Colombia, bajo sus propias medidas de seguridad.</p>
+
+    <h2>5. Seguridad</h2>
+    <p>Toda la comunicación con el sitio y la nube va cifrada (HTTPS). En la base de datos, cada cuenta solo puede leer y escribir su propio espacio de trabajo, y sin sesión iniciada no hay ningún acceso. Ningún sistema es infalible: si detectas un problema de seguridad, avísanos por el canal de la sección 10.</p>
+
+    <h2>6. Conservación y borrado</h2>
+    <ul>
+      <li>Los datos en la nube se conservan mientras uses tu cuenta.</li>
+      <li>Puedes borrar en cualquier momento la copia local cerrando sesión y borrando los datos del sitio en tu navegador.</li>
+      <li>Para borrar tu cuenta y tu espacio de trabajo en la nube, haz la solicitud por el canal de la sección 10. Se atiende en un plazo máximo de 30 días.</li>
+    </ul>
+
+    <h2>7. Tus derechos</h2>
+    <p>Puedes conocer, actualizar, rectificar y pedir la supresión de tus datos, y revocar la autorización para tratarlos. En Colombia estos derechos están reconocidos por la Ley 1581 de 2012 (habeas data). Desde el Web Hub puedes descargar una copia de tu espacio de trabajo con <strong>EXPORTAR JSON</strong>.</p>
+
+    <h2>8. Menores de edad</h2>
+    <p>Bandait no está dirigido a menores de edad. Si eres menor, usa Bandait solo con la autorización de tu madre, padre o representante.</p>
+
+    <h2>9. Cambios a esta política</h2>
+    <p>Si esta política cambia, la nueva versión se publicará en esta misma página con su fecha de actualización.</p>
+
+    <h2>10. Contacto</h2>
+    <p>Escríbenos abriendo un issue en <a href="https://github.com/DanAndCastRod/Bandait/issues" target="_blank" rel="noopener">github.com/DanAndCastRod/Bandait/issues</a>. Para solicitudes de borrado o de tus datos, <strong>no publiques información personal en el issue</strong>: indica solo que quieres ejercer tus derechos y te contactaremos por un canal privado.</p>
+
+    <a class="back" href="../">&larr; Volver a Bandait</a>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-brand">© 2026 Bandait 3.0 — by <a href="https://releven.cc" target="_blank" rel="noopener">Releven</a></span>
+    <ul class="footer-links">
+      <li><a href="../hub/">Web Hub</a></li>
+      <li><a href="../privacidad/">Privacidad</a></li>
+      <li><a href="https://github.com/DanAndCastRod/Bandait" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </footer>
+
+</body>
+</html>

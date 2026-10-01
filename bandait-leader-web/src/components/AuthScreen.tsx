@@ -371,6 +371,14 @@ export const AuthScreen: React.FC = () => {
               </button>
             </div>
           )}
+          {/* Served under /hub/ in production, so ../privacidad/ is the landing's /privacidad/. */}
+          <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#94a3b8', fontFamily: mono }} data-testid="privacy-note">
+            Al continuar con Google aceptas la{' '}
+            <a href="../privacidad/" style={{ color: '#38bdf8' }}>
+              política de privacidad
+            </a>
+            .
+          </p>
         </section>
 
         {/* 2. GOOGLE IDENTITY SERVICES: LOCAL PROFILE ONLY */}

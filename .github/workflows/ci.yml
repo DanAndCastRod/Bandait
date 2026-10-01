@@ -61,6 +61,8 @@ jobs:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: bandait-leader-web/package-lock.json
+      - name: No secret Supabase keys in the committed production env
+        run: "! grep -nE '^[^#]*sb_secret_' .env.production"
       - run: npm ci
       - run: npm run lint
       - run: npm run verify:logic
