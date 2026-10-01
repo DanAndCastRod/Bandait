@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { useHub } from '../context/HubContext'
+import { useHub, type HubSyncStatus } from '../context/hubContextCore'
+import { PROVIDER_LABELS } from '../services/authService'
 import { GoogleIcon } from './GoogleIcon'
 import {
   ListMusic,
@@ -17,7 +18,6 @@ import {
 } from 'lucide-react'
 import { UserManualModal } from './UserManualModal'
 import { SupabaseConfigModal } from './SupabaseConfigModal'
-import { getSupabaseConfig } from '../services/supabaseClient'
 
 export type HubTab = 'playlists' | 'stems' | 'members' | 'equipment'
 
@@ -26,8 +26,22 @@ interface Props {
   onSelectTab: (tab: HubTab) => void
 }
 
+const SYNC_LABEL: Record<HubSyncStatus['state'], { text: string; color: string }> = {
+  local_only: { text: 'SOLO LOCAL', color: '#94a3b8' },
+  syncing: { text: 'SINCRONIZANDO', color: '#38bdf8' },
+  synced: { text: 'SINCRONIZADO', color: '#10b981' },
+  error: { text: 'ERROR NUBE', color: '#ef4444' },
+}
+
+function syncTitle(status: HubSyncStatus): string {
+  if (status.state === 'synced') return `Sincronizado con la nube (${new Date(status.at).toLocaleTimeString()})`
+  return status.detail
+}
+
 export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
-  const { user, bands, activeBand, switchBand, createBand, logout, exportMasterXlsxJson } = useHub()
+  const { user, bands, activeBand, activeBandRole, switchBand, createBand, logout, exportWorkspaceJson, syncStatus } = useHub()
+  const syncLabel = SYNC_LABEL[syncStatus.state]
+  const hasGoogleIdentity = user?.authProvider === 'supabase' || user?.authProvider === 'google_local'
   const [showBandMenu, setShowBandMenu] = useState(false)
   const [showNewBandModal, setShowNewBandModal] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -47,7 +61,6 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
       return false
     }
   })
-  const isCloudConfigured = getSupabaseConfig().isConfigured
   const [newBandName, setNewBandName] = useState('')
   const [newBandGenre, setNewBandGenre] = useState('')
 
@@ -64,6 +77,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
   return (
     <>
       <header
+        className="hub-header"
         style={{
           background: '#12151c',
           borderBottom: '1px solid #2a3346',
@@ -170,7 +184,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 flexShrink: 0,
               }}
             >
-              [{activeBand?.currentUserRole.toUpperCase()}]
+              [{(activeBandRole ?? '').toUpperCase()}]
             </span>
             <ChevronDown size={12} style={{ opacity: 0.6, flexShrink: 0 }} />
           </button>
@@ -380,31 +394,34 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
           <span className="hub-desktop-only">MANUAL</span>
         </button>
 
-        {/* SUPABASE CLOUD SYNC BUTTON */}
+        {/* CLOUD SYNC STATUS (local only / syncing / synced / error) */}
         <button
           onClick={() => setShowSupabaseModal(true)}
-          title={isCloudConfigured ? 'Sincronización en la Nube Activa' : 'Configurar Nube Supabase'}
+          title={`${syncLabel.text}: ${syncTitle(syncStatus)}`}
+          data-testid="sync-status"
+          data-sync-state={syncStatus.state}
+          aria-label={`Estado de la nube: ${syncLabel.text}`}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '5px',
-            background: isCloudConfigured ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
-            border: `1px solid ${isCloudConfigured ? '#10b981' : '#2a3346'}`,
+            background: syncStatus.state === 'local_only' ? 'transparent' : `${syncLabel.color}1a`,
+            border: `1px solid ${syncStatus.state === 'local_only' ? '#2a3346' : syncLabel.color}`,
             borderRadius: '4px',
             padding: '5px 8px',
-            color: isCloudConfigured ? '#10b981' : '#94a3b8',
+            color: syncLabel.color,
             cursor: 'pointer',
             fontSize: '11px',
             fontFamily: "'IBM Plex Mono', monospace",
           }}
         >
           <Cloud size={13} />
-          <span className="hub-desktop-only">{isCloudConfigured ? 'NUBE OK' : 'NUBE'}</span>
+          <span className="hub-desktop-only">{syncLabel.text}</span>
         </button>
 
         <button
-          onClick={exportMasterXlsxJson}
-          title="Exportar Libro Maestro XLSX/JSON"
+          onClick={exportWorkspaceJson}
+          title="Exportar la banda activa como JSON (XLSX real pendiente)"
           className="hub-desktop-only"
           style={{
             display: 'flex',
@@ -421,7 +438,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
           }}
         >
           <Download size={13} />
-          <span>EXPORTAR MAESTRO</span>
+          <span>EXPORTAR JSON</span>
         </button>
 
         {user && (
@@ -474,7 +491,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                   <span style={{ fontSize: '11px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {user.name}
                   </span>
-                  <GoogleIcon size={12} />
+                  {hasGoogleIdentity && <GoogleIcon size={12} />}
                 </div>
                 <span style={{ fontSize: '9px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {user.email}
@@ -484,8 +501,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
 
             {/* DIRECT LOGOUT BUTTON ALWAYS VISIBLE */}
             <button
-              onClick={logout}
-              title="Cerrar Sesión Google"
+              onClick={() => void logout()}
+              title="Cerrar sesión"
               style={{
                 background: 'rgba(239, 68, 68, 0.15)',
                 border: '1px solid #ef4444',
@@ -748,16 +765,17 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                   {user.email}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                  <GoogleIcon size={12} />
+                  {hasGoogleIdentity && <GoogleIcon size={12} />}
                   <span
+                    data-testid="profile-provider"
                     style={{
                       fontSize: '10px',
-                      color: '#10b981',
+                      color: user.authProvider === 'supabase' ? '#10b981' : '#f59e0b',
                       fontFamily: "'IBM Plex Mono', monospace",
                       fontWeight: 700,
                     }}
                   >
-                    CUENTA VERIFICADA
+                    {PROVIDER_LABELS[user.authProvider]}
                   </span>
                 </div>
               </div>
@@ -775,21 +793,27 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 lineHeight: 1.6,
               }}
             >
-              <div>ESPACIO DE TRABAJO LOCAL:</div>
+              <div>COPIA LOCAL (LOCALSTORAGE):</div>
               <div style={{ color: '#ffffff', fontWeight: 700, wordBreak: 'break-all' }}>
                 bandait_workspace_{user.id}
               </div>
               <div style={{ marginTop: '4px' }}>
+                NUBE:{' '}
+                <span style={{ color: user.authProvider === 'supabase' ? '#10b981' : '#94a3b8', fontWeight: 700 }}>
+                  {user.authProvider === 'supabase' ? `fila user_id = ${user.id}` : 'sin nube (perfil local)'}
+                </span>
+              </div>
+              <div style={{ marginTop: '4px' }}>
                 BANDA ACTIVA:{' '}
                 <span style={{ color: '#ff4500', fontWeight: 700 }}>{activeBand?.name}</span>{' '}
-                [{activeBand?.currentUserRole.toUpperCase()}]
+                [{(activeBandRole ?? '').toUpperCase()}]
               </div>
             </div>
 
             <button
               onClick={() => {
                 setShowProfileModal(false)
-                exportMasterXlsxJson()
+                exportWorkspaceJson()
               }}
               style={{
                 background: 'transparent',
@@ -808,13 +832,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               }}
             >
               <Download size={14} />
-              <span>EXPORTAR COPIA DE SEGURIDAD XLSX</span>
+              <span>EXPORTAR COPIA DE SEGURIDAD JSON</span>
             </button>
 
             <button
               onClick={() => {
                 setShowProfileModal(false)
-                logout()
+                void logout()
               }}
               style={{
                 background: '#ef4444',

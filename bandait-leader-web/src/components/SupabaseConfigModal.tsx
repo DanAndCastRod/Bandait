@@ -1,98 +1,156 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
+import { Cloud, CheckCircle2, AlertCircle, X, RefreshCw, Trash2, ShieldCheck, Download, RotateCcw, LogIn } from 'lucide-react'
 import {
-  Cloud,
-  CheckCircle2,
-  AlertCircle,
-  X,
-  Database,
-  RefreshCw,
-  Trash2,
-} from 'lucide-react'
-import {
-  getSupabaseConfig,
+  checkAnonExposure,
+  clearSupabaseOverride,
+  getAuthRedirectUrl,
   saveSupabaseConfig,
-  clearSupabaseConfig,
-  checkSupabaseHealth,
-  syncWorkspaceToCloud,
+  type HealthResult,
 } from '../services/supabaseClient'
-import { useHub } from '../context/HubContext'
+import { useHub } from '../context/hubContextCore'
+import { PROVIDER_LABELS } from '../services/authService'
 
 interface Props {
   onClose: () => void
 }
 
+const mono = "'IBM Plex Mono', monospace"
+
+const labelStyle: React.CSSProperties = { fontSize: '11px', color: '#94a3b8', fontFamily: mono }
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  background: '#0d1017',
+  border: '1px solid #2a3346',
+  borderRadius: '4px',
+  padding: '8px 10px',
+  color: '#ffffff',
+  marginTop: '4px',
+  boxSizing: 'border-box',
+  fontSize: '13px',
+}
+
+const smallButton: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid #2a3346',
+  color: '#94a3b8',
+  padding: '7px 12px',
+  borderRadius: '4px',
+  fontSize: '11px',
+  fontFamily: mono,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+}
+
+const boxStyle: React.CSSProperties = {
+  background: '#0d1017',
+  border: '1px solid #2a3346',
+  borderRadius: '4px',
+  padding: '12px',
+  fontSize: '11px',
+  color: '#94a3b8',
+  lineHeight: 1.5,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+}
+
+const SOURCE_LABEL = {
+  build: 'variables de compilación (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)',
+  override: 'override guardado en este navegador',
+  none: 'sin configurar',
+} as const
+
+function banner(level: 'ok' | 'warn' | 'error', message: string, testId?: string) {
+  const color = level === 'ok' ? '#10b981' : level === 'warn' ? '#f59e0b' : '#ef4444'
+  return (
+    <div
+      role={level === 'error' ? 'alert' : 'status'}
+      data-testid={testId}
+      style={{
+        padding: '10px 12px',
+        borderRadius: '4px',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '8px',
+        fontSize: '12px',
+        fontFamily: mono,
+        background: `${color}1f`,
+        border: `1px solid ${color}`,
+        color,
+        lineHeight: 1.4,
+      }}
+    >
+      {level === 'ok' ? <CheckCircle2 size={16} style={{ flexShrink: 0 }} /> : <AlertCircle size={16} style={{ flexShrink: 0 }} />}
+      <span>{message}</span>
+    </div>
+  )
+}
+
 export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
-  const { user } = useHub()
-  const [url, setUrl] = useState('')
+  const { user, cloud, syncStatus, retrySync, signInWithCloudGoogle, backups, restoreBackup, downloadBackup } = useHub()
+  const [url, setUrl] = useState(cloud.source === 'override' ? cloud.url : '')
   const [anonKey, setAnonKey] = useState('')
-  const [status, setStatus] = useState<{ loading: boolean; ok?: boolean; message?: string }>({
-    loading: false,
-  })
+  const [formMessage, setFormMessage] = useState<{ level: 'ok' | 'warn' | 'error'; text: string } | null>(null)
+  const [health, setHealth] = useState<HealthResult | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    const config = getSupabaseConfig()
-    setUrl(config.url)
-    setAnonKey(config.anonKey)
-    if (config.isConfigured) {
-      handleTestConnection()
-    }
-  }, [])
-
-  const handleTestConnection = async () => {
-    setStatus({ loading: true })
-    const res = await checkSupabaseHealth()
-    setStatus({ loading: false, ok: res.ok, message: res.message })
-  }
-
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!url.trim() || !anonKey.trim()) return
-
-    const saved = saveSupabaseConfig(url, anonKey)
-    if (saved) {
-      setStatus({ loading: true })
-      const res = await checkSupabaseHealth()
-      setStatus({ loading: false, ok: res.ok, message: res.message })
-    }
-  }
-
-  const handleClear = () => {
-    clearSupabaseConfig()
-    setUrl('')
-    setAnonKey('')
-    setStatus({ loading: false, ok: false, message: 'Configuracion eliminada. El sistema opera en modo Local-First.' })
-  }
-
-  const handleSyncNow = async () => {
-    if (!user) return
-    setStatus({ loading: true })
-    const raw = localStorage.getItem(`bandait_workspace_${user.id}`)
-    if (!raw) {
-      setStatus({ loading: false, ok: false, message: 'No hay datos locales para sincronizar.' })
+    const result = saveSupabaseConfig(url, anonKey)
+    if (!result.ok) {
+      setFormMessage({ level: 'error', text: result.reason })
       return
     }
+    setFormMessage({ level: 'ok', text: 'Configuración guardada. Recargando el Hub para aplicarla...' })
+    setTimeout(() => window.location.reload(), 600)
+  }
 
-    try {
-      const parsed = JSON.parse(raw)
-      const success = await syncWorkspaceToCloud(user.id, parsed)
-      if (success) {
-        setStatus({ loading: false, ok: true, message: 'Workspace sincronizado exitosamente con la nube Supabase.' })
-      } else {
-        setStatus({ loading: false, ok: false, message: 'Error al sincronizar. Revisa la tabla bandait_workspaces.' })
-      }
-    } catch {
-      setStatus({ loading: false, ok: false, message: 'Error al procesar el workspace local.' })
+  const handleClearOverride = () => {
+    clearSupabaseOverride()
+    setFormMessage({ level: 'ok', text: 'Override eliminado. Recargando el Hub...' })
+    setTimeout(() => window.location.reload(), 600)
+  }
+
+  const handleSecurityCheck = async () => {
+    setChecking(true)
+    setHealth(await checkAnonExposure())
+    setChecking(false)
+  }
+
+  const handleCloudLogin = async () => {
+    setBusy(true)
+    const error = await signInWithCloudGoogle()
+    if (error) {
+      setFormMessage({ level: 'error', text: error })
+      setBusy(false)
     }
   }
+
+  const handleRestore = (backupId: string) => {
+    if (!window.confirm('Esto reemplaza el workspace actual por el respaldo y lo sube a la nube como versión nueva. ¿Continuar?')) {
+      return
+    }
+    const error = restoreBackup(backupId)
+    setFormMessage(error ? { level: 'error', text: error } : { level: 'ok', text: 'Respaldo restaurado. Se subirá a la nube.' })
+  }
+
+  const isCloudUser = user?.authProvider === 'supabase'
+  const statusLevel: 'ok' | 'warn' | 'error' =
+    syncStatus.state === 'synced' ? 'ok' : syncStatus.state === 'error' ? 'error' : 'warn'
+  const statusText =
+    syncStatus.state === 'synced'
+      ? `Sincronizado. Última confirmación: ${new Date(syncStatus.at).toLocaleTimeString()}.`
+      : syncStatus.detail
 
   return (
     <div
       style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100vw',
-        height: '100vh',
+        inset: 0,
         background: 'rgba(0, 0, 0, 0.88)',
         display: 'flex',
         alignItems: 'center',
@@ -103,12 +161,14 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
       }}
     >
       <div
+        role="dialog"
+        aria-label="Nube Supabase"
         style={{
           background: '#161b26',
           border: '1px solid #2a3346',
           borderRadius: '8px',
           width: '100%',
-          maxWidth: '520px',
+          maxWidth: '560px',
           padding: '24px',
           boxShadow: '0 24px 48px rgba(0, 0, 0, 0.9)',
           display: 'flex',
@@ -116,197 +176,177 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
           gap: '16px',
           maxHeight: '90dvh',
           overflowY: 'auto',
+          boxSizing: 'border-box',
         }}
       >
         {/* HEADER */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #2a3346', paddingBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Cloud size={20} style={{ color: '#0066ff' }} />
-            <h3 style={{ margin: 0, fontFamily: "'IBM Plex Mono', monospace", fontSize: '15px', color: '#ffffff' }}>
-              SINCRONIZACION EN LA NUBE // SUPABASE
-            </h3>
+            <h3 style={{ margin: 0, fontFamily: mono, fontSize: '15px', color: '#ffffff' }}>NUBE // SUPABASE</h3>
           </div>
-          <button
-            onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
-          >
+          <button onClick={onClose} aria-label="Cerrar" style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}>
             <X size={18} />
           </button>
         </div>
 
-        <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
-          Conecta tu proyecto de Supabase para sincronizacion automatica entre tu laptop, tableta y telefonos de la banda en tiempo real. Si no esta configurado, Bandait opera 100% de forma autonoma en <strong style={{ color: '#ffffff' }}>Local-First</strong>.
-        </p>
+        {formMessage && banner(formMessage.level, formMessage.text, 'cloud-form-message')}
 
-        {/* STATUS BANNER */}
-        {status.message && (
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '12px',
-              fontFamily: "'IBM Plex Mono', monospace",
-              background: status.ok ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-              border: `1px solid ${status.ok ? '#10b981' : '#ef4444'}`,
-              color: status.ok ? '#10b981' : '#ef4444',
-            }}
-          >
-            {status.ok ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-            <span>{status.message}</span>
+        {/* IDENTITY & SYNC STATUS */}
+        {user && (
+          <div style={boxStyle}>
+            <strong style={{ color: '#ffffff', fontFamily: mono }}>IDENTIDAD Y ESTADO</strong>
+            <div>
+              Perfil: <span style={{ color: '#ffffff' }}>{user.email || user.name}</span> //{' '}
+              <span style={{ color: isCloudUser ? '#10b981' : '#f59e0b', fontFamily: mono }}>{PROVIDER_LABELS[user.authProvider]}</span>
+            </div>
+            {banner(statusLevel, statusText, 'cloud-sync-detail')}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {isCloudUser && syncStatus.state === 'error' && (
+                <button type="button" onClick={retrySync} style={smallButton}>
+                  <RefreshCw size={12} />
+                  <span>REINTENTAR AHORA</span>
+                </button>
+              )}
+              {!isCloudUser && cloud.configured && (
+                <button type="button" onClick={handleCloudLogin} disabled={busy} style={{ ...smallButton, color: '#10b981', borderColor: '#10b981' }}>
+                  <LogIn size={12} />
+                  <span>{cloud.sessionEmail ? `CAMBIAR A LA CUENTA DE NUBE (${cloud.sessionEmail})` : 'INICIAR SESIÓN CON GOOGLE (NUBE)'}</span>
+                </button>
+              )}
+            </div>
+            {!isCloudUser && cloud.configured && (
+              <div>
+                Al iniciar sesión en la nube se usa otro workspace (el de tu cuenta). Este perfil local queda intacto en este
+                navegador; exporta su JSON si quieres conservarlo aparte.
+              </div>
+            )}
           </div>
         )}
 
-        {/* FORM */}
-        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {/* CURRENT CONFIG */}
+        <div style={boxStyle}>
+          <strong style={{ color: '#ffffff', fontFamily: mono }}>CONFIGURACIÓN ACTUAL</strong>
           <div>
-            <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+            Origen: <span style={{ color: '#ffffff' }}>{SOURCE_LABEL[cloud.source]}</span>
+          </div>
+          {cloud.url && (
+            <div style={{ wordBreak: 'break-all' }}>
+              URL: <span style={{ color: '#ffffff', fontFamily: mono }}>{cloud.url}</span>
+            </div>
+          )}
+          <div style={{ wordBreak: 'break-all' }}>
+            URL de retorno del login (agrégala en Supabase, Authentication, URL Configuration):{' '}
+            <span style={{ color: '#ffffff', fontFamily: mono }}>{getAuthRedirectUrl()}</span>
+          </div>
+          {cloud.configError && banner('error', cloud.configError, 'cloud-config-error')}
+          {cloud.configured && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button type="button" onClick={handleSecurityCheck} disabled={checking} style={smallButton}>
+                <ShieldCheck size={12} />
+                <span>{checking ? 'COMPROBANDO...' : 'COMPROBAR SEGURIDAD DE LA TABLA (SIN SESIÓN)'}</span>
+              </button>
+              {health && banner(health.level, health.message, 'cloud-health')}
+            </div>
+          )}
+        </div>
+
+        {/* OVERRIDE FORM */}
+        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <strong style={{ color: '#ffffff', fontFamily: mono, fontSize: '11px' }}>OVERRIDE EN ESTE NAVEGADOR (OPCIONAL)</strong>
+          <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
+            Solo la <strong style={{ color: '#ffffff' }}>anon key</strong> o la <strong style={{ color: '#ffffff' }}>publishable key</strong>.
+            Las claves service_role y sb_secret_ se rechazan: ignoran RLS y darían acceso a todos los workspaces.
+          </p>
+          <div>
+            <label htmlFor="sb-url" style={labelStyle}>
               SUPABASE PROJECT URL
             </label>
             <input
+              id="sb-url"
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://xyzproject.supabase.co"
+              placeholder="https://<proyecto>.supabase.co"
               required
-              style={{
-                width: '100%',
-                background: '#0d1017',
-                border: '1px solid #2a3346',
-                borderRadius: '4px',
-                padding: '8px 10px',
-                color: '#ffffff',
-                marginTop: '4px',
-                boxSizing: 'border-box',
-                fontSize: '13px',
-              }}
+              style={inputStyle}
             />
           </div>
-
           <div>
-            <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
-              SUPABASE ANON KEY
+            <label htmlFor="sb-key" style={labelStyle}>
+              SUPABASE ANON / PUBLISHABLE KEY
             </label>
             <input
+              id="sb-key"
               type="password"
               value={anonKey}
               onChange={(e) => setAnonKey(e.target.value)}
-              placeholder="eyJhbGciOiJIUzI1NiIsIn..."
+              placeholder="eyJ... o sb_publishable_..."
               required
-              style={{
-                width: '100%',
-                background: '#0d1017',
-                border: '1px solid #2a3346',
-                borderRadius: '4px',
-                padding: '8px 10px',
-                color: '#ffffff',
-                marginTop: '4px',
-                boxSizing: 'border-box',
-                fontSize: '13px',
-              }}
+              autoComplete="off"
+              style={inputStyle}
             />
           </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={status.loading || !url}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #2a3346',
-                  color: '#94a3b8',
-                  padding: '7px 12px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <RefreshCw size={12} className={status.loading ? 'spin' : ''} />
-                <span>PROBAR CONEXION</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+            {cloud.source === 'override' ? (
+              <button type="button" onClick={handleClearOverride} style={{ ...smallButton, borderColor: '#ef4444', color: '#ef4444' }}>
+                <Trash2 size={12} />
+                <span>QUITAR OVERRIDE</span>
               </button>
-
-              {url && (
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #ef4444',
-                    color: '#ef4444',
-                    padding: '7px 10px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                  }}
-                  title="Eliminar configuracion"
-                >
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px' }}>
-              {status.ok && (
-                <button
-                  type="button"
-                  onClick={handleSyncNow}
-                  style={{
-                    background: '#10b981',
-                    border: 'none',
-                    color: '#ffffff',
-                    padding: '7px 14px',
-                    borderRadius: '4px',
-                    fontFamily: "'IBM Plex Mono', monospace",
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}
-                >
-                  <Database size={12} />
-                  <span>SINCRONIZAR AHORA</span>
-                </button>
-              )}
-
-              <button
-                type="submit"
-                style={{
-                  background: '#0066ff',
-                  border: 'none',
-                  color: '#ffffff',
-                  padding: '7px 16px',
-                  borderRadius: '4px',
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                GUARDAR Y ACTIVAR
-              </button>
-            </div>
+            ) : (
+              <span />
+            )}
+            <button
+              type="submit"
+              style={{
+                background: '#0066ff',
+                border: 'none',
+                color: '#ffffff',
+                padding: '7px 16px',
+                borderRadius: '4px',
+                fontFamily: mono,
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              GUARDAR Y RECARGAR
+            </button>
           </div>
         </form>
 
-        <div style={{ background: '#0d1017', border: '1px solid #2a3346', borderRadius: '4px', padding: '10px', fontSize: '11px', color: '#94a3b8', lineHeight: 1.4 }}>
-          <strong style={{ color: '#ffffff' }}>ESPECIFICACION SQL (TABLA SUPABASE):</strong>
-          <pre style={{ margin: '6px 0 0 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', color: '#10b981' }}>
-{`CREATE TABLE bandait_workspaces (
-  user_id TEXT PRIMARY KEY,
-  workspace JSONB NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);`}
-          </pre>
+        {/* LOCAL BACKUPS FROM CONFLICTS */}
+        {isCloudUser && (
+          <div style={boxStyle} data-testid="cloud-backups">
+            <strong style={{ color: '#ffffff', fontFamily: mono }}>RESPALDOS LOCALES DE CONFLICTOS ({backups.length}/3)</strong>
+            {backups.length === 0 && <div>No hay respaldos. Se crean cuando un conflicto descarta cambios de un lado.</div>}
+            {backups.map((b) => (
+              <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: mono }}>
+                  {new Date(b.savedAt).toLocaleString()} // copia {b.side === 'local' ? 'de este navegador' : 'de la nube'}
+                </span>
+                <span style={{ display: 'flex', gap: '6px' }}>
+                  <button type="button" onClick={() => downloadBackup(b.id)} style={smallButton}>
+                    <Download size={12} />
+                    <span>DESCARGAR</span>
+                  </button>
+                  <button type="button" onClick={() => handleRestore(b.id)} style={smallButton}>
+                    <RotateCcw size={12} />
+                    <span>RESTAURAR</span>
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ ...boxStyle, color: '#94a3b8' }}>
+          <strong style={{ color: '#ffffff', fontFamily: mono }}>BASE DE DATOS</strong>
+          <div>
+            Tabla <span style={{ fontFamily: mono, color: '#10b981' }}>public.bandait_workspaces</span> (una fila por usuario,
+            clave <span style={{ fontFamily: mono }}>user_id = auth.uid()</span>). El SQL seguro (RLS, revoke a anon,
+            políticas por usuario) está en docs/DEPLOY.md, sección 3. Debe ejecutarse en tu proyecto Supabase.
+          </div>
         </div>
       </div>
     </div>

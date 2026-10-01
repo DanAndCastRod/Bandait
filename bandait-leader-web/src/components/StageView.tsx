@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
 
+/*
+ * NO MONTADO a proposito (ver App.tsx): el Hub se publica por HTTPS y no puede abrir ws://
+ * hacia un lider en la LAN (contenido mixto bloqueado por el navegador). La vista de
+ * escenario y el control del director viven en el follower PWA, servido desde la LAN.
+ */
+
 interface StageViewProps {
   currentSong: {
     title: string;
@@ -13,38 +19,24 @@ interface StageViewProps {
 }
 
 export default function StageView({ currentSong, currentBeat, isPlaying }: StageViewProps) {
-  const [currentLyricIndex, setCurrentLyricIndex] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
 
   useEffect(() => {
-    if (!isPlaying) {
-      setElapsedTime(0);
-      setCurrentLyricIndex(0);
-      return;
-    }
-
+    if (!isPlaying) return;
+    const start = performance.now();
     const interval = setInterval(() => {
-      setElapsedTime((prev) => prev + 0.1);
+      setElapsedTime((performance.now() - start) / 1000);
     }, 100);
-
     return () => clearInterval(interval);
   }, [isPlaying]);
 
-  useEffect(() => {
-    if (!currentSong || !isPlaying) return;
-
-    const songLyrics = currentSong.lyrics || [];
-    const currentLyric = songLyrics.findIndex(
-      (lyric, index) => {
-        const nextLyric = songLyrics[index + 1];
-        return elapsedTime >= lyric.time && (!nextLyric || elapsedTime < nextLyric.time);
-      }
-    );
-
-    if (currentLyric !== -1 && currentLyric !== currentLyricIndex) {
-      setCurrentLyricIndex(currentLyric);
-    }
-  }, [elapsedTime, currentSong, currentLyricIndex, isPlaying]);
+  const shownElapsed = isPlaying ? elapsedTime : 0;
+  const songLyrics = currentSong?.lyrics || [];
+  const foundIndex = songLyrics.findIndex((lyric, index) => {
+    const nextLyric = songLyrics[index + 1];
+    return shownElapsed >= lyric.time && (!nextLyric || shownElapsed < nextLyric.time);
+  });
+  const currentLyricIndex = foundIndex === -1 ? 0 : foundIndex;
 
   if (!currentSong) {
     return (
@@ -59,7 +51,6 @@ export default function StageView({ currentSong, currentBeat, isPlaying }: Stage
           gap: '16px',
         }}
       >
-        <div style={{ fontSize: '48px', opacity: 0.3 }}>🎵</div>
         <div style={{ fontSize: '18px' }}>Sin canción cargada</div>
         <div style={{ fontSize: '14px', opacity: 0.5 }}>Selecciona una canción desde la biblioteca</div>
       </div>

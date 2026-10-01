@@ -1,11 +1,12 @@
 import React, { useState } from 'react'
-import { useHub } from '../context/HubContext'
+import { useHub } from '../context/hubContextCore'
 import type { MemberRole } from '../types/hub'
 import { Users, UserPlus, Shield, Mail, Phone, CheckCircle2 } from 'lucide-react'
 
 export const BandMembersHubView: React.FC = () => {
-  const { activeBand, members, updateMemberRole, inviteMember } = useHub()
+  const { activeBand, members, updateMemberRole, inviteMember, roleEditBlockReason } = useHub()
   const [showInviteModal, setShowInviteModal] = useState(false)
+  const [roleError, setRoleError] = useState<string | null>(null)
   const [inviteName, setInviteName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<MemberRole>('Musician')
@@ -19,6 +20,11 @@ export const BandMembersHubView: React.FC = () => {
     setInviteEmail('')
     setInviteInstrument('')
     setShowInviteModal(false)
+  }
+
+  const handleRoleChange = (memberId: string, newRole: MemberRole) => {
+    const result = updateMemberRole(memberId, newRole)
+    setRoleError(result.ok ? null : result.reason || 'Cambio de rol no permitido.')
   }
 
   const roleColors: Record<MemberRole, string> = {
@@ -78,6 +84,42 @@ export const BandMembersHubView: React.FC = () => {
         </button>
       </div>
 
+      {/* ROLE GUARD NOTICE */}
+      <div
+        data-testid="role-guard-note"
+        style={{
+          background: '#0d1017',
+          border: '1px solid #2a3346',
+          borderRadius: '4px',
+          padding: '10px 14px',
+          fontSize: '11px',
+          color: '#94a3b8',
+          fontFamily: "'IBM Plex Mono', monospace",
+          lineHeight: 1.5,
+        }}
+      >
+        REGLAS DE ROLES: solo un Owner cambia roles, nadie cambia su propio rol y siempre queda al menos un Owner.
+        Es una validación de este navegador; la aplicación real exige permisos por banda en el servidor (pendiente).
+      </div>
+
+      {roleError && (
+        <div
+          role="alert"
+          data-testid="role-error"
+          style={{
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid #ef4444',
+            borderRadius: '4px',
+            padding: '10px 14px',
+            color: '#fca5a5',
+            fontSize: '12px',
+            fontFamily: "'IBM Plex Mono', monospace",
+          }}
+        >
+          [ROLES]: {roleError}
+        </div>
+      )}
+
       {/* MEMBERS TABLE */}
       <div
         className="touch-scroll-x"
@@ -109,9 +151,12 @@ export const BandMembersHubView: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {members.map((member, idx) => (
+            {members.map((member, idx) => {
+              const blockReason = roleEditBlockReason(member.id)
+              return (
               <tr
                 key={member.id}
+                data-testid={`member-row-${member.id}`}
                 style={{
                   borderBottom: '1px solid #1f2737',
                   background: idx % 2 === 0 ? '#131720' : '#11141c',
@@ -148,8 +193,12 @@ export const BandMembersHubView: React.FC = () => {
                 <td style={{ padding: '14px 16px' }}>
                   <select
                     value={member.role}
-                    onChange={(e) => updateMemberRole(member.id, e.target.value as MemberRole)}
+                    onChange={(e) => handleRoleChange(member.id, e.target.value as MemberRole)}
+                    disabled={blockReason !== null}
+                    title={blockReason ?? 'Cambiar rol'}
+                    aria-label={`Rol de ${member.name}`}
                     style={{
+                      opacity: blockReason ? 0.55 : 1,
                       background: '#1a202c',
                       border: `1px solid ${roleColors[member.role] || '#2a3346'}`,
                       borderRadius: '4px',
@@ -159,7 +208,7 @@ export const BandMembersHubView: React.FC = () => {
                       fontSize: '11px',
                       fontWeight: 700,
                       outline: 'none',
-                      cursor: 'pointer',
+                      cursor: blockReason ? 'not-allowed' : 'pointer',
                     }}
                   >
                     <option value="Owner">Dueño (Owner)</option>
@@ -191,7 +240,8 @@ export const BandMembersHubView: React.FC = () => {
                   </div>
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>

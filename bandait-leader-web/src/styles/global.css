@@ -103,6 +103,21 @@ input, select, textarea {
   display: flex;
 }
 
+/* Anchos intermedios: la barra superior no cabe en una sola fila (marca + banda + pestanas +
+   acciones). Las pestanas pasan a una segunda fila en vez de quedar tapadas por el selector. */
+@media (min-width: 769px) and (max-width: 1599px) {
+  .hub-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .hub-desktop-nav {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: center;
+  }
+}
+
 @media (max-width: 768px) {
   .hub-desktop-nav {
     display: none !important;

@@ -173,7 +173,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   {
                     step: 'PASO 01',
                     title: 'Acceso e Identidad',
-                    desc: 'Inicia sesion con Google o vincula tu cuenta personal. Tu espacio de trabajo y bandas se guardan de forma aislada y persistente.',
+                    desc: 'Inicia sesion con Google (nube, via Supabase) para sincronizar entre dispositivos, o usa un perfil local que guarda todo solo en este navegador.',
                   },
                   {
                     step: 'PASO 02',

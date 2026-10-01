@@ -1,594 +1,412 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import type {
-  UserProfile,
-  Band,
-  BandMember,
-  Playlist,
-  SongStems,
-  EquipmentItem,
-  MemberRole,
-  PlaylistSong,
-} from '../types/hub'
-import { authService, DEMO_PROFILES } from '../services/authService'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import {
-  syncWorkspaceToCloud,
-  fetchWorkspaceFromCloud,
-  subscribeToWorkspaceChanges,
+  isWorkspaceStore,
+  type AuthProvider,
+  type Band,
+  type BandMember,
+  type EquipmentItem,
+  type MemberRole,
+  type Playlist,
+  type PlaylistSong,
+  type UserProfile,
+  type WorkspaceStore,
+} from '../types/hub'
+import { authService } from '../services/authService'
+import {
+  consumeOAuthPending,
+  consumeOAuthRedirectError,
+  createWorkspaceCloudAdapter,
+  getSupabaseClient,
+  getSupabaseConfig,
+  profileFromSupabaseUser,
+  signInWithSupabaseGoogle,
+  signOutSupabase,
 } from '../services/supabaseClient'
+import {
+  WorkspaceSyncEngine,
+  parseBackups,
+  syncBackupsKey,
+  type EngineStatus,
+  type KeyValueStore,
+  type SyncNotice,
+} from '../services/workspaceSync'
+import { checkRoleChange, resolveActorRole, roleEditBlockReason as roleBlockReason } from '../services/roles'
+import { legacyEmailProfileId, localProfileId } from '../services/identity'
+import { uuidv4 } from '../services/uuid'
+import { downloadJson, slugify } from '../services/download'
+import { createDemoWorkspace, createPersonalWorkspace } from './seedData'
+import { HubContext, type HubContextType, type HubSyncStatus } from './hubContextCore'
 
-// INITIAL SEED DATA FOR DEMO SCENARIOS
-const INITIAL_BANDS: Band[] = [
-  {
-    id: 'band_01',
-    name: 'Los Inquietos del Rock',
-    genre: 'Rock Latino / Pop',
-    ownerId: 'usr_director_01',
-    currentUserRole: 'MusicDirector',
-    membersCount: 5,
-    createdAt: '2025-11-01',
-  },
-  {
-    id: 'band_02',
-    name: 'Trío Acústico Pereira',
-    genre: 'Acústico / Balada',
-    ownerId: 'usr_director_01',
-    currentUserRole: 'Owner',
-    membersCount: 3,
-    createdAt: '2026-01-20',
-  },
-  {
-    id: 'band_03',
-    name: 'Sinfónica Pop Bogotá',
-    genre: 'Orquesta Pop Fusión',
-    ownerId: 'usr_foh_02',
-    currentUserRole: 'Musician',
-    membersCount: 14,
-    createdAt: '2026-02-15',
-  },
-]
+const workspaceKey = (userId: string) => `bandait_workspace_${userId}`
 
-const INITIAL_MEMBERS: Record<string, BandMember[]> = {
-  band_01: [
-    {
-      id: 'mem_01',
-      bandId: 'band_01',
-      userId: 'usr_director_01',
-      name: 'Carlos Mendoza',
-      email: 'carlos.director@bandait.live',
-      phone: '+57 310 555 0101',
-      role: 'MusicDirector',
-      instrument: 'Director / Teclados',
-      joinedAt: '2025-11-01',
-    },
-    {
-      id: 'mem_02',
-      bandId: 'band_01',
-      userId: 'usr_drummer_03',
-      name: 'Mateo Gómez',
-      email: 'mateo.drums@bandait.live',
-      phone: '+57 311 555 0202',
-      role: 'Musician',
-      instrument: 'Batería Principal',
-      joinedAt: '2025-11-05',
-    },
-    {
-      id: 'mem_03',
-      bandId: 'band_01',
-      userId: 'usr_foh_02',
-      name: 'Alejandro Vélez',
-      email: 'alejandro.foh@soundcraft.live',
-      phone: '+57 315 555 0303',
-      role: 'SoundEngineer',
-      instrument: 'Ingeniero FOH & Monitores',
-      joinedAt: '2025-11-10',
-    },
-    {
-      id: 'mem_04',
-      bandId: 'band_01',
-      userId: 'usr_bass_04',
-      name: 'Felipe Restrepo',
-      email: 'felipe.bass@bandait.live',
-      phone: '+57 300 555 0404',
-      role: 'Musician',
-      instrument: 'Bajo Eléctrico',
-      joinedAt: '2025-11-12',
-    },
-    {
-      id: 'mem_05',
-      bandId: 'band_01',
-      userId: 'usr_vox_05',
-      name: 'Laura Valencia',
-      email: 'laura.lead@bandait.live',
-      phone: '+57 320 555 0505',
-      role: 'Musician',
-      instrument: 'Voz Líder',
-      joinedAt: '2025-11-15',
-    },
-  ],
-}
-
-const INITIAL_PLAYLISTS: Record<string, Playlist[]> = {
-  band_01: [
-    {
-      id: 'pl_01',
-      bandId: 'band_01',
-      name: 'Gira Nacional 2026 — Setlist Principal',
-      description: 'Repertorio oficial para salas y festivales. Orden inmutable salvo indicación expresa del Director.',
-      createdAt: '2026-02-01',
-      updatedAt: '2026-03-02',
-      songs: [
-        {
-          id: 'song_01',
-          orderIndex: 1,
-          title: 'Medianoche en Pereira',
-          artist: 'Los Inquietos del Rock',
-          bpm: 124,
-          key: 'Am',
-          showKey: 'Am',
-          camelot: '8A',
-          durationSec: 215,
-          transitionMode: 'manual_cue',
-          countInBars: 2,
-          notes: 'Inicio con intro de sintetizador y claqueta en compás 3. Alerta de solo de guitarra en c4.',
-        },
-        {
-          id: 'song_02',
-          orderIndex: 2,
-          title: 'Ruta del Café',
-          artist: 'Los Inquietos del Rock',
-          bpm: 130,
-          key: 'Dm',
-          showKey: 'Dm',
-          camelot: '7A',
-          durationSec: 198,
-          transitionMode: 'auto_count_in',
-          countInBars: 1,
-          notes: 'Auto conteo de 4 pulsos. Batería entra directo en el compás 1.',
-        },
-        {
-          id: 'song_03',
-          orderIndex: 3,
-          title: 'Desde Lejos (Balada)',
-          artist: 'Los Inquietos del Rock',
-          bpm: 88,
-          key: 'G',
-          showKey: 'F#',
-          camelot: '11B',
-          durationSec: 280,
-          transitionMode: 'manual_cue',
-          countInBars: 2,
-          notes: 'Tono bajado medio tono (F#) para comodidad vocal. Silencio de batería al final.',
-        },
-        {
-          id: 'song_04',
-          orderIndex: 4,
-          title: 'Fuego en Tarima',
-          artist: 'Los Inquietos del Rock',
-          bpm: 140,
-          key: 'Em',
-          showKey: 'Em',
-          camelot: '9A',
-          durationSec: 230,
-          transitionMode: 'gapless',
-          countInBars: 1,
-          notes: 'Final con solo de bajo y batería extendido.',
-        },
-      ],
-    },
-  ],
-}
-
-const INITIAL_STEMS: Record<string, SongStems> = {
-  song_01: {
-    songId: 'song_01',
-    songTitle: 'Medianoche en Pereira',
-    bpm: 124,
-    tracks: [
-      {
-        channel: 1,
-        id: 'stem_drm_01',
-        name: 'Batería Stems',
-        code: '[DRM]',
-        filename: 'medianoche_drums_48k.wav',
-        fileSizeMb: 42.1,
-        volumeDb: 0.0,
-        pan: 0,
-        limiterSafe: true,
-        demucsStatus: 'ready',
-      },
-      {
-        channel: 2,
-        id: 'stem_bas_01',
-        name: 'Bajo Eléctrico',
-        code: '[BAS]',
-        filename: 'medianoche_bass_48k.wav',
-        fileSizeMb: 38.4,
-        volumeDb: -1.5,
-        pan: 0,
-        limiterSafe: true,
-        demucsStatus: 'ready',
-      },
-      {
-        channel: 3,
-        id: 'stem_vox_01',
-        name: 'Voces de Apoyo',
-        code: '[VOX]',
-        filename: 'medianoche_backing_vox.wav',
-        fileSizeMb: 35.0,
-        volumeDb: -2.0,
-        pan: 0,
-        limiterSafe: true,
-        demucsStatus: 'ready',
-      },
-      {
-        channel: 4,
-        id: 'stem_oth_01',
-        name: 'Armonía / Teclados',
-        code: '[OTH]',
-        filename: 'medianoche_synths.wav',
-        fileSizeMb: 40.2,
-        volumeDb: -0.5,
-        pan: 0.1,
-        limiterSafe: true,
-        demucsStatus: 'ready',
-      },
-      {
-        channel: 5,
-        id: 'stem_clk_01',
-        name: 'Clic Metrónomo FOH',
-        code: '[CLK]',
-        filename: 'click_124bpm_4_4.wav',
-        fileSizeMb: 12.0,
-        volumeDb: +1.0,
-        pan: -1.0,
-        limiterSafe: true,
-        demucsStatus: 'ready',
-      },
-      {
-        channel: 6,
-        id: 'stem_voz_01',
-        name: 'Guía de Voz de Tarima',
-        code: '[VOZ]',
-        filename: 'medianoche_stage_cues.wav',
-        fileSizeMb: 14.5,
-        volumeDb: 0.0,
-        pan: 1.0,
-        limiterSafe: true,
-        demucsStatus: 'ready',
-      },
-    ],
-  },
-}
-
-const INITIAL_EQUIPMENT: Record<string, EquipmentItem[]> = {
-  band_01: [
-    {
-      id: 'eq_01',
-      bandId: 'band_01',
-      category: 'interface',
-      name: 'Interfaz ASIO FOH Master',
-      model: 'Focusrite Scarlett 18i20 3rd Gen (USB)',
-      assignedTo: 'Alejandro Vélez (FOH)',
-      channelRouting: 'Salidas 1-2 PA Principal (XLR) / Salida 3 In-Ear Baterista',
-      notes: 'Driver ASIO a 48kHz / 64 samples (latencia 1.4ms).',
-    },
-    {
-      id: 'eq_02',
-      bandId: 'band_01',
-      category: 'in_ear',
-      name: 'Transmisor In-Ear Shure PSM300',
-      model: 'P3T / P3RA Bodypack Receptor',
-      assignedTo: 'Carlos Mendoza (Director)',
-      channelRouting: 'Aux 1 (Mezcla Director)',
-      rfFrequency: '518.200 MHz (Grupo 1 / Canal 1)',
-      notes: 'Frecuencia coordinada. Sin interferencia en tarima.',
-    },
-    {
-      id: 'eq_03',
-      bandId: 'band_01',
-      category: 'in_ear',
-      name: 'Transmisor In-Ear Sennheiser G4',
-      model: 'SR IEM G4 / EK G4',
-      assignedTo: 'Felipe Restrepo (Bajo)',
-      channelRouting: 'Aux 2 (Mono Mix)',
-      rfFrequency: '542.400 MHz (Grupo 2 / Canal 1)',
-      notes: 'Limiter interno activado.',
-    },
-    {
-      id: 'eq_04',
-      bandId: 'band_01',
-      category: 'cabling',
-      name: 'Cable Físico Clic Baterista',
-      model: 'Cable Blindado Neutrik Jack TRS 1/4" a XLR (10 metros)',
-      assignedTo: 'Mateo Gómez (Batería)',
-      channelRouting: 'Salida Física Ch 3 de la Interfaz FOH',
-      notes: 'Conexión cableada directa obligatoria (latencia < 1.5ms garantizada).',
-    },
-  ],
-}
-
-interface WorkspaceStore {
-  bands: Band[]
-  activeBandId: string
-  membersMap: Record<string, BandMember[]>
-  playlistsMap: Record<string, Playlist[]>
-  equipmentMap: Record<string, EquipmentItem[]>
-  stemsMap: Record<string, SongStems>
-}
-
-function loadUserWorkspace(currentUser: UserProfile | null): WorkspaceStore {
-  if (!currentUser) {
-    return {
-      bands: INITIAL_BANDS,
-      activeBandId: 'band_01',
-      membersMap: INITIAL_MEMBERS,
-      playlistsMap: INITIAL_PLAYLISTS,
-      equipmentMap: INITIAL_EQUIPMENT,
-      stemsMap: INITIAL_STEMS,
-    }
-  }
-
-  const storageKey = `bandait_workspace_${currentUser.id}`
-  const saved = localStorage.getItem(storageKey)
-  if (saved) {
+const browserStore: KeyValueStore = {
+  get(key) {
     try {
-      const parsed = JSON.parse(saved)
-      if (parsed.bands && parsed.bands.length > 0) {
-        return parsed
-      }
-    } catch (err) {
-      console.error('Error parsing stored workspace:', err)
+      return localStorage.getItem(key)
+    } catch {
+      return null
     }
-  }
-
-  // If user is a demo profile, use default demo data
-  const isDemo = DEMO_PROFILES.some((p) => p.id === currentUser.id)
-  if (isDemo) {
-    return {
-      bands: INITIAL_BANDS,
-      activeBandId: 'band_01',
-      membersMap: INITIAL_MEMBERS,
-      playlistsMap: INITIAL_PLAYLISTS,
-      equipmentMap: INITIAL_EQUIPMENT,
-      stemsMap: INITIAL_STEMS,
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, value)
+      return true
+    } catch {
+      return false
     }
-  }
-
-  // Real user: create clean personal workspace
-  const cleanId = currentUser.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)
-  const primaryBandId = `band_${cleanId}_01`
-  const firstName = currentUser.name.split(' ')[0]
-
-  const initialBand: Band = {
-    id: primaryBandId,
-    name: `Banda de ${firstName}`,
-    genre: 'Live Show / En Vivo',
-    ownerId: currentUser.id,
-    currentUserRole: 'Owner',
-    membersCount: 1,
-    createdAt: new Date().toISOString().slice(0, 10),
-  }
-
-  const initialMember: BandMember = {
-    id: `mem_${cleanId}_owner`,
-    bandId: primaryBandId,
-    userId: currentUser.id,
-    name: currentUser.name,
-    email: currentUser.email,
-    role: 'Owner',
-    instrument: 'Director Musical',
-    joinedAt: new Date().toISOString().slice(0, 10),
-  }
-
-  const initialPlaylist: Playlist = {
-    id: `pl_${cleanId}_01`,
-    bandId: primaryBandId,
-    name: 'Setlist Principal — Gira 2026',
-    description: `Repertorio oficial configurado en el Web Hub para ${initialBand.name}`,
-    createdAt: new Date().toISOString().slice(0, 10),
-    updatedAt: new Date().toISOString().slice(0, 10),
-    songs: [
-      {
-        id: `song_${cleanId}_01`,
-        orderIndex: 1,
-        title: 'Tema 1 (Apertura Show)',
-        artist: initialBand.name,
-        bpm: 120,
-        key: 'Am',
-        showKey: 'Am',
-        camelot: '8A',
-        durationSec: 210,
-        transitionMode: 'manual_cue',
-        countInBars: 2,
-        notes: 'Inicio de show. Conteo de 8 pulsos por claqueta.',
-      },
-    ],
-  }
-
-  const initialEquipment: EquipmentItem[] = [
-    {
-      id: `eq_${cleanId}_01`,
-      bandId: primaryBandId,
-      category: 'interface',
-      name: 'Interfaz ASIO Multicanal FOH',
-      model: 'Interfaz USB ASIO 8x8 (64 samples)',
-      assignedTo: `${currentUser.name} (FOH)`,
-      channelRouting: 'Ch 1-2 PA Master (XLR) / Ch 3 In-Ear Baterista',
-      notes: 'Driver ASIO a 48kHz. Conexión directa por cable Neutrik a baterista.',
-    },
-    {
-      id: `eq_${cleanId}_02`,
-      bandId: primaryBandId,
-      category: 'cabling',
-      name: 'Cable Físico Baterista (Salida 3)',
-      model: 'Neutrik Jack TRS 1/4" a XLR Balanceado (10m)',
-      assignedTo: 'Batería',
-      channelRouting: 'Salida 3 de interfaz a audífonos baterista',
-      notes: 'Conexión cableada obligatoria: latencia cero y cero desconexión.',
-    },
-  ]
-
-  const newWorkspace: WorkspaceStore = {
-    bands: [initialBand],
-    activeBandId: primaryBandId,
-    membersMap: { [primaryBandId]: [initialMember] },
-    playlistsMap: { [primaryBandId]: [initialPlaylist] },
-    equipmentMap: { [primaryBandId]: initialEquipment },
-    stemsMap: INITIAL_STEMS,
-  }
-
-  localStorage.setItem(storageKey, JSON.stringify(newWorkspace))
-  return newWorkspace
+  },
 }
 
-interface HubContextType {
-  user: UserProfile | null
-  bands: Band[]
-  activeBand: Band | null
-  members: BandMember[]
-  playlists: Playlist[]
-  activePlaylist: Playlist | null
-  songStems: SongStems | null
-  equipment: EquipmentItem[]
-  googleClientId: string
-  setGoogleClientId: (clientId: string) => void
-  loginWithGoogleCredential: (credentialJwt: string) => void
-  loginWithPersonalAccount: (name: string, email: string) => void
-  loginWithDemoProfile: (profile: UserProfile) => void
-  loginWithGoogle: (profile?: UserProfile) => void
-  resetWorkspaceToDemo: () => void
-  logout: () => void
-  switchBand: (bandId: string) => void
-  createBand: (name: string, genre: string) => void
-  updateMemberRole: (memberId: string, newRole: MemberRole) => void
-  inviteMember: (name: string, email: string, role: MemberRole, instrument: string) => void
-  createPlaylist: (name: string, description: string) => void
-  setActivePlaylist: (playlist: Playlist) => void
-  updatePlaylistSong: (songId: string, updates: Partial<PlaylistSong>) => void
-  reorderSongs: (fromIndex: number, toIndex: number) => void
-  addSongToPlaylist: (song: Omit<PlaylistSong, 'id' | 'orderIndex'>) => void
-  removeSongFromPlaylist: (songId: string) => void
-  updateStemTrackVolume: (channel: number, volumeDb: number) => void
-  addEquipment: (item: Omit<EquipmentItem, 'id' | 'bandId'>) => void
-  removeEquipment: (id: string) => void
-  exportMasterXlsxJson: () => void
+function readStoredWorkspace(userId: string): WorkspaceStore | null {
+  const raw = browserStore.get(workspaceKey(userId))
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return isWorkspaceStore(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
-const HubContext = createContext<HubContextType | undefined>(undefined)
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+/** Cambia el id de usuario dentro de un workspace importado (ownerId y userId de integrantes). */
+function remapUserId(ws: WorkspaceStore, fromId: string, toId: string): WorkspaceStore {
+  const copy = clone(ws)
+  copy.bands = copy.bands.map((b) => (b.ownerId === fromId ? { ...b, ownerId: toId } : b))
+  for (const bandId of Object.keys(copy.membersMap)) {
+    copy.membersMap[bandId] = (copy.membersMap[bandId] || []).map((m) => (m.userId === fromId ? { ...m, userId: toId } : m))
+  }
+  return copy
+}
+
+/**
+ * Workspace inicial de un usuario. No escribe nada: el efecto de persistencia lo hace.
+ * Para cuentas de nube esto es solo la copia local de partida: el motor de sincronizacion
+ * descarga la fila de la nube ANTES de escribir y reconcilia.
+ */
+function loadWorkspaceFor(user: UserProfile | null): WorkspaceStore {
+  if (!user) return createDemoWorkspace()
+  const stored = readStoredWorkspace(user.id)
+  if (stored) return stored
+  if (user.authProvider === 'demo') return createDemoWorkspace()
+  // Workspace local de un perfil anterior con el mismo correo en ESTE navegador
+  // (incluye los ids antiguos usr_google_<btoa(email)>). Solo localStorage; nunca la nube.
+  if (user.email) {
+    for (const candidate of [localProfileId(user.email), legacyEmailProfileId(user.email)]) {
+      if (!candidate || candidate === user.id) continue
+      const previous = readStoredWorkspace(candidate)
+      if (previous) return remapUserId(previous, candidate, user.id)
+    }
+  }
+  return createPersonalWorkspace(user)
+}
+
+function firstPlaylistId(ws: WorkspaceStore): string {
+  const band = ws.bands.find((b) => b.id === ws.activeBandId) || ws.bands[0]
+  return band ? ws.playlistsMap[band.id]?.[0]?.id ?? '' : ''
+}
+
+const LOCAL_ONLY_DETAIL: Record<Exclude<AuthProvider, 'supabase'>, string> = {
+  local: 'Perfil local: los datos viven solo en este navegador. Para sincronizar entre dispositivos inicia sesión con Google (nube).',
+  google_local:
+    'Perfil local de Google: el token no se verifica en un servidor, así que no abre la nube. Los datos viven solo en este navegador.',
+  demo: 'Modo demo: datos ficticios guardados solo en este navegador.',
+}
 
 export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(() => authService.getCurrentUser())
+  // El error de retorno de OAuth se lee y se limpia de la URL antes de crear el cliente de Supabase.
+  const [authNotice, setAuthNotice] = useState<string | null>(() => {
+    const err = consumeOAuthRedirectError()
+    return err ? `El login con Google no se completó: ${err}` : null
+  })
+  const [cloudConfig] = useState(() => getSupabaseConfig())
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    const stored = authService.getCurrentUser()
+    if (stored?.authProvider === 'supabase' && !cloudConfig.isConfigured) {
+      authService.logout()
+      return null
+    }
+    return stored
+  })
+  const [hadLocalCopy, setHadLocalCopy] = useState(() => (user ? readStoredWorkspace(user.id) !== null : false))
+  const [workspace, setWorkspace] = useState<WorkspaceStore>(() => loadWorkspaceFor(user))
+  const [activePlaylistId, setActivePlaylistId] = useState<string>(() => firstPlaylistId(workspace))
   const [googleClientId, setGoogleClientIdState] = useState<string>(() => authService.getGoogleClientId())
+  const [googleClientIdSource, setGoogleClientIdSource] = useState(() => authService.getGoogleClientIdSource())
+  const [cloudAuthReady, setCloudAuthReady] = useState(() => !cloudConfig.isConfigured)
+  const [cloudSessionUserId, setCloudSessionUserId] = useState<string | null>(null)
+  const [cloudSessionEmail, setCloudSessionEmail] = useState<string | null>(null)
+  const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
+  const [syncNotice, setSyncNotice] = useState<SyncNotice | null>(null)
+  const [backupsVersion, setBackupsVersion] = useState(0)
+  const [offlineChosen, setOfflineChosen] = useState(false)
 
-  // Load initial workspace according to user
-  const [workspace, setWorkspace] = useState<WorkspaceStore>(() => loadUserWorkspace(user))
+  const userRef = useRef<UserProfile | null>(user)
+  const workspaceRef = useRef<WorkspaceStore>(workspace)
+  /** Ultimo workspace que NO es una edicion del usuario (carga inicial o datos adoptados de la nube). */
+  const nonEditRef = useRef<WorkspaceStore | null>(workspace)
+  const lastHandledRef = useRef<WorkspaceStore | null>(null)
+  const engineRef = useRef<WorkspaceSyncEngine<WorkspaceStore> | null>(null)
+  const loggingOutRef = useRef(false)
 
   const activeBand = workspace.bands.find((b) => b.id === workspace.activeBandId) || workspace.bands[0] || null
   const members = activeBand ? workspace.membersMap[activeBand.id] || [] : []
   const playlists = activeBand ? workspace.playlistsMap[activeBand.id] || [] : []
-  const [activePlaylistId, setActivePlaylistId] = useState<string>(() => playlists[0]?.id || '')
   const activePlaylist = playlists.find((p) => p.id === activePlaylistId) || playlists[0] || null
   const equipment = activeBand ? workspace.equipmentMap[activeBand.id] || [] : []
-  const songStems = activePlaylist?.songs[0] ? workspace.stemsMap[activePlaylist.songs[0].id] || workspace.stemsMap['song_01'] : workspace.stemsMap['song_01']
+  const songStems = activePlaylist?.songs[0]
+    ? workspace.stemsMap[activePlaylist.songs[0].id] || workspace.stemsMap['song_01'] || null
+    : workspace.stemsMap['song_01'] || null
 
-  // Auto-persist workspace changes per user (Local-First + Background Cloud Sync)
+  const roleActor = user && activeBand ? { userId: user.id, bandOwnerId: activeBand.ownerId } : null
+  const activeBandRole: MemberRole | null =
+    roleActor && activeBand ? resolveActorRole(members, roleActor) ?? activeBand.currentUserRole : null
+
+  const cloudUserId = user?.authProvider === 'supabase' && cloudSessionUserId === user.id ? user.id : null
+
+  const applyUser = useCallback((next: UserProfile | null) => {
+    userRef.current = next
+    const had = next ? readStoredWorkspace(next.id) !== null : false
+    const ws = loadWorkspaceFor(next)
+    nonEditRef.current = ws
+    workspaceRef.current = ws
+    setUser(next)
+    setHadLocalCopy(had)
+    setWorkspace(ws)
+    setActivePlaylistId(firstPlaylistId(ws))
+    setOfflineChosen(false)
+    setSyncNotice(null)
+    setEngineStatus(null)
+  }, [])
+
+  // Persistencia local-first: cada cambio se guarda en localStorage; si es una edicion del
+  // usuario y hay cuenta de nube, se avisa al motor (que sube con debounce).
   useEffect(() => {
-    if (user) {
-      const storageKey = `bandait_workspace_${user.id}`
-      localStorage.setItem(storageKey, JSON.stringify(workspace))
-      // Background Supabase Cloud Sync (fails silently if unconfigured or offline)
-      syncWorkspaceToCloud(user.id, workspace).catch(() => {})
+    workspaceRef.current = workspace
+    if (!user) return
+    if (lastHandledRef.current === workspace) return
+    lastHandledRef.current = workspace
+    browserStore.set(workspaceKey(user.id), JSON.stringify(workspace))
+    if (workspace !== nonEditRef.current) {
+      engineRef.current?.notifyLocalChange(workspace)
     }
   }, [user, workspace])
 
-  // Real-time Cloud Sync & initial pull from Supabase
+  // Sesion de Supabase Auth: restaurar (getSession), seguir cambios (onAuthStateChange) y
+  // procesar el retorno del login con Google (PKCE: ?code=... lo canjea supabase-js).
   useEffect(() => {
-    if (!user) return
-    let isMounted = true
+    const client = getSupabaseClient()
+    if (!client) return
+    let active = true
 
-    // Fetch cloud workspace on sign-in
-    fetchWorkspaceFromCloud(user.id).then((cloudWs) => {
-      if (isMounted && cloudWs && cloudWs.bands && cloudWs.bands.length > 0) {
-        setWorkspace(cloudWs)
+    const handleSession = (session: Session | null, event: AuthChangeEvent | 'INITIAL') => {
+      if (!active) return
+      const current = userRef.current
+      if (session?.user) {
+        setCloudSessionUserId(session.user.id)
+        setCloudSessionEmail(session.user.email ?? null)
+        const adopt = !current || current.authProvider === 'supabase' || consumeOAuthPending()
+        if (!adopt) return // hay un perfil local elegido explicitamente; la sesion queda disponible en el modal NUBE
+        const profile = profileFromSupabaseUser(session.user)
+        authService.storeUser(profile)
+        if (current && current.authProvider === 'supabase' && current.id === profile.id) {
+          if (current.name !== profile.name || current.email !== profile.email || current.avatarUrl !== profile.avatarUrl) {
+            userRef.current = profile
+            setUser(profile)
+          }
+        } else {
+          applyUser(profile)
+        }
+        return
       }
-    })
+      setCloudSessionUserId(null)
+      setCloudSessionEmail(null)
+      if (current?.authProvider === 'supabase' && !loggingOutRef.current) {
+        authService.logout()
+        applyUser(null)
+        setAuthNotice(
+          event === 'INITIAL'
+            ? 'No hay una sesión de nube activa en este navegador. Inicia sesión de nuevo; los cambios guardados aquí se subirán al volver.'
+            : 'La sesión de nube terminó o expiró. Inicia sesión de nuevo; los cambios guardados aquí se subirán al volver.'
+        )
+      }
+    }
 
-    // Subscribe to multi-device real-time updates
-    const unsubscribe = subscribeToWorkspaceChanges(user.id, (remoteWs) => {
-      if (isMounted && remoteWs) {
-        setWorkspace(remoteWs)
-      }
+    client.auth
+      .getSession()
+      .then(({ data }) => {
+        handleSession(data.session, 'INITIAL')
+      })
+      .catch(() => {
+        handleSession(null, 'INITIAL')
+      })
+      .finally(() => {
+        if (active) setCloudAuthReady(true)
+      })
+
+    const { data: sub } = client.auth.onAuthStateChange((event, session) => {
+      if (event === 'INITIAL_SESSION') return // ya cubierto por getSession
+      // Diferido: supabase-js recomienda no llamar a la API de auth dentro del callback.
+      setTimeout(() => handleSession(session, event), 0)
     })
 
     return () => {
-      isMounted = false
-      if (unsubscribe) unsubscribe()
+      active = false
+      sub.subscription.unsubscribe()
     }
-  }, [user])
+  }, [applyUser])
 
-  // Sync workspace on user change
-  const applyUser = useCallback((newUser: UserProfile | null) => {
-    setUser(newUser)
-    const newWs = loadUserWorkspace(newUser)
-    setWorkspace(newWs)
-    const band = newWs.bands.find((b) => b.id === newWs.activeBandId) || newWs.bands[0]
-    if (band) {
-      const pls = newWs.playlistsMap[band.id] || []
-      if (pls.length > 0) {
-        setActivePlaylistId(pls[0].id)
-      }
+  // Motor de sincronizacion: solo existe con una sesion de Supabase confirmada para el usuario actual.
+  useEffect(() => {
+    if (!cloudUserId) return
+    const client = getSupabaseClient()
+    if (!client) return
+    const engine = new WorkspaceSyncEngine<WorkspaceStore>({
+      userId: cloudUserId,
+      adapter: createWorkspaceCloudAdapter(client, cloudUserId),
+      store: browserStore,
+      initialLocal: workspaceRef.current,
+      onApplyRemote: (data) => {
+        nonEditRef.current = data
+        workspaceRef.current = data
+        setWorkspace(data)
+      },
+      onStatus: setEngineStatus,
+      onNotice: setSyncNotice,
+      onBackupsChanged: () => setBackupsVersion((v) => v + 1),
+      newId: uuidv4,
+    })
+    engineRef.current = engine
+    engine.start()
+    const onOnline = () => engine.retryNow()
+    window.addEventListener('online', onOnline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      engine.stop()
+      if (engineRef.current === engine) engineRef.current = null
     }
-  }, [])
+  }, [cloudUserId])
 
-  const setGoogleClientId = (clientId: string) => {
-    authService.setGoogleClientId(clientId)
-    setGoogleClientIdState(clientId.trim())
+  const backups = useMemo(
+    () => (cloudUserId ? parseBackups(browserStore.get(syncBackupsKey(cloudUserId))) : []),
+    // backupsVersion fuerza la relectura cuando el motor guarda un respaldo nuevo
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cloudUserId, backupsVersion]
+  )
+
+  let syncStatus: HubSyncStatus
+  if (!user) {
+    syncStatus = { state: 'local_only', detail: 'Sin sesión.' }
+  } else if (user.authProvider !== 'supabase') {
+    syncStatus = {
+      state: 'local_only',
+      detail: `${LOCAL_ONLY_DETAIL[user.authProvider]}${cloudConfig.isConfigured ? '' : ' Supabase no está configurado en este Hub.'}`,
+    }
+  } else if (!cloudUserId) {
+    syncStatus = { state: 'syncing', phase: 'initial', detail: 'Verificando la sesión de nube...' }
+  } else {
+    syncStatus = engineStatus ?? { state: 'syncing', phase: 'initial', detail: 'Iniciando la sincronización...' }
+  }
+  const initialSyncBlocking =
+    !!cloudUserId && !hadLocalCopy && !offlineChosen && syncStatus.state !== 'local_only' && syncStatus.phase === 'initial'
+
+  // ---------------------------------------------------------------------------
+  // Identidad
+
+  const setGoogleClientId = (clientId: string): string | null => {
+    const error = authService.setGoogleClientId(clientId)
+    if (!error) {
+      setGoogleClientIdState(authService.getGoogleClientId())
+      setGoogleClientIdSource(authService.getGoogleClientIdSource())
+    }
+    return error
   }
 
-  const loginWithGoogleCredential = (credentialJwt: string) => {
-    const loggedUser = authService.loginWithGoogleCredential(credentialJwt)
-    if (loggedUser) {
-      applyUser(loggedUser)
-    }
-  }
+  const loginWithGoogleCredential = useCallback(
+    (credentialJwt: string) => {
+      const logged = authService.loginWithGoogleCredential(credentialJwt, googleClientId)
+      applyUser(logged)
+    },
+    [googleClientId, applyUser]
+  )
 
-  const loginWithPersonalAccount = (name: string, email: string) => {
-    const loggedUser = authService.loginWithPersonalAccount(name, email)
-    applyUser(loggedUser)
+  const loginWithLocalProfile = (name: string, email: string) => {
+    applyUser(authService.loginWithLocalProfile(name, email))
   }
 
   const loginWithDemoProfile = (profile: UserProfile) => {
-    const loggedUser = authService.loginWithDemoProfile(profile)
-    applyUser(loggedUser)
+    applyUser(authService.loginWithDemoProfile(profile))
   }
 
-  const loginWithGoogle = (profile?: UserProfile) => {
-    if (profile) {
-      loginWithDemoProfile(profile)
-    } else {
-      // If direct Google auth clicked without profile and without Google credential, fallback to first demo
-      loginWithDemoProfile(DEMO_PROFILES[0])
+  const signInWithCloudGoogle = async (): Promise<string | null> => {
+    const { error } = await signInWithSupabaseGoogle()
+    return error
+  }
+
+  const logout = async (): Promise<void> => {
+    const current = userRef.current
+    loggingOutRef.current = true
+    try {
+      if (current?.authProvider === 'supabase') {
+        const engine = engineRef.current
+        let allUploaded = true
+        if (engine) {
+          allUploaded = await engine.flush(3000).catch(() => false)
+          engine.stop()
+        }
+        await signOutSupabase()
+        if (!allUploaded) {
+          setAuthNotice(
+            'Quedaron cambios sin subir a la nube. Están guardados en este navegador y se subirán la próxima vez que inicies sesión aquí.'
+          )
+        }
+      }
+      authService.logout()
+      applyUser(null)
+    } finally {
+      loggingOutRef.current = false
     }
   }
 
-  const resetWorkspaceToDemo = () => {
-    if (!user) return
-    const demoWs: WorkspaceStore = {
-      bands: INITIAL_BANDS,
-      activeBandId: 'band_01',
-      membersMap: INITIAL_MEMBERS,
-      playlistsMap: INITIAL_PLAYLISTS,
-      equipmentMap: INITIAL_EQUIPMENT,
-      stemsMap: INITIAL_STEMS,
+  // ---------------------------------------------------------------------------
+  // Sincronizacion
+
+  const retrySync = () => engineRef.current?.retryNow()
+
+  const findBackup = (backupId: string) =>
+    cloudUserId ? parseBackups(browserStore.get(syncBackupsKey(cloudUserId))).find((b) => b.id === backupId) ?? null : null
+
+  const restoreBackup = (backupId: string): string | null => {
+    const backup = findBackup(backupId)
+    if (!backup) return 'Respaldo no encontrado.'
+    let data: unknown = backup.data
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const copy: Record<string, unknown> = { ...(data as Record<string, unknown>) }
+      delete copy._sync
+      data = copy
     }
-    setWorkspace(demoWs)
-    localStorage.setItem(`bandait_workspace_${user.id}`, JSON.stringify(demoWs))
+    if (!isWorkspaceStore(data)) {
+      return 'El respaldo no tiene un formato de workspace válido. Descárgalo para revisarlo a mano.'
+    }
+    const restored = clone(data)
+    // Es una edicion del usuario: se guarda y se sube como version nueva.
+    setWorkspace(restored)
+    setActivePlaylistId(firstPlaylistId(restored))
+    return null
   }
 
-  const logout = () => {
-    authService.logout()
-    applyUser(null)
+  const downloadBackup = (backupId: string) => {
+    const backup = findBackup(backupId)
+    if (!backup) return
+    downloadJson(`bandait_respaldo_${backup.side}_${backup.savedAt.replace(/[:.]/g, '-')}.json`, backup)
   }
+
+  // ---------------------------------------------------------------------------
+  // Workspace
 
   const switchBand = (bandId: string) => {
     setWorkspace((prev) => ({ ...prev, activeBandId: bandId }))
@@ -625,32 +443,31 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       bands: [...prev.bands, newBand],
       activeBandId: newBandId,
-      membersMap: {
-        ...prev.membersMap,
-        [newBandId]: [ownerMember],
-      },
-      playlistsMap: {
-        ...prev.playlistsMap,
-        [newBandId]: [],
-      },
-      equipmentMap: {
-        ...prev.equipmentMap,
-        [newBandId]: [],
-      },
+      membersMap: { ...prev.membersMap, [newBandId]: [ownerMember] },
+      playlistsMap: { ...prev.playlistsMap, [newBandId]: [] },
+      equipmentMap: { ...prev.equipmentMap, [newBandId]: [] },
     }))
   }
 
+  const roleEditBlockReason = (memberId: string): string | null => {
+    if (!roleActor) return 'Sin banda activa.'
+    return roleBlockReason(members, roleActor, memberId)
+  }
+
+  // Guardia de cliente (ver services/roles.ts): la aplicacion real necesita RLS por banda en el servidor.
   const updateMemberRole = (memberId: string, newRole: MemberRole) => {
-    if (!activeBand) return
+    if (!activeBand || !roleActor) return { ok: false, reason: 'Sin banda activa.' }
+    const check = checkRoleChange(members, roleActor, memberId, newRole)
+    if (!check.ok) return check
+    const bandId = activeBand.id
     setWorkspace((prev) => ({
       ...prev,
       membersMap: {
         ...prev.membersMap,
-        [activeBand.id]: (prev.membersMap[activeBand.id] || []).map((m) =>
-          m.id === memberId ? { ...m, role: newRole } : m
-        ),
+        [bandId]: (prev.membersMap[bandId] || []).map((m) => (m.id === memberId ? { ...m, role: newRole } : m)),
       },
     }))
+    return check
   }
 
   const inviteMember = (name: string, email: string, role: MemberRole, instrument: string) => {
@@ -661,7 +478,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       userId: `usr_invited_${Date.now()}`,
       name,
       email,
-      role,
+      // Nunca se agrega a alguien directamente como Owner desde la invitacion.
+      role: role === 'Owner' ? 'Musician' : role,
       instrument,
       joinedAt: new Date().toISOString().slice(0, 10),
     }
@@ -695,89 +513,46 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActivePlaylistId(newPl.id)
   }
 
-  const updatePlaylistSong = (songId: string, updates: Partial<PlaylistSong>) => {
+  const updateActivePlaylist = (mutate: (pl: Playlist) => Playlist) => {
     if (!activeBand || !activePlaylist) return
+    const bandId = activeBand.id
+    const playlistId = activePlaylist.id
     setWorkspace((prev) => ({
       ...prev,
       playlistsMap: {
         ...prev.playlistsMap,
-        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
-          if (pl.id !== activePlaylist.id) return pl
-          return {
-            ...pl,
-            updatedAt: new Date().toISOString().slice(0, 10),
-            songs: pl.songs.map((s) => (s.id === songId ? { ...s, ...updates } : s)),
-          }
-        }),
+        [bandId]: (prev.playlistsMap[bandId] || []).map((pl) =>
+          pl.id === playlistId ? { ...mutate(pl), updatedAt: new Date().toISOString().slice(0, 10) } : pl
+        ),
       },
     }))
+  }
+
+  const updatePlaylistSong = (songId: string, updates: Partial<PlaylistSong>) => {
+    updateActivePlaylist((pl) => ({ ...pl, songs: pl.songs.map((s) => (s.id === songId ? { ...s, ...updates } : s)) }))
   }
 
   const reorderSongs = (fromIndex: number, toIndex: number) => {
-    if (!activeBand || !activePlaylist) return
-    const currentSongs = [...activePlaylist.songs]
-    const [moved] = currentSongs.splice(fromIndex, 1)
-    currentSongs.splice(toIndex, 0, moved)
-    const reindexed = currentSongs.map((s, idx) => ({ ...s, orderIndex: idx + 1 }))
-
-    setWorkspace((prev) => ({
-      ...prev,
-      playlistsMap: {
-        ...prev.playlistsMap,
-        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
-          if (pl.id !== activePlaylist.id) return pl
-          return {
-            ...pl,
-            updatedAt: new Date().toISOString().slice(0, 10),
-            songs: reindexed,
-          }
-        }),
-      },
-    }))
+    updateActivePlaylist((pl) => {
+      if (toIndex < 0 || toIndex >= pl.songs.length) return pl
+      const songs = [...pl.songs]
+      const [moved] = songs.splice(fromIndex, 1)
+      songs.splice(toIndex, 0, moved)
+      return { ...pl, songs: songs.map((s, idx) => ({ ...s, orderIndex: idx + 1 })) }
+    })
   }
 
   const addSongToPlaylist = (songData: Omit<PlaylistSong, 'id' | 'orderIndex'>) => {
-    if (!activeBand || !activePlaylist) return
-    const newSong: PlaylistSong = {
-      ...songData,
-      id: `song_${Date.now()}`,
-      orderIndex: activePlaylist.songs.length + 1,
-    }
-    setWorkspace((prev) => ({
-      ...prev,
-      playlistsMap: {
-        ...prev.playlistsMap,
-        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
-          if (pl.id !== activePlaylist.id) return pl
-          return {
-            ...pl,
-            updatedAt: new Date().toISOString().slice(0, 10),
-            songs: [...pl.songs, newSong],
-          }
-        }),
-      },
+    updateActivePlaylist((pl) => ({
+      ...pl,
+      songs: [...pl.songs, { ...songData, id: `song_${Date.now()}`, orderIndex: pl.songs.length + 1 }],
     }))
   }
 
   const removeSongFromPlaylist = (songId: string) => {
-    if (!activeBand || !activePlaylist) return
-    const filtered = activePlaylist.songs
-      .filter((s) => s.id !== songId)
-      .map((s, idx) => ({ ...s, orderIndex: idx + 1 }))
-
-    setWorkspace((prev) => ({
-      ...prev,
-      playlistsMap: {
-        ...prev.playlistsMap,
-        [activeBand.id]: (prev.playlistsMap[activeBand.id] || []).map((pl) => {
-          if (pl.id !== activePlaylist.id) return pl
-          return {
-            ...pl,
-            updatedAt: new Date().toISOString().slice(0, 10),
-            songs: filtered,
-          }
-        }),
-      },
+    updateActivePlaylist((pl) => ({
+      ...pl,
+      songs: pl.songs.filter((s) => s.id !== songId).map((s, idx) => ({ ...s, orderIndex: idx + 1 })),
     }))
   }
 
@@ -787,26 +562,17 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const currentSongId = activePlaylist?.songs[0]?.id || 'song_01'
       const existing = prev.stemsMap[currentSongId] || prev.stemsMap['song_01']
       if (!existing) return prev
-      const updatedTracks = existing.tracks.map((t) =>
-        t.channel === channel ? { ...t, volumeDb } : t
-      )
+      const updatedTracks = existing.tracks.map((t) => (t.channel === channel ? { ...t, volumeDb } : t))
       return {
         ...prev,
-        stemsMap: {
-          ...prev.stemsMap,
-          [currentSongId]: { ...existing, tracks: updatedTracks },
-        },
+        stemsMap: { ...prev.stemsMap, [currentSongId]: { ...existing, tracks: updatedTracks } },
       }
     })
   }
 
   const addEquipment = (itemData: Omit<EquipmentItem, 'id' | 'bandId'>) => {
     if (!activeBand) return
-    const newItem: EquipmentItem = {
-      ...itemData,
-      id: `eq_${Date.now()}`,
-      bandId: activeBand.id,
-    }
+    const newItem: EquipmentItem = { ...itemData, id: `eq_${Date.now()}`, bandId: activeBand.id }
     setWorkspace((prev) => ({
       ...prev,
       equipmentMap: {
@@ -827,71 +593,74 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }))
   }
 
-  const exportMasterXlsxJson = () => {
+  const exportWorkspaceJson = () => {
     if (!activeBand) return
-    const masterExport = {
-      bandait_version: '3.0.0-PRO',
-      exported_at: new Date().toISOString(),
+    const now = new Date()
+    downloadJson(`bandait_${slugify(activeBand.name)}_${now.toISOString().slice(0, 10)}.json`, {
+      bandait_version: '3.0.0',
+      formato: 'json',
+      exported_at: now.toISOString(),
       agrupacion: activeBand,
       miembros: members,
       setlists: playlists,
       stems_catalogo: songStems,
       equipamiento: equipment,
-    }
-
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(masterExport, null, 2))
-    const dl = document.createElement('a')
-    dl.setAttribute('href', dataStr)
-    dl.setAttribute('download', `bandait_${activeBand.name.toLowerCase().replace(/\s+/g, '_')}_master.json`)
-    document.body.appendChild(dl)
-    dl.click()
-    dl.remove()
+    })
   }
 
-  return (
-    <HubContext.Provider
-      value={{
-        user,
-        bands: workspace.bands,
-        activeBand,
-        members,
-        playlists,
-        activePlaylist,
-        songStems,
-        equipment,
-        googleClientId,
-        setGoogleClientId,
-        loginWithGoogleCredential,
-        loginWithPersonalAccount,
-        loginWithDemoProfile,
-        loginWithGoogle,
-        resetWorkspaceToDemo,
-        logout,
-        switchBand,
-        createBand,
-        updateMemberRole,
-        inviteMember,
-        createPlaylist,
-        setActivePlaylist: (pl) => setActivePlaylistId(pl.id),
-        updatePlaylistSong,
-        reorderSongs,
-        addSongToPlaylist,
-        removeSongFromPlaylist,
-        updateStemTrackVolume,
-        addEquipment,
-        removeEquipment,
-        exportMasterXlsxJson,
-      }}
-    >
-      {children}
-    </HubContext.Provider>
-  )
-}
-
-export const useHub = () => {
-  const context = useContext(HubContext)
-  if (!context) {
-    throw new Error('useHub must be used within a HubProvider')
+  const value: HubContextType = {
+    user,
+    bands: workspace.bands,
+    activeBand,
+    activeBandRole,
+    members,
+    playlists,
+    activePlaylist,
+    songStems,
+    equipment,
+    googleClientId,
+    googleClientIdSource,
+    setGoogleClientId,
+    cloud: {
+      configured: cloudConfig.isConfigured,
+      source: cloudConfig.source,
+      configError: cloudConfig.error,
+      url: cloudConfig.url,
+      authReady: cloudAuthReady,
+      sessionEmail: cloudSessionEmail,
+    },
+    authNotice,
+    dismissAuthNotice: () => setAuthNotice(null),
+    loginWithGoogleCredential,
+    loginWithLocalProfile,
+    loginWithDemoProfile,
+    signInWithCloudGoogle,
+    logout,
+    syncStatus,
+    initialSyncBlocking,
+    continueOffline: () => setOfflineChosen(true),
+    retrySync,
+    syncNotice,
+    dismissSyncNotice: () => setSyncNotice(null),
+    backups,
+    restoreBackup,
+    downloadBackup,
+    switchBand,
+    createBand,
+    roleEditBlockReason,
+    updateMemberRole,
+    inviteMember,
+    createPlaylist,
+    setActivePlaylist: (pl) => setActivePlaylistId(pl.id),
+    updatePlaylistSong,
+    reorderSongs,
+    addSongToPlaylist,
+    removeSongFromPlaylist,
+    updateStemTrackVolume,
+    addEquipment,
+    removeEquipment,
+    exportWorkspaceJson,
   }
-  return context
+
+  return <HubContext.Provider value={value}>{children}</HubContext.Provider>
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useHub } from '../context/HubContext'
+import { useHub } from '../context/hubContextCore'
 import type { EquipmentCategory } from '../types/hub'
 import { Radio, Plus, Trash2, Cpu, Headphones, Cable, Mic } from 'lucide-react'
 

@@ -5,12 +5,22 @@
 
 export type MemberRole = 'Owner' | 'MusicDirector' | 'Musician' | 'Substitute' | 'SoundEngineer'
 
+/**
+ * Origen de la identidad del usuario del Hub:
+ * - supabase: Google via Supabase Auth. Unica identidad verificada y unica que sincroniza con la nube.
+ * - google_local: boton de Google Identity Services. El token NO se verifica en un servidor:
+ *   es un perfil local de este navegador, sin nube.
+ * - local: perfil local creado con nombre y correo. Sin verificacion, sin nube.
+ * - demo: perfiles de demostracion con datos ficticios. Sin nube.
+ */
+export type AuthProvider = 'supabase' | 'google_local' | 'local' | 'demo'
+
 export interface UserProfile {
   id: string
   name: string
   email: string
   avatarUrl?: string
-  authProvider: 'google' | 'guest'
+  authProvider: AuthProvider
   createdAt: string
 }
 
@@ -97,4 +107,33 @@ export interface EquipmentItem {
   channelRouting: string
   rfFrequency?: string
   notes?: string
+}
+
+/** Workspace completo de un usuario: lo que se guarda en localStorage y en la fila de Supabase. */
+export interface WorkspaceStore {
+  bands: Band[]
+  activeBandId: string
+  membersMap: Record<string, BandMember[]>
+  playlistsMap: Record<string, Playlist[]>
+  equipmentMap: Record<string, EquipmentItem[]>
+  stemsMap: Record<string, SongStems>
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Validacion defensiva de forma (datos de localStorage o de la nube pueden venir corruptos). */
+export function isWorkspaceStore(value: unknown): value is WorkspaceStore {
+  if (!isPlainObject(value)) return false
+  const bands = value.bands
+  if (!Array.isArray(bands) || bands.length === 0) return false
+  if (!bands.every((b) => isPlainObject(b) && typeof b.id === 'string' && typeof b.name === 'string')) return false
+  if (typeof value.activeBandId !== 'string') return false
+  return (
+    isPlainObject(value.membersMap) &&
+    isPlainObject(value.playlistsMap) &&
+    isPlainObject(value.equipmentMap) &&
+    isPlainObject(value.stemsMap)
+  )
 }
