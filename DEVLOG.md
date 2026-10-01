@@ -348,4 +348,27 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   1. Supabase → Authentication → Sign In / Providers → Google: activar y guardar el Client ID y el Client secret.
   2. Google Auth Platform → Branding: poner la URL de privacidad `https://bandait.releven.cc/privacidad/` (disponible tras fusionar este cambio) y luego **Publish app**.
   3. Probar el login en `/hub/` y el botón "COMPROBAR SEGURIDAD DE LA TABLA" del panel NUBE.
+* **Cierre (confirmado por el usuario el 2026-10-01):** los tres pendientes quedaron hechos y el login con Google en `/hub/` funciona. Verificado desde aquí:
+  - `GET /auth/v1/settings` → `google: True`;
+  - lectura sin sesión de `bandait_workspaces` → HTTP 401;
+  - `https://bandait.releven.cc/privacidad/` → HTTP 200;
+  - `origin/main` en `746272b` (merge del PR #13).
+
+### [2026-10-01] - Manuales: pendiente de cierre del refinamiento (decisión del usuario)
+* **Sprint / Módulo:** documentación en la app: `bandait-leader-web/src/components/UserManualModal.tsx` ("Manual de usuario y guía técnica") y `bandait-follower/src/components/FollowerManualModal.tsx` ("Manual de escenario"). Agente: Claude Code (Opus 5.5).
+* **Decisión del usuario:** no reescribir los manuales ahora. Se actualizan **al final del refinamiento de la plataforma**, cuando el comportamiento deje de cambiar.
+* **Estado encontrado (revisado contra el código el 2026-10-01):** ambos manuales se escribieron el 2026-09-09 describiendo el plan; en el hub solo se corrigió el paso de acceso. Afirmaciones falsas o desactualizadas:
+  - Hub, paso 3: "sube pistas o stems Demucs de 6 canales". El input de archivo de `StemsHubView` no tiene manejador y Demucs no existe.
+  - Hub, paso 4, y follower, "Conexión": "escanea el QR o entra a la PWA… pulsa ESTABLECER ENLACE". El QR sale del líder (Red > Conectar músicos) y se escanea con la cámara nativa; `/app/` en HTTPS no puede conectar a la LAN (CONTRACT_V3 §8); hay que tocar ACTIVAR AUDIO.
+  - Hub, "Ruteo ASIO & Stems": una matriz de 6 canales con buses in-ear. El líder solo saca el clic (salidas 1-2 a la PA, salida 3 al baterista) y no reproduce pistas (`audio/track.py` es un placeholder).
+  - Ambos, "Roles": letras con scroll y acordes transpuestos. El follower muestra "SIN LETRA" (distribución de letras pendiente) y los roles reales son músico y director.
+  - Follower, "In-Ear": mezcla de clic, guía y stems con limitador en todo. Solo funcionan el volumen general y el del clic, y el limitador aplica solo al clic.
+  - Ambos, "Flywheel": "se realinea en 4 compases". En realidad un error menor de 2 ms se ignora, uno menor de 50 ms se reparte en al menos un compás y uno mayor se re-ancla en el siguiente beat.
+  - Follower, "Conexión": "offset verificado < 5.1 ms". No hay medición en Wi-Fi real que lo respalde.
+* **Qué deben incluir los manuales nuevos y hoy falta:**
+  - PANIC por rol: el músico solo silencia su equipo, el director detiene a la banda;
+  - los estados del enlace: LOCKED, DEGRADED, UNSTABLE, FLYWHEEL y LOST;
+  - el aviso "PANTALLA PUEDE APAGARSE" y el modo PANTALLA: API/VIDEO;
+  - en el líder: permitir Python en el firewall en redes privadas, marcar la Wi-Fi de escenario como red privada y elegir su IP en Conectar músicos.
+* **Pendiente (al cierre del refinamiento):** reescribir ambos manuales desde el comportamiento verificado en ese momento, marcar como PENDIENTE lo que no exista, regenerar `landing/` con `npm run build:landing` y verificar los textos en el e2e.
 
