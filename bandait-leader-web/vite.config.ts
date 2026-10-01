@@ -6,7 +6,10 @@ export default defineConfig({
   base: './',
   plugins: [react()],
   server: {
-    port: 3000,
+    // 5173 coincide con playwright.config.ts (proyecto leader-web). strictPort evita que Vite
+    // salte a otro puerto en silencio y las pruebas golpeen otro servidor.
+    port: 5173,
+    strictPort: true,
     host: true,
   },
   build: {

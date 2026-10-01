@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QSizePolicy
 )
-from PySide6.QtCore import Qt
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QKeyEvent, QColor
 
@@ -19,6 +18,7 @@ class StageView(QWidget):
     panic_clicked = Signal()
     next_song_clicked = Signal()
     prev_song_clicked = Signal()
+    fullscreen_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -113,6 +113,17 @@ class StageView(QWidget):
 
         layout.addLayout(header)
 
+        # Aviso de salto de setlist (setlist_jump): visible unos segundos.
+        self.jump_alert = QLabel("")
+        self.jump_alert.setFont(QFont("Inter", 16, QFont.Bold))
+        self.jump_alert.setAlignment(Qt.AlignCenter)
+        self.jump_alert.setStyleSheet("color: #000000; background: #FFAA00; padding: 8px;")
+        self.jump_alert.hide()
+        layout.addWidget(self.jump_alert)
+        self._jump_timer = QTimer(self)
+        self._jump_timer.setSingleShot(True)
+        self._jump_timer.timeout.connect(self.jump_alert.hide)
+
         # === ÁREA PRINCIPAL: Letra y metrónomo ===
         main_area = QHBoxLayout()
         main_area.setContentsMargins(40, 20, 40, 20)
@@ -180,6 +191,12 @@ class StageView(QWidget):
             beat_layout.addWidget(led)
         right_panel.addLayout(beat_layout)
 
+        self.bar_label = QLabel("COMPÁS -")
+        self.bar_label.setFont(QFont("JetBrains Mono", 14, QFont.Bold))
+        self.bar_label.setStyleSheet("color: #666666;")
+        self.bar_label.setAlignment(Qt.AlignCenter)
+        right_panel.addWidget(self.bar_label)
+
         # Próxima sección
         next_sec_label = QLabel("PRÓXIMA")
         next_sec_label.setFont(QFont("Inter", 10))
@@ -203,7 +220,7 @@ class StageView(QWidget):
         bottom.setContentsMargins(24, 16, 24, 16)
 
         # Botón pantalla completa
-        self.fullscreen_btn = QPushButton("⛶ Pantalla Completa")
+        self.fullscreen_btn = QPushButton("Pantalla Completa")
         self.fullscreen_btn.setFont(QFont("Inter", 11))
         self.fullscreen_btn.setStyleSheet("""
             QPushButton {
@@ -291,20 +308,36 @@ class StageView(QWidget):
         self.bpm_display.setText(str(bpm))
 
     def set_beat(self, beat: int):
-        """Actualizar indicador de beat (1-4) con flash visual."""
+        """Actualizar indicador de beat (1-4) con flash visual en el beat 1.
+
+        Solo se reestilizan los dos LEDs que cambian (sin reconstruir widgets)."""
+        prev = self._beat if getattr(self, "_beat_lit", False) else None
         self._beat = beat
-        for i, led in enumerate(self.beat_indicators):
-            if i == beat - 1:
-                # Beat 1 = Cyan brillante, otros = Lima tenue
-                if beat == 1:
-                    led.setStyleSheet("color: #00FFFF; font-size: 40px; font-weight: bold;")
-                else:
-                    led.setStyleSheet("color: #CCFF00; font-size: 32px;")
+        self._beat_lit = True
+        if prev is not None and 0 < prev <= len(self.beat_indicators) and prev != beat:
+            self.beat_indicators[prev - 1].setStyleSheet("color: #333333; font-size: 32px;")
+        if 0 < beat <= len(self.beat_indicators):
+            led = self.beat_indicators[beat - 1]
+            if beat == 1:
+                led.setStyleSheet("color: #00FFFF; font-size: 40px; font-weight: bold;")
             else:
-                led.setStyleSheet("color: #333333; font-size: 32px;")
-        # Flash de borde para beat 1
+                led.setStyleSheet("color: #CCFF00; font-size: 32px;")
         if beat == 1:
             self._flash_border()
+
+    def clear_beat(self):
+        for led in self.beat_indicators:
+            led.setStyleSheet("color: #333333; font-size: 32px;")
+        self._beat_lit = False
+
+    def set_bar(self, bar):
+        self.bar_label.setText(f"COMPÁS {bar}" if bar is not None else "COMPÁS -")
+
+    def show_jump_alert(self, title: str, order_index: int):
+        """Aviso grande de salto no secuencial (order_index 0-based)."""
+        self.jump_alert.setText(f"SALTO: {title} (tema {order_index + 1})")
+        self.jump_alert.show()
+        self._jump_timer.start(5000)
 
     def _flash_border(self):
         """Flash de borde en beat 1 — simulación de frame OLED."""
@@ -335,14 +368,13 @@ class StageView(QWidget):
             self.beacon.setStyleSheet("background-color: #FF0000;")
 
     def _toggle_fullscreen(self):
-        if self._is_fullscreen:
-            self.showNormal()
-            self._is_fullscreen = False
-            self.fullscreen_btn.setText("⛶ Pantalla Completa")
-        else:
-            self.showFullScreen()
-            self._is_fullscreen = True
-            self.fullscreen_btn.setText("⛶ Salir Pantalla Completa")
+        # Un widget hijo no puede ponerse en pantalla completa por si mismo:
+        # la ventana principal lo hace y luego llama a set_fullscreen_state().
+        self.fullscreen_requested.emit()
+
+    def set_fullscreen_state(self, fullscreen: bool):
+        self._is_fullscreen = fullscreen
+        self.fullscreen_btn.setText("Salir de Pantalla Completa" if fullscreen else "Pantalla Completa")
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Escape and self._is_fullscreen:

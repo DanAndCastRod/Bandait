@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 export interface InEarMixPreferences {
   masterVolume: number
@@ -23,8 +23,6 @@ interface CustomMetaEnv {
 }
 
 const STORAGE_PROFILE_KEY = 'bandait_musician_profile'
-const STORAGE_SUPABASE_URL = 'bandait_supabase_url'
-const STORAGE_SUPABASE_KEY = 'bandait_supabase_anon_key'
 
 export const STAGE_ROLES = [
   { id: 'drums', label: 'Bateria / Percusion' },
@@ -60,7 +58,7 @@ export const DEFAULT_PROFILE: MusicianProfile = {
   inEarMix: DEFAULT_MIX,
 }
 
-let clientInstance: SupabaseClient | null = null
+let clientPromise: Promise<SupabaseClient | null> | null = null
 
 function getMetaEnv(): CustomMetaEnv {
   try {
@@ -70,25 +68,45 @@ function getMetaEnv(): CustomMetaEnv {
   }
 }
 
-export function getSupabaseFollowerClient(): SupabaseClient | null {
-  if (clientInstance) return clientInstance
+function supabaseConfig(): { url: string; anonKey: string } | null {
   const env = getMetaEnv()
-  const url = localStorage.getItem(STORAGE_SUPABASE_URL) || env.VITE_SUPABASE_URL || ''
-  const anonKey = localStorage.getItem(STORAGE_SUPABASE_KEY) || env.VITE_SUPABASE_ANON_KEY || ''
-
+  const url = (env.VITE_SUPABASE_URL || '').trim()
+  const anonKey = (env.VITE_SUPABASE_ANON_KEY || '').trim()
   if (!url || !anonKey) return null
+  return { url, anonKey }
+}
 
-  try {
-    clientInstance = createClient(url, anonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    })
-    return clientInstance
-  } catch {
-    return null
+/**
+ * True only when this build has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
+ * The UI hides the Google link otherwise (the profile stays local).
+ */
+export function isCloudAuthConfigured(): boolean {
+  return supabaseConfig() !== null
+}
+
+/**
+ * Lazily loads @supabase/supabase-js only when the build is configured, so
+ * the stage bundle never pays for (or depends on) the cloud SDK otherwise.
+ */
+export function getSupabaseFollowerClient(): Promise<SupabaseClient | null> {
+  const config = supabaseConfig()
+  if (!config) return Promise.resolve(null)
+  if (!clientPromise) {
+    clientPromise = import('@supabase/supabase-js')
+      .then(({ createClient }) =>
+        createClient(config.url, config.anonKey, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+          },
+        }),
+      )
+      .catch(() => {
+        clientPromise = null // allow a retry (e.g. chunk not cached yet while offline)
+        return null
+      })
   }
+  return clientPromise
 }
 
 export function getMusicianProfile(): MusicianProfile {
@@ -118,7 +136,7 @@ export function saveMusicianProfile(profile: MusicianProfile): void {
 }
 
 export async function signInMusicianWithGoogle(): Promise<{ error: Error | null }> {
-  const client = getSupabaseFollowerClient()
+  const client = await getSupabaseFollowerClient()
   if (!client) {
     return { error: new Error('Supabase no configurado en este terminal. Usa el perfil local offline.') }
   }
@@ -137,7 +155,7 @@ export async function signInMusicianWithGoogle(): Promise<{ error: Error | null 
 }
 
 export async function signOutMusician(): Promise<void> {
-  const client = getSupabaseFollowerClient()
+  const client = await getSupabaseFollowerClient()
   if (client) {
     try {
       await client.auth.signOut()

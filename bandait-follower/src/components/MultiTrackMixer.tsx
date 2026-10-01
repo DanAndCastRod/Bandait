@@ -18,6 +18,9 @@ interface Props {
   onClose: () => void
   onMasterVolumeChange?: (vol: number) => void
   initialMasterVolume?: number
+  /** Controlled local mute of ALL local audio (scheduler master gain). */
+  panicMuted?: boolean
+  onPanicMuteChange?: (muted: boolean) => void
 }
 
 const INITIAL_CHANNELS: ChannelMix[] = [
@@ -35,10 +38,18 @@ export default function MultiTrackMixer({
   onClose,
   onMasterVolumeChange,
   initialMasterVolume = 0.8,
+  panicMuted: panicMutedProp,
+  onPanicMuteChange,
 }: Props) {
   const [channels, setChannels] = useState<ChannelMix[]>(INITIAL_CHANNELS)
   const [masterVolume, setMasterVolume] = useState<number>(initialMasterVolume)
-  const [panicMuted, setPanicMuted] = useState(false)
+  const [panicMutedLocal, setPanicMutedLocal] = useState(false)
+  const panicMuted = panicMutedProp ?? panicMutedLocal
+  const togglePanicMute = () => {
+    const next = !panicMuted
+    if (onPanicMuteChange) onPanicMuteChange(next)
+    else setPanicMutedLocal(next)
+  }
   const [isPreloading, setIsPreloading] = useState(false)
   const [preloadProgress, setPreloadProgress] = useState<number>(0)
   const [cacheStatus, setCacheStatus] = useState<string>('COMPROBANDO...')
@@ -62,6 +73,11 @@ export default function MultiTrackMixer({
       checkCache()
     }
   }, [isOpen, checkCache])
+
+  // Keep the fader in sync with the stage IN-EAR knob (same master gain).
+  useEffect(() => {
+    if (isOpen) setMasterVolume(initialMasterVolume)
+  }, [isOpen, initialMasterVolume])
 
   const handlePreload = async () => {
     setIsPreloading(true)
@@ -223,6 +239,16 @@ export default function MultiTrackMixer({
           >
             Aislamiento estéreo multicanal con techo acústico calibrado a -0.5 dBFS.
           </p>
+          <p
+            style={{
+              margin: '4px 0 0 0',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              color: 'var(--accent-warning)',
+            }}
+          >
+            ACTIVO: VOLUMEN GENERAL Y CORTE PANIC (CLIC). CANALES DE STEMS: SIN REPRODUCCION LOCAL (PENDIENTE).
+          </p>
         </div>
 
         <button
@@ -292,7 +318,7 @@ export default function MultiTrackMixer({
         </div>
 
         {/* STEM CACHE STATUS & PRELOAD BUTTON */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
           <span
             style={{
               fontFamily: 'var(--font-mono)',
@@ -541,7 +567,7 @@ export default function MultiTrackMixer({
         {/* EMERGENCY PANIC MUTE */}
         <button
           type="button"
-          onClick={() => setPanicMuted(!panicMuted)}
+          onClick={togglePanicMute}
           className="btn-stage"
           style={{
             background: panicMuted ? 'var(--accent-danger)' : 'rgba(239, 68, 68, 0.12)',
@@ -555,8 +581,8 @@ export default function MultiTrackMixer({
           <span>{panicMuted ? 'DESACTIVAR CORTE' : 'PANIC: SILENCIAR IN-EAR'}</span>
         </button>
 
-        {/* MASTER VOLUME FADER */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        {/* MASTER VOLUME FADER (wraps on narrow phones) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', minWidth: 0 }}>
           <div style={{ textAlign: 'right' }}>
             <div
               style={{

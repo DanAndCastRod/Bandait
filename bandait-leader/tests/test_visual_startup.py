@@ -1,16 +1,11 @@
 """Test visual startup — verifies the app initializes without crashing."""
 
 import sys
-import os
-
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
 
-from ui.main_window import MainWindow
+from src.ui.main_window import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -26,11 +21,14 @@ class TestVisualStartup:
     """Verify the app starts and all components are accessible."""
 
     def test_main_window_creates(self, app):
-        """MainWindow initializes without exception."""
+        """MainWindow initializes without exception and shuts its services down."""
         window = MainWindow()
         assert window is not None
         assert window.windowTitle() == "Bandait DAW — Líder de Sesión"
+        assert window.server.is_running()
         window.close()
+        assert window.server.status == "stopped"
+        assert not window.clock_service.is_running()
 
     def test_all_tabs_exist(self, app):
         """All tabs are created and accessible."""

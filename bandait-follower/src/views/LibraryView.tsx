@@ -9,13 +9,17 @@ import {
 } from '../services/xlsxService'
 import { DiffPreview, ExcelMasterWorkbook } from '../types/xlsx'
 import { LibraryIcon, UploadIcon, DownloadIcon, ShieldIcon } from '../components/Icons'
+import { getMusicianProfile, STAGE_ROLES } from '../services/musicianAuth'
 
 interface Props {
+  selectedSetlistId: string | null
   onSelectSetlist: (id: string) => void
   onBack: () => void
 }
 
-export default function LibraryView({ onSelectSetlist, onBack }: Props) {
+export default function LibraryView({ selectedSetlistId, onSelectSetlist, onBack }: Props) {
+  const profile = getMusicianProfile()
+  const roleLabel = STAGE_ROLES.find((r) => r.id === profile.role)?.label ?? profile.role
   const [setlists, setSetlists] = useState<StoredSetlist[]>([])
   const [loading, setLoading] = useState(true)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -52,7 +56,12 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
+    if (!/\.json$/i.test(file.name)) {
+      setStatusMessage('[ERR] Solo se admite el libro maestro en JSON. La importacion XLSX esta pendiente.')
+      return
+    }
 
     const reader = new FileReader()
     reader.onload = (event) => {
@@ -72,6 +81,7 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
         setStatusMessage('[ERR] No se pudo procesar el archivo.')
       }
     }
+    reader.onerror = () => setStatusMessage('[ERR] No se pudo leer el archivo.')
     reader.readAsText(file)
   }
 
@@ -113,12 +123,12 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
     <div className="library-view">
       {/* HEADER */}
       <div className="library-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', minWidth: 0 }}>
           <button type="button" className="btn-stage btn-stage-secondary" onClick={onBack} style={{ padding: '8px 14px', fontSize: '12px' }}>
             [VOLVER]
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <LibraryIcon size={20} style={{ color: 'var(--accent-active)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <LibraryIcon size={20} style={{ color: 'var(--accent-active)', flexShrink: 0 }} />
             <h1 className="library-title" style={{ margin: 0 }}>BIBLIOTECA // CATÁLOGO</h1>
           </div>
         </div>
@@ -128,7 +138,7 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
             type="file"
             ref={fileInputRef}
             onChange={handleFileUpload}
-            accept=".json,.xlsx"
+            accept=".json,application/json"
             style={{ display: 'none' }}
           />
 
@@ -139,7 +149,7 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
             style={{ padding: '8px 14px', fontSize: '11px' }}
           >
             <UploadIcon size={14} />
-            <span>IMPORTAR LIBRO</span>
+            <span>IMPORTAR LIBRO (JSON)</span>
           </button>
 
           <button
@@ -182,14 +192,15 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <ShieldIcon size={14} style={{ color: 'var(--accent-success)' }} />
           <span>
-            <span style={{ color: 'var(--text-disabled)' }}>AGRUPACIÓN ACTIVA:</span>{' '}
-            <strong style={{ color: 'var(--text-primary)' }}>LOS INQUIETOS DEL ROCK</strong>
+            <span style={{ color: 'var(--text-disabled)' }}>PERFIL:</span>{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>{profile.alias}</strong>
           </span>
         </div>
         <span>
           <span style={{ color: 'var(--text-disabled)' }}>ROL:</span>{' '}
-          <strong style={{ color: 'var(--accent-active)' }}>[MUSIC DIRECTOR]</strong>
+          <strong style={{ color: 'var(--accent-active)' }}>[{roleLabel.toUpperCase()}]</strong>
         </span>
+        <span style={{ color: 'var(--accent-warning)' }}>IMPORTACION XLSX: PENDIENTE (EXPORTA EL LIBRO A JSON)</span>
       </div>
 
       {statusMessage && (
@@ -220,7 +231,7 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
             No hay setlists almacenados localmente en IndexedDB.
           </p>
           <p style={{ color: 'var(--text-secondary)', fontSize: '12px', maxWidth: '440px', margin: '0 auto' }}>
-            Importa un archivo maestro XLSX/JSON o pulsa [DIFF PREVIEW DEMO] para precargar el repertorio del show.
+            Importa el libro maestro en JSON (la importacion XLSX esta pendiente) o pulsa [DIFF PREVIEW DEMO] para precargar un repertorio de ejemplo.
           </p>
         </div>
       )}
@@ -236,7 +247,8 @@ export default function LibraryView({ onSelectSetlist, onBack }: Props) {
               {sl.name}
             </div>
             <div className="setlist-meta">
-              {sl.songs.length} CANCIONES // SINCRONIZADO OFFLINE
+              {sl.songs.length} CANCIONES // GUARDADO EN ESTE EQUIPO
+              {sl.id === selectedSetlistId ? ' // SELECCIONADO' : ''}
             </div>
             <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
               <span

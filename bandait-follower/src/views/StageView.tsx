@@ -1,15 +1,21 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
-import { useSync } from '../hooks/useSync'
-import { syncService } from '../services/syncService'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSession } from '../hooks/useSession'
+import { useBeatVisuals } from '../hooks/useBeatVisuals'
+import { useCommandRunner } from '../hooks/useCommandRunner'
+import { session } from '../services/sessionController'
 import { flywheelClock } from '../services/flywheelClock'
+import { CommandError } from '../services/syncService'
+import { LINK_STATE_CLASS, LINK_STATE_LABEL } from '../services/linkState'
+import { CommandSender, SetlistEntry } from '../types/protocol'
+import { getSetlist, StoredSetlist } from '../db/indexedDb'
 import SetlistJumpBanner from '../components/SetlistJumpBanner'
 import SongRibbon, { RibbonSong } from '../components/SongRibbon'
 import VFDDisplay from '../components/VFDDisplay'
 import HardwareKnob from '../components/HardwareKnob'
 import DirectorRemoteToolbar from '../components/DirectorRemoteToolbar'
 import MultiTrackMixer from '../components/MultiTrackMixer'
-import { CommandType } from '../types/protocol'
-import { getAllSetlists } from '../db/indexedDb'
+import AudioArmButton from '../components/AudioArmButton'
+import EmergencySlide from '../components/EmergencySlide'
 import {
   LibraryIcon,
   SettingsIcon,
@@ -21,311 +27,239 @@ import {
 } from '../components/Icons'
 
 interface Props {
-  sessionId: string
+  /** Local (IndexedDB) setlist picked in the Library; shown only without a leader. */
+  setlistId: string | null
   onLibrary: () => void
   onSettings: () => void
-  onDisconnect: () => void
+  /** Explicit SALIR: the parent leaves the session. */
+  onExit: () => void
 }
 
-type NetworkHealth = 'good' | 'warning' | 'critical'
+const INEAR_KEY = 'bandait_inear_vol'
+const PANIC_NOTE_MS = 6000
 
-interface SongData {
-  title: string
-  artist: string
-  bpm: number
-  key?: string
-  lyrics: Array<{ time: number; text: string; chord?: string }>
-  segments: Array<{ label: string; bars: number }>
+function pad(n: number, width: number): string {
+  return String(n).padStart(width, '0')
 }
 
-export default function StageView({ sessionId, onLibrary, onSettings, onDisconnect }: Props) {
-  const { connected, state, offsetMs, jumpAlert, setJumpAlert, sendCommand, joinSession } = useSync()
-  const [health, setHealth] = useState<NetworkHealth>('good')
-  const [isFlywheelAutonomous, setIsFlywheelAutonomous] = useState(false)
-  const [slideProgress, setSlideProgress] = useState(0)
-  const [isSliding, setIsSliding] = useState(false)
-  const slideTimer = useRef<number | null>(null)
-  const [visualBeat, setVisualBeat] = useState(0)
-  const [currentLyricIndex, setCurrentLyricIndex] = useState(0)
-  const [elapsedTime, setElapsedTime] = useState(0)
-  const [songData, setSongData] = useState<SongData | null>(null)
+function saveNumber(key: string, value: number): void {
+  try {
+    localStorage.setItem(key, String(value))
+  } catch {
+    // Storage blocked: the value still applies for this session.
+  }
+}
 
-  // Stage state
-  const [ribbonSongs, setRibbonSongs] = useState<RibbonSong[]>([
-    { id: 'song_01', title: 'Medianoche en Pereira', bpm: 124, key: 'Am' },
-    { id: 'song_02', title: 'Ritmo de Calle', bpm: 128, key: 'Em' },
-    { id: 'song_03', title: 'Desde Lejos (Balada)', bpm: 88, key: 'G' },
-    { id: 'song_04', title: 'Fuego en Tarima', bpm: 140, key: 'Dm' },
-  ])
-  const [inEarVolume, setInEarVolume] = useState(0.8)
-  const [showDirectorControls, setShowDirectorControls] = useState(false)
+export default function StageView({ setlistId, onLibrary, onSettings, onExit }: Props) {
+  const snap = useSession()
+  const { state, connected, role, linkState, clock } = snap
+  const isDirector = role === 'director'
+
+  const [inEarVolume, setInEarVolume] = useState(() => flywheelClock.getVolume())
+  const [showDirectorControls, setShowDirectorControls] = useState(true)
   const [showMixer, setShowMixer] = useState(false)
+  const [localSetlist, setLocalSetlist] = useState<StoredSetlist | null>(null)
+  const [panicNote, setPanicNote] = useState<string | null>(null)
 
-  useEffect(() => {
-    joinSession(sessionId)
-  }, [sessionId, joinSession])
+  const rootRef = useRef<HTMLDivElement>(null)
+  const barRef = useRef<HTMLSpanElement>(null)
+  const beatRef = useRef<HTMLSpanElement>(null)
+  const pillsRef = useRef<HTMLDivElement>(null)
 
-  // Load setlist songs from offline IndexedDB if available
-  useEffect(() => {
-    getAllSetlists()
-      .then((setlists) => {
-        if (setlists.length > 0 && setlists[0].songs.length > 0) {
-          const loaded: RibbonSong[] = setlists[0].songs.map((s) => ({
-            id: s.id,
-            title: s.title,
-            bpm: s.bpm,
-            key: s.key,
-          }))
-          setRibbonSongs(loaded)
-        }
-      })
-      .catch(() => {})
-  }, [])
+  // Director PANIC silences this device at once (released by the next PLAY).
+  const send = useCallback<CommandSender>(
+    (type, payload) => (type === 'PANIC' ? session.panicRemote() : session.sendCommand(type, payload)),
+    [],
+  )
+  const { feedback, run } = useCommandRunner(send)
 
-  // Network health
+  // Selected local setlist (honors the id picked in the Library).
   useEffect(() => {
-    if (!offsetMs) return
-    if (Math.abs(offsetMs) < 20) setHealth('good')
-    else if (Math.abs(offsetMs) < 100) setHealth('warning')
-    else setHealth('critical')
-  }, [offsetMs])
-
-  // Visual beat flash
-  const beat = state?.beat ?? 0
-  useEffect(() => {
-    if (beat > 0) {
-      setVisualBeat(beat)
-      const timer = setTimeout(() => setVisualBeat(0), 140)
-      return () => clearTimeout(timer)
-    }
-  }, [beat])
-
-  // Elapsed time
-  useEffect(() => {
-    if (state?.status !== 'PLAYING') {
-      setElapsedTime(0)
-      setCurrentLyricIndex(0)
+    if (!setlistId) {
+      setLocalSetlist(null)
       return
     }
-    const interval = window.setInterval(() => {
-      setElapsedTime((prev) => prev + 0.1)
-    }, 100)
-    return () => clearInterval(interval)
-  }, [state?.status])
-
-  // Lyric index
-  useEffect(() => {
-    if (!songData || state?.status !== 'PLAYING') return
-    const lyrics = songData.lyrics
-    const idx = lyrics.findIndex((lyric, index) => {
-      const nextLyric = lyrics[index + 1]
-      return elapsedTime >= lyric.time && (!nextLyric || elapsedTime < nextLyric.time)
-    })
-    if (idx !== -1 && idx !== currentLyricIndex) {
-      setCurrentLyricIndex(idx)
-    }
-  }, [elapsedTime, songData, currentLyricIndex, state?.status])
-
-  // Synchronize Flywheel with connection state
-  useEffect(() => {
-    flywheelClock.setConnected(connected)
-  }, [connected])
-
-  // Flywheel Web Audio precision metronome & clock
-  useEffect(() => {
-    flywheelClock.setCallbacks(
-      (_bar, beatNum) => {
-        setVisualBeat(beatNum)
-        setTimeout(() => setVisualBeat(0), 120)
-      },
-      (autonomous) => {
-        setIsFlywheelAutonomous(autonomous)
-      }
-    )
-
-    if (state?.status === 'PLAYING' && state?.bpm) {
-      flywheelClock.start(state.bpm)
-    } else {
-      flywheelClock.stop()
-    }
-
-    return () => {
-      flywheelClock.stop()
-    }
-  }, [state?.status, state?.bpm])
-
-  // Load song data when song changes
-  useEffect(() => {
-    if (state?.currentSongId) {
-      const demoSongs: Record<string, SongData> = {
-        'song_01': {
-          title: 'Medianoche en Pereira',
-          artist: 'Los Inquietos',
-          bpm: 124,
-          key: 'Am',
-          lyrics: [
-            { time: 0, text: '...', chord: 'Am' },
-            { time: 12.5, text: 'Las luces de la ciudad se apagan', chord: 'Dm7' },
-            { time: 18.2, text: 'Y solo queda el eco de tu voz', chord: 'G7' },
-            { time: 24.0, text: 'Medianoche en Pereira', chord: 'Cmaj7' },
-            { time: 30.5, text: 'Donde el viento nos encontró', chord: 'F' },
-            { time: 42.0, text: 'Verso 2: Caminamos sin dirección', chord: 'E7' },
-          ],
-          segments: [
-            { label: 'Intro', bars: 8 },
-            { label: 'Verso A', bars: 16 },
-            { label: 'Coro', bars: 16 },
-            { label: 'Puente', bars: 8 },
-          ],
-        },
-        'song_02': {
-          title: 'Ritmo de Calle',
-          artist: 'Banda Local',
-          bpm: 128,
-          key: 'Em',
-          lyrics: [
-            { time: 0, text: '...', chord: 'Em' },
-            { time: 8.0, text: 'El ritmo de la calle nos llama', chord: 'C' },
-            { time: 14.5, text: 'Y la noche apenas comienza', chord: 'D' },
-            { time: 21.0, text: 'Bailamos sin preocupación', chord: 'B7' },
-          ],
-          segments: [
-            { label: 'Intro', bars: 4 },
-            { label: 'Verso', bars: 16 },
-            { label: 'Coro', bars: 16 },
-          ],
-        },
-        'song_03': {
-          title: 'Desde Lejos (Balada)',
-          artist: 'Solistas',
-          bpm: 88,
-          key: 'G',
-          lyrics: [
-            { time: 0, text: '...', chord: 'G' },
-            { time: 10.0, text: 'Desde lejos te observo', chord: 'Em' },
-            { time: 20.0, text: 'Y no puedo hablar', chord: 'C' },
-          ],
-          segments: [
-            { label: 'Intro', bars: 4 },
-            { label: 'Verso', bars: 8 },
-          ],
-        },
-      }
-      setSongData(demoSongs[state.currentSongId] || {
-        title: `Canción ${state.currentSongId}`,
-        artist: 'Bandait Live',
-        bpm: state.bpm,
-        lyrics: [],
-        segments: [],
+    let cancelled = false
+    getSetlist(setlistId)
+      .then((sl) => {
+        if (!cancelled) setLocalSetlist(sl)
       })
-    } else {
-      setSongData(null)
+      .catch(() => {
+        if (!cancelled) setLocalSetlist(null)
+      })
+    return () => {
+      cancelled = true
     }
-  }, [state?.currentSongId, state?.bpm])
+  }, [setlistId])
 
-  const handleEmergencyStop = useCallback(() => {
-    sendCommand('PANIC')
-    syncService.disconnect()
-    setIsSliding(false)
-    setSlideProgress(0)
-  }, [sendCommand])
+  useEffect(() => {
+    if (!panicNote) return
+    const t = setTimeout(() => setPanicNote(null), PANIC_NOTE_MS)
+    return () => clearTimeout(t)
+  }, [panicNote])
 
-  const handleSlideStart = useCallback(() => {
-    setIsSliding(true)
-    setSlideProgress(0)
-    let progress = 0
-    const interval = window.setInterval(() => {
-      progress += 2.5
-      setSlideProgress(progress)
-      if (progress >= 100) {
-        window.clearInterval(interval)
-        handleEmergencyStop()
+  // Current song strictly from the leader state.
+  const orderedSetlist: SetlistEntry[] = useMemo(
+    () => (state ? [...state.setlist].sort((a, b) => a.orderIndex - b.orderIndex) : []),
+    [state],
+  )
+  const currentSong: SetlistEntry | null = useMemo(() => {
+    if (!state) return null
+    const byId = state.currentSongId ? orderedSetlist.find((s) => s.songId === state.currentSongId) : undefined
+    if (byId) return byId
+    if (state.currentOrderIndex !== null) {
+      return orderedSetlist.find((s) => s.orderIndex === state.currentOrderIndex) ?? null
+    }
+    return null
+  }, [state, orderedSetlist])
+  const nextSong = currentSong ? orderedSetlist.find((s) => s.orderIndex > currentSong.orderIndex) ?? null : null
+
+  const ribbon = useMemo((): { label: string; songs: RibbonSong[] } | null => {
+    if (state && orderedSetlist.length > 0) {
+      return {
+        label: 'SETLIST LIDER',
+        songs: orderedSetlist.map((s) => ({ id: s.songId, title: s.title, bpm: s.bpm })),
       }
-    }, 20)
-    slideTimer.current = interval
-  }, [handleEmergencyStop])
-
-  const handleSlideEnd = useCallback(() => {
-    setIsSliding(false)
-    setSlideProgress(0)
-    if (slideTimer.current) {
-      window.clearInterval(slideTimer.current)
     }
+    if (!state && localSetlist && localSetlist.songs.length > 0) {
+      return {
+        label: 'SETLIST LOCAL (SIN LIDER)',
+        songs: localSetlist.songs.map((s) => ({ id: s.id, title: s.title, bpm: s.bpm, key: s.key })),
+      }
+    }
+    return null
+  }, [state, orderedSetlist, localSetlist])
+
+  // bar:beat and pulses come from the scheduler through rAF, not React state.
+  const pausedBar = state?.status === 'PAUSED' ? state.pausedBar : null
+  const fallback = useMemo(
+    () => (pausedBar !== null ? { bar: pad(pausedBar, 3), beat: '--' } : { bar: '---', beat: '--' }),
+    [pausedBar],
+  )
+  const visualRefs = useMemo(() => ({ root: rootRef, bar: barRef, beat: beatRef, pills: pillsRef }), [])
+  useBeatVisuals(flywheelClock, visualRefs, fallback)
+
+  const handleArmAudio = useCallback(() => {
+    // Synchronous call inside the click handler: required by iOS.
+    void flywheelClock.armAudio()
+    // Same gesture: retry the keep-awake video if it was refused without one.
+    session.ensureWakeLock()
+  }, [])
+
+  const handleVolume = useCallback((value: number) => {
+    setInEarVolume(value)
+    flywheelClock.setVolume(value)
+    saveNumber(INEAR_KEY, value)
+  }, [])
+
+  const handlePanicMute = useCallback((muted: boolean) => {
+    if (muted) flywheelClock.setLocalMuted(true)
+    else void flywheelClock.armAudio()
+  }, [])
+
+  // Musician: SILENCIO LOCAL only (nothing sent). Director: PANIC to the band + local silence.
+  const handleEmergencyStop = useCallback(() => {
+    session.emergencyStop().then(
+      (outcome) =>
+        setPanicNote(
+          outcome.kind === 'local_mute'
+            ? 'SILENCIO LOCAL: SOLO ESTE EQUIPO // LA BANDA SIGUE TOCANDO'
+            : 'PANIC CONFIRMADO POR EL LIDER // AUDIO LOCAL SILENCIADO',
+        ),
+      (err: unknown) =>
+        setPanicNote(
+          err instanceof CommandError && err.reason === 'offline'
+            ? 'SIN CONEXION: SOLO SE SILENCIO ESTE EQUIPO'
+            : 'AUDIO LOCAL SILENCIADO // EL LIDER NO CONFIRMO EL PANIC',
+        ),
+    )
   }, [])
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {})
+      document.documentElement.requestFullscreen?.().catch(() => {})
     } else {
-      document.exitFullscreen().catch(() => {})
+      document.exitFullscreen?.().catch(() => {})
     }
   }, [])
 
-  const handleDirectorCommand = (type: CommandType, payload?: Record<string, unknown>) => {
-    sendCommand(type, payload)
+  const canCommand = isDirector && connected && state !== null
+  const handleSelectSongFromRibbon = (song: RibbonSong) => {
+    if (!canCommand) return
+    run('JUMP_SONG', { songId: song.id })
   }
 
-  const handleSelectSongFromRibbon = (song: RibbonSong, index: number) => {
-    sendCommand('JUMP_SONG', { song_id: song.id, order_index: index })
-  }
+  const disabledReason = !snap.active
+    ? 'SIN SESION ACTIVA'
+    : !connected
+      ? 'SIN CONEXION CON EL LIDER'
+      : !state
+        ? 'ESPERANDO ESTADO DEL LIDER'
+        : null
 
-  const isBeatOne = visualBeat === 1
-  const lyrics = songData?.lyrics || []
-  const currentLyric = lyrics[currentLyricIndex]
-  const nextLyric = lyrics[currentLyricIndex + 1]
+  const beatsPerBar = state?.beatsPerBar ?? 4
+  const songTitle = currentSong
+    ? currentSong.title
+    : state
+      ? 'SIN CANCION ACTIVA'
+      : snap.active
+        ? 'ESPERANDO ESTADO DEL LIDER'
+        : 'SIN SESION'
+
+  const clockText =
+    connected && clock
+      ? `RTT ${clock.rttMs.toFixed(1)} // JIT ${clock.jitterMs.toFixed(1)} ms // ${clock.sampleCount}m`
+      : 'RTT -- // JIT --'
+
+  let footerText: string
+  if (!snap.active) footerText = 'SIN SESION // USA SALIR PARA CONECTAR A UN LIDER'
+  else if (connected) footerText = `ENLACE ACTIVO // SESION: ${snap.sessionId} // ${isDirector ? 'DIRECTOR' : 'MUSICO'}: ${snap.alias}`
+  else {
+    const attempt = snap.reconnectAttempt > 0 ? ` (INTENTO ${snap.reconnectAttempt})` : ''
+    footerText = `RECONECTANDO${attempt} // ${snap.schedulerRunning ? 'FLYWHEEL MANTIENE EL TEMPO' : 'SIN TRANSPORTE'}`
+  }
 
   return (
-    <div className="stage-view">
+    <div className="stage-view" ref={rootRef}>
       {/* HIGH VISIBILITY SETLIST JUMP ALERT BANNER */}
-      <SetlistJumpBanner
-        alert={jumpAlert}
-        onDismiss={() => setJumpAlert(null)}
-      />
+      <SetlistJumpBanner alert={snap.jumpAlert} onDismiss={session.dismissJumpAlert} />
 
-      {/* Visual Metronome — 4-border flash */}
-      <div className={`metronome-border top ${isBeatOne ? 'active' : ''}`} />
-      <div className={`metronome-border right ${visualBeat === 2 ? 'active' : ''}`} />
-      <div className={`metronome-border bottom ${visualBeat === 3 ? 'active' : ''}`} />
-      <div className={`metronome-border left ${visualBeat === 4 ? 'active' : ''}`} />
+      {/* Visual metronome: lit by CSS from data attributes set in rAF */}
+      <div className="metronome-border top" />
+      <div className="metronome-border right" />
+      <div className="metronome-border bottom" />
+      <div className="metronome-border left" />
 
       {/* TOP RACK BAR */}
       <div className="stage-rack-bar">
-        {/* LEFT STATUS */}
         <div className="rack-group-left">
-          {isFlywheelAutonomous ? (
+          {linkState === 'FLYWHEEL' && (
             <span className="badge-hardware badge-flywheel">
               <FlywheelIcon size={13} />
               <span>FLYWHEEL ACTIVO</span>
             </span>
-          ) : (
-            <span className="badge-hardware badge-ntp">
-              <span>NTP SYNC</span>
-            </span>
           )}
 
-          {/* Network Beacon */}
-          <div className={`network-beacon ${health}`}>
+          <div className={`network-beacon ${LINK_STATE_CLASS[linkState]}`} title={snap.lastError ?? undefined}>
             <span className="beacon-shape" />
-            <span>
-              {health === 'good' && 'SYNC OK'}
-              {health === 'warning' && 'JITTER'}
-              {health === 'critical' && 'LOST'}
-            </span>
-            <span style={{ opacity: 0.75, fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
-              {offsetMs ? `${Math.abs(offsetMs).toFixed(1)}ms` : '--'}
-            </span>
+            <span>{LINK_STATE_LABEL[linkState]}</span>
+            <span style={{ opacity: 0.75, fontFamily: 'var(--font-mono)', fontSize: '10px' }}>{clockText}</span>
           </div>
+
+          {snap.localMuted && <span className="badge-hardware badge-flywheel">SILENCIO LOCAL</span>}
+
+          {snap.active && snap.wakeMode === 'NO DISPONIBLE' && (
+            <span
+              className="wakelock-warning"
+              title="El navegador no permite mantener la pantalla encendida (requiere HTTPS). Si se apaga, el metronomo se detiene."
+            >
+              PANTALLA PUEDE APAGARSE
+            </span>
+          )}
         </div>
 
-        {/* RIGHT ACTIONS */}
         <div className="rack-group-right">
-          <button
-            type="button"
-            className="btn-stage-icon"
-            onClick={onLibrary}
-            title="Biblioteca de Setlists"
-            aria-label="Biblioteca"
-          >
+          <button type="button" className="btn-stage-icon" onClick={onLibrary} title="Biblioteca de setlists" aria-label="Biblioteca">
             <LibraryIcon size={16} />
           </button>
 
@@ -333,201 +267,134 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
             type="button"
             className="btn-stage-icon"
             onClick={() => setShowMixer(true)}
-            title="Mezclador In-Ear Multipista"
+            title="Mezclador in-ear"
             aria-label="Mezclador"
           >
             <MixerIcon size={16} />
           </button>
 
-          <button
-            type="button"
-            className={`btn-stage-icon ${showDirectorControls ? 'active' : ''}`}
-            onClick={() => setShowDirectorControls(!showDirectorControls)}
-            title="Alternar Mando del Director"
-            aria-label="Mando Director"
-          >
-            <RemoteIcon size={16} />
-          </button>
+          {isDirector && (
+            <button
+              type="button"
+              className={`btn-stage-icon ${showDirectorControls ? 'active' : ''}`}
+              onClick={() => setShowDirectorControls((v) => !v)}
+              title="Mostrar u ocultar el mando del director"
+              aria-label="Mando director"
+            >
+              <RemoteIcon size={16} />
+            </button>
+          )}
 
-          <button
-            type="button"
-            className="btn-stage-icon"
-            onClick={onSettings}
-            title="Ajustes de Temas y Audio"
-            aria-label="Configuración"
-          >
+          <button type="button" className="btn-stage-icon" onClick={onSettings} title="Ajustes de temas y audio" aria-label="Configuracion">
             <SettingsIcon size={16} />
           </button>
 
-          <button
-            type="button"
-            className="btn-stage-icon"
-            onClick={toggleFullscreen}
-            title="Pantalla Completa"
-            aria-label="Pantalla Completa"
-          >
+          <button type="button" className="btn-stage-icon" onClick={toggleFullscreen} title="Pantalla completa" aria-label="Pantalla completa">
             <FullscreenIcon size={16} />
           </button>
 
           <button
             type="button"
             className="btn-stage-icon"
-            onClick={onDisconnect}
-            title="Desconectar y Salir"
-            aria-label="Desconectar"
+            onClick={onExit}
+            title="SALIR: cerrar la sesion y detener el metronomo"
+            aria-label="Salir de la sesion"
             style={{ color: 'var(--accent-danger)' }}
           >
             <DisconnectIcon size={16} />
           </button>
 
-          {/* Compact In-Ear Gain Knob */}
           <div style={{ marginLeft: '4px' }}>
-            <HardwareKnob
-              label="IN-EAR"
-              value={inEarVolume}
-              onChange={(val) => setInEarVolume(val)}
-            />
+            <HardwareKnob label="IN-EAR" value={inEarVolume} onChange={handleVolume} />
           </div>
         </div>
       </div>
 
-      {/* HARDWARE SONG RIBBON */}
-      <SongRibbon
-        songs={ribbonSongs}
-        currentSongId={state?.currentSongId ?? null}
-        onSelectSong={handleSelectSongFromRibbon}
-      />
+      <AudioArmButton audio={snap.audio} localMuted={snap.localMuted} onArm={handleArmAudio} />
 
-      {/* VFD DIGITAL STAGE DISPLAY */}
+      {/* SONG RIBBON: leader setlist; local setlist only when there is no leader */}
+      {ribbon && (
+        <SongRibbon
+          label={ribbon.label}
+          songs={ribbon.songs}
+          currentSongId={state?.currentSongId ?? null}
+          onSelectSong={handleSelectSongFromRibbon}
+          disabled={!canCommand}
+        />
+      )}
+
       <VFDDisplay
-        bpm={state?.bpm ?? 120}
-        bar={state?.bar ?? 1}
-        beat={visualBeat || (state?.beat ?? 1)}
-        status={state?.status ?? 'IDLE'}
-        isFlywheel={isFlywheelAutonomous}
+        bpm={state?.bpm ?? null}
+        status={state?.status ?? null}
+        linkState={linkState}
+        barRef={barRef}
+        beatRef={beatRef}
       />
 
-      {/* DIRECTOR CONCURRENT CONTROL TOOLBAR */}
-      {showDirectorControls && (
+      {isDirector && showDirectorControls && (
         <DirectorRemoteToolbar
-          isPlaying={state?.status === 'PLAYING'}
-          currentBpm={state?.bpm ?? 120}
-          onCommand={handleDirectorCommand}
+          status={state?.status ?? null}
+          currentBpm={state?.bpm ?? null}
+          run={run}
+          onPanic={() => run('PANIC')}
+          disabledReason={disabledReason}
+          feedback={feedback}
         />
       )}
 
       {/* MAIN STAGE PROMPTER CENTER */}
-      <div className={`stage-prompter-center ${visualBeat > 0 ? 'beat-flash' : ''}`}>
-        {/* Prompter Meta Strip */}
+      <div className="stage-prompter-center">
         <div className="prompter-meta-strip">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="prompter-song-name">
-              {songData ? songData.title : 'ESPERANDO SEÑAL DEL DIRECTOR'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            {currentSong && (
+              <span className="prompter-chord-badge">
+                TEMA {pad(currentSong.orderIndex + 1, 2)}/{pad(orderedSetlist.length, 2)}
+              </span>
+            )}
+            <span className="prompter-song-name">{songTitle}</span>
+          </div>
+          {currentSong && (
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {currentSong.bpm} BPM{state && state.bpm !== currentSong.bpm ? ` // AJUSTADO A ${state.bpm}` : ''}
             </span>
-            {songData?.artist && (
-              <span style={{ opacity: 0.6 }}>• {songData.artist}</span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {currentLyric?.chord && (
-              <span className="prompter-chord-badge">
-                ACORDE: {currentLyric.chord}
-              </span>
-            )}
-            {songData?.key && !currentLyric?.chord && (
-              <span className="prompter-chord-badge">
-                TONO: {songData.key}
-              </span>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* Big High-Contrast Lyrics Readout */}
         <div className="prompter-lyrics-box">
-          {currentLyric ? (
-            <>
-              <div className="prompter-lyric-current">{currentLyric.text}</div>
-              {nextLyric && (
-                <div className="prompter-lyric-next">{nextLyric.text}</div>
-              )}
-            </>
-          ) : (
-            <div className="prompter-waiting">
-              {songData ? '[EN ESPERA DE INICIO]' : '[SISTEMA LISTO // SELECCIONA CANCIÓN]'}
+          <div className="prompter-waiting">SIN LETRA</div>
+          <div className="prompter-lyric-next" style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
+            LA DISTRIBUCION DE LETRAS DESDE EL LIDER ESTA PENDIENTE
+          </div>
+          {nextSong && (
+            <div className="prompter-lyric-next">
+              SIGUIENTE: {nextSong.title} // {nextSong.bpm} BPM
             </div>
           )}
         </div>
 
-        {/* 4-Beat Pill Rhythm Strip */}
-        <div className="beat-indicator-strip">
-          {[1, 2, 3, 4].map((beatNum) => {
-            const isCurrentBeat = visualBeat === beatNum || (visualBeat === 0 && (state?.beat ?? 0) === beatNum)
-            const isDown = beatNum === 1
-            return (
-              <div
-                key={beatNum}
-                className={`beat-pill ${isDown ? 'downbeat' : ''} ${isCurrentBeat ? 'active' : ''}`}
-              />
-            )
-          })}
-        </div>
-
-        {/* Structural Segments Bar */}
-        {songData && songData.segments.length > 0 && (
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '4px' }}>
-            {songData.segments.map((seg, i) => (
-              <span
-                key={i}
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '10px',
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--theme-border)',
-                  color: 'var(--text-secondary)',
-                  padding: '2px 8px',
-                  borderRadius: 'var(--theme-radius)',
-                  letterSpacing: '0.5px',
-                }}
-              >
-                {seg.label} ({seg.bars}c)
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* INDUSTRIAL EMERGENCY SLIDE-TO-STOP */}
-      <div className="emergency-container">
-        <div
-          className="emergency-track"
-          onMouseDown={handleSlideStart}
-          onMouseUp={handleSlideEnd}
-          onMouseLeave={handleSlideEnd}
-          onTouchStart={handleSlideStart}
-          onTouchEnd={handleSlideEnd}
-        >
-          <div
-            className="emergency-handle"
-            style={{ transform: `translateX(${slideProgress}%)` }}
-          >
-            ■
-          </div>
-          <div className="emergency-label">
-            &gt;&gt;&gt; DESLIZAR PARA PARADA DE EMERGENCIA &gt;&gt;&gt;
-          </div>
-          {isSliding && (
-            <div
-              className="emergency-fill"
-              style={{ width: `${slideProgress}%` }}
-            />
-          )}
+        <div className="beat-indicator-strip" ref={pillsRef}>
+          {Array.from({ length: beatsPerBar }, (_, i) => i + 1).map((n) => (
+            <div key={n} data-beat-pill={n} className={`beat-pill ${n === 1 ? 'downbeat' : ''}`} />
+          ))}
         </div>
       </div>
 
-      {/* STAGE FOOTER DIAGNOSTICS */}
+      <EmergencySlide
+        onTrigger={handleEmergencyStop}
+        label={
+          isDirector
+            ? '>>> MANTEN PARA PANIC (DETIENE A TODA LA BANDA) >>>'
+            : '>>> MANTEN PARA SILENCIO LOCAL (SOLO ESTE EQUIPO) >>>'
+        }
+      />
+      {panicNote && (
+        <div className="stage-footer" role="status" style={{ color: 'var(--accent-danger)', justifyContent: 'center' }}>
+          {panicNote}
+        </div>
+      )}
+
       <div className="stage-footer">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
           <span
             style={{
               width: '6px',
@@ -535,20 +402,27 @@ export default function StageView({ sessionId, onLibrary, onSettings, onDisconne
               borderRadius: '50%',
               background: connected ? 'var(--accent-success)' : 'var(--accent-danger)',
               display: 'inline-block',
+              flexShrink: 0,
             }}
           />
-          <span>{connected ? `ENLACE ACTIVO // SESIÓN: ${sessionId}` : 'OFFLINE // MODO AUTÓNOMO'}</span>
+          <span>{footerText}</span>
+          {!connected && snap.lastError && <span style={{ opacity: 0.7 }}>// {snap.lastError}</span>}
         </div>
-        <span>BANDAIT 3.0 // MOTOR ACÚSTICO PRO</span>
+        {snap.protocolError ? (
+          <span style={{ color: 'var(--accent-danger)' }}>PROTOCOLO: {snap.protocolError}</span>
+        ) : (
+          <span>PANTALLA: {snap.wakeMode} // BANDAIT 3.0 // PROTOCOLO V3</span>
+        )}
       </div>
 
-      {/* IN-EAR MULTI-TRACK STEM MIXER */}
       <MultiTrackMixer
-        songId={state?.currentSongId || 'song_01'}
+        songId={state?.currentSongId ?? 'sin_cancion'}
         isOpen={showMixer}
         onClose={() => setShowMixer(false)}
         initialMasterVolume={inEarVolume}
-        onMasterVolumeChange={(vol) => setInEarVolume(vol)}
+        onMasterVolumeChange={handleVolume}
+        panicMuted={snap.localMuted}
+        onPanicMuteChange={handlePanicMute}
       />
     </div>
   )

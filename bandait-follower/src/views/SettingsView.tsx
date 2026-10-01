@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { SettingsIcon, ShieldIcon, FlywheelIcon, VolumeIcon } from '../components/Icons'
+import { flywheelClock } from '../services/flywheelClock'
 
 export type ThemeStyle = 'theme-swiss' | 'theme-milspec' | 'theme-tokyo' | 'theme-concert'
 
@@ -76,15 +77,20 @@ export default function SettingsView({ onBack }: Props) {
   }
 
   const handleVolumeChange = (type: 'click' | 'guide' | 'stems', val: number) => {
+    const key = type === 'click' ? 'bandait_click_vol' : type === 'guide' ? 'bandait_guide_vol' : 'bandait_stems_vol'
     if (type === 'click') {
       setClickVolume(val)
-      localStorage.setItem('bandait_click_vol', val.toString())
+      // Live: the click channel of the metronome scheduler.
+      flywheelClock.setClickVolume(val)
     } else if (type === 'guide') {
       setGuideVolume(val)
-      localStorage.setItem('bandait_guide_vol', val.toString())
     } else {
       setStemsVolume(val)
-      localStorage.setItem('bandait_stems_vol', val.toString())
+    }
+    try {
+      localStorage.setItem(key, val.toString())
+    } catch {
+      // Storage blocked: the value still applies for this session.
     }
   }
 
@@ -98,7 +104,7 @@ export default function SettingsView({ onBack }: Props) {
           className="btn-stage btn-stage-secondary"
           style={{ padding: '8px 16px', fontSize: '12px' }}
         >
-          [VOLVER AL STAGE]
+          [VOLVER]
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -138,7 +144,7 @@ export default function SettingsView({ onBack }: Props) {
           </span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: '12px' }}>
           {THEMES.map((theme) => {
             const isSelected = currentTheme === theme.id
             return (
@@ -240,7 +246,7 @@ export default function SettingsView({ onBack }: Props) {
             <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '11px', marginBottom: '6px' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <VolumeIcon size={13} />
-                <span>CANAL 2: GUÍA VOCAL / TALKBACK</span>
+                <span>CANAL 2: GUÍA VOCAL / TALKBACK (SIN FUENTE DE AUDIO, PENDIENTE)</span>
               </span>
               <span style={{ fontWeight: 700, color: 'var(--accent-active)' }}>{Math.round(guideVolume * 100)}%</span>
             </div>
@@ -259,7 +265,7 @@ export default function SettingsView({ onBack }: Props) {
             <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: '11px', marginBottom: '6px' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <VolumeIcon size={13} />
-                <span>CANAL 3: STEMS PRE-CACHE</span>
+                <span>CANAL 3: STEMS PRE-CACHE (SIN REPRODUCCION, PENDIENTE)</span>
               </span>
               <span style={{ fontWeight: 700, color: 'var(--accent-active)' }}>{Math.round(stemsVolume * 100)}%</span>
             </div>

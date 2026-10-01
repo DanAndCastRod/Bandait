@@ -2,6 +2,12 @@ import { useState, useCallback } from 'react';
 import { Play, Square, Circle, Zap } from 'lucide-react';
 import { socketService } from '../services/socketService';
 
+/*
+ * NO MONTADO a proposito (ver App.tsx): el Hub se sirve por HTTPS y no puede abrir ws://
+ * hacia un lider en la LAN (contenido mixto). El transporte del director vive en el
+ * follower PWA. Se mantiene alineado con CONTRACT_V3 para un Hub servido desde la LAN.
+ */
+
 interface TransportBarProps {
   bpm: number;
   isPlaying: boolean;
@@ -29,12 +35,19 @@ export default function TransportBar({
   };
 
   const handlePlay = useCallback(() => {
-    socketService.sendControl(isPlaying ? 'STOP' : 'PLAY');
+    socketService.sendCommand(isPlaying ? 'STOP' : 'PLAY').catch((err: unknown) => console.warn('[Transport]', err));
   }, [isPlaying]);
 
-  const handleRecord = useCallback(() => {
-    socketService.sendControl(isRecording ? 'STOP_RECORDING' : 'START_RECORDING');
-  }, [isRecording]);
+  // La grabacion no existe en CONTRACT_V3: el boton queda deshabilitado (pendiente).
+
+  const sendTempo = useCallback(
+    (newBpm: number) => {
+      const delta = Math.round(newBpm - bpm);
+      if (delta === 0) return;
+      socketService.sendCommand('TEMPO_NUDGE', { delta_bpm: delta }).catch((err: unknown) => console.warn('[Transport]', err));
+    },
+    [bpm]
+  );
 
   const handleTapTempo = useCallback(() => {
     const now = Date.now();
@@ -50,10 +63,10 @@ export default function TransportBar({
       const newBpm = Math.round(60000 / avgInterval);
       if (newBpm >= 40 && newBpm <= 300) {
         onBpmChange(newBpm);
-        socketService.sendControl('SET_BPM', { bpm: newBpm });
+        sendTempo(newBpm);
       }
     }
-  }, [tapTimes, onBpmChange]);
+  }, [tapTimes, onBpmChange, sendTempo]);
 
   return (
     <div
@@ -105,7 +118,7 @@ export default function TransportBar({
         </button>
 
         <button
-          onClick={handleRecord}
+          disabled
           style={{
             width: '48px',
             height: '48px',
@@ -119,7 +132,7 @@ export default function TransportBar({
             justifyContent: 'center',
             transition: 'all 0.15s ease',
           }}
-          title={isRecording ? 'Detener grabación' : 'Grabar'}
+          title="Grabación: no existe en el contrato v3 (pendiente)"
         >
           <Circle size={20} fill={isRecording ? 'currentColor' : 'none'} />
         </button>
@@ -217,7 +230,7 @@ export default function TransportBar({
           onChange={(e) => {
             const newBpm = parseInt(e.target.value);
             onBpmChange(newBpm);
-            socketService.sendControl('SET_BPM', { bpm: newBpm });
+            sendTempo(newBpm);
           }}
           style={{
             width: '100px',

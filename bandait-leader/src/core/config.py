@@ -3,6 +3,8 @@
 import os
 from dataclasses import dataclass
 
+from src.core.paths import get_db_path
+
 
 @dataclass(frozen=True)
 class Config:
@@ -17,33 +19,28 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        import sounddevice as sd
-        
-        # Auto-detect audio hardware capabilities
+        max_out = 2
+        max_in = 2
         try:
+            import sounddevice as sd
+
             default_out = sd.query_devices(kind="output")
-            max_out = default_out.get("max_output_channels", 2)
+            max_out = int(default_out.get("max_output_channels", 2))
             default_in = sd.query_devices(kind="input")
-            max_in = default_in.get("max_input_channels", 2)
+            max_in = int(default_in.get("max_input_channels", 2))
         except Exception:
-            max_out = 2
-            max_in = 2
-        
+            # No PortAudio library or no devices: keep conservative defaults.
+            pass
+
         # Clamp to hardware limits (default 4, but hardware may only support 2)
-        channels_out = min(
-            int(os.getenv("BANDAIT_AUDIO_CHANNELS_OUT", "4")),
-            max_out
-        )
-        channels_in = min(
-            int(os.getenv("BANDAIT_AUDIO_CHANNELS_IN", "4")),
-            max_in
-        )
-        
+        channels_out = min(int(os.getenv("BANDAIT_AUDIO_CHANNELS_OUT", "4")), max_out)
+        channels_in = min(int(os.getenv("BANDAIT_AUDIO_CHANNELS_IN", "4")), max_in)
+
         return cls(
             host=os.getenv("BANDAIT_HOST", "0.0.0.0"),
             port=int(os.getenv("BANDAIT_PORT", "4040")),
             api_key=os.getenv("GOOGLE_API_KEY"),
-            db_path=os.getenv("BANDAIT_DB", "bandait.db"),
+            db_path=get_db_path(),
             audio_channels_out=max(1, channels_out),
             audio_channels_in=max(1, channels_in),
             audio_blocksize=int(os.getenv("BANDAIT_AUDIO_BLOCKSIZE", "256")),

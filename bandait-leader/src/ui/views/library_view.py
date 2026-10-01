@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
-from src.db.models import init_db, Song, Setlist
+from src.core.paths import get_db_path
+from src.db.models import init_db, load_setlist_entries, Song, Setlist
 from src.infrastructure.parsers.lrc_parser import LRCParser
 from src.infrastructure.parsers.chordpro_parser import ChordProParser
 
@@ -21,38 +22,33 @@ class LibraryView(QWidget):
     """Biblioteca musical con canciones, setlists y eventos persistentes."""
 
     song_selected = Signal(int)
-    setlist_selected = Signal(int)
+    setlist_selected = Signal(str)  # setlist id (solo muestra detalle)
+    setlist_activated = Signal(str)  # setlist id cargado como setlist en vivo
     import_requested = Signal(str)
+
+    NOT_AVAILABLE = "No disponible en esta version"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._db_session = None
+        self._setlist_ids: list = []
+        self._active_setlist_id = None
         self._setup_db()
         self._setup_ui()
         self._load_songs_from_db()
         self._load_setlists_from_db()
 
     def _setup_db(self):
-        """Inicializar conexión a SQLite con migración automática."""
-        db_path = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "bandait.db")
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        """Abrir SQLite en get_db_path() (respeta BANDAIT_DB).
 
-        # Si la DB existe pero el schema es viejo, eliminarla
-        if os.path.exists(db_path):
-            try:
-                Session = init_db(db_path)
-                test_session = Session()
-                # Test si la columna artist existe
-                from sqlalchemy import text
-                test_session.execute(text("SELECT artist FROM songs LIMIT 1"))
-                test_session.close()
-            except Exception:
-                # Schema viejo — eliminar y recrear
-                print("[DB] Schema desactualizado. Recreando base de datos...")
-                os.remove(db_path)
-
-        Session = init_db(db_path)
-        self._db_session = Session()
+        init_db aplica migraciones aditivas con respaldo previo; nunca borra la
+        base del usuario."""
+        try:
+            Session = init_db(get_db_path())
+            self._db_session = Session()
+        except Exception as e:
+            print(f"[DB] No se pudo abrir la base de datos: {e}")
+            self._db_session = None
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -108,12 +104,15 @@ class LibraryView(QWidget):
 
         add_btn = QPushButton("Nueva")
         add_btn.setObjectName("primary")
-        add_btn.clicked.connect(self._on_add_song)
+        add_btn.setEnabled(False)
+        add_btn.setToolTip(self.NOT_AVAILABLE)
         toolbar.addWidget(add_btn)
 
         delete_btn = QPushButton("Eliminar")
         delete_btn.setObjectName("danger")
-        delete_btn.clicked.connect(self._on_delete_song)
+        # Solo quitaba la fila de la tabla, no de la base: deshabilitado.
+        delete_btn.setEnabled(False)
+        delete_btn.setToolTip(self.NOT_AVAILABLE)
         toolbar.addWidget(delete_btn)
 
         layout.addLayout(toolbar)
@@ -156,13 +155,15 @@ class LibraryView(QWidget):
 
         self.setlist_search = QLineEdit()
         self.setlist_search.setPlaceholderText("Buscar setlist...")
+        self.setlist_search.textChanged.connect(self._on_search_setlists)
         toolbar.addWidget(self.setlist_search)
 
         toolbar.addStretch()
 
         new_btn = QPushButton("Nuevo Setlist")
         new_btn.setObjectName("primary")
-        new_btn.clicked.connect(self._on_add_setlist)
+        new_btn.setEnabled(False)
+        new_btn.setToolTip(self.NOT_AVAILABLE)
         toolbar.addWidget(new_btn)
 
         layout.addLayout(toolbar)
@@ -175,7 +176,9 @@ class LibraryView(QWidget):
         ])
         self.setlists_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.setlists_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.setlists_table.setSelectionMode(QTableWidget.SingleSelection)
         self.setlists_table.itemSelectionChanged.connect(self._on_setlist_selected)
+        self.setlists_table.cellDoubleClicked.connect(lambda _r, _c: self._on_load_setlist())
 
         layout.addWidget(self.setlists_table)
 
@@ -194,13 +197,21 @@ class LibraryView(QWidget):
 
         edit_btn = QPushButton("Editar")
         edit_btn.setObjectName("primary")
+        edit_btn.setEnabled(False)
+        edit_btn.setToolTip(self.NOT_AVAILABLE)
         actions.addWidget(edit_btn)
 
-        play_btn = QPushButton("Cargar")
-        play_btn.setObjectName("success")
-        actions.addWidget(play_btn)
+        self.load_setlist_btn = QPushButton("Cargar en vivo")
+        self.load_setlist_btn.setObjectName("success")
+        self.load_setlist_btn.setToolTip(
+            "Enviar este setlist al transporte (CUE y saltos en todos los dispositivos)"
+        )
+        self.load_setlist_btn.clicked.connect(self._on_load_setlist)
+        actions.addWidget(self.load_setlist_btn)
 
         duplicate_btn = QPushButton("Duplicar")
+        duplicate_btn.setEnabled(False)
+        duplicate_btn.setToolTip(self.NOT_AVAILABLE)
         actions.addWidget(duplicate_btn)
 
         detail_layout.addLayout(actions)
@@ -219,13 +230,16 @@ class LibraryView(QWidget):
 
         self.event_filter = QComboBox()
         self.event_filter.addItems(["Todos", "Próximos", "Pasados", "Hoy"])
+        self.event_filter.setEnabled(False)
+        self.event_filter.setToolTip(self.NOT_AVAILABLE)
         toolbar.addWidget(self.event_filter)
 
         toolbar.addStretch()
 
         new_event_btn = QPushButton("Nuevo Evento")
         new_event_btn.setObjectName("primary")
-        new_event_btn.clicked.connect(self._on_add_event)
+        new_event_btn.setEnabled(False)
+        new_event_btn.setToolTip(self.NOT_AVAILABLE)
         toolbar.addWidget(new_event_btn)
 
         layout.addLayout(toolbar)
@@ -283,7 +297,12 @@ class LibraryView(QWidget):
         """Cargar setlists desde SQLite."""
         if not self._db_session:
             return
-        setlists = self._db_session.query(Setlist).all()
+        try:
+            setlists = self._db_session.query(Setlist).all()
+        except Exception as e:
+            print(f"[DB] Error cargando setlists: {e}")
+            setlists = []
+        self._setlist_ids = [sl.id for sl in setlists]
         self.setlists_table.setRowCount(len(setlists))
         for i, sl in enumerate(setlists):
             self.setlists_table.setItem(i, 0, self._create_item(sl.name))
@@ -291,7 +310,80 @@ class LibraryView(QWidget):
             self.setlists_table.setItem(i, 1, self._create_item(str(n_songs)))
             self.setlists_table.setItem(i, 2, self._create_item("—"))
             self.setlists_table.setItem(i, 3, self._create_item("—"))
-            self.setlists_table.setItem(i, 4, self._create_item("Activo"))
+            self.setlists_table.setItem(i, 4, self._create_item(""))
+        self._refresh_active_marker()
+
+    # === SETLIST EN VIVO ===
+    def setlist_ids(self) -> list:
+        return list(self._setlist_ids)
+
+    def get_setlist_entries(self, setlist_id: str) -> list:
+        """Canciones del setlist en orden, como entradas del protocolo v3."""
+        if not self._db_session or not setlist_id:
+            return []
+        try:
+            return load_setlist_entries(self._db_session, setlist_id)
+        except Exception as e:
+            print(f"[DB] Error leyendo setlist {setlist_id}: {e}")
+            return []
+
+    def mark_active_setlist(self, setlist_id):
+        self._active_setlist_id = setlist_id
+        self._refresh_active_marker()
+
+    def _refresh_active_marker(self):
+        for row, sid in enumerate(self._setlist_ids):
+            item = self.setlists_table.item(row, 4)
+            if item is not None:
+                item.setText("EN VIVO" if sid == self._active_setlist_id else "")
+
+    def _selected_setlist_id(self):
+        selected = self.setlists_table.selectedItems()
+        if not selected:
+            return None
+        row = selected[0].row()
+        if 0 <= row < len(self._setlist_ids):
+            return self._setlist_ids[row]
+        return None
+
+    def _on_load_setlist(self):
+        setlist_id = self._selected_setlist_id()
+        if setlist_id:
+            self.setlist_activated.emit(setlist_id)
+
+    def _on_search_setlists(self, text: str):
+        for row in range(self.setlists_table.rowCount()):
+            item = self.setlists_table.item(row, 0)
+            match = bool(item) and text.lower() in item.text().lower()
+            self.setlists_table.setRowHidden(row, not match)
+
+    def get_song_data_by_id(self, song_id: str) -> dict:
+        """Datos de una cancion por id (cancion actual del transporte)."""
+        if not self._db_session or not song_id:
+            return {}
+        try:
+            song = self._db_session.get(Song, song_id)
+        except Exception as e:
+            print(f"[DB] Error leyendo cancion {song_id}: {e}")
+            return {}
+        if not song:
+            return {}
+        return self._song_to_dict(song)
+
+    def _song_to_dict(self, song) -> dict:
+        return {
+            "id": song.id,
+            "title": song.title,
+            "artist": song.artist or "",
+            "bpm": song.bpm,
+            "key": song.key or "",
+            "duration_seconds": song.duration_seconds or 180,
+            "lyrics_text": song.lyrics_text or "",
+            "chords_text": song.chords_text or "",
+            "audio_path": song.audio_path or "",
+            "lyrics": self._parse_lyrics(song.lyrics_text),
+            "sections": self._parse_sections(song.chords_text or song.lyrics_text),
+        }
 
     def _create_item(self, text: str) -> QTableWidgetItem:
         item = QTableWidgetItem(text)
@@ -338,7 +430,8 @@ class LibraryView(QWidget):
             name = self.setlists_table.item(row, 0).text()
             songs = self.setlists_table.item(row, 1).text()
             self.setlist_detail.setText(f"<b>{name}</b><br>{songs} canciones")
-            self.setlist_selected.emit(row)
+            setlist_id = self._setlist_ids[row] if 0 <= row < len(self._setlist_ids) else ""
+            self.setlist_selected.emit(setlist_id)
 
     def _on_import(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -476,28 +569,6 @@ class LibraryView(QWidget):
             import traceback
             traceback.print_exc()
 
-    def _on_add_song(self):
-        QMessageBox.information(self, "Nueva Canción", "Función en desarrollo: Editor de canciones")
-
-    def _on_delete_song(self):
-        selected = self.songs_table.selectedItems()
-        if selected:
-            row = selected[0].row()
-            title = self.songs_table.item(row, 0).text()
-            reply = QMessageBox.question(
-                self, "Confirmar",
-                f"¿Eliminar '{title}'?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
-                self.songs_table.removeRow(row)
-
-    def _on_add_setlist(self):
-        QMessageBox.information(self, "Nuevo Setlist", "Función en desarrollo: Editor de setlists")
-
-    def _on_add_event(self):
-        QMessageBox.information(self, "Nuevo Evento", "Función en desarrollo: Gestor de eventos")
-
     def get_song_data(self, row: int) -> dict:
         """Retornar datos de canción seleccionada desde la DB."""
         if row < 0 or row >= self.songs_table.rowCount():
@@ -509,19 +580,7 @@ class LibraryView(QWidget):
         if self._db_session:
             song = self._db_session.query(Song).filter(Song.title == title).first()
             if song:
-                return {
-                    "id": song.id,
-                    "title": song.title,
-                    "artist": song.artist or "",
-                    "bpm": song.bpm,
-                    "key": song.key or "",
-                    "duration_seconds": song.duration_seconds or 180,
-                    "lyrics_text": song.lyrics_text or "",
-                    "chords_text": song.chords_text or "",
-                    "audio_path": song.audio_path or "",
-                    "lyrics": self._parse_lyrics(song.lyrics_text),
-                    "sections": self._parse_sections(song.chords_text or song.lyrics_text),
-                }
+                return self._song_to_dict(song)
 
         # Fallback: datos de la tabla
         return {
@@ -578,17 +637,3 @@ class LibraryView(QWidget):
             return int(parts[0]) * 60 + int(parts[1])
         except Exception:
             return 180
-
-    def _on_next_song(self):
-        """Seleccionar siguiente canción."""
-        current = self.songs_table.currentRow()
-        next_row = (current + 1) % self.songs_table.rowCount()
-        self.songs_table.selectRow(next_row)
-        self._on_song_selected()
-
-    def _on_prev_song(self):
-        """Seleccionar canción anterior."""
-        current = self.songs_table.currentRow()
-        prev_row = (current - 1) % self.songs_table.rowCount()
-        self.songs_table.selectRow(prev_row)
-        self._on_song_selected()

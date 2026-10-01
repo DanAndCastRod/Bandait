@@ -1,4 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import QrScanner from '../components/QrScanner'
+import { QrConnectionData } from '../services/qrDiscovery'
+import { detectLeaderInfo } from '../services/leaderInfo'
+import { currentPageContext, decideConnection, qrEntryMode } from '../services/connectionGuard'
+import { LeaderInfo } from '../types/protocol'
 import {
   LibraryIcon,
   SettingsIcon,
@@ -19,13 +24,69 @@ import {
   signInMusicianWithGoogle,
   signOutMusician,
   getSupabaseFollowerClient,
+  isCloudAuthConfigured,
 } from '../services/musicianAuth'
 
+export interface ConnectRequest {
+  ip: string
+  port: string
+  sessionId: string
+  /**
+   * The exact profile this join uses (role and alias). Passed explicitly so a
+   * join never reads a profile that React state or storage has not caught up
+   * with yet (e.g. ?role=director&auto=1 from the stage QR).
+   */
+  profile: MusicianProfile
+}
+
 interface Props {
-  onConnect: (sessionId: string) => void
+  onConnect: (req: ConnectRequest) => void
+  /** Creates/resumes the AudioContext; must be called inside a user gesture. */
+  onArmAudio: () => void
   onSettings?: () => void
   onLibrary?: () => void
   onManual?: () => void
+}
+
+interface UrlOverrides {
+  ip: string | null
+  port: string | null
+  session: string | null
+}
+
+/**
+ * URL parameters (?session=&ip=&port=&role=&alias=&auto=1) are consumed once
+ * per page load. Without this, coming back to this view after SALIR re-read
+ * ?auto=1 and rejoined immediately. They always override /leader-info.json.
+ */
+let urlParamsConsumed = false
+let urlOverrides: UrlOverrides = { ip: null, port: null, session: null }
+/** auto=1 whose ip/port/session must come from /leader-info.json (consumed once). */
+let pendingAutoJoin: { profile: MusicianProfile; stored: UrlOverrides } | null = null
+
+function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Storage blocked: values still apply for this join.
+  }
+}
+
+function validate(ip: string, port: string, sessionId: string): string | null {
+  if (!ip.trim()) return 'FALTA LA IP DEL LIDER'
+  if (/\s|\/|:/.test(ip.trim())) return 'IP INVALIDA: ESCRIBE SOLO LA DIRECCION (EJ. 192.168.1.100)'
+  const p = Number(port)
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return 'PUERTO INVALIDO (1-65535)'
+  if (!sessionId.trim()) return 'FALTA EL ID DE SESION'
+  return null
 }
 
 const IP_PRESETS = [
@@ -34,103 +95,232 @@ const IP_PRESETS = [
   { label: 'LOCALHOST', ip: '127.0.0.1' },
 ]
 
-export default function ConnectView({ onConnect, onSettings, onLibrary, onManual }: Props) {
-  const [ip, setIp] = useState(localStorage.getItem('bandait_last_ip') || '192.168.1.100')
-  const [port, setPort] = useState(localStorage.getItem('bandait_last_port') || '4040')
-  const [sessionId, setSessionId] = useState(localStorage.getItem('bandait_last_session') || 'default')
-  const [scanning, setScanning] = useState(false)
+export default function ConnectView({ onConnect, onArmAudio, onSettings, onLibrary, onManual }: Props) {
+  const [ip, setIp] = useState(readStorage('bandait_last_ip') || '192.168.1.100')
+  const [port, setPort] = useState(readStorage('bandait_last_port') || '4040')
+  const [sessionId, setSessionId] = useState(readStorage('bandait_last_session') || 'default')
+  const [showScanner, setShowScanner] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
   const [profile, setProfile] = useState<MusicianProfile>(getMusicianProfile())
   const [cloudUser, setCloudUser] = useState<{ email: string } | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+  /** Set when this page was served by the leader (GET ./leader-info.json answered v3 JSON). */
+  const [served, setServed] = useState<LeaderInfo | null>(null)
+  /** Set when the HTTPS guard refused a direct socket: top-level link to the leader-served follower. */
+  const [guardUrl, setGuardUrl] = useState<string | null>(null)
+  const cloudConfigured = isCloudAuthConfigured()
+  const page = useMemo(() => currentPageContext(), [])
+  const qrMode = qrEntryMode(page)
 
-  // 1. Stage QR Auto-join via URL parameters (?session=...&ip=...&role=...&auto=1)
+  /**
+   * The single path to a join (form, one-tap, QR, auto=1). From HTTPS a LAN
+   * target is never dialed: the guard offers "ABRIR DESDE EL LIDER" instead.
+   */
+  const attemptJoin = useCallback(
+    (target: { ip: string; port: string; sessionId: string }, joinProfile: MusicianProfile): boolean => {
+      let keep: URLSearchParams | undefined
+      try {
+        keep = new URLSearchParams(window.location.search)
+      } catch {
+        keep = undefined
+      }
+      const decision = decideConnection(page, target, { role: joinProfile.role, alias: joinProfile.alias, keep })
+      if (decision.kind === 'open_from_leader') {
+        setGuardUrl(decision.url)
+        return false
+      }
+      setGuardUrl(null)
+      onConnect({ ...target, profile: joinProfile })
+      return true
+    },
+    [onConnect, page],
+  )
+
+  // 1. URL parameters (stage QR: ?ip=&port=&session=&role=&alias=&auto=1), once per load.
   useEffect(() => {
+    if (urlParamsConsumed) return
+    urlParamsConsumed = true
     try {
       const params = new URLSearchParams(window.location.search)
       const qSession = params.get('session') || params.get('s')
       const qIp = params.get('ip')
       const qPort = params.get('port')
       const qRole = params.get('role')
+      const qAlias = params.get('alias')
       const qAuto = params.get('auto') || params.get('autoconnect')
+      urlOverrides = { ip: qIp, port: qPort, session: qSession }
 
-      let effectiveSession = sessionId
+      const stored: UrlOverrides = {
+        ip: readStorage('bandait_last_ip'),
+        port: readStorage('bandait_last_port'),
+        session: readStorage('bandait_last_session'),
+      }
+      let effectiveProfile = getMusicianProfile()
 
       if (qIp) {
         setIp(qIp)
-        localStorage.setItem('bandait_last_ip', qIp)
+        writeStorage('bandait_last_ip', qIp)
       }
       if (qPort) {
         setPort(qPort)
-        localStorage.setItem('bandait_last_port', qPort)
-      }
-      if (qRole) {
-        setProfile((prev) => {
-          const updated = { ...prev, role: qRole }
-          saveMusicianProfile(updated)
-          return updated
-        })
+        writeStorage('bandait_last_port', qPort)
       }
       if (qSession) {
-        effectiveSession = qSession
         setSessionId(qSession)
-        localStorage.setItem('bandait_last_session', qSession)
+        writeStorage('bandait_last_session', qSession)
+      }
+      if (qRole || (qAlias && qAlias.trim())) {
+        // Synchronous: build, persist and set the profile BEFORE any join below
+        // (saving inside a setState updater ran too late and joined as musician).
+        effectiveProfile = {
+          ...effectiveProfile,
+          ...(qRole ? { role: qRole } : {}),
+          ...(qAlias && qAlias.trim() ? { alias: qAlias.trim().slice(0, 40) } : {}),
+        }
+        saveMusicianProfile(effectiveProfile)
+        setProfile(effectiveProfile)
       }
 
-      if (qSession && (qAuto === '1' || qAuto === 'true')) {
-        onConnect(effectiveSession)
+      const wantsAuto = qAuto === '1' || qAuto === 'true'
+      if (wantsAuto) {
+        // Strip the auto flag so a reload or SALIR never rejoins by itself.
+        params.delete('auto')
+        params.delete('autoconnect')
+        const query = params.toString()
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
+
+        const target = { ip: qIp ?? '', port: qPort ?? stored.port ?? '4040', sessionId: qSession ?? '' }
+        if (qIp && qSession && !validate(target.ip, target.port, target.sessionId)) {
+          // Complete link (the leader's QR): join now. No gesture: Stage shows ACTIVAR AUDIO.
+          attemptJoin(target, effectiveProfile)
+        } else {
+          // Missing ip/port/session: wait for /leader-info.json (bounded, ~1.5 s).
+          pendingAutoJoin = { profile: effectiveProfile, stored }
+        }
       }
     } catch {
       // Graceful fallback for non-browser/restricted URL parsing
     }
-  }, [onConnect, sessionId])
+  }, [attemptJoin])
 
-  // 2. Check Supabase auth session if configured
+  // 2. Served by the leader? (contract section 8). URL parameters still win.
   useEffect(() => {
-    const client = getSupabaseFollowerClient()
-    if (!client) return
+    let cancelled = false
+    detectLeaderInfo()
+      .then((outcome) => {
+        if (cancelled) return
+        const pending = pendingAutoJoin
+        pendingAutoJoin = null
+        if (outcome.kind === 'served') {
+          const info = outcome.info
+          setServed(info)
+          const merged = {
+            ip: urlOverrides.ip ?? info.ip,
+            port: urlOverrides.port ?? String(info.port),
+            sessionId: urlOverrides.session ?? info.sessionId,
+          }
+          setIp(merged.ip)
+          setPort(merged.port)
+          setSessionId(merged.sessionId)
+          if (pending && !validate(merged.ip, merged.port, merged.sessionId)) attemptJoin(merged, pending.profile)
+          return
+        }
+        // Not served by a leader: an incomplete auto=1 link keeps the old behaviour
+        // (needs at least ?session=, the rest from the last successful values).
+        if (pending && urlOverrides.session) {
+          const fallback = {
+            ip: urlOverrides.ip ?? pending.stored.ip ?? '',
+            port: urlOverrides.port ?? pending.stored.port ?? '4040',
+            sessionId: urlOverrides.session,
+          }
+          if (!validate(fallback.ip, fallback.port, fallback.sessionId)) attemptJoin(fallback, pending.profile)
+        }
+      })
+      .catch(() => {
+        // detectLeaderInfo never rejects; nothing to do.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [attemptJoin])
 
-    client.auth.getSession().then(({ data }) => {
-      if (data.session?.user?.email) {
-        setCloudUser({ email: data.session.user.email })
-      }
-    }).catch(() => {
-      // Offline fallback
-    })
+  // 3. Check Supabase auth session if configured (SDK is loaded lazily)
+  useEffect(() => {
+    if (!isCloudAuthConfigured()) return
+    let cancelled = false
+    let unsubscribe: (() => void) | null = null
 
-    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
-      if (session?.user?.email) {
-        setCloudUser({ email: session.user.email })
-      } else {
-        setCloudUser(null)
-      }
-    })
+    getSupabaseFollowerClient()
+      .then((client) => {
+        if (!client || cancelled) return
+        client.auth
+          .getSession()
+          .then(({ data }) => {
+            if (!cancelled && data.session?.user?.email) {
+              setCloudUser({ email: data.session.user.email })
+            }
+          })
+          .catch(() => {
+            // Offline fallback
+          })
+        const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+          if (cancelled) return
+          if (session?.user?.email) {
+            setCloudUser({ email: session.user.email })
+          } else {
+            setCloudUser(null)
+          }
+        })
+        unsubscribe = () => listener.subscription.unsubscribe()
+      })
+      .catch(() => {
+        // Cloud unavailable: the local profile keeps working.
+      })
 
     return () => {
-      listener.subscription.unsubscribe()
+      cancelled = true
+      unsubscribe?.()
     }
   }, [])
 
+  const join = (nextIp: string, nextPort: string, nextSession: string, joinProfile: MusicianProfile = profile) => {
+    const cleanIp = nextIp.trim()
+    const cleanPort = nextPort.trim()
+    const cleanSession = nextSession.trim()
+    const error = validate(cleanIp, cleanPort, cleanSession)
+    setFormError(error)
+    if (error) return
+    writeStorage('bandait_last_ip', cleanIp)
+    writeStorage('bandait_last_port', cleanPort)
+    writeStorage('bandait_last_session', cleanSession)
+    attemptJoin({ ip: cleanIp, port: cleanPort, sessionId: cleanSession }, joinProfile)
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    localStorage.setItem('bandait_last_ip', ip)
-    localStorage.setItem('bandait_last_port', port)
-    localStorage.setItem('bandait_last_session', sessionId)
-    onConnect(sessionId)
+    onArmAudio() // inside the submit gesture: unlocks iOS audio
+    join(ip, port, sessionId)
   }
 
-  const handleQrUpload = () => {
-    fileRef.current?.click()
+  /** Served by the leader: one tap with the prefilled values (URL overrides included). */
+  const handleServedJoin = () => {
+    onArmAudio()
+    join(ip, port, sessionId)
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setScanning(true)
-    setTimeout(() => {
-      setScanning(false)
-      onConnect(sessionId || 'default')
-    }, 1200)
+  const handleOpenFromLeader = () => {
+    if (!guardUrl) return
+    try {
+      window.location.assign(guardUrl) // top-level navigation: allowed from HTTPS
+    } catch {
+      // The link is also shown as text below.
+    }
+  }
+
+  const handleOpenScanner = () => {
+    onArmAudio() // the scan button press is the user gesture
+    setFormError(null)
+    setShowScanner(true)
   }
 
   const handleAliasChange = (alias: string) => {
@@ -139,10 +329,23 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
     saveMusicianProfile(updated)
   }
 
-  const handleRoleChange = (role: string) => {
+  const handleRoleChange = (role: string): MusicianProfile => {
     const updated = { ...profile, role }
     setProfile(updated)
     saveMusicianProfile(updated)
+    return updated
+  }
+
+  const handleQrResult = (data: QrConnectionData) => {
+    setShowScanner(false)
+    const nextIp = data.ip
+    const nextPort = String(data.port)
+    setIp(nextIp)
+    setPort(nextPort)
+    setSessionId(data.sessionId)
+    // Join with the profile just built: `profile` in this closure is still the old one.
+    const joinProfile = data.role ? handleRoleChange(data.role) : profile
+    join(nextIp, nextPort, data.sessionId, joinProfile)
   }
 
   const handleGoogleLogin = async () => {
@@ -212,6 +415,35 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
           <p className="connect-subtitle">SISTEMA DE MONITOREO EN VIVO</p>
         </div>
 
+        {guardUrl && (
+          <div className="https-guard" role="alert">
+            <strong>CONEXION BLOQUEADA POR EL NAVEGADOR</strong>
+            <p>
+              Esta pagina se abrio por HTTPS (internet) y el navegador no permite conectarse por ws:// a un
+              lider en la red local (contenido mixto). Abre el follower servido por el propio lider: se
+              conservan sesion, rol y alias.
+            </p>
+            <button type="button" className="btn-stage btn-stage-primary" onClick={handleOpenFromLeader}>
+              <WifiIcon size={16} />
+              <span>ABRIR DESDE EL LIDER</span>
+            </button>
+            <code className="https-guard-url">{guardUrl}</code>
+          </div>
+        )}
+
+        {served && (
+          <div className="served-banner" role="status">
+            <div className="served-banner-title">
+              SERVIDO POR EL LIDER {served.ip}:{served.port}
+            </div>
+            <div className="served-banner-meta">SESION: {sessionId}</div>
+            <button type="button" className="btn-stage btn-stage-primary" onClick={handleServedJoin}>
+              <WifiIcon size={16} />
+              <span>UNIRSE CON UN TOQUE</span>
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="connect-form">
           {/* IP INPUT */}
           <div className="form-group">
@@ -242,7 +474,7 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
           </div>
 
           {/* PORT AND SESSION ID */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 2fr)', gap: '10px' }}>
             <div className="form-group">
               <label className="form-label">
                 <span>PUERTO</span>
@@ -270,6 +502,12 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
             </div>
           </div>
 
+          {formError && (
+            <div role="alert" style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent-danger)' }}>
+              {formError}
+            </div>
+          )}
+
           {/* SUBMIT BUTTON */}
           <button type="submit" className="btn-stage btn-stage-primary" style={{ marginTop: '4px' }}>
             <WifiIcon size={18} />
@@ -279,19 +517,19 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
 
         <div className="connect-divider">O ACCESO POR CREDENCIAL QR</div>
 
-        <button type="button" onClick={handleQrUpload} className="btn-stage btn-stage-secondary">
-          <QrIcon size={18} />
-          <span>{scanning ? 'PROCESANDO CÓDIGO...' : 'ESCANEAR CÓDIGO QR'}</span>
-        </button>
-
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handleFileChange}
-          style={{ display: 'none' }}
-        />
+        {qrMode === 'native_camera' ? (
+          <div className="qr-native-note" role="note">
+            <QrIcon size={18} />
+            <span>Escanea el QR del lider con la camara del telefono</span>
+          </div>
+        ) : showScanner ? (
+          <QrScanner onResult={handleQrResult} onCancel={() => setShowScanner(false)} />
+        ) : (
+          <button type="button" onClick={handleOpenScanner} className="btn-stage btn-stage-secondary">
+            <QrIcon size={18} />
+            <span>ESCANEAR CÓDIGO QR</span>
+          </button>
+        )}
 
         {/* MUSICIAN IDENTITY & CLOUD SYNC CARD */}
         <div
@@ -324,11 +562,11 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
                 color: cloudUser ? 'var(--accent-success, #00ff66)' : 'var(--text-secondary, #888)',
               }}
             >
-              {cloudUser ? 'NUBE ACTIVA' : 'PERFIL LOCAL'}
+              {cloudUser ? 'NUBE ACTIVA' : cloudConfigured ? 'PERFIL LOCAL' : 'PERFIL LOCAL (NUBE NO CONFIGURADA)'}
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)', gap: '8px', marginBottom: '10px' }}>
             <div>
               <label style={{ fontSize: '10px', color: 'var(--text-secondary, #888)', display: 'block', marginBottom: '3px' }}>
                 ALIAS EN TARIMA
@@ -397,7 +635,7 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
                 <LogOutIcon size={14} />
               </button>
             </div>
-          ) : (
+          ) : cloudConfigured ? (
             <div>
               <button
                 type="button"
@@ -429,7 +667,7 @@ export default function ConnectView({ onConnect, onSettings, onLibrary, onManual
                 </div>
               )}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* HARDWARE DIAGNOSTICS STRIP */}

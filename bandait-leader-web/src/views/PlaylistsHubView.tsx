@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useHub } from '../context/HubContext'
+import { useHub } from '../context/hubContextCore'
 import type { TransitionMode } from '../types/hub'
 import {
   ListMusic,

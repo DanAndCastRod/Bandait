@@ -12,6 +12,8 @@ interface Props {
   currentSongId: string | null
   onSelectSong: (song: RibbonSong, index: number) => void
   disabled?: boolean
+  /** Where the list comes from, e.g. "SETLIST LIDER" or "SETLIST LOCAL". */
+  label?: string
 }
 
 export default function SongRibbon({
@@ -19,6 +21,7 @@ export default function SongRibbon({
   currentSongId,
   onSelectSong,
   disabled = false,
+  label = 'SETLIST',
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -41,6 +44,7 @@ export default function SongRibbon({
         userSelect: 'none',
       }}
       ref={containerRef}
+      data-allow-hscroll="true"
     >
       <div
         style={{
@@ -54,7 +58,7 @@ export default function SongRibbon({
           whiteSpace: 'nowrap',
         }}
       >
-        SETLIST //
+        {label} //
       </div>
 
       {songs.map((song, idx) => {
@@ -64,6 +68,7 @@ export default function SongRibbon({
         return (
           <button
             key={song.id}
+            type="button"
             onClick={() => !disabled && onSelectSong(song, idx)}
             disabled={disabled}
             style={{
@@ -74,7 +79,7 @@ export default function SongRibbon({
                 : '1px solid var(--theme-border)',
               borderRadius: 'var(--theme-radius)',
               padding: '6px 14px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
+              cursor: disabled ? 'default' : 'pointer',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'flex-start',

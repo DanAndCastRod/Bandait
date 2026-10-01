@@ -1,17 +1,17 @@
 """Seed database with sample songs for testing."""
 
-import os
 from datetime import datetime
+
+from src.core.paths import get_db_path
 
 from .models import init_db, Song, Setlist, Gig, BandMember
 
 
 def seed_database(db_path: str = None):
-    """Create sample data if database is empty."""
+    """Create sample data if database is empty. Path defaults to get_db_path()."""
     if db_path is None:
-        db_path = os.path.join(os.path.expanduser("~"), "Documents", "Bandait", "bandait.db")
+        db_path = get_db_path()
 
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
     Session = init_db(db_path)
     session = Session()
 

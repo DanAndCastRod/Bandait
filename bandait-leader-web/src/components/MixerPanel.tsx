@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Volume2, VolumeX, Headphones } from 'lucide-react';
-import { socketService } from '../services/socketService';
+
+// NO MONTADO a proposito (ver App.tsx). CONTRACT_V3 no tiene comandos de mezcla: los
+// faders son solo locales; la mezcla personal in-ear vive en el follower.
 
 interface Track {
   id: number;
@@ -13,7 +15,7 @@ interface Track {
 }
 
 export default function MixerPanel() {
-  const [tracks] = useState<Track[]>([
+  const [tracks, setTracks] = useState<Track[]>([
     { id: 0, name: 'Click General', volume: 0.8, pan: 0, mute: false, solo: false, level: 0 },
     { id: 1, name: 'Batería', volume: 0.7, pan: 0, mute: false, solo: false, level: 0 },
     { id: 2, name: 'Backing', volume: 0.6, pan: 0, mute: false, solo: false, level: 0 },
@@ -105,7 +107,7 @@ export default function MixerPanel() {
               value={track.volume * 100}
               onChange={(e) => {
                 const vol = parseInt(e.target.value) / 100;
-                socketService.sendControl('SET_TRACK_VOLUME', { trackId: track.id, volume: vol });
+                setTracks((prev) => prev.map((t) => (t.id === track.id ? { ...t, volume: vol } : t)));
               }}
               style={{
                 flex: 1,

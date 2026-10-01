@@ -1,9 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Song",
-  "description": "Musical composition entity shared between Leader and Follower.",
+  "description": "Song library entity (leader database / hub). Not sent as-is on the v3 wire: the session carries SetlistEntry objects (session_state.json#/definitions/SetlistEntry).",
   "type": "object",
-  "required": ["id", "title", "bpm"],
+  "required": [
+    "id",
+    "title",
+    "bpm"
+  ],
   "properties": {
     "id": {
       "type": "string"
@@ -24,10 +28,18 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["label", "bars"],
+        "required": [
+          "label",
+          "bars"
+        ],
         "properties": {
-          "label": { "type": "string" },
-          "bars": { "type": "integer", "minimum": 1 }
+          "label": {
+            "type": "string"
+          },
+          "bars": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       }
     },
@@ -35,17 +47,29 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["time", "text"],
+        "required": [
+          "time",
+          "text"
+        ],
         "properties": {
-          "time": { "type": "number", "description": "Offset in seconds from song start." },
-          "text": { "type": "string" }
+          "time": {
+            "type": "number",
+            "description": "Offset in seconds from song start."
+          },
+          "text": {
+            "type": "string"
+          }
         }
       }
     },
     "audio_path": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Local or network path to backing track audio file."
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$id": "song.json"
 }

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Music, Clock, KeyRound, Loader } from 'lucide-react';
 import { socketService } from '../services/socketService';
 
+// NO MONTADO a proposito (ver App.tsx): HTTPS no puede abrir ws:// hacia el lider en la LAN.
+
 interface Song {
   id: string;
   title: string;
@@ -157,7 +159,9 @@ export default function LibraryView({ songs, currentSongId, onSelectSong }: Libr
             key={song.id}
             onClick={() => {
               onSelectSong(song);
-              socketService.sendControl('LOAD_SONG', { songId: song.id });
+              socketService
+                .sendCommand('JUMP_SONG', { song_id: song.id })
+                .catch((err: unknown) => console.warn('[Library]', err));
             }}
             style={{
               display: 'flex',

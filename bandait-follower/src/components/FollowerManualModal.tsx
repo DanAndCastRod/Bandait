@@ -90,13 +90,13 @@ export const FollowerManualModal: React.FC<Props> = ({ onClose }) => {
           </button>
         </div>
 
-        {/* TABS */}
+        {/* TABS: wrap onto a second row on narrow phones instead of scrolling sideways */}
         <div
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             background: 'var(--bg-primary, #0d1017)',
             borderBottom: '1px solid var(--border-subtle, #2a3346)',
-            overflowX: 'auto',
           }}
         >
           {[
@@ -107,9 +107,11 @@ export const FollowerManualModal: React.FC<Props> = ({ onClose }) => {
           ].map((t) => (
             <button
               key={t.id}
+              type="button"
               onClick={() => setTab(t.id as TabType)}
               style={{
-                flex: 1,
+                flex: '1 1 auto',
+                minWidth: 0,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -180,7 +182,7 @@ export const FollowerManualModal: React.FC<Props> = ({ onClose }) => {
               <strong style={{ color: 'var(--text-primary, #ffffff)', fontSize: '13px' }}>
                 Vistas Optimizadas por Instrumento:
               </strong>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '8px' }}>
                 <div style={{ background: 'var(--bg-primary, #0d1017)', border: '1px solid var(--border-subtle, #2a3346)', borderRadius: '4px', padding: '10px' }}>
                   <span style={{ color: 'var(--accent-orange, #ff4500)', fontWeight: 700 }}>VOCALISTA</span>
                   <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '4px' }}>Letras grandes y scroll automatico sincronizado.</div>

@@ -73,17 +73,20 @@ export default defineConfig({
   ],
 
   /* Web servers para levantar las apps antes de testear */
+  /* Los puertos se fijan aqui (--strictPort): el dev server de cada app usa otro por defecto. */
   webServer: [
     {
-      command: 'cd bandait-leader-web && npm run dev',
+      command: 'npm run dev -- --port 5173 --strictPort',
+      cwd: 'bandait-leader-web',
       url: 'http://localhost:5173',
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 60000,
     },
     {
-      command: 'cd bandait-follower && npm run dev',
+      command: 'npm run dev -- --port 5174 --strictPort',
+      cwd: 'bandait-follower',
       url: 'http://localhost:5174',
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 60000,
     },
   ],

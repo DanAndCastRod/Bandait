@@ -279,12 +279,19 @@ class TimelineWidget(QWidget):
             self._zoom = max(0.1, self._zoom / 1.1)
         self.update()
 
+    def zoom_in(self):
+        self._zoom = min(5.0, self._zoom * 1.25)
+        self.update()
+
+    def zoom_out(self):
+        self._zoom = max(0.1, self._zoom / 1.25)
+        self.update()
+
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Space:
-            if self._playing:
-                self.stop_playback()
-            else:
-                self.start_playback()
+            # Espacio es el transporte de la banda: lo maneja la ventana principal.
+            event.ignore()
+            return
         elif event.key() == Qt.Key_Home:
             self.set_position(0)
         elif event.key() == Qt.Key_End:

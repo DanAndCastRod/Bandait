@@ -25,6 +25,10 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 SRC = PROJECT_ROOT / "src"
 STYLES = SRC / "styles"
 RESOURCES = PROJECT_ROOT / "resources"
+# Follower bundle served to phones by the leader (CONTRACT_V3 section 8).
+# Build it first with `npm run build:landing` at the repo root. Inside the exe it
+# lives at sys._MEIPASS/follower (see src/network/http_app.py).
+FOLLOWER = PROJECT_ROOT.parent / "landing" / "app"
 DIST = PROJECT_ROOT / "dist"
 BUILD = PROJECT_ROOT / "build"
 
@@ -42,11 +46,18 @@ def build() -> None:
     clean()
 
     # Collect data files (styles, resources)
+    import os
+
+    sep = os.pathsep  # PyInstaller < 6 on Windows needs ';'
     datas = []
     if STYLES.exists():
-        datas.append(f"{STYLES}:styles")
+        datas.append(f"{STYLES}{sep}styles")
     if RESOURCES.exists():
-        datas.append(f"{RESOURCES}:resources")
+        datas.append(f"{RESOURCES}{sep}resources")
+    if (FOLLOWER / "index.html").exists():
+        datas.append(f"{FOLLOWER}{sep}follower")
+    else:
+        print(f"WARNING: follower bundle not found at {FOLLOWER}; run `npm run build:landing` first.")
 
     # Hidden imports for dynamic dependencies
     hidden = [
