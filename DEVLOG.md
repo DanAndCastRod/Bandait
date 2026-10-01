@@ -468,6 +468,20 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
     - las DLL de PortAudio con y sin ASIO incluidas;
     - el follower servido desde el `.exe`;
     - Socket.IO con `101 Switching Protocols`.
+  - **CI del PR #15, job "Instalador Windows" en `windows-latest`.** Falló dos veces antes de pasar:
+    1. `test_license_is_the_full_gpl3_text`:
+       - el runner hace checkout con `core.autocrlf` y `LICENSE` pasó a CRLF, con un hash distinto del oficial;
+       - se reprodujo en local: con CRLF el SHA-256 es `230184f6…`, igual que en el CI, y normalizado es `3972dc97…`;
+       - corrección: `.gitattributes` con `eol=lf` para LICENSE, NOTICE y fixtures, y la prueba normaliza los fines de línea.
+    2. `ERROR: NOTICE.md no menciona: charset-normalizer`:
+       - el entorno limpio del CI incluye ese paquete y el local no;
+       - se agregó a NOTICE y el verificador del propio script ya no reporta faltantes con la lista exacta del CI.
+    - **Tercera corrida: todos los pasos en verde:**
+      - `Build listo: ...BandaitLeader.exe (version 2.1.0, 134.4 MB)`;
+      - el smoke test del `.exe` empaquetado pasa;
+      - `Successful compile (27.703 sec)` de Inno Setup;
+      - artefacto `BandaitLeader-2.1.0-windows` de 102 MB; el paso del Release se salta en un PR, como corresponde.
+    - Lección: compilar el instalador en el PR detectó dos fallas que el entorno local no podía mostrar.
   - **Prueba inestable:**
     - la prueba exigía que crear la ventana tardara menos de 10 s, y eso dependía de la carga de la máquina;
     - se reemplazó por una compuerta (`FakeSupabase.rest_gate`) que retiene la lectura del workspace hasta que la ventana existe. Así se demuestra que el arranque no espera la red sin depender del reloj;
