@@ -108,6 +108,7 @@ propia licencia.
 | Pillow (incluye libjpeg-turbo, libpng, zlib, libtiff, libwebp, FreeType, Little CMS, OpenJPEG y otras, todas permisivas) | MIT-CMU (HPND) | <https://github.com/python-pillow/Pillow> |
 | psutil | BSD-3-Clause | <https://github.com/giampaolo/psutil> |
 | mutagen | GPL-2.0-or-later | <https://github.com/quodlibet/mutagen> |
+| charset-normalizer | MIT | <https://github.com/jawah/charset_normalizer> |
 | PyInstaller (cargador `BandaitLeader.exe` y *runtime hooks*) | GPL-2.0-or-later con la excepción del cargador de PyInstaller, que permite distribuirlo con cualquier programa | <https://github.com/pyinstaller/pyinstaller> |
 
 `openpyxl` (MIT, <https://foss.heptapod.net/openpyxl/openpyxl>) y `et_xmlfile` (MIT) están
