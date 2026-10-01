@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { useHub, type HubSyncStatus } from '../context/hubContextCore'
 import { PROVIDER_LABELS } from '../services/authService'
 import { GoogleIcon } from './GoogleIcon'
@@ -15,11 +15,14 @@ import {
   X,
   BookOpen,
   Cloud,
+  Library,
+  Mic,
+  Upload,
 } from 'lucide-react'
 import { UserManualModal } from './UserManualModal'
 import { SupabaseConfigModal } from './SupabaseConfigModal'
 
-export type HubTab = 'playlists' | 'stems' | 'members' | 'equipment'
+export type HubTab = 'playlists' | 'songs' | 'voice' | 'stems' | 'members' | 'equipment'
 
 interface Props {
   activeTab: HubTab
@@ -39,7 +42,24 @@ function syncTitle(status: HubSyncStatus): string {
 }
 
 export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
-  const { user, bands, activeBand, activeBandRole, switchBand, createBand, logout, exportWorkspaceJson, syncStatus } = useHub()
+  const { user, bands, activeBand, activeBandRole, switchBand, createBand, logout, exportWorkspaceJson, importWorkspaceJson, syncStatus } =
+    useHub()
+  const importInputRef = useRef<HTMLInputElement>(null)
+  const [importMessage, setImportMessage] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const handleImportFile = async (file: File | undefined) => {
+    if (!file) return
+    const confirmed = window.confirm(
+      'Importar reemplaza TODO tu workspace en este navegador (y en la nube si tienes sesión) por el del archivo. Si quieres conservar el actual, exporta antes una copia. ¿Continuar?'
+    )
+    if (!confirmed) return
+    try {
+      const result = importWorkspaceJson(await file.text())
+      setImportMessage({ ok: result.ok, text: result.message })
+    } catch {
+      setImportMessage({ ok: false, text: 'No se pudo leer el archivo.' })
+    }
+  }
   const syncLabel = SYNC_LABEL[syncStatus.state]
   const hasGoogleIdentity = user?.authProvider === 'supabase' || user?.authProvider === 'google_local'
   const [showBandMenu, setShowBandMenu] = useState(false)
@@ -307,6 +327,48 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         </button>
 
         <button
+          onClick={() => onSelectTab('songs')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 14px',
+            background: activeTab === 'songs' ? '#1a202c' : 'transparent',
+            border: activeTab === 'songs' ? '1px solid #a855f7' : '1px solid transparent',
+            borderRadius: '4px',
+            color: activeTab === 'songs' ? '#ffffff' : '#94a3b8',
+            cursor: 'pointer',
+            fontSize: '13px',
+            fontFamily: "'IBM Plex Mono', monospace",
+            fontWeight: activeTab === 'songs' ? 700 : 400,
+          }}
+        >
+          <Library size={15} style={{ color: activeTab === 'songs' ? '#a855f7' : 'inherit' }} />
+          <span>CANCIONES</span>
+        </button>
+
+        <button
+          onClick={() => onSelectTab('voice')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 14px',
+            background: activeTab === 'voice' ? '#1a202c' : 'transparent',
+            border: activeTab === 'voice' ? '1px solid #38bdf8' : '1px solid transparent',
+            borderRadius: '4px',
+            color: activeTab === 'voice' ? '#ffffff' : '#94a3b8',
+            cursor: 'pointer',
+            fontSize: '13px',
+            fontFamily: "'IBM Plex Mono', monospace",
+            fontWeight: activeTab === 'voice' ? 700 : 400,
+          }}
+        >
+          <Mic size={15} style={{ color: activeTab === 'voice' ? '#38bdf8' : 'inherit' }} />
+          <span>VOZ Y CONTEOS</span>
+        </button>
+
+        <button
           onClick={() => onSelectTab('stems')}
           style={{
             display: 'flex',
@@ -421,7 +483,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
 
         <button
           onClick={exportWorkspaceJson}
-          title="Exportar la banda activa como JSON (XLSX real pendiente)"
+          title="Exportar la banda activa y el workspace v2 completo como JSON"
           className="hub-desktop-only"
           style={{
             display: 'flex',
@@ -836,6 +898,55 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             </button>
 
             <button
+              onClick={() => importInputRef.current?.click()}
+              data-testid="import-workspace"
+              style={{
+                background: 'transparent',
+                border: '1px solid #2a3346',
+                color: '#94a3b8',
+                borderRadius: '4px',
+                padding: '10px',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+              }}
+            >
+              <Upload size={14} />
+              <span>IMPORTAR COPIA JSON</span>
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              aria-label="Archivo JSON a importar"
+              data-testid="import-workspace-file"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                void handleImportFile(file)
+              }}
+            />
+            {importMessage && (
+              <div
+                data-testid="import-workspace-message"
+                style={{
+                  fontSize: '11px',
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  color: importMessage.ok ? '#10b981' : '#ef4444',
+                  lineHeight: 1.5,
+                }}
+              >
+                {importMessage.text}
+              </div>
+            )}
+
+            <button
               onClick={() => {
                 setShowProfileModal(false)
                 void logout()
@@ -911,6 +1022,54 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
       >
         <ListMusic size={18} />
         <span>SETLISTS</span>
+      </button>
+
+      <button
+        onClick={() => onSelectTab('songs')}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '3px',
+          height: '100%',
+          background: 'transparent',
+          border: 'none',
+          color: activeTab === 'songs' ? '#a855f7' : '#94a3b8',
+          fontSize: '10px',
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: activeTab === 'songs' ? 700 : 400,
+          cursor: 'pointer',
+          borderTop: activeTab === 'songs' ? '2px solid #a855f7' : '2px solid transparent',
+        }}
+      >
+        <Library size={18} />
+        <span>CANCIONES</span>
+      </button>
+
+      <button
+        onClick={() => onSelectTab('voice')}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '3px',
+          height: '100%',
+          background: 'transparent',
+          border: 'none',
+          color: activeTab === 'voice' ? '#38bdf8' : '#94a3b8',
+          fontSize: '10px',
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: activeTab === 'voice' ? 700 : 400,
+          cursor: 'pointer',
+          borderTop: activeTab === 'voice' ? '2px solid #38bdf8' : '2px solid transparent',
+        }}
+      >
+        <Mic size={18} />
+        <span>VOZ</span>
       </button>
 
       <button

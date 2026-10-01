@@ -1,17 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
-import {
-  isWorkspaceStore,
-  type AuthProvider,
-  type Band,
-  type BandMember,
-  type EquipmentItem,
-  type MemberRole,
-  type Playlist,
-  type PlaylistSong,
-  type UserProfile,
-  type WorkspaceStore,
+import type {
+  AuthProvider,
+  Band,
+  BandMember,
+  EquipmentItem,
+  MemberRole,
+  Playlist,
+  PlaylistSong,
+  Song,
+  UserProfile,
+  VoiceConfig,
+  WorkspaceStore,
 } from '../types/hub'
+import { defaultVoiceConfig, loadWorkspaceDocument, parseImportedWorkspace } from '../services/workspaceSchema'
 import { authService } from '../services/authService'
 import {
   consumeOAuthPending,
@@ -58,12 +60,12 @@ const browserStore: KeyValueStore = {
   },
 }
 
+/** Copia local migrada a v2 (la migracion es idempotente: corre en cada carga). */
 function readStoredWorkspace(userId: string): WorkspaceStore | null {
   const raw = browserStore.get(workspaceKey(userId))
   if (!raw) return null
   try {
-    const parsed: unknown = JSON.parse(raw)
-    return isWorkspaceStore(parsed) ? parsed : null
+    return loadWorkspaceDocument(JSON.parse(raw))
   } catch {
     return null
   }
@@ -109,6 +111,12 @@ function firstPlaylistId(ws: WorkspaceStore): string {
   const band = ws.bands.find((b) => b.id === ws.activeBandId) || ws.bands[0]
   return band ? ws.playlistsMap[band.id]?.[0]?.id ?? '' : ''
 }
+
+const EMPTY_SONGS: Song[] = []
+const DEFAULT_VOICE: VoiceConfig = defaultVoiceConfig()
+
+const nowIso = () => new Date().toISOString()
+const today = () => new Date().toISOString().slice(0, 10)
 
 const LOCAL_ONLY_DETAIL: Record<Exclude<AuthProvider, 'supabase'>, string> = {
   local: 'Perfil local: los datos viven solo en este navegador. Para sincronizar entre dispositivos inicia sesión con Google (nube).',
@@ -158,6 +166,9 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const playlists = activeBand ? workspace.playlistsMap[activeBand.id] || [] : []
   const activePlaylist = playlists.find((p) => p.id === activePlaylistId) || playlists[0] || null
   const equipment = activeBand ? workspace.equipmentMap[activeBand.id] || [] : []
+  // Opcional: un documento con schemaVersion > 2 (hub mas nuevo) no se migra y podria no traerlos.
+  const songs: Song[] = activeBand ? workspace.songsMap?.[activeBand.id] ?? EMPTY_SONGS : EMPTY_SONGS
+  const voiceConfig: VoiceConfig = (activeBand ? workspace.voiceMap?.[activeBand.id] : undefined) ?? DEFAULT_VOICE
   const songStems = activePlaylist?.songs[0]
     ? workspace.stemsMap[activePlaylist.songs[0].id] || workspace.stemsMap['song_01'] || null
     : workspace.stemsMap['song_01'] || null
@@ -383,13 +394,9 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const restoreBackup = (backupId: string): string | null => {
     const backup = findBackup(backupId)
     if (!backup) return 'Respaldo no encontrado.'
-    let data: unknown = backup.data
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      const copy: Record<string, unknown> = { ...(data as Record<string, unknown>) }
-      delete copy._sync
-      data = copy
-    }
-    if (!isWorkspaceStore(data)) {
+    // Quita _sync, valida y migra (un respaldo de la nube pudo ser v1).
+    const data = loadWorkspaceDocument(backup.data)
+    if (!data) {
       return 'El respaldo no tiene un formato de workspace válido. Descárgalo para revisarlo a mano.'
     }
     const restored = clone(data)
@@ -446,6 +453,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       membersMap: { ...prev.membersMap, [newBandId]: [ownerMember] },
       playlistsMap: { ...prev.playlistsMap, [newBandId]: [] },
       equipmentMap: { ...prev.equipmentMap, [newBandId]: [] },
+      songsMap: { ...prev.songsMap, [newBandId]: [] },
+      voiceMap: { ...prev.voiceMap, [newBandId]: defaultVoiceConfig() },
     }))
   }
 
@@ -556,6 +565,120 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }))
   }
 
+  // ---------------------------------------------------------------------------
+  // Libreria de canciones (songsMap) y voz (voiceMap) de la banda activa
+
+  const createSong = (data: Omit<Song, 'id' | 'updatedAt'>): Song | null => {
+    if (!activeBand) return null
+    const bandId = activeBand.id
+    const song: Song = { ...data, id: uuidv4(), updatedAt: nowIso() }
+    setWorkspace((prev) => ({
+      ...prev,
+      songsMap: { ...prev.songsMap, [bandId]: [...(prev.songsMap?.[bandId] ?? []), song] },
+    }))
+    return song
+  }
+
+  /**
+   * Guarda una cancion editada (mismo id: nunca se regenera). Actualiza tambien la copia de
+   * respaldo (title, artist, key) de los items de setlist que la usan; el BPM y el tono del
+   * show de cada item no se tocan, salvo el tono si el item no estaba transpuesto.
+   */
+  const saveSong = (song: Song) => {
+    if (!activeBand) return
+    const bandId = activeBand.id
+    const saved: Song = { ...song, updatedAt: nowIso() }
+    setWorkspace((prev) => {
+      const list = prev.songsMap?.[bandId] ?? []
+      const exists = list.some((s) => s.id === saved.id)
+      const nextSongs = exists ? list.map((s) => (s.id === saved.id ? saved : s)) : [...list, saved]
+      const playlistsForBand = prev.playlistsMap[bandId] || []
+      let playlistsChanged = false
+      const nextPlaylists = playlistsForBand.map((pl) => {
+        let changed = false
+        const items = pl.songs.map((it) => {
+          if (it.songId !== saved.id) return it
+          if (it.title === saved.title && it.artist === saved.artist && it.key === saved.key) return it
+          changed = true
+          const showKey = it.showKey === it.key ? saved.key : it.showKey
+          return { ...it, title: saved.title, artist: saved.artist, key: saved.key, showKey }
+        })
+        if (!changed) return pl
+        playlistsChanged = true
+        return { ...pl, songs: items }
+      })
+      return {
+        ...prev,
+        songsMap: { ...prev.songsMap, [bandId]: nextSongs },
+        playlistsMap: playlistsChanged ? { ...prev.playlistsMap, [bandId]: nextPlaylists } : prev.playlistsMap,
+      }
+    })
+  }
+
+  /** Copia con ids NUEVOS (cancion y secciones): para el lider es otra cancion. */
+  const duplicateSong = (songId: string): Song | null => {
+    const original = songs.find((s) => s.id === songId)
+    if (!original) return null
+    const data: Omit<Song, 'id' | 'updatedAt'> & { id?: string; updatedAt?: string } = {
+      ...clone(original),
+      title: `${original.title} (copia)`,
+      sections: original.sections.map((sec) => ({ ...clone(sec), id: uuidv4() })),
+    }
+    delete data.id
+    delete data.updatedAt
+    return createSong(data)
+  }
+
+  /** Borra la cancion y los items de setlist que la usan (un songId nunca queda roto). */
+  const deleteSong = (songId: string) => {
+    if (!activeBand) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => {
+      const playlistsForBand = prev.playlistsMap[bandId] || []
+      let playlistsChanged = false
+      const nextPlaylists = playlistsForBand.map((pl) => {
+        if (!pl.songs.some((it) => it.songId === songId)) return pl
+        playlistsChanged = true
+        return {
+          ...pl,
+          songs: pl.songs.filter((it) => it.songId !== songId).map((it, idx) => ({ ...it, orderIndex: idx + 1 })),
+          updatedAt: today(),
+        }
+      })
+      return {
+        ...prev,
+        songsMap: { ...prev.songsMap, [bandId]: (prev.songsMap?.[bandId] ?? []).filter((s) => s.id !== songId) },
+        playlistsMap: playlistsChanged ? { ...prev.playlistsMap, [bandId]: nextPlaylists } : prev.playlistsMap,
+      }
+    })
+  }
+
+  const updateVoiceConfig = (updates: Partial<VoiceConfig>) => {
+    if (!activeBand) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => ({
+      ...prev,
+      voiceMap: { ...prev.voiceMap, [bandId]: { ...(prev.voiceMap?.[bandId] ?? defaultVoiceConfig()), ...updates } },
+    }))
+  }
+
+  /** Reemplaza el workspace por un JSON importado (migrado y validado). Es una edicion del usuario. */
+  const importWorkspaceJson = (text: string): { ok: boolean; message: string } => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      return { ok: false, message: 'El archivo no es un JSON válido.' }
+    }
+    const result = parseImportedWorkspace(parsed)
+    if (!result.ok) return { ok: false, message: result.error }
+    const imported = clone(result.workspace)
+    setWorkspace(imported)
+    setActivePlaylistId(firstPlaylistId(imported))
+    const warn = result.warnings.length > 0 ? ` (${result.warnings.length} advertencias de formato)` : ''
+    return { ok: true, message: `Workspace importado: ${imported.bands.length} banda(s)${warn}.` }
+  }
+
   const updateStemTrackVolume = (channel: number, volumeDb: number) => {
     if (!songStems) return
     setWorkspace((prev) => {
@@ -603,8 +726,13 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       agrupacion: activeBand,
       miembros: members,
       setlists: playlists,
+      canciones: songs,
+      voz: voiceConfig,
       stems_catalogo: songStems,
       equipamiento: equipment,
+      // Documento v2 completo (todas las bandas), el mismo que descarga el lider. Se puede
+      // volver a importar desde PERFIL & SESION.
+      workspace,
     })
   }
 
@@ -618,6 +746,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     activePlaylist,
     songStems,
     equipment,
+    songs,
+    voiceConfig,
     googleClientId,
     googleClientIdSource,
     setGoogleClientId,
@@ -659,7 +789,13 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateStemTrackVolume,
     addEquipment,
     removeEquipment,
+    createSong,
+    saveSong,
+    duplicateSong,
+    deleteSong,
+    updateVoiceConfig,
     exportWorkspaceJson,
+    importWorkspaceJson,
   }
 
   return <HubContext.Provider value={value}>{children}</HubContext.Provider>

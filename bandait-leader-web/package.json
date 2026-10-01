@@ -8,7 +8,7 @@
     "build": "node ./node_modules/typescript/bin/tsc -b && node ./node_modules/vite/bin/vite.js build",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
     "preview": "node ./node_modules/vite/bin/vite.js preview",
-    "verify:logic": "node --experimental-strip-types --no-warnings scripts/verify-sync-logic.ts"
+    "verify:logic": "node --experimental-strip-types --no-warnings scripts/verify-sync-logic.ts && node --experimental-strip-types --no-warnings scripts/verify-workspace-schema.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

@@ -1,4 +1,19 @@
-import type { Band, BandMember, EquipmentItem, Playlist, SongStems, UserProfile, WorkspaceStore } from '../types/hub'
+import type {
+  Band,
+  BandMember,
+  EquipmentItem,
+  Playlist,
+  PlaylistSong,
+  SongSection,
+  SongStems,
+  UserProfile,
+  WorkspaceInput,
+  WorkspaceStore,
+} from '../types/hub'
+import { deterministicUuid, migrateWorkspace } from '../services/workspaceSchema'
+
+/** Setlists de semilla en forma v1: la migracion crea la libreria y completa los campos v2. */
+type SeedPlaylist = Omit<Playlist, 'songs'> & { songs: Array<Omit<PlaylistSong, 'songId' | 'countInVoice' | 'gapSec'>> }
 
 // DATOS DE DEMOSTRACION (MODO DEMO). Nunca se suben a la nube.
 const DEMO_BANDS: Band[] = [
@@ -91,7 +106,7 @@ const DEMO_MEMBERS: Record<string, BandMember[]> = {
   ],
 }
 
-const DEMO_PLAYLISTS: Record<string, Playlist[]> = {
+const DEMO_PLAYLISTS: Record<string, SeedPlaylist[]> = {
   band_01: [
     {
       id: 'pl_01',
@@ -229,19 +244,52 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+/** Secciones de ejemplo para "Medianoche en Pereira" (ids fijos: el demo es determinista). */
+function demoSections(): SongSection[] {
+  const id = (n: string) => deterministicUuid(`bandait:demo:medianoche:${n}`)
+  return [
+    { id: id('intro'), kind: 'intro', label: 'Intro', bars: 4, chordpro: '[Am]  [F]  [C]  [G]' },
+    {
+      id: id('verse1'),
+      kind: 'verse',
+      label: 'Estrofa 1',
+      bars: 8,
+      chordpro: '[Am]Medianoche en [F]Pereira,\n[C]la ciudad no [G]duerme',
+    },
+    {
+      id: id('chorus1'),
+      kind: 'chorus',
+      label: 'Coro',
+      bars: 8,
+      chordpro: '[F]Canta [G]fuerte, [Am]canta\n[F]que la noche es [G]nuestra',
+    },
+    { id: id('solo'), kind: 'solo', label: 'Solo de guitarra', bars: 8, chordpro: '[Am]  [F]  [C]  [G]', cueText: 'Solo de guitarra' },
+    { id: id('outro'), kind: 'outro', label: 'Final', bars: 4, chordpro: '[Am]', cueText: null },
+  ]
+}
+
 export function createDemoWorkspace(): WorkspaceStore {
-  return clone({
-    bands: DEMO_BANDS,
-    activeBandId: 'band_01',
-    membersMap: DEMO_MEMBERS,
-    playlistsMap: DEMO_PLAYLISTS,
-    equipmentMap: DEMO_EQUIPMENT,
-    stemsMap: DEMO_STEMS,
-  })
+  const ws = migrateWorkspace(
+    clone({
+      bands: DEMO_BANDS,
+      activeBandId: 'band_01',
+      membersMap: DEMO_MEMBERS,
+      playlistsMap: DEMO_PLAYLISTS,
+      equipmentMap: DEMO_EQUIPMENT,
+      stemsMap: DEMO_STEMS,
+    }) as unknown as WorkspaceInput
+  )
+  const songs = ws.songsMap.band_01 ?? []
+  ws.songsMap.band_01 = songs.map((s) => (s.title === 'Medianoche en Pereira' ? { ...s, sections: demoSections() } : s))
+  return ws
 }
 
 /** Workspace limpio para un usuario real (perfil local o cuenta de nube nueva). */
 export function createPersonalWorkspace(user: UserProfile): WorkspaceStore {
+  return migrateWorkspace(personalSeed(user) as unknown as WorkspaceInput)
+}
+
+function personalSeed(user: UserProfile) {
   const today = new Date().toISOString().slice(0, 10)
   const cleanId = user.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)
   const primaryBandId = `band_${cleanId}_01`
