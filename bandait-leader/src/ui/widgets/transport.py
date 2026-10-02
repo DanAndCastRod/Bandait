@@ -252,9 +252,9 @@ class TransportWidget(QWidget):
         # Loop
         self.loop_btn = QPushButton("BUCLE")
         self.loop_btn.setCheckable(True)
-        # Sin implementacion de bucle en el transporte v3: deshabilitado y visible.
+        # Sin bucle en el transporte v3: oculto hasta que exista (ningún control sin función).
         self.loop_btn.setEnabled(False)
-        self.loop_btn.setToolTip("Bucle: no disponible en esta version")
+        self.loop_btn.setVisible(False)
         self.loop_btn.setFont(QFont("Inter", 9, QFont.Bold))
         self.loop_btn.setStyleSheet("""
             QPushButton {

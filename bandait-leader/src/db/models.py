@@ -371,16 +371,33 @@ DEMO_SIGNATURES = {
 }
 
 
+# PRAGMA user_version from which the demo marking already ran on this file. The
+# marking is a one-time fix for databases seeded before ``source`` existed: once
+# done, a demo row the user edits becomes theirs ("local", see db/library_ops)
+# and must not be marked demo again on the next start.
+DEMO_MARKS_DONE_VERSION = 1
+
+
+def _user_version(con) -> int:
+    try:
+        return int(con.execute("PRAGMA user_version").fetchone()[0] or 0)
+    except Exception:
+        return 0
+
+
 def plan_demo_marks(db_path: str) -> List[tuple]:
     """UPDATEs (sql, params) that mark untouched seed rows as ``source='demo'``.
 
     They run after the ALTERs of the same migration, so a missing ``source``
     column (added with DEFAULT 'local') is fine. Hub rows and rows already
-    marked are never selected."""
+    marked are never selected. Nothing once the marking already ran on this
+    file (``DEMO_MARKS_DONE_VERSION``)."""
     if not os.path.exists(db_path):
         return []
     con = sqlite3.connect(db_path)
     try:
+        if _user_version(con) >= DEMO_MARKS_DONE_VERSION:
+            return []
         existing = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         updates: List[tuple] = []
         for table, (label, rows) in DEMO_SIGNATURES.items():
@@ -451,6 +468,7 @@ def migrate_db(db_path: str) -> Optional[str]:
     statements = plan_migrations(db_path)
     marks = plan_demo_marks(db_path)
     if not statements and not marks:
+        mark_demo_marks_done(db_path)  # metadata only: no row changes, no backup
         return None
     backup = backup_db(db_path)
     con = sqlite3.connect(db_path)
@@ -460,6 +478,7 @@ def migrate_db(db_path: str) -> Optional[str]:
                 con.execute(ddl)
             for sql, params in marks:
                 con.execute(sql, params)
+            con.execute(f"PRAGMA user_version = {DEMO_MARKS_DONE_VERSION}")
     finally:
         con.close()
     logger.warning(
@@ -467,6 +486,21 @@ def migrate_db(db_path: str) -> Optional[str]:
         len(statements), len(marks), backup,
     )
     return backup
+
+
+def mark_demo_marks_done(db_path: str) -> None:
+    """Record that the demo marking ran (or was never needed) on this file."""
+    if not os.path.exists(db_path):
+        return
+    con = sqlite3.connect(db_path)
+    try:
+        if _user_version(con) < DEMO_MARKS_DONE_VERSION:
+            con.execute(f"PRAGMA user_version = {DEMO_MARKS_DONE_VERSION}")
+            con.commit()
+    except Exception as e:  # metadata only: never block opening the library
+        logger.warning("No se pudo anotar la versión de la base: %s", e)
+    finally:
+        con.close()
 
 
 def init_db(db_path: Optional[str] = None) -> sessionmaker:
@@ -478,6 +512,8 @@ def init_db(db_path: Optional[str] = None) -> sessionmaker:
         migrate_db(db_path)
     engine = create_engine(f"sqlite:///{db_path}")
     Base.metadata.create_all(engine)
+    if db_path != ":memory:":
+        mark_demo_marks_done(db_path)  # a new file has no pre-``source`` seed rows
     return sessionmaker(bind=engine)
 
 

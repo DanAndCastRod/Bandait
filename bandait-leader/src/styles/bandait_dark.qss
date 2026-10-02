@@ -68,6 +68,101 @@ QLabel#bpmDisplay {
     padding: 4px 12px;
 }
 
+/* ===== BOTONES =====
+   Todo QPushButton se ve como botón: fondo elevado, borde visible y texto claro.
+   Variantes por objectName: primary (la acción del momento), danger (borrar),
+   success (cargar en vivo). Las reglas #transport y #toggle de abajo ganan por
+   especificidad. tests/test_library_controls.py exige una regla aquí para cada
+   objectName que el código ponga en un QPushButton. */
+QPushButton {
+    background-color: #141414;
+    border: 1px solid #4A4A4A;
+    border-radius: 4px;
+    color: #F0F0F0;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 16px;
+    min-height: 22px;
+}
+
+QPushButton:hover {
+    border-color: #00FFFF;
+    color: #00FFFF;
+}
+
+QPushButton:pressed {
+    background-color: #00FFFF;
+    border-color: #00FFFF;
+    color: #000000;
+}
+
+QPushButton:focus {
+    border-color: #00FFFF;
+}
+
+QPushButton:disabled {
+    background-color: #0A0A0A;
+    border-color: #262626;
+    color: #555555;
+}
+
+QPushButton#primary {
+    background-color: #00FFFF;
+    border-color: #00FFFF;
+    color: #000000;
+}
+
+QPushButton#primary:hover {
+    background-color: #7FFFFF;
+    border-color: #7FFFFF;
+    color: #000000;
+}
+
+QPushButton#primary:pressed {
+    background-color: #00B3B3;
+    border-color: #00B3B3;
+}
+
+QPushButton#primary:disabled {
+    background-color: #0A0A0A;
+    border-color: #262626;
+    color: #555555;
+}
+
+QPushButton#danger {
+    background-color: #1A0505;
+    border-color: #FF3B30;
+    color: #FF6B61;
+}
+
+QPushButton#danger:hover {
+    background-color: #FF3B30;
+    color: #000000;
+}
+
+QPushButton#danger:disabled {
+    background-color: #0A0A0A;
+    border-color: #262626;
+    color: #555555;
+}
+
+QPushButton#success {
+    background-color: #0F1400;
+    border-color: #CCFF00;
+    color: #CCFF00;
+}
+
+QPushButton#success:hover {
+    background-color: #CCFF00;
+    color: #000000;
+}
+
+QPushButton#success:disabled {
+    background-color: #0A0A0A;
+    border-color: #262626;
+    color: #555555;
+}
+
 /* ===== BOTONES DE TRANSPORTE ===== */
 QPushButton#transport {
     min-width: 56px;
@@ -77,6 +172,7 @@ QPushButton#transport {
     font-weight: bold;
     border: 2px solid;
     background: transparent;
+    padding: 0;
     transition: all 0.15s ease;
 }
 
@@ -323,6 +419,44 @@ QLineEdit {
 
 QLineEdit:focus {
     border-color: #00FFFF;
+}
+
+/* ===== CAMPOS DE LOS EDITORES ===== */
+QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit {
+    background: #0A0A0A;
+    border: 1px solid #2A2A2A;
+    color: #F0F0F0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    selection-background-color: #00FFFF;
+    selection-color: #000000;
+}
+
+QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateTimeEdit:focus {
+    border-color: #00FFFF;
+}
+
+QCheckBox {
+    background: transparent;
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #4A4A4A;
+    border-radius: 3px;
+    background: #0A0A0A;
+}
+
+QCheckBox::indicator:checked {
+    background: #00FFFF;
+    border-color: #00FFFF;
+}
+
+QDialog QLabel {
+    background: transparent;
 }
 
 /* ===== LIST VIEW / TABLE ===== */

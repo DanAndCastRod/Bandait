@@ -105,10 +105,8 @@ def test_no_dead_menu_actions(window):
             meta = action.metaObject()
             signal = meta.method(meta.indexOfSignal("triggered(bool)"))
             connected = action.isSignalConnected(signal)
-            if action.isEnabled() and not connected:
-                dead.append(action.text())
-            if not action.isEnabled():
-                assert "no disponible" in action.text()
+            if not connected or not action.isEnabled() or "no disponible" in action.text():
+                dead.append(action.text())  # nothing is left in a menu "for later"
     assert dead == []
 
 

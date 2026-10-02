@@ -1,25 +1,33 @@
 """
 Bandait DAW — Vista de Biblioteca
-Gestión de canciones, setlists y eventos con persistencia SQLite real.
+Canciones, setlists y eventos del líder, con persistencia SQLite real.
 
-Cada canción y setlist muestra su origen (NUBE / LOCAL / DEMO). Con una banda
-del hub elegida, los datos de demostración se ocultan salvo que se pida verlos.
-Las canciones de la nube son de solo lectura: se editan en el hub.
+Cada canción, setlist y evento muestra su origen (NUBE / LOCAL / DEMO). Con una
+banda del hub elegida, los datos de demostración se ocultan salvo que se pida verlos.
+Lo del hub es de solo lectura aquí: se edita en el hub y llega al sincronizar.
+Lo local y lo DEMO se crea, edita y borra aquí (``src/db/library_ops``).
+
+Ningún botón visible queda sin función: Editar, Duplicar y Eliminar se activan
+al elegir una fila, y con una fila del hub explican dónde se edita.
 """
 
 import os
+from typing import Callable, List, Optional
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
-    QTableWidget, QTableWidgetItem, QLineEdit, QComboBox,
+    QTableWidget, QTableWidgetItem, QLineEdit, QComboBox, QDialog,
     QTabWidget, QFrame, QHeaderView, QMessageBox, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
 from src.core.paths import get_db_path
+from src.db import library_ops as ops
 from src.db.models import init_db, load_setlist_entries, Song, Setlist
 from src.infrastructure.parsers.lrc_parser import LRCParser
 from src.infrastructure.parsers.chordpro_parser import ChordProParser
+from src.ui.dialogs.library_editors import GigEditorDialog, SetlistEditorDialog, SongEditorDialog
 
 # origin -> (badge text, color)
 ORIGIN_BADGES = {
@@ -27,7 +35,16 @@ ORIGIN_BADGES = {
     "local": ("LOCAL", "#9A9A9A"),
     "demo": ("DEMO", "#FFAA00"),
 }
-CLOUD_READ_ONLY_MESSAGE = "Esta canción viene del hub: edítala en bandait.releven.cc/hub y sincroniza."
+CLOUD_READ_ONLY_MESSAGE = ops.CLOUD_SONG_EDIT
+BUSY_MESSAGE = "La banda está tocando el setlist en vivo: detenla antes de {what}."
+LOAD_LIVE_TIP = (
+    "Enviar este setlist al transporte (CUE y saltos en todos los dispositivos). "
+    "Si la banda está tocando, se carga al detenerla."
+)
+DUPLICATE_TIP = "Crear una copia local, editable en este equipo (también de un setlist del hub)"
+GIG_FILTERS = ("Todos", "Próximos", "Hoy", "Pasados")
+_WEEKDAYS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
+_GIG_COLORS = {ops.GIG_TODAY: "#CCFF00", ops.GIG_UPCOMING: "#00FFFF", ops.GIG_PAST: "#666666"}
 
 
 def song_origin(song) -> str:
@@ -41,16 +58,38 @@ def setlist_origin(setlist) -> str:
     return "demo" if getattr(setlist, "source", None) == "demo" else "local"
 
 
+def gig_origin(gig) -> str:
+    return "demo" if getattr(gig, "source", None) == "demo" else "local"
+
+
+def format_gig_date(date) -> str:
+    if date is None:
+        return "—"
+    return f"{_WEEKDAYS[date.weekday()]} {date:%d/%m/%Y %H:%M}"
+
+
+def _button(text: str, kind: str = "", tooltip: str = "") -> QPushButton:
+    btn = QPushButton(text)
+    if kind:
+        btn.setObjectName(kind)
+    if tooltip:
+        btn.setToolTip(tooltip)
+    return btn
+
+
 class LibraryView(QWidget):
     """Biblioteca musical con canciones, setlists y eventos persistentes."""
 
     song_selected = Signal(int)
     setlist_selected = Signal(str)  # setlist id (solo muestra detalle)
-    setlist_activated = Signal(str)  # setlist id cargado como setlist en vivo
+    setlist_activated = Signal(str)  # setlist id pedido como setlist en vivo
     import_requested = Signal(str)
     demo_remove_requested = Signal()  # la ventana confirma, respalda y borra
-
-    NOT_AVAILABLE = "No disponible en esta version"
+    song_saved = Signal(str)  # song id creada o editada
+    song_removed = Signal(str)
+    setlist_saved = Signal(str)  # setlist id creado, editado o duplicado
+    setlist_removed = Signal(str)
+    status_message = Signal(str)  # texto para la barra de estado
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,14 +98,17 @@ class LibraryView(QWidget):
         self._setlist_meta: dict = {}  # id -> {"name", "origin", "band_cloud_id", "songs"}
         self._song_ids: list = []
         self._song_origins: list = []
+        self._gig_ids: list = []
+        self._gig_rows: dict = {}  # id -> {"name", "setlist_id", "origin"}
+        self._has_demo_gigs = False
         self._song_query = ""
         self._setlist_query = ""
         self._cloud_mode = False  # signed in with a hub band: demo hidden by default
         self._active_setlist_id = None
+        self._transport_busy: Callable[[], bool] = lambda: False
         self._setup_db()
         self._setup_ui()
-        self._load_songs_from_db()
-        self._load_setlists_from_db()
+        self.reload()
 
     def _setup_db(self):
         """Abrir SQLite en get_db_path() (respeta BANDAIT_DB).
@@ -79,6 +121,21 @@ class LibraryView(QWidget):
         except Exception as e:
             print(f"[DB] No se pudo abrir la base de datos: {e}")
             self._db_session = None
+
+    def set_transport_busy(self, busy: Callable[[], bool]):
+        """``busy()`` True mientras la banda toca: no se borra lo que está sonando."""
+        self._transport_busy = busy
+
+    def reload(self):
+        """Releer todo desde la base (otra conexión pudo escribir: sincronización)."""
+        if self._db_session is not None:
+            try:
+                self._db_session.expire_all()
+            except Exception as e:
+                print(f"[DB] No se pudo refrescar la sesión: {e}")
+        self._load_songs_from_db()
+        self._load_setlists_from_db()
+        self._load_gigs_from_db()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -95,16 +152,15 @@ class LibraryView(QWidget):
 
         # Datos de demostración: los controles solo aparecen cuando existen.
         self.show_demo_check = QCheckBox("Mostrar demostración")
-        self.show_demo_check.setToolTip("Mostrar las canciones y setlists marcados DEMO")
+        self.show_demo_check.setToolTip("Mostrar las canciones, setlists y eventos marcados DEMO")
         self.show_demo_check.setStyleSheet("color: #FFAA00;")
-        self.show_demo_check.toggled.connect(lambda _on: self._apply_filters())
+        self.show_demo_check.toggled.connect(lambda _on: self._on_demo_visibility())
         self.show_demo_check.setVisible(False)
         header.addWidget(self.show_demo_check)
 
-        self.remove_demo_btn = QPushButton("Quitar datos de demostración")
-        self.remove_demo_btn.setObjectName("danger")
-        self.remove_demo_btn.setToolTip(
-            "Borra solo lo marcado DEMO (antes guarda una copia de la base). Lo del hub y lo tuyo no se toca."
+        self.remove_demo_btn = _button(
+            "Quitar datos de demostración", "danger",
+            "Borra solo lo marcado DEMO (antes guarda una copia de la base). Lo del hub y lo tuyo no se toca.",
         )
         self.remove_demo_btn.clicked.connect(self.demo_remove_requested.emit)
         self.remove_demo_btn.setVisible(False)
@@ -114,19 +170,9 @@ class LibraryView(QWidget):
         # === TABS ===
         self.tabs = QTabWidget()
         self.tabs.setFont(QFont("Inter", 12))
-
-        # --- TAB: CANCIONES ---
-        songs_widget = self._create_songs_tab()
-        self.tabs.addTab(songs_widget, "Canciones")
-
-        # --- TAB: SETLISTS ---
-        setlists_widget = self._create_setlists_tab()
-        self.tabs.addTab(setlists_widget, "Setlists")
-
-        # --- TAB: EVENTOS ---
-        events_widget = self._create_events_tab()
-        self.tabs.addTab(events_widget, "Eventos")
-
+        self.tabs.addTab(self._create_songs_tab(), "Canciones")
+        self.tabs.addTab(self._create_setlists_tab(), "Setlists")
+        self.tabs.addTab(self._create_events_tab(), "Eventos")
         layout.addWidget(self.tabs)
 
     def _create_songs_tab(self) -> QWidget:
@@ -135,39 +181,28 @@ class LibraryView(QWidget):
         layout.setSpacing(12)
         layout.setContentsMargins(12, 12, 12, 12)
 
-        # Barra de herramientas
         toolbar = QHBoxLayout()
-
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Buscar canción...")
         self.search_input.setMinimumWidth(200)
         self.search_input.textChanged.connect(self._on_search_songs)
         toolbar.addWidget(self.search_input)
-
         toolbar.addStretch()
 
-        import_btn = QPushButton("Importar")
-        import_btn.setObjectName("primary")
-        import_btn.setToolTip("Importar archivo LRC, ChordPro o MP3")
-        import_btn.clicked.connect(self._on_import)
-        toolbar.addWidget(import_btn)
-
-        add_btn = QPushButton("Nueva")
-        add_btn.setObjectName("primary")
-        add_btn.setEnabled(False)
-        add_btn.setToolTip(self.NOT_AVAILABLE)
-        toolbar.addWidget(add_btn)
-
-        delete_btn = QPushButton("Eliminar")
-        delete_btn.setObjectName("danger")
-        # Solo quitaba la fila de la tabla, no de la base: deshabilitado.
-        delete_btn.setEnabled(False)
-        delete_btn.setToolTip(self.NOT_AVAILABLE)
-        toolbar.addWidget(delete_btn)
-
+        self.import_btn = _button("Importar archivo...", "", "Importar un archivo LRC, ChordPro o de audio")
+        self.import_btn.clicked.connect(self._on_import)
+        toolbar.addWidget(self.import_btn)
+        self.new_song_btn = _button("Nueva canción", "primary", "Escribir una canción con su letra y acordes")
+        self.new_song_btn.clicked.connect(self.new_song)
+        toolbar.addWidget(self.new_song_btn)
+        self.edit_song_btn = _button("Editar")
+        self.edit_song_btn.clicked.connect(self.edit_song)
+        toolbar.addWidget(self.edit_song_btn)
+        self.delete_song_btn = _button("Eliminar", "danger")
+        self.delete_song_btn.clicked.connect(self.delete_song)
+        toolbar.addWidget(self.delete_song_btn)
         layout.addLayout(toolbar)
 
-        # Tabla de canciones
         self.songs_table = QTableWidget()
         self.songs_table.setColumnCount(6)
         self.songs_table.setHorizontalHeaderLabels([
@@ -180,18 +215,18 @@ class LibraryView(QWidget):
         self.songs_table.setColumnWidth(3, 80)
         self.songs_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.songs_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.songs_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.songs_table.itemSelectionChanged.connect(self._on_song_selected)
+        self.songs_table.cellDoubleClicked.connect(lambda _r, _c: self.edit_song())
         self.songs_table.setMinimumHeight(300)
-
         layout.addWidget(self.songs_table)
 
-        # Info de canción seleccionada
         self.song_info = QLabel("Selecciona una canción para ver detalles")
         self.song_info.setFont(QFont("Inter", 11))
         self.song_info.setStyleSheet("color: #666666; padding: 8px;")
         self.song_info.setWordWrap(True)
         layout.addWidget(self.song_info)
-
+        self._update_song_actions()
         return widget
 
     def _create_setlists_tab(self) -> QWidget:
@@ -200,25 +235,17 @@ class LibraryView(QWidget):
         layout.setSpacing(12)
         layout.setContentsMargins(12, 12, 12, 12)
 
-        # Toolbar
         toolbar = QHBoxLayout()
-
         self.setlist_search = QLineEdit()
         self.setlist_search.setPlaceholderText("Buscar setlist...")
         self.setlist_search.textChanged.connect(self._on_search_setlists)
         toolbar.addWidget(self.setlist_search)
-
         toolbar.addStretch()
-
-        new_btn = QPushButton("Nuevo Setlist")
-        new_btn.setObjectName("primary")
-        new_btn.setEnabled(False)
-        new_btn.setToolTip(self.NOT_AVAILABLE)
-        toolbar.addWidget(new_btn)
-
+        self.new_setlist_btn = _button("Nuevo setlist", "primary", "Armar un setlist con canciones de la biblioteca")
+        self.new_setlist_btn.clicked.connect(self.new_setlist)
+        toolbar.addWidget(self.new_setlist_btn)
         layout.addLayout(toolbar)
 
-        # Lista de setlists
         self.setlists_table = QTableWidget()
         self.setlists_table.setColumnCount(5)
         self.setlists_table.setHorizontalHeaderLabels([
@@ -227,46 +254,37 @@ class LibraryView(QWidget):
         self.setlists_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.setlists_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.setlists_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.setlists_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.setlists_table.itemSelectionChanged.connect(self._on_setlist_selected)
         self.setlists_table.cellDoubleClicked.connect(lambda _r, _c: self._on_load_setlist())
-
         layout.addWidget(self.setlists_table)
 
-        # Detalle del setlist
         detail_frame = QFrame()
         detail_frame.setObjectName("panel")
         detail_layout = QVBoxLayout(detail_frame)
-
         self.setlist_detail = QLabel("Selecciona un setlist")
         self.setlist_detail.setFont(QFont("Inter", 12))
         self.setlist_detail.setStyleSheet("color: #F0F0F0;")
+        self.setlist_detail.setMinimumHeight(44)  # name + song count, never clipped
         detail_layout.addWidget(self.setlist_detail)
 
-        # Botones de acción
         actions = QHBoxLayout()
-
-        edit_btn = QPushButton("Editar")
-        edit_btn.setObjectName("primary")
-        edit_btn.setEnabled(False)
-        edit_btn.setToolTip(self.NOT_AVAILABLE)
-        actions.addWidget(edit_btn)
-
-        self.load_setlist_btn = QPushButton("Cargar en vivo")
-        self.load_setlist_btn.setObjectName("success")
-        self.load_setlist_btn.setToolTip(
-            "Enviar este setlist al transporte (CUE y saltos en todos los dispositivos)"
-        )
+        self.load_setlist_btn = _button("Cargar en vivo", "success", LOAD_LIVE_TIP)
         self.load_setlist_btn.clicked.connect(self._on_load_setlist)
         actions.addWidget(self.load_setlist_btn)
-
-        duplicate_btn = QPushButton("Duplicar")
-        duplicate_btn.setEnabled(False)
-        duplicate_btn.setToolTip(self.NOT_AVAILABLE)
-        actions.addWidget(duplicate_btn)
-
+        self.edit_setlist_btn = _button("Editar")
+        self.edit_setlist_btn.clicked.connect(self.edit_setlist)
+        actions.addWidget(self.edit_setlist_btn)
+        self.duplicate_setlist_btn = _button("Duplicar", "", DUPLICATE_TIP)
+        self.duplicate_setlist_btn.clicked.connect(self.duplicate_setlist)
+        actions.addWidget(self.duplicate_setlist_btn)
+        actions.addStretch()
+        self.delete_setlist_btn = _button("Eliminar", "danger")
+        self.delete_setlist_btn.clicked.connect(self.delete_setlist)
+        actions.addWidget(self.delete_setlist_btn)
         detail_layout.addLayout(actions)
         layout.addWidget(detail_frame)
-
+        self._update_setlist_actions()
         return widget
 
     def _create_events_tab(self) -> QWidget:
@@ -275,59 +293,90 @@ class LibraryView(QWidget):
         layout.setSpacing(12)
         layout.setContentsMargins(12, 12, 12, 12)
 
-        # Toolbar
         toolbar = QHBoxLayout()
-
         self.event_filter = QComboBox()
-        self.event_filter.addItems(["Todos", "Próximos", "Pasados", "Hoy"])
-        self.event_filter.setEnabled(False)
-        self.event_filter.setToolTip(self.NOT_AVAILABLE)
+        self.event_filter.addItems(GIG_FILTERS)
+        self.event_filter.setToolTip("Mostrar todos los eventos, los próximos, los de hoy o los pasados")
+        self.event_filter.currentIndexChanged.connect(lambda _i: self._load_gigs_from_db())
         toolbar.addWidget(self.event_filter)
-
         toolbar.addStretch()
-
-        new_event_btn = QPushButton("Nuevo Evento")
-        new_event_btn.setObjectName("primary")
-        new_event_btn.setEnabled(False)
-        new_event_btn.setToolTip(self.NOT_AVAILABLE)
-        toolbar.addWidget(new_event_btn)
-
+        self.new_gig_btn = _button("Nuevo evento", "primary", "Agendar un show o un ensayo con su setlist")
+        self.new_gig_btn.clicked.connect(self.new_gig)
+        toolbar.addWidget(self.new_gig_btn)
         layout.addLayout(toolbar)
 
-        # Tabla de eventos
         self.events_table = QTableWidget()
         self.events_table.setColumnCount(6)
         self.events_table.setHorizontalHeaderLabels([
-            "Fecha", "Nombre", "Lugar", "Setlist", "Estado", "Acciones"
+            "Fecha", "Nombre", "Lugar", "Setlist", "Estado", "Origen"
         ])
         self.events_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.events_table.setSelectionBehavior(QTableWidget.SelectRows)
-
+        self.events_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.events_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.events_table.itemSelectionChanged.connect(self._update_gig_actions)
+        self.events_table.cellDoubleClicked.connect(lambda _r, _c: self.edit_gig())
         layout.addWidget(self.events_table)
 
-        # Resumen
+        actions = QHBoxLayout()
+        self.load_gig_btn = _button(
+            "Cargar su setlist en vivo", "success", "Enviar el setlist de este evento al transporte"
+        )
+        self.load_gig_btn.clicked.connect(self.load_gig_setlist)
+        actions.addWidget(self.load_gig_btn)
+        self.edit_gig_btn = _button("Editar")
+        self.edit_gig_btn.clicked.connect(self.edit_gig)
+        actions.addWidget(self.edit_gig_btn)
+        actions.addStretch()
+        self.delete_gig_btn = _button("Eliminar", "danger")
+        self.delete_gig_btn.clicked.connect(self.delete_gig)
+        actions.addWidget(self.delete_gig_btn)
+        layout.addLayout(actions)
+
         summary = QFrame()
         summary.setObjectName("panel")
         summary_layout = QHBoxLayout(summary)
-
         self.total_events = QLabel("Total: 0")
         self.total_events.setStyleSheet("color: #666666;")
         summary_layout.addWidget(self.total_events)
-
         self.upcoming_events = QLabel("Próximos: 0")
         self.upcoming_events.setStyleSheet("color: #00FFFF;")
         summary_layout.addWidget(self.upcoming_events)
-
         summary_layout.addStretch()
         layout.addWidget(summary)
-
+        self._update_gig_actions()
         return widget
+
+    # === MENSAJES (un solo lugar: las pruebas los sustituyen) ===
+    def _confirm(self, title: str, text: str, verb: str) -> bool:
+        """Confirmación con el verbo en el botón; el foco empieza en Cancelar."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle(title)
+        box.setText(text)
+        yes = box.addButton(verb, QMessageBox.DestructiveRole)
+        cancel = box.addButton("Cancelar", QMessageBox.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _inform(self, title: str, text: str):
+        QMessageBox.information(self, title, text)
+
+    def _fail(self, what: str, error: Exception):
+        message = str(error) if isinstance(error, ops.LibraryEditError) else f"No se pudo {what}: {error}"
+        QMessageBox.warning(self, "Biblioteca", message)
+
+    def _run_dialog(self, dialog: QDialog) -> bool:
+        return dialog.exec() == QDialog.Accepted
 
     # === DB OPERATIONS ===
     def _load_songs_from_db(self):
         """Cargar canciones desde SQLite."""
         if not self._db_session:
             return
+        selected = self.selected_song_id()
         try:
             songs = self._db_session.query(Song).all()
             self.songs_table.setRowCount(len(songs))
@@ -348,11 +397,15 @@ class LibraryView(QWidget):
             self._song_ids = []
             self._song_origins = []
         self._apply_filters()
+        if selected:
+            self.select_song(selected)
+        self._update_song_actions()
 
     def _load_setlists_from_db(self):
         """Cargar setlists desde SQLite."""
         if not self._db_session:
             return
+        selected = self.selected_setlist_id()
         try:
             setlists = self._db_session.query(Setlist).all()
         except Exception as e:
@@ -364,16 +417,66 @@ class LibraryView(QWidget):
         for i, sl in enumerate(setlists):
             n_songs = len(sl.songs) if sl.songs else 0
             origin = setlist_origin(sl)
+            total = sum(float(s.duration_seconds or 0) for s in (sl.songs or []))
             self._setlist_meta[sl.id] = {
                 "name": sl.name or "", "origin": origin, "band_cloud_id": sl.band_cloud_id, "songs": n_songs,
             }
             self.setlists_table.setItem(i, 0, self._create_item(sl.name))
             self.setlists_table.setItem(i, 1, self._create_item(str(n_songs)))
-            self.setlists_table.setItem(i, 2, self._create_item("—"))
+            self.setlists_table.setItem(i, 2, self._create_item(ops.format_duration(total) or "—"))
             self.setlists_table.setItem(i, 3, self._create_badge_item(origin))
             self.setlists_table.setItem(i, 4, self._create_item(""))
         self._refresh_active_marker()
         self._apply_filters()
+        if selected:
+            self.select_setlist(selected)
+        self._update_setlist_actions()
+
+    def _load_gigs_from_db(self):
+        """Cargar eventos, con el filtro elegido y sin lo DEMO cuando está oculto."""
+        if not self._db_session or not hasattr(self, "events_table"):
+            return
+        selected = self.selected_gig_id()
+        try:
+            gigs = ops.list_gigs(self._db_session)
+        except Exception as e:
+            print(f"[DB] Error cargando eventos: {e}")
+            gigs = []
+        self._has_demo_gigs = any(gig_origin(g) == "demo" for g in gigs)
+        wanted = {0: None, 1: {ops.GIG_TODAY, ops.GIG_UPCOMING}, 2: {ops.GIG_TODAY}, 3: {ops.GIG_PAST}}.get(
+            self.event_filter.currentIndex()
+        )
+        hide_demo = self.demo_hidden()
+        shown, total, upcoming = [], 0, 0
+        for gig in gigs:
+            origin = gig_origin(gig)
+            if hide_demo and origin == "demo":
+                continue
+            when = ops.gig_when(gig.date)
+            total += 1
+            upcoming += when in (ops.GIG_TODAY, ops.GIG_UPCOMING)
+            if wanted is None or when in wanted:
+                shown.append((gig, when, origin))
+        self._gig_ids = [g.id for g, _w, _o in shown]
+        self._gig_rows = {}
+        self.events_table.setRowCount(len(shown))
+        for i, (gig, when, origin) in enumerate(shown):
+            setlist_name = self._setlist_meta.get(gig.setlist_id, {}).get("name") if gig.setlist_id else ""
+            self._gig_rows[gig.id] = {"name": gig.name or "", "setlist_id": gig.setlist_id, "origin": origin}
+            self.events_table.setItem(i, 0, self._create_item(format_gig_date(gig.date)))
+            self.events_table.setItem(i, 1, self._create_item(gig.name or ""))
+            self.events_table.setItem(i, 2, self._create_item(gig.venue or ""))
+            self.events_table.setItem(i, 3, self._create_item(setlist_name or "—"))
+            status = self._create_item(ops.GIG_LABELS[when])
+            status.setForeground(QColor(_GIG_COLORS[when]))
+            self.events_table.setItem(i, 4, status)
+            self.events_table.setItem(i, 5, self._create_badge_item(origin))
+        self.total_events.setText(f"Total: {total}")
+        self.upcoming_events.setText(f"Próximos: {upcoming}")
+        if selected:
+            self.select_gig(selected)
+        self._update_demo_controls()
+        self._update_gig_actions()
 
     # === ORIGEN Y DATOS DE DEMOSTRACIÓN ===
     def set_cloud_mode(self, active: bool):
@@ -382,17 +485,21 @@ class LibraryView(QWidget):
         if active != self._cloud_mode:
             self._cloud_mode = active
             self.show_demo_check.setChecked(False)
-        self._apply_filters()
+        self._on_demo_visibility()
 
     def set_show_demo(self, show: bool):
         self.show_demo_check.setChecked(bool(show))
+        self._on_demo_visibility()
+
+    def _on_demo_visibility(self):
         self._apply_filters()
+        self._load_gigs_from_db()
 
     def demo_hidden(self) -> bool:
         return self._cloud_mode and not self.show_demo_check.isChecked()
 
     def has_demo_rows(self) -> bool:
-        return "demo" in self._song_origins or any(
+        return self._has_demo_gigs or "demo" in self._song_origins or any(
             meta["origin"] == "demo" for meta in self._setlist_meta.values()
         )
 
@@ -404,6 +511,10 @@ class LibraryView(QWidget):
 
     def visible_setlist_ids(self) -> list:
         return [sid for row, sid in enumerate(self._setlist_ids) if not self.setlists_table.isRowHidden(row)]
+
+    def gig_ids(self) -> list:
+        """Eventos que muestra la tabla (con el filtro aplicado)."""
+        return list(self._gig_ids)
 
     def song_origin_of(self, song_id: str):
         try:
@@ -449,9 +560,112 @@ class LibraryView(QWidget):
             demo = self.setlist_origin_of(sid) == "demo"
             match = self._row_matches(self.setlists_table, row, setlist_query, (0,))
             self.setlists_table.setRowHidden(row, (hide_demo and demo) or not match)
+        self._update_demo_controls()
+
+    def _update_demo_controls(self):
         has_demo = self.has_demo_rows()
         self.show_demo_check.setVisible(has_demo and self._cloud_mode)
         self.remove_demo_btn.setVisible(has_demo)
+
+    # === SELECCIÓN ===
+    def _selected_row(self, table) -> int:
+        rows = table.selectionModel().selectedRows() if table.selectionModel() else []
+        if rows:
+            return rows[0].row()
+        items = table.selectedItems()
+        return items[0].row() if items else -1
+
+    def selected_song_id(self) -> Optional[str]:
+        if not hasattr(self, "songs_table"):
+            return None
+        row = self._selected_row(self.songs_table)
+        return self._song_ids[row] if 0 <= row < len(self._song_ids) else None
+
+    def selected_setlist_id(self) -> Optional[str]:
+        if not hasattr(self, "setlists_table"):
+            return None
+        row = self._selected_row(self.setlists_table)
+        return self._setlist_ids[row] if 0 <= row < len(self._setlist_ids) else None
+
+    def selected_gig_id(self) -> Optional[str]:
+        if not hasattr(self, "events_table"):
+            return None
+        row = self._selected_row(self.events_table)
+        return self._gig_ids[row] if 0 <= row < len(self._gig_ids) else None
+
+    def _select(self, table, ids: list, wanted: str) -> bool:
+        if wanted in ids:
+            row = ids.index(wanted)
+            if not table.isRowHidden(row):
+                table.selectRow(row)
+                return True
+        return False
+
+    def select_song(self, song_id: str) -> bool:
+        return self._select(self.songs_table, self._song_ids, song_id)
+
+    def select_setlist(self, setlist_id: str) -> bool:
+        return self._select(self.setlists_table, self._setlist_ids, setlist_id)
+
+    def select_gig(self, gig_id: str) -> bool:
+        return self._select(self.events_table, self._gig_ids, gig_id)
+
+    def _update_song_actions(self):
+        if not hasattr(self, "edit_song_btn"):
+            return
+        sid = self.selected_song_id()
+        cloud = sid is not None and self.song_origin_of(sid) == "cloud"
+        for btn in (self.edit_song_btn, self.delete_song_btn):
+            btn.setEnabled(sid is not None)
+        if sid is None:
+            tip = "Selecciona una canción"
+            self.edit_song_btn.setToolTip(tip)
+            self.delete_song_btn.setToolTip(tip)
+        elif cloud:
+            self.edit_song_btn.setToolTip("Viene del hub: se edita en bandait.releven.cc/hub")
+            self.delete_song_btn.setToolTip("Viene del hub: se borra en bandait.releven.cc/hub")
+        else:
+            self.edit_song_btn.setToolTip("Editar título, tempo, compás, letra y acordes (doble clic)")
+            self.delete_song_btn.setToolTip("Borrar esta canción de este equipo")
+
+    def _update_setlist_actions(self):
+        if not hasattr(self, "edit_setlist_btn"):
+            return
+        sid = self.selected_setlist_id()
+        cloud = sid is not None and self.setlist_origin_of(sid) == "cloud"
+        for btn in (self.load_setlist_btn, self.edit_setlist_btn, self.duplicate_setlist_btn, self.delete_setlist_btn):
+            btn.setEnabled(sid is not None)
+        if sid is None:
+            for btn in (self.load_setlist_btn, self.edit_setlist_btn, self.duplicate_setlist_btn,
+                        self.delete_setlist_btn):
+                btn.setToolTip("Selecciona un setlist")
+            return
+        self.load_setlist_btn.setToolTip(LOAD_LIVE_TIP)
+        self.duplicate_setlist_btn.setToolTip(DUPLICATE_TIP)
+        if cloud:
+            self.edit_setlist_btn.setToolTip("Viene del hub: se edita en el hub, o usa Duplicar")
+            self.delete_setlist_btn.setToolTip("Viene del hub: se borra en bandait.releven.cc/hub")
+        else:
+            self.edit_setlist_btn.setToolTip("Cambiar el nombre, las canciones y el orden")
+            self.delete_setlist_btn.setToolTip("Borrar este setlist de este equipo (las canciones se quedan)")
+
+    def _update_gig_actions(self):
+        if not hasattr(self, "edit_gig_btn"):
+            return
+        gid = self.selected_gig_id()
+        for btn in (self.load_gig_btn, self.edit_gig_btn, self.delete_gig_btn):
+            btn.setEnabled(gid is not None)
+        if gid is None:
+            for btn in (self.load_gig_btn, self.edit_gig_btn, self.delete_gig_btn):
+                btn.setToolTip("Selecciona un evento")
+        else:
+            has_setlist = bool(self._gig_rows.get(gid, {}).get("setlist_id"))
+            self.load_gig_btn.setToolTip(
+                "Enviar el setlist de este evento al transporte" if has_setlist
+                else "Este evento no tiene setlist: edítalo y elige uno"
+            )
+            self.edit_gig_btn.setToolTip("Cambiar nombre, fecha, lugar, setlist y notas (doble clic)")
+            self.delete_gig_btn.setToolTip("Borrar este evento (el setlist se queda)")
 
     # === SETLIST EN VIVO ===
     def setlist_ids(self) -> list:
@@ -478,22 +692,270 @@ class LibraryView(QWidget):
                 item.setText("EN VIVO" if sid == self._active_setlist_id else "")
 
     def _selected_setlist_id(self):
-        selected = self.setlists_table.selectedItems()
-        if not selected:
-            return None
-        row = selected[0].row()
-        if 0 <= row < len(self._setlist_ids):
-            return self._setlist_ids[row]
-        return None
+        return self.selected_setlist_id()
 
     def _on_load_setlist(self):
-        setlist_id = self._selected_setlist_id()
+        setlist_id = self.selected_setlist_id()
         if setlist_id:
             self.setlist_activated.emit(setlist_id)
 
     def _on_search_setlists(self, text: str):
         self._setlist_query = text or ""
         self._apply_filters()
+
+    def _live_song_ids(self) -> List[str]:
+        if not self._active_setlist_id or not self._db_session:
+            return []
+        try:
+            return ops.setlist_song_ids(self._db_session, self._active_setlist_id)
+        except Exception:
+            return []
+
+    def _busy(self) -> bool:
+        try:
+            return bool(self._transport_busy())
+        except Exception:
+            return True  # in doubt, never delete what may be sounding
+
+    # === CANCIONES: NUEVA / EDITAR / ELIMINAR ===
+    def new_song(self):
+        if not self._db_session:
+            return self._fail("crear la canción", RuntimeError("la base de datos no está disponible"))
+        dialog = SongEditorDialog(parent=self)
+        if not self._run_dialog(dialog):
+            return
+        try:
+            song = ops.create_song(self._db_session, dialog.fields())
+        except Exception as e:
+            return self._fail("crear la canción", e)
+        self._after_song_change(song.id, f"Canción creada: {song.title}")
+
+    def edit_song(self):
+        song_id = self.selected_song_id()
+        if not song_id or not self._db_session:
+            return
+        if self.song_origin_of(song_id) == "cloud":
+            return self._inform("Canción del hub", ops.CLOUD_SONG_EDIT)
+        song = self._db_session.get(Song, song_id)
+        if song is None:
+            return self.reload()
+        dialog = SongEditorDialog(ops.song_fields(song), parent=self)
+        if not self._run_dialog(dialog):
+            return
+        try:
+            song = ops.update_song(self._db_session, song_id, dialog.fields())
+        except Exception as e:
+            return self._fail("guardar la canción", e)
+        self._after_song_change(song_id, f"Canción guardada: {song.title}")
+
+    def _after_song_change(self, song_id: str, message: str):
+        self._load_songs_from_db()
+        self._load_setlists_from_db()  # durations and counts
+        self.select_song(song_id)
+        self.song_saved.emit(song_id)
+        self.status_message.emit(message)
+
+    def delete_song(self):
+        song_id = self.selected_song_id()
+        if not song_id or not self._db_session:
+            return
+        if self.song_origin_of(song_id) == "cloud":
+            return self._inform("Canción del hub", ops.CLOUD_SONG_DELETE)
+        song = self._db_session.get(Song, song_id)
+        if song is None:
+            return self.reload()
+        title = song.title or "sin título"
+        if song_id in self._live_song_ids() and self._busy():
+            return self._inform("Eliminar canción", BUSY_MESSAGE.format(what="borrar una de sus canciones"))
+        names = ops.song_setlist_names(self._db_session, song_id)
+        text = f"Se borra «{title}» de este equipo, con su letra y acordes."
+        if names:
+            text += "\n\nTambién sale de estos setlists: " + ", ".join(names) + "."
+        text += "\n\nNo se puede deshacer."
+        if not self._confirm("Eliminar canción", text, "Borrar canción"):
+            return
+        try:
+            ops.delete_song(self._db_session, song_id)
+        except Exception as e:
+            return self._fail("borrar la canción", e)
+        self.reload()
+        self.song_info.setText("Selecciona una canción para ver detalles")
+        self.song_removed.emit(song_id)
+        self.status_message.emit(f"Canción borrada: {title}")
+
+    # === SETLISTS: NUEVO / EDITAR / DUPLICAR / ELIMINAR ===
+    def _song_choices(self) -> list:
+        """(id, etiqueta) de las canciones que se pueden agregar a un setlist."""
+        hide_demo = self.demo_hidden()
+        out = []
+        try:
+            songs = self._db_session.query(Song).order_by(Song.title).all()
+        except Exception as e:
+            print(f"[DB] Error leyendo canciones: {e}")
+            return out
+        for song in songs:
+            origin = song_origin(song)
+            if hide_demo and origin == "demo":
+                continue
+            parts = [song.title or "sin título"]
+            if song.artist:
+                parts.append(song.artist)
+            meta = " · ".join(x for x in (song.key or "", f"{song.bpm} BPM" if song.bpm else "") if x)
+            label = " — ".join(parts) + (f"   ({meta})" if meta else "") + f"   [{ORIGIN_BADGES[origin][0]}]"
+            out.append((song.id, label))
+        return out
+
+    def new_setlist(self):
+        if not self._db_session:
+            return self._fail("crear el setlist", RuntimeError("la base de datos no está disponible"))
+        dialog = SetlistEditorDialog(self._song_choices(), parent=self)
+        if not self._run_dialog(dialog):
+            return
+        try:
+            setlist = ops.create_setlist(self._db_session, dialog.setlist_name(), dialog.song_ids())
+        except Exception as e:
+            return self._fail("crear el setlist", e)
+        self._after_setlist_change(setlist.id, f"Setlist creado: {setlist.name}")
+
+    def edit_setlist(self):
+        setlist_id = self.selected_setlist_id()
+        if not setlist_id or not self._db_session:
+            return
+        if self.setlist_origin_of(setlist_id) == "cloud":
+            return self._inform("Setlist del hub", ops.CLOUD_SETLIST_EDIT)
+        setlist = self._db_session.get(Setlist, setlist_id)
+        if setlist is None:
+            return self.reload()
+        dialog = SetlistEditorDialog(
+            self._song_choices(), name=setlist.name or "",
+            selected=ops.setlist_song_ids(self._db_session, setlist_id), editing=True, parent=self,
+        )
+        if not self._run_dialog(dialog):
+            return
+        try:
+            setlist = ops.update_setlist(self._db_session, setlist_id, dialog.setlist_name(), dialog.song_ids())
+        except Exception as e:
+            return self._fail("guardar el setlist", e)
+        self._after_setlist_change(setlist_id, f"Setlist guardado: {setlist.name}")
+
+    def duplicate_setlist(self):
+        setlist_id = self.selected_setlist_id()
+        if not setlist_id or not self._db_session:
+            return
+        try:
+            copy = ops.duplicate_setlist(self._db_session, setlist_id)
+        except Exception as e:
+            return self._fail("duplicar el setlist", e)
+        self._after_setlist_change(copy.id, f"Copia creada: {copy.name}. Ya la puedes editar.")
+
+    def _after_setlist_change(self, setlist_id: str, message: str):
+        self._load_setlists_from_db()
+        self._load_gigs_from_db()
+        self.select_setlist(setlist_id)
+        self.setlist_saved.emit(setlist_id)
+        self.status_message.emit(message)
+
+    def delete_setlist(self):
+        setlist_id = self.selected_setlist_id()
+        if not setlist_id or not self._db_session:
+            return
+        if self.setlist_origin_of(setlist_id) == "cloud":
+            return self._inform("Setlist del hub", ops.CLOUD_SETLIST_DELETE)
+        is_live = setlist_id == self._active_setlist_id
+        if is_live and self._busy():
+            return self._inform("Eliminar setlist", BUSY_MESSAGE.format(what="borrarlo"))
+        meta = self._setlist_meta.get(setlist_id, {})
+        name = meta.get("name") or "sin nombre"
+        n = int(meta.get("songs") or 0)
+        text = f"Se borra el setlist «{name}» ({'1 canción' if n == 1 else f'{n} canciones'}) de este equipo."
+        text += " Las canciones siguen en la biblioteca."
+        gigs = ops.gigs_using_setlist(self._db_session, setlist_id)
+        if gigs:
+            text += f"\n\n{'1 evento queda' if gigs == 1 else f'{gigs} eventos quedan'} sin setlist."
+        if is_live:
+            text += "\n\nEs el setlist en vivo: los teléfonos dejan de verlo."
+        text += "\n\nNo se puede deshacer."
+        if not self._confirm("Eliminar setlist", text, "Borrar setlist"):
+            return
+        try:
+            ops.delete_setlist(self._db_session, setlist_id)
+        except Exception as e:
+            return self._fail("borrar el setlist", e)
+        self.reload()
+        self.setlist_detail.setText("Selecciona un setlist")
+        self.setlist_removed.emit(setlist_id)
+        self.status_message.emit(f"Setlist borrado: {name}")
+
+    # === EVENTOS: NUEVO / EDITAR / ELIMINAR / CARGAR ===
+    def _setlist_choices(self) -> list:
+        hide_demo = self.demo_hidden()
+        rows = [
+            (meta["name"] + (" [NUBE]" if meta["origin"] == "cloud" else ""), sid)
+            for sid, meta in self._setlist_meta.items()
+            if not (hide_demo and meta["origin"] == "demo")
+        ]
+        return [(sid, label) for label, sid in sorted(rows)]
+
+    def new_gig(self):
+        if not self._db_session:
+            return self._fail("crear el evento", RuntimeError("la base de datos no está disponible"))
+        dialog = GigEditorDialog(self._setlist_choices(), parent=self)
+        if not self._run_dialog(dialog):
+            return
+        try:
+            gig = ops.create_gig(self._db_session, dialog.fields())
+        except Exception as e:
+            return self._fail("crear el evento", e)
+        self._after_gig_change(gig.id, f"Evento creado: {gig.name}")
+
+    def edit_gig(self):
+        gig_id = self.selected_gig_id()
+        if not gig_id or not self._db_session:
+            return
+        from src.db.models import Gig
+
+        gig = self._db_session.get(Gig, gig_id)
+        if gig is None:
+            return self.reload()
+        dialog = GigEditorDialog(self._setlist_choices(), ops.gig_fields(gig), parent=self)
+        if not self._run_dialog(dialog):
+            return
+        try:
+            gig = ops.update_gig(self._db_session, gig_id, dialog.fields())
+        except Exception as e:
+            return self._fail("guardar el evento", e)
+        self._after_gig_change(gig_id, f"Evento guardado: {gig.name}")
+
+    def _after_gig_change(self, gig_id: str, message: str):
+        if self.event_filter.currentIndex() != 0:
+            self.event_filter.setCurrentIndex(0)  # the new event must be visible
+        self._load_gigs_from_db()
+        self.select_gig(gig_id)
+        self.status_message.emit(message)
+
+    def delete_gig(self):
+        gig_id = self.selected_gig_id()
+        if not gig_id or not self._db_session:
+            return
+        name = self._gig_rows.get(gig_id, {}).get("name") or "sin nombre"
+        text = f"Se borra el evento «{name}». Su setlist se queda en la biblioteca.\n\nNo se puede deshacer."
+        if not self._confirm("Eliminar evento", text, "Borrar evento"):
+            return
+        try:
+            ops.delete_gig(self._db_session, gig_id)
+        except Exception as e:
+            return self._fail("borrar el evento", e)
+        self._load_gigs_from_db()
+        self.status_message.emit(f"Evento borrado: {name}")
+
+    def load_gig_setlist(self):
+        gig_id = self.selected_gig_id()
+        if not gig_id:
+            return
+        setlist_id = self._gig_rows.get(gig_id, {}).get("setlist_id")
+        if not setlist_id or setlist_id not in self._setlist_meta:
+            return self._inform("Cargar setlist", "Este evento no tiene setlist: edítalo y elige uno.")
+        self.setlist_activated.emit(setlist_id)
 
     def get_song_data_by_id(self, song_id: str) -> dict:
         """Datos de una cancion por id (cancion actual del transporte)."""
@@ -553,29 +1015,31 @@ class LibraryView(QWidget):
         self._apply_filters()
 
     def _on_song_selected(self):
-        selected = self.songs_table.selectedItems()
-        if selected:
-            row = selected[0].row()
-            title = self.songs_table.item(row, 0).text()
-            bpm = self.songs_table.item(row, 2).text()
-            key = self.songs_table.item(row, 3).text()
-            duration = self.songs_table.item(row, 4).text()
-            self.song_info.setText(
-                f"<b>{title}</b><br>"
-                f"BPM: <span style='color:#00FFFF'>{bpm}</span> | "
-                f"Tonalidad: {key} | Duración: {duration}"
-            )
-            self.song_selected.emit(row)
+        self._update_song_actions()
+        row = self._selected_row(self.songs_table)
+        if row < 0:
+            return
+        title = self.songs_table.item(row, 0).text()
+        bpm = self.songs_table.item(row, 2).text()
+        key = self.songs_table.item(row, 3).text()
+        duration = self.songs_table.item(row, 4).text()
+        self.song_info.setText(
+            f"<b>{title}</b><br>"
+            f"BPM: <span style='color:#00FFFF'>{bpm}</span> | "
+            f"Tonalidad: {key} | Duración: {duration}"
+        )
+        self.song_selected.emit(row)
 
     def _on_setlist_selected(self):
-        selected = self.setlists_table.selectedItems()
-        if selected:
-            row = selected[0].row()
-            name = self.setlists_table.item(row, 0).text()
-            songs = self.setlists_table.item(row, 1).text()
-            self.setlist_detail.setText(f"<b>{name}</b><br>{songs} canciones")
-            setlist_id = self._setlist_ids[row] if 0 <= row < len(self._setlist_ids) else ""
-            self.setlist_selected.emit(setlist_id)
+        self._update_setlist_actions()
+        row = self._selected_row(self.setlists_table)
+        if row < 0:
+            return
+        name = self.setlists_table.item(row, 0).text()
+        songs = self.setlists_table.item(row, 1).text()
+        self.setlist_detail.setText(f"<b>{name}</b><br>{songs} canciones")
+        setlist_id = self._setlist_ids[row] if 0 <= row < len(self._setlist_ids) else ""
+        self.setlist_selected.emit(setlist_id)
 
     def _on_import(self):
         file_path, _ = QFileDialog.getOpenFileName(

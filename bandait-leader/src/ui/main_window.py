@@ -39,7 +39,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 # Persistent notices while the live setlist has no songs (stage view + status bar).
 EMPTY_SETLIST_NOTICE = (
@@ -338,7 +338,8 @@ class MainWindow(QMainWindow):
         min_btn = QPushButton("−")
         min_btn.setFixedSize(28, 28)
         min_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #333333; color: #666666; border-radius: 4px; font-size: 14px; }
+            QPushButton { border: 1px solid #333333; color: #666666; border-radius: 4px; font-size: 14px;
+                          padding: 0; min-height: 0; background: transparent; }
             QPushButton:hover { border-color: #00FFFF; color: #00FFFF; }
         """)
         min_btn.clicked.connect(self.showMinimized)
@@ -347,7 +348,8 @@ class MainWindow(QMainWindow):
         close_btn = QPushButton("×")
         close_btn.setFixedSize(28, 28)
         close_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #333333; color: #666666; border-radius: 4px; font-size: 14px; }
+            QPushButton { border: 1px solid #333333; color: #666666; border-radius: 4px; font-size: 14px;
+                          padding: 0; min-height: 0; background: transparent; }
             QPushButton:hover { background: #FF0000; border-color: #FF0000; color: #000000; }
         """)
         close_btn.clicked.connect(self.close)
@@ -420,9 +422,15 @@ class MainWindow(QMainWindow):
 
         # Tab 3: Biblioteca
         self.library_view = LibraryView()
+        self.library_view.set_transport_busy(lambda: not self._transport_idle())
         self.library_view.song_selected.connect(self._on_song_selected)
-        self.library_view.setlist_activated.connect(self._activate_setlist)
+        self.library_view.setlist_activated.connect(self._on_library_setlist_chosen)
         self.library_view.demo_remove_requested.connect(self._remove_demo_data)
+        self.library_view.setlist_saved.connect(self._on_library_setlist_saved)
+        self.library_view.setlist_removed.connect(self._on_library_setlist_removed)
+        self.library_view.song_saved.connect(self._on_library_song_changed)
+        self.library_view.song_removed.connect(self._on_library_song_changed)
+        self.library_view.status_message.connect(lambda text: self.status_bar.showMessage(text, 8000))
         self.tabs.addTab(self.library_view, "Biblioteca")
 
         # Tab 4: IA
@@ -480,25 +488,25 @@ class MainWindow(QMainWindow):
             QMenu::item:disabled { color: #555555; }
         """)
 
-        def unavailable(menu, text):
-            action = QAction(f"{text} (no disponible)", self)
-            action.setEnabled(False)
-            action.setToolTip("No disponible en esta versión")
-            menu.addAction(action)
+        # Every action does something. The library saves on its own (SQLite), so
+        # there is no "Guardar" and no session file to open.
+        def library_action(text, tab, run):
+            action = QAction(text, self)
+            action.triggered.connect(lambda _checked=False: self._run_library_action(tab, run))
+            file_menu.addAction(action)
             return action
 
         file_menu = menubar.addMenu("&Archivo")
-        self.action_new = unavailable(file_menu, "Nueva Sesión")
-        self.action_open = unavailable(file_menu, "Abrir Sesión...")
-        self.action_save = unavailable(file_menu, "Guardar")
+        lv = self.library_view
+        self.action_new_song = library_action("Nueva &canción...", 0, lv.new_song)
+        self.action_import_song = library_action("&Importar archivo...", 0, lv._on_import)
+        self.action_new_setlist = library_action("Nuevo &setlist...", 1, lv.new_setlist)
+        self.action_new_gig = library_action("Nuevo &evento...", 2, lv.new_gig)
         file_menu.addSeparator()
         exit_action = QAction("&Salir", self)
         exit_action.setShortcut("Alt+F4")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-
-        edit_menu = menubar.addMenu("&Editar")
-        self.action_preferences = unavailable(edit_menu, "Preferencias...")
 
         audio_menu = menubar.addMenu("&Audio")
         self.action_audio_devices = QAction("&Dispositivos de Audio...", self)
@@ -971,6 +979,37 @@ class MainWindow(QMainWindow):
         self._pending_live_setlist = setlist_id
         self.status_bar.showMessage(f"{reason or 'Setlist actualizado'}: se carga al detener la banda", 10000)
 
+    # ------------------------------------------------------------------ library edits
+    def _run_library_action(self, tab: int, run):
+        """Archivo > Nueva canción / setlist / evento: show the library, then run it."""
+        self.tabs.setCurrentWidget(self.library_view)
+        self.library_view.tabs.setCurrentIndex(tab)
+        run()
+
+    def _on_library_setlist_chosen(self, setlist_id: str):
+        """Cargar en vivo (biblioteca o evento): same path as the hub picker, so the
+        setlist never changes under a song that is playing."""
+        self._request_live_setlist(setlist_id, persist=True, reason="Setlist elegido")
+
+    def _on_library_setlist_saved(self, setlist_id: str):
+        if setlist_id == self._live_setlist_id:
+            self._request_live_setlist(setlist_id, persist=False, reason="Setlist editado")
+
+    def _on_library_setlist_removed(self, setlist_id: str):
+        if self._settings.active_setlist_id == setlist_id:
+            self._settings.active_setlist_id = None
+            self._save_settings()
+        if self._pending_live_setlist == setlist_id:
+            self._pending_live_setlist = None
+        if setlist_id == self._live_setlist_id:
+            self._load_initial_setlist()  # the view refuses this while the band plays
+
+    def _on_library_song_changed(self, song_id: str):
+        """A song of the live setlist was edited or removed: phones get the new
+        tempo and lyrics, at once if the band is stopped, else when it stops."""
+        if self._live_setlist_id and self._live_entry(song_id) is not None:
+            self._request_live_setlist(self._live_setlist_id, persist=False, reason="Canción editada")
+
     def _apply_pending_live_reload(self):
         setlist_id = self._pending_live_setlist
         if not setlist_id or not self._transport_idle():
@@ -1077,11 +1116,7 @@ class MainWindow(QMainWindow):
         view = self.library_view
         self._refresh_library_mode()
         try:
-            session = getattr(view, "_db_session", None)
-            if session is not None:
-                session.expire_all()
-            view._load_songs_from_db()
-            view._load_setlists_from_db()
+            view.reload()
             view.mark_active_setlist(self._live_setlist_id)
         except Exception as e:
             logger.warning("No se pudo refrescar la biblioteca: %s", e)
