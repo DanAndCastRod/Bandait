@@ -547,3 +547,41 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   1. Probar en el equipo del usuario el `.exe` nuevo tocando con el playhead visible (pestaña Mezcla) y con el setlist vacío del hub. NO VERIFICADO aquí con hardware real.
   2. Investigar el access violation de `pytestqt` con una sincronización en curso cuando una prueba falla (preexistente, ver arriba).
   3. Observar en el CI de Linux qué hace el control sin guarda de `test_paint_guard.py` (solo se registra; no se afirma).
+
+### [2026-10-02] - Sistema de diseño bandait refinado para escenario y versión 2.1.1 del líder
+* **Sprint / Módulo:** Sistema de diseño (artefacto de claude.ai, fuera del repo) / `bandait-leader` (versión)
+* **Acción técnica realizada:**
+  - Artefacto "bandait" (tipo Design System, https://claude.ai/artifact/BCRLwP6fB2PFKFMrQiwfsX, privado del usuario), versiones 6 y 7. No hay código del repo que lo use todavía; es el destino del rediseño del hub, la PWA y el líder.
+    - `tokens.json` v2: tres temas. Oscuro (escenario) con `surface` #000000; Claro; Alto contraste (texto mínimo 7:1). Tono nuevo `warn` / `warn-soft` / `on-warn` y estilo tipográfico `chord`.
+    - Bundle React 18 (`window.Bandait`, 23 componentes, 54 íconos Lucide). Nuevos: `Tag` (NUBE / LOCAL / DEMOSTRACIÓN), `ChordLine` (ChordPro, corta entre palabras y nunca dentro de una), `LinkMeter` (locked / degraded / unstable / flywheel / lost), `PanicButton` (mantener 800 ms; `local` silencia solo el equipo, `band` detiene a todos), `EmptyState` y `ConfirmDialog` (foco inicial en Cancelar, Escape, lista de lo que se pierde).
+    - Rehechos en compases, no en segundos: `CueTimeline` (secciones con `startBar`/`bars`, conteo de entrada antes del compás 1), `LyricEditor` (líneas en ChordPro con compás de entrada, modos editar y sincronizar) y `TransportBar` (`status` stopped / counting / playing / paused, ±1 BPM, `LinkMeter`, PANIC de banda).
+    - `SetlistItem` muestra la entrada de cada canción (`manual_cue`, `auto_count_in` con N compases, `gapless`, igual que CONTRACT_V3 sección 9) y el origen.
+    - README: público de músicos independientes y bandas pequeñas y medianas, roles de la PWA (Músico, Director, Letras), regla "ningún control sin función" y ejemplos neutros (se quitaron los de culto: "Tu fidelidad", "Domingo 9:00", rol Proyección).
+  - `bandait-leader`: `APP_VERSION` y `pyproject.toml` pasan de 2.1.0 a 2.1.1 para publicar el primer Release del líder PySide6, que incluye las correcciones del PR #16. El tag `v2.1.1` se empuja después del merge y `release.yml` construye y publica el Release.
+* **Impacto en Audio / Red / UI:**
+  - Sin cambio de comportamiento en este commit, aparte del número de versión.
+  - El sistema de diseño ya no contradice las reglas de escenario: oscuro forzado al abrir el líder y la PWA, letra y avisos anclados al compás, PANIC sin disparo accidental y estados degradados visibles en amarillo.
+* **Verificación y Pruebas (resultado literal):**
+  - Contraste de tokens (script propio): `144/144` combinaciones cumplen; texto mínimo 4,79:1 en Claro, 5,9:1 en Oscuro, 8,24:1 en Alto contraste.
+  - Render del bundle con React 18 de `bandait-follower/node_modules` (`renderToStaticMarkup`): `rendered 37/37`; las 24 vistas previas del artefacto: `24/24 previews OK`.
+  - Revisión visual en Chromium (Playwright MCP) de las vistas previas en los tres temas, a 490 px y a ancho de laptop. Encontró cuatro fallos, corregidos antes de publicar:
+    1. `TransportBar` aplastaba las casillas de pulso y el botón de clic, y PANIC se salía de la pantalla a 1344 px;
+    2. `SetlistItem` cortaba el título a "Carret..." en el teléfono;
+    3. la letra con acordes se partía en cajas enteras ("Canta" sola en una línea);
+    4. la etiqueta del conteo no cabía en `CueTimeline`.
+  - Versión: `python scripts/version.py --check-tag v2.1.1` -> `2.1.1`; `ruff check src tests` -> `All checks passed!`; `pytest -q tests/test_packaging.py` -> `19 passed`.
+  - El instalador 2.1.1 y el Release: NO VERIFICADOS al escribir esta entrada (los produce el CI al empujar el tag).
+* **Errores propios:**
+  - El MCP de Playwright guardó 12 capturas en la raíz del repo, porque resuelve los nombres relativos contra el directorio de trabajo. Se movieron fuera del repo antes del commit.
+  - Publicar al artefacto con la ruta corta 8.3 del scratchpad (`DANIEL~1.CAS`) fue bloqueado por una regla de permisos de lectura; con la ruta larga funcionó. `index.d.ts` exige `contentType: text/plain`.
+  - La copia local del artefacto no tenía 7 fichas de componentes (Icon, IconButton, FileDrop, QRJoinCard, TextField, SelectField, Toggle). Se leyeron del artefacto después de publicar la versión 6 y se corrigieron en la 7.
+* **Decisiones:**
+  - Escenario siempre en oscuro con claro opcional: decisión del usuario. El tema Alto contraste se agregó para tarimas con mucha luz y baja visión. El hub sigue en claro por defecto, con oscuro opcional.
+  - PANIC por mantener presionado (800 ms) y no por diálogo de confirmación: en vivo un diálogo es lento y un toque simple es peligroso.
+  - "Ningún control sin función": un botón cuya acción no existe no se muestra, ni deshabilitado. Responde al reporte del usuario de controles que no hacen nada.
+  - Las copias SVG de los 10 íconos nuevos no se subieron al grupo Icons del artefacto; el bundle los dibuja.
+* **Pendientes:**
+  1. PR que haga funcionar o quite cada control muerto: borrar setlists y bandas en el hub; los 7 botones deshabilitados y los 5 menús "no disponible" de la biblioteca del líder.
+  2. Aplicar el sistema de diseño: hub y PWA con el bundle y los tokens; líder con QSS generado desde `tokens.json`; íconos de la app con `bandait-app-icon`.
+  3. Subir al grupo Icons del artefacto las copias de `hand`, `octagon-x`, `volume-x`, `activity`, `cloud`, `hard-drive`, `flask-conical`, `moon`, `sun` y `contrast`.
+  4. Probar en el equipo del usuario el instalador 2.1.1 descargado del Release.
