@@ -113,7 +113,9 @@ class ChannelStrip(QWidget):
         pan_label.setFont(QFont("Inter", 7))
         pan_label.setStyleSheet("color: #666666;")
         pan_label.setAlignment(Qt.AlignCenter)
+        pan_label.setVisible(False)  # pan is hidden until the mixer applies it
         layout.addWidget(pan_label)
+        self.pan_label = pan_label
 
         self.pan_slider = QSlider(Qt.Horizontal)
         self.pan_slider.setMinimum(-50)
@@ -139,15 +141,16 @@ class ChannelStrip(QWidget):
             }
         """)
         self.pan_slider.valueChanged.connect(self._on_pan)
-        # El mezclador no aplica paneo todavia: control deshabilitado y visible.
+        # El mezclador no aplica paneo todavía: oculto hasta que exista.
         self.pan_slider.setEnabled(False)
-        self.pan_slider.setToolTip("Paneo: no disponible en esta version")
+        self.pan_slider.setVisible(False)
         layout.addWidget(self.pan_slider)
 
         self.pan_display = QLabel("C")
         self.pan_display.setFont(QFont("JetBrains Mono", 8))
         self.pan_display.setStyleSheet("color: #666666;")
         self.pan_display.setAlignment(Qt.AlignCenter)
+        self.pan_display.setVisible(False)  # goes with the hidden pan slider
         layout.addWidget(self.pan_display)
 
         # === FADER ===

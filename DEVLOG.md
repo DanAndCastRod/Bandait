@@ -585,3 +585,73 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Aplicar el sistema de diseño: hub y PWA con el bundle y los tokens; líder con QSS generado desde `tokens.json`; íconos de la app con `bandait-app-icon`.
   3. Subir al grupo Icons del artefacto las copias de `hand`, `octagon-x`, `volume-x`, `activity`, `cloud`, `hard-drive`, `flask-conical`, `moon`, `sun` y `contrast`.
   4. Probar en el equipo del usuario el instalador 2.1.1 descargado del Release.
+
+### [2026-10-02] - Biblioteca del líder: botones que se ven y que funcionan (2.1.2)
+* **Sprint / Módulo:** `bandait-leader` (Biblioteca, estilos QSS, menús, transporte, mezclador)
+* **Estado encontrado (reporte del usuario con el instalador 2.1.1):** en Biblioteca, "Importar", "Nueva", "Eliminar", "Nuevo setlist" y "Nuevo evento" no se veían como botones o no hacían nada. "Acerca de" decía 2.1.1, así que no era una versión vieja instalada.
+  - `src/ui/main_window.py` (`_apply_styles`) carga `src/styles/bandait_dark.qss`. Ese archivo solo tenía reglas para `QPushButton#transport` y `#toggle`. Las reglas `QPushButton`, `#primary`, `#danger` y `#success` estaban solo en `bandait_daw.qss`, que nada carga. Como la regla base `QMainWindow, QWidget, QDialog { background-color: #000000 }` también aplica a los botones, se dibujaban planos y sin borde, como texto (captura offscreen de la vista: los botones se confunden con los campos).
+  - `src/ui/views/library_view.py`: "Nueva", "Eliminar", "Nuevo Setlist", "Editar", "Duplicar", "Nuevo Evento" y el filtro de eventos estaban `setEnabled(False)` con la etiqueta "No disponible en esta version". La pestaña Eventos nunca leía la tabla `gigs`.
+  - Barrido de toda la ventana (script con `findChildren`, revisando las señales conectadas): además, el botón BUCLE del transporte, el paneo de los 4 canales del mezclador y 4 menús "(no disponible)" (Nueva Sesión, Abrir Sesión, Guardar, Preferencias). Ningún otro botón visible estaba sin acción.
+* **Causa:** los controles se dejaron como marcadores deshabilitados y el estilo de botones quedó en un QSS que la app no carga. No se determinó por qué existen dos archivos QSS.
+* **Corrección aplicada:**
+  - `bandait_dark.qss`:
+    - regla base de `QPushButton` (fondo #141414, borde #4A4A4A, hover y foco cian, `:disabled` atenuado pero con forma de botón);
+    - variantes `#primary`, `#danger` y `#success`;
+    - estilos de `QPlainTextEdit`, `QSpinBox`, `QDateTimeEdit` y `QCheckBox`;
+    - `padding: 0` en `#transport`, porque el padding de la regla base se heredaba.
+    - Los botones − y × del encabezado (28 px) quedaban sin espacio para el glifo: su estilo propio ahora fija `padding: 0`.
+  - `src/db/library_ops.py` (nuevo): crea, edita y borra canciones, setlists y eventos locales.
+    - Lo del hub (canción `source='cloud'`, setlist con `cloud_id`) se rechaza con `CloudReadOnly` antes de tocar la sesión, con el mensaje de dónde se edita.
+    - Una fila DEMO editada pasa a `local`.
+    - Los ítems de setlist se escriben con Core y, al editar, conservan transición, conteo y tonalidad del show de las canciones que siguen.
+    - Duplicar copia cualquier setlist (también del hub) a uno local sin `item_cloud_id`.
+    - Borrar un setlist deja sus eventos sin setlist.
+    - Letra con acordes: `[Am]` es acorde y `[Coro]` es sección (regex de vocabulario de acordes); `lyrics_text` queda sin acordes y `chords_text` guarda el ChordPro.
+  - `src/ui/dialogs/library_editors.py` (nuevo): editores de canción (título, artista, BPM, compás, tonalidad, duración mm:ss, letra ChordPro), de setlist (biblioteca a la izquierda, orden del show a la derecha, Agregar, Quitar, Subir, Bajar) y de evento (nombre, fecha y hora, lugar, setlist, notas). Un error de validación se muestra dentro y el diálogo no se cierra.
+  - `library_view.py`:
+    - todos los botones conectados;
+    - Editar, Duplicar y Eliminar se activan al elegir una fila y, sin selección, dicen "Selecciona...";
+    - con una fila del hub explican dónde se edita;
+    - cada borrado confirma con el verbo en el botón y la lista de lo que se pierde (setlists que pierden la canción, eventos que quedan sin setlist, si es el setlist en vivo);
+    - la pestaña Eventos lee `gigs`, filtra (Todos, Próximos, Hoy, Pasados) y carga el setlist del evento en vivo;
+    - no se borra el setlist en vivo ni una de sus canciones mientras la banda toca.
+  - `main_window.py`:
+    - "Cargar en vivo" (biblioteca y eventos) pasa por `_request_live_setlist`: antes llamaba a `_activate_setlist` directo y podía cambiar el setlist debajo de una canción sonando;
+    - editar el setlist en vivo o una de sus canciones lo recarga (al instante si está detenido, si no al detener);
+    - borrar el setlist en vivo carga el inicial.
+    - Archivo ahora tiene Nueva canción, Importar archivo, Nuevo setlist y Nuevo evento; se quitó el menú Editar (Preferencias no existía).
+  - BUCLE y paneo: ocultos hasta que existan (`setVisible(False)`), no deshabilitados.
+  - `models.py`:
+    - el marcado de filas DEMO por id y título (`plan_demo_marks`) corría en cada arranque, con un respaldo cada vez, y habría vuelto a marcar DEMO una fila DEMO editada sin cambiarle el nombre;
+    - ahora corre una sola vez por archivo: `PRAGMA user_version = 1` al terminar (o al crear una base nueva).
+    - `tests/test_demo_data.py::make_pre_demo_db` pone `user_version = 0`, como un archivo real de 2.1.x.
+  - Versión 2.1.1 -> 2.1.2.
+* **Impacto en Audio / Red / UI:**
+  - Ningún cambio en el camino del clic ni en el protocolo.
+  - El setlist en vivo ya no cambia bajo una canción que suena desde la biblioteca.
+  - Una banda sin hub puede armar canciones, setlists y eventos en la laptop.
+* **Verificación y Pruebas (resultado literal):**
+  - `ruff check src tests` -> `All checks passed!`
+  - `QT_QPA_PLATFORM=offscreen python -m pytest -q` -> `353 passed in 113.31s (0:01:53)` (antes 314).
+  - Pruebas nuevas:
+    - `tests/test_library_ops.py`: 21 casos de la capa de datos;
+    - `tests/test_library_controls.py`: 16 casos. Uno exige una regla en `bandait_dark.qss` para cada `objectName` de `QPushButton` del código (habría detectado el fallo de 2.1.1). Otro recorre todas las pestañas: ningún control dice "no disponible", ningún botón visible queda sin señal conectada y ninguno queda deshabilitado sin decir "Selecciona...". Otros cubren las acciones de Archivo, los flujos de canción, setlist y evento con hub y DEMO, "Cargar en vivo" diferido mientras suena y el borrado bloqueado del setlist en vivo;
+    - `tests/test_demo_data.py`: marcado DEMO una sola vez.
+  - `test_leader_ui_path::test_no_dead_menu_actions` ahora falla con cualquier acción deshabilitada.
+  - Capturas offscreen (con `QT_QPA_FONTDIR`) de Biblioteca, los tres editores, Escenario y Mezcla.
+  - El instalador 2.1.2 en el equipo del usuario: NO VERIFICADO.
+* **Errores propios:**
+  - El primer script de capturas de la ventana completa no cargó `tests/conftest.py`. Leyó la sesión real del hub desde el Administrador de credenciales de Windows, sincronizó la banda a una base temporal y guardó el refresh token rotado (la sesión guardada quedó presente y válida, `saved_at` de hace 61 s). Si el líder del usuario estaba abierto con el token anterior, puede pedir iniciar sesión otra vez. Los scripts siguientes importan `tests.conftest` primero y comprueban `MemoryKeyring`.
+  - Al rearmar `library_view.py`, un archivo temporal escrito por Python en `/tmp` quedó en `C:\tmp` y la redirección de bash truncó el archivo con solo la primera mitad. Se reconstruyó con la segunda mitad tomada de `git show HEAD`.
+  - Una prueba propia renombraba la copia antes de pedir la segunda y esperaba el sufijo "(2)": se corrigió el orden.
+* **Decisiones:**
+  - Eventos solo locales: el hub no tiene eventos (WORKSPACE_V2 no los define), así que no hay una segunda fuente de verdad.
+  - Lo que aún no funciona se oculta, no se deshabilita: un botón gris con "no disponible" es un botón roto para el usuario.
+  - Una fila DEMO editada pasa a ser del usuario; la alternativa (dejarla DEMO) haría que "Quitar datos de demostración" borre sus cambios.
+  - En el editor de setlist no hay control de transición ni de conteo por canción: el líder todavía no ejecuta COUNTING ni transiciones automáticas. Se conservan los valores que trae el hub.
+  - Se mantiene la paleta cian actual: el paso al sistema de diseño bandait (tokens a QSS) es un cambio aparte.
+* **Pendientes:**
+  1. Probar el instalador 2.1.2 en el equipo del usuario (artefacto del CI del PR; el Release espera el sí del usuario).
+  2. Unificar los dos QSS (`bandait_daw.qss` no se carga) al generar el QSS desde `tokens.json` del sistema de diseño.
+  3. Controles de transición y conteo por canción en el editor de setlist cuando el líder ejecute COUNTING.
+  4. Bucle y paneo: implementarlos o quitarlos del código.

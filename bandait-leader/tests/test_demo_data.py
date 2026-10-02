@@ -54,6 +54,7 @@ def make_pre_demo_db(db):
             con.execute(f"CREATE TABLE {table}_old AS SELECT {', '.join(cols)} FROM {table}")
             con.execute(f"DROP TABLE {table}")
             con.execute(f"ALTER TABLE {table}_old RENAME TO {table}")
+        con.execute("PRAGMA user_version = 0")  # 2.1.x never set it
         con.commit()
     finally:
         con.close()
@@ -111,6 +112,37 @@ def test_migration_marks_only_untouched_seed_rows_with_one_backup(tmp_path):
     assert plan_demo_marks(db) == []
     init_db(db)
     assert len(glob.glob(db + ".bak-*")) == 1
+
+
+def test_demo_marking_runs_once_so_an_edited_demo_row_stays_the_users(tmp_path):
+    """After the one-time marking, a demo row the user edits (now 'local', same id
+    and title) is not marked demo again on the next start, and no backup is made."""
+    db = str(tmp_path / "bandait.db")
+    make_pre_demo_db(db)
+    init_db(db)  # the one-time marking, with its backup
+    assert sources(db, "gigs") == {"gig-001": "demo"}
+    con = sqlite3.connect(db)
+    con.execute("UPDATE gigs SET source = 'local' WHERE id = 'gig-001'")  # edited in the library
+    con.commit()
+    con.close()
+    assert plan_demo_marks(db) == []
+    init_db(db)
+    assert sources(db, "gigs") == {"gig-001": "local"}
+    assert len(glob.glob(db + ".bak-*")) == 1
+    assert rows(db, "PRAGMA user_version") == [(1,)]
+
+
+def test_a_new_database_needs_no_demo_marking(tmp_path):
+    db = str(tmp_path / "bandait.db")
+    init_db(db)
+    assert rows(db, "PRAGMA user_version") == [(1,)]
+    seed_database(db)
+    con = sqlite3.connect(db)
+    con.execute("UPDATE songs SET source = 'local' WHERE id = 'song-001'")  # edited, same title
+    con.commit()
+    con.close()
+    init_db(db)
+    assert sources(db, "songs")["song-001"] == "local" and glob.glob(db + ".bak-*") == []
 
 
 # --------------------------------------------------------------------------- removal
