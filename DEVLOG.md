@@ -655,3 +655,24 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Unificar los dos QSS (`bandait_daw.qss` no se carga) al generar el QSS desde `tokens.json` del sistema de diseño.
   3. Controles de transición y conteo por canción en el editor de setlist cuando el líder ejecute COUNTING.
   4. Bucle y paneo: implementarlos o quitarlos del código.
+
+### [2026-10-04] - Releases v2.1.1 y v2.1.2 del líder publicados
+* **Sprint / Módulo:** `bandait-leader` (distribución) / GitHub Releases
+* **Acción técnica realizada:**
+  - Con el sí del usuario, se empujaron los tags anotados `v2.1.1` (sobre `c5aff0b`, merge del PR #17) y `v2.1.2` (sobre `80d87bd`, merge del PR #18).
+  - `release.yml` construyó cada `.exe`, corrió el smoke test, compiló el instalador y creó el Release.
+  - Cierra el punto de las entradas de 2.1.1 y 2.1.2 que dejaba el Release "NO VERIFICADO" o "a la espera del sí del usuario".
+* **Impacto en Audio / Red / UI:**
+  - El botón "Releases en GitHub" de la landing lleva al instalador 2.1.2, marcado Latest.
+  - Antes la página de Releases solo tenía las versiones viejas de Flutter (v1.0.x).
+* **Verificación y Pruebas (resultado literal):**
+  - Run `36962075877` (tag `v2.1.1`): `success`. Release "Bandait Leader 2.1.1", publicado `2026-10-02T03:55:59Z`, no borrador ni prerelease. Archivos: `BandaitLeader-Setup-2.1.1.exe` (44724994 bytes), `NOTICE.md` (8657) y `SHA256SUMS` (174).
+  - Run `37248800440` (tag `v2.1.2`): `success`. Release "Bandait Leader 2.1.2", publicado `2026-10-05T00:49:12Z` (UTC), marcado Latest. Archivos: `BandaitLeader-Setup-2.1.2.exe` (44775845 bytes), `NOTICE.md` (8657) y `SHA256SUMS` (174).
+  - La instalación de 2.1.2 en el equipo del usuario y la prueba de la Biblioteca con el instalador: NO VERIFICADAS al escribir esta entrada.
+* **Pendientes:**
+  1. Que el usuario instale 2.1.2 y pruebe la Biblioteca (canciones, setlists y eventos) y "Cargar en vivo" con la banda tocando.
+  2. Siguiente bloque:
+     - aplicar el sistema de diseño bandait al líder (un solo QSS generado desde `tokens.json`), al hub y a la PWA;
+     - en el hub, borrar setlists y bandas;
+     - Fase 1: letra por compases en la PWA, conteo y transiciones automáticas en el líder, avisos de voz (Worker de Cloudflare con Azure TTS) y prueba en ensayo real;
+     - al final del refinamiento, reescribir los manuales dentro de la app.
