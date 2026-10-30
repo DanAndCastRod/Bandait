@@ -27,6 +27,7 @@ CASES = {
     "control_command_jump_song": "message_types.json#/definitions/control_command",
     "control_command_tempo_nudge": "message_types.json#/definitions/control_command",
     "link_report": "message_types.json#/definitions/link_report",
+    "song_content": "message_types.json#/definitions/song_content",
     "command_ack_accepted": "message_types.json#/definitions/command_ack",
     "command_ack_rejected": "message_types.json#/definitions/command_ack",
     "beat_beacon": "message_types.json#/definitions/beat_beacon",
@@ -70,3 +71,17 @@ def test_leader_payloads_match_schemas():
         ack = mgr.process_raw({"command_id": type_, "type": type_, "origin": "hub", "payload": payload}).ack
         errors = list(ack_v.iter_errors(ack))
         assert not errors, (type_, [e.message for e in errors])
+
+
+def test_leader_song_content_matches_schema():
+    """GET /songs/<id>.json (CONTRACT_V3 9.1) with the fixture's sections."""
+    mgr = ConcurrentControlManager(_Clock())
+    song = load_fixtures()["song_content"]
+    mgr.set_setlist([dict(song, order_index=0, transition_mode="manual_cue")])
+    entry = mgr.get_state().setlist[0]
+    content = entry.content_wire()
+    errors = list(_validator("message_types.json#/definitions/song_content").iter_errors(content))
+    assert not errors, [e.message for e in errors]
+    assert {k: v for k, v in content.items() if k != "content_etag"} == {
+        k: v for k, v in song.items() if k != "content_etag"}
+    assert mgr.wire_state()["setlist"][0]["content_etag"] == entry.content_etag

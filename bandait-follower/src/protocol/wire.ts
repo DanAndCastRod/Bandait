@@ -31,6 +31,8 @@ import {
   SessionState,
   SetlistEntry,
   SetlistJump,
+  SongContent,
+  SongSection,
   SyncAck,
   TRANSITION_MODES,
   TRANSPORT_STATUSES,
@@ -100,6 +102,8 @@ export interface WireSetlistEntry {
   bpm: number
   order_index: number
   transition_mode: TransitionMode
+  /** CONTRACT_V3 9.1 (v3.2); absent from older leaders. */
+  content_etag?: string
 }
 
 export interface WireLastCommand {
@@ -299,6 +303,26 @@ function readSetlistEntry(value: unknown, path: string): SetlistEntry {
     bpm: bpmField(o, 'bpm', path),
     orderIndex: int(o, 'order_index', path, 0),
     transitionMode: oneOf(o, 'transition_mode', path, TRANSITION_MODES),
+    contentEtag: optionalEtag(o, path),
+  }
+}
+
+/** content_etag is optional (a leader before v3.2 does not send it); when present it must be a non-empty string. */
+function optionalEtag(o: Obj, path: string): string | null {
+  if (!('content_etag' in o) || o.content_etag === null) return null
+  return str(o, 'content_etag', path, { nonEmpty: true })
+}
+
+function readSongSection(value: unknown, path: string): SongSection {
+  const o = asObject(value, path)
+  return {
+    id: str(o, 'id', path, { nonEmpty: true }),
+    kind: str(o, 'kind', path),
+    label: str(o, 'label', path),
+    bars: int(o, 'bars', path, 1),
+    startBar: int(o, 'start_bar', path, 1),
+    chordpro: str(o, 'chordpro', path),
+    cueText: nullableStr(o, 'cue_text', path),
   }
 }
 
@@ -347,6 +371,28 @@ function readSessionState(value: unknown, path: string): SessionState {
 
 export function decodeSessionState(raw: unknown): WireResult<SessionState> {
   return run(() => readSessionState(raw, 'SessionState'))
+}
+
+/** GET /songs/<song_id>.json (CONTRACT_V3 9.1). */
+export function decodeSongContent(raw: unknown): WireResult<SongContent> {
+  return run(() => {
+    const path = 'song_content'
+    const o = asObject(raw, path)
+    const sectionsRaw = has(o, 'sections', path)
+    if (!Array.isArray(sectionsRaw)) throw new WireError(`${path}.sections: se esperaba un arreglo`)
+    return {
+      songId: str(o, 'song_id', path, { nonEmpty: true }),
+      title: str(o, 'title', path),
+      artist: str(o, 'artist', path),
+      bpm: bpmField(o, 'bpm', path),
+      beatsPerBar: int(o, 'beats_per_bar', path, 1),
+      key: str(o, 'key', path),
+      showKey: str(o, 'show_key', path),
+      totalBars: nullableInt(o, 'total_bars', path, 1),
+      sections: sectionsRaw.map((s, i) => readSongSection(s, `${path}.sections[${i}]`)),
+      contentEtag: str(o, 'content_etag', path, { nonEmpty: true }),
+    }
+  })
 }
 
 export function decodeJoinAck(raw: unknown): WireResult<JoinAck> {

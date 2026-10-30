@@ -133,9 +133,12 @@ class LeaderHttpApp:
         self,
         info_provider: Callable[[], dict],
         bundle_dir_provider: Callable[[], Optional[Path]] = resolve_follower_dir,
+        song_provider: Callable[[str], Optional[dict]] = lambda _song_id: None,
     ) -> None:
         self._info = info_provider
         self._bundle_dir = bundle_dir_provider
+        # CONTRACT_V3 9.1: content of a song of the loaded setlist, or None.
+        self._song = song_provider
         self._cache: Dict[Path, Tuple[int, int, bytes]] = {}
 
     async def __call__(self, scope, receive, send) -> None:
@@ -162,12 +165,19 @@ class LeaderHttpApp:
         raw = scope.get("raw_path")
         path = raw.decode("latin-1") if isinstance(raw, (bytes, bytearray)) and raw else scope.get("path", "/")
         path = path.split("?", 1)[0]
+        if_none_match = b""
+        for name, value in scope.get("headers") or ():
+            if name.lower() == b"if-none-match":
+                if_none_match = value
         try:
-            await self._route(send, path, scope.get("path", path), head)
+            await self._route(send, path, scope.get("path", path), head, if_none_match)
         except Exception:
             await self._respond(send, 500, b"Error interno\n", "text/plain; charset=utf-8", NO_STORE, head)
 
-    async def _route(self, send, raw_path: str, decoded_path: str, head: bool) -> None:
+    async def _route(self, send, raw_path: str, decoded_path: str, head: bool, if_none_match: bytes = b"") -> None:
+        if decoded_path.startswith("/songs/") and decoded_path.endswith(".json"):
+            await self._song_content(send, decoded_path[len("/songs/"):-len(".json")], head, if_none_match)
+            return
         if decoded_path == "/leader-info.json":
             body = json.dumps(self._info(), ensure_ascii=False).encode("utf-8")
             await self._respond(send, 200, body, "application/json", NO_STORE, head,
@@ -205,6 +215,21 @@ class LeaderHttpApp:
         suffix = target.suffix.lower()
         mime = MIME_TYPES.get(suffix, "application/octet-stream")
         await self._respond(send, 200, body, mime, self._cache_policy(bundle, target), head)
+
+    async def _song_content(self, send, song_id: str, head: bool, if_none_match: bytes) -> None:
+        """GET /songs/<song_id>.json (CONTRACT_V3 9.1): only songs of the loaded setlist."""
+        cors = (b"access-control-allow-origin", b"*")
+        content = self._song(song_id) if song_id and "/" not in song_id else None
+        if content is None:
+            await self._respond(send, 404, b"No encontrado\n", "text/plain; charset=utf-8", NO_STORE, head, extra=[cors])
+            return
+        etag = f'"{content["content_etag"]}"'.encode("ascii")
+        extra = [cors, (b"etag", etag)]
+        if if_none_match and etag in [t.strip() for t in if_none_match.split(b",")]:
+            await self._respond(send, 304, b"", "application/json", "no-cache", head=True, extra=extra)
+            return
+        body = json.dumps(content, ensure_ascii=False).encode("utf-8")
+        await self._respond(send, 200, body, "application/json", "no-cache", head, extra=extra)
 
     @staticmethod
     def _cache_policy(bundle: Path, target: Path) -> str:

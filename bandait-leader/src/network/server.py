@@ -131,7 +131,9 @@ class BandaitServer:
         self._lan_lock = threading.Lock()
         self._follower_dir_config = follower_dir
         self._http_app = LeaderHttpApp(
-            self.leader_info, lambda: resolve_follower_dir(self._follower_dir_config)
+            self.leader_info,
+            lambda: resolve_follower_dir(self._follower_dir_config),
+            self.song_content,
         )
         self._sio: socketio.AsyncServer = self._build_sio()
         self._app = socketio.ASGIApp(self._sio, other_asgi_app=self._http_app)
@@ -175,6 +177,13 @@ class BandaitServer:
     ) -> CommandExecutionResult:
         """Laptop FOH command (origin ``laptop_foh``). Safe from any thread."""
         return self._control_manager.process_local(command_type, payload, command_id)
+
+    def song_content(self, song_id: str) -> Optional[dict]:
+        """CONTRACT_V3 9.1: content of a song of the loaded setlist, or None."""
+        for entry in self._control_manager.get_state().setlist:
+            if entry.song_id == song_id:
+                return entry.content_wire()
+        return None
 
     def followers(self) -> List[dict]:
         """Joined followers: client_id, alias, role and, once it reports, ``link`` (link_report)."""

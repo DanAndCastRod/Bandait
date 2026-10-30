@@ -61,7 +61,7 @@ describe('wire decode: canonical fixtures', () => {
     expect(s.pausedBar).toBeNull()
     expect(s.leaderTimeNs).toBe(241953609000000)
     expect(s.setlist).toHaveLength(3)
-    expect(s.setlist[2]).toEqual({ songId: 'song_07', title: 'Septima', bpm: 140, orderIndex: 2, transitionMode: 'gapless' })
+    expect(s.setlist[2]).toEqual({ songId: 'song_07', title: 'Septima', bpm: 140, orderIndex: 2, transitionMode: 'gapless', contentEtag: '51d8e0a4c3b29f76' })
     expect(s.lastCommand).toEqual({
       commandId: '2b9f0c4e-8d1a-4f6b-b3c7-5e2a9d0f1a44',
       type: 'PLAY',

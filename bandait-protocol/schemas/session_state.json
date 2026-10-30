@@ -143,6 +143,11 @@
             "auto_count_in",
             "gapless"
           ]
+        },
+        "content_etag": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CONTRACT_V3 9.1: changes when the song content (GET /songs/<song_id>.json) changes."
         }
       },
       "additionalProperties": false

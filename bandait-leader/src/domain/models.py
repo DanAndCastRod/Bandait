@@ -1,7 +1,10 @@
 """Pure domain models (immutable dataclasses)."""
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import List, Optional, Tuple
 from enum import Enum
 
@@ -244,14 +247,51 @@ class SetlistEntry:
     order_index: int
     transition_mode: str = TransitionMode.MANUAL_CUE.value
     # How the band enters this item and what the song contains (WORKSPACE_V2 3-4,
-    # CONTRACT_V3 9). Carried for wave 2; not on the wire yet, so ``to_wire`` and
-    # the SessionState schema are unchanged.
+    # CONTRACT_V3 9). The content (sections with ChordPro) is not in the state: phones
+    # fetch it from GET /songs/<song_id>.json and the state carries only content_etag.
     count_in_bars: int = 0
     count_in_voice: bool = True
     gap_sec: float = 0.0
     beats_per_bar: int = 4
     total_bars: Optional[int] = None  # None: no known end (manual_cue only)
     sections: Tuple[SetlistSection, ...] = ()
+    artist: str = ""
+    key: str = ""
+    show_key: str = ""
+
+    def content(self) -> dict:
+        """Song content for the prompter (CONTRACT_V3 9.1), without content_etag."""
+        return {
+            "song_id": self.song_id,
+            "title": self.title,
+            "artist": self.artist,
+            "bpm": self.bpm,
+            "beats_per_bar": self.beats_per_bar,
+            "key": self.key,
+            "show_key": self.show_key or self.key,
+            "total_bars": self.total_bars,
+            "sections": [
+                {
+                    "id": s.id,
+                    "kind": s.kind,
+                    "label": s.label,
+                    "bars": s.bars,
+                    "start_bar": s.start_bar,
+                    "chordpro": s.chordpro,
+                    "cue_text": s.cue_text,
+                }
+                for s in self.sections
+            ],
+        }
+
+    @cached_property
+    def content_etag(self) -> str:
+        """First 16 hex of SHA-1 over the canonical JSON of content() (CONTRACT_V3 9.1)."""
+        canonical = json.dumps(self.content(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:16]
+
+    def content_wire(self) -> dict:
+        return dict(self.content(), content_etag=self.content_etag)
 
     def to_wire(self) -> dict:
         return {
@@ -260,6 +300,7 @@ class SetlistEntry:
             "bpm": self.bpm,
             "order_index": self.order_index,
             "transition_mode": self.transition_mode,
+            "content_etag": self.content_etag,
         }
 
 

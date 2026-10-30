@@ -60,6 +60,33 @@ export interface SetlistEntry {
   bpm: number
   orderIndex: number
   transitionMode: TransitionMode
+  /** CONTRACT_V3 9.1: changes when GET /songs/<songId>.json changes; null from a leader before v3.2. */
+  contentEtag: string | null
+}
+
+/** A section of a song (CONTRACT_V3 9.1). Bars are 1-based and cumulative: bar 1 is the first bar after the count-in. */
+export interface SongSection {
+  id: string
+  kind: string
+  label: string
+  bars: number
+  startBar: number
+  chordpro: string
+  cueText: string | null
+}
+
+/** GET /songs/<song_id>.json from the leader (CONTRACT_V3 9.1): what the prompter shows. */
+export interface SongContent {
+  songId: string
+  title: string
+  artist: string
+  bpm: number
+  beatsPerBar: number
+  key: string
+  showKey: string
+  totalBars: number | null
+  sections: SongSection[]
+  contentEtag: string
 }
 
 export interface LastCommand {

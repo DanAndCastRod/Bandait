@@ -16,6 +16,9 @@ import DirectorRemoteToolbar from '../components/DirectorRemoteToolbar'
 import MultiTrackMixer from '../components/MultiTrackMixer'
 import AudioArmButton from '../components/AudioArmButton'
 import EmergencySlide from '../components/EmergencySlide'
+import ChordProPrompter, { PrompterMode } from '../components/ChordProPrompter'
+import { useSectionIndex, useSongContent } from '../hooks/usePrompter'
+import { songContentStore } from '../services/songContent'
 import {
   LibraryIcon,
   SettingsIcon,
@@ -36,6 +39,16 @@ interface Props {
 }
 
 const INEAR_KEY = 'bandait_inear_vol'
+const PROMPTER_MODE_KEY = 'bandait_prompter_mode'
+const NO_SECTIONS: never[] = []
+
+function loadPrompterMode(): PrompterMode {
+  try {
+    return localStorage.getItem(PROMPTER_MODE_KEY) === 'singer' ? 'singer' : 'musician'
+  } catch {
+    return 'musician'
+  }
+}
 const PANIC_NOTE_MS = 6000
 
 function pad(n: number, width: number): string {
@@ -60,6 +73,7 @@ export default function StageView({ setlistId, onLibrary, onSettings, onExit }: 
   const [showMixer, setShowMixer] = useState(false)
   const [localSetlist, setLocalSetlist] = useState<StoredSetlist | null>(null)
   const [panicNote, setPanicNote] = useState<string | null>(null)
+  const [prompterMode, setPrompterMode] = useState<PrompterMode>(loadPrompterMode)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLSpanElement>(null)
@@ -114,6 +128,13 @@ export default function StageView({ setlistId, onLibrary, onSettings, onExit }: 
   }, [state, orderedSetlist])
   const nextSong = currentSong ? orderedSetlist.find((s) => s.orderIndex > currentSong.orderIndex) ?? null : null
 
+  // Lyrics and chords (CONTRACT_V3 9.1): downloaded when content_etag changes, kept for Flywheel.
+  const currentSongId = currentSong?.songId ?? null
+  useEffect(() => {
+    if (state) songContentStore.sync(snap.url, state.setlist, currentSongId)
+  }, [snap.url, state, currentSongId])
+  const content = useSongContent(songContentStore, currentSongId)
+
   const ribbon = useMemo((): { label: string; songs: RibbonSong[] } | null => {
     if (state && orderedSetlist.length > 0) {
       return {
@@ -138,6 +159,19 @@ export default function StageView({ setlistId, onLibrary, onSettings, onExit }: 
   )
   const visualRefs = useMemo(() => ({ root: rootRef, bar: barRef, beat: beatRef, pills: pillsRef }), [])
   useBeatVisuals(flywheelClock, visualRefs, fallback)
+  const sectionIndex = useSectionIndex(flywheelClock, content?.sections ?? NO_SECTIONS, pausedBar)
+
+  const togglePrompterMode = useCallback(() => {
+    setPrompterMode((mode) => {
+      const next: PrompterMode = mode === 'singer' ? 'musician' : 'singer'
+      try {
+        localStorage.setItem(PROMPTER_MODE_KEY, next)
+      } catch {
+        // Storage blocked: the mode still applies for this session.
+      }
+      return next
+    })
+  }, [])
 
   const handleArmAudio = useCallback(() => {
     // Synchronous call inside the click handler: required by iOS.
@@ -356,18 +390,40 @@ export default function StageView({ setlistId, onLibrary, onSettings, onExit }: 
             )}
             <span className="prompter-song-name">{songTitle}</span>
           </div>
-          {currentSong && (
-            <span style={{ fontFamily: 'var(--font-mono)' }}>
-              {currentSong.bpm} BPM{state && state.bpm !== currentSong.bpm ? ` // AJUSTADO A ${state.bpm}` : ''}
-            </span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {currentSong && (
+              <span style={{ fontFamily: 'var(--font-mono)' }}>
+                {content?.showKey ? `${content.showKey} // ` : ''}
+                {currentSong.bpm} BPM{state && state.bpm !== currentSong.bpm ? ` // AJUSTADO A ${state.bpm}` : ''}
+              </span>
+            )}
+            <button
+              type="button"
+              className="prompter-mode-toggle"
+              onClick={togglePrompterMode}
+              aria-label={prompterMode === 'singer' ? 'Mostrar acordes' : 'Mostrar solo letra'}
+            >
+              {prompterMode === 'singer' ? 'LETRA' : 'ACORDES'}
+            </button>
+          </div>
         </div>
 
         <div className="prompter-lyrics-box">
-          <div className="prompter-waiting">SIN LETRA</div>
-          <div className="prompter-lyric-next" style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
-            LA DISTRIBUCION DE LETRAS DESDE EL LIDER ESTA PENDIENTE
-          </div>
+          {content && content.sections.length > 0 ? (
+            <ChordProPrompter content={content} sectionIndex={sectionIndex} mode={prompterMode} />
+          ) : (
+            <div className="prompter-waiting">
+              {!currentSong
+                ? 'SIN CANCION ACTIVA'
+                : content
+                  ? 'ESTA CANCION NO TIENE LETRA NI ACORDES'
+                  : !currentSong.contentEtag
+                    ? 'ESTE LIDER NO ENVIA LETRAS: ACTUALIZARLO'
+                    : songContentStore.hasFailed(currentSong.songId)
+                      ? 'SIN LETRA: EL LIDER NO LA ENTREGO'
+                      : 'CARGANDO LETRA...'}
+            </div>
+          )}
           {nextSong && (
             <div className="prompter-lyric-next">
               SIGUIENTE: {nextSong.title} // {nextSong.bpm} BPM

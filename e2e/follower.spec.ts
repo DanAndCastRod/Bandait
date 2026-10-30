@@ -72,6 +72,14 @@ async function mockLeader(page: Page): Promise<MockLeader> {
     ...over,
   });
 
+  // CONTRACT_V3 9.1: song content (only song_01 has sections in the fixtures).
+  await page.route('**/songs/*.json', (route) => {
+    const song = FIXTURES.song_content;
+    return route.request().url().endsWith(`/songs/${song.song_id}.json`)
+      ? route.fulfill({ json: song, headers: { 'access-control-allow-origin': '*', etag: `"${song.content_etag}"` } })
+      : route.fulfill({ status: 404, body: 'No encontrado', headers: { 'access-control-allow-origin': '*' } });
+  });
+
   await page.routeWebSocket(SOCKET_URL, (ws: WebSocketRoute) => {
     // Engine.IO open packet.
     ws.send('0' + JSON.stringify({ sid: 'e2e-engine', upgrades: [], pingInterval: 60000, pingTimeout: 60000, maxPayload: 1e6 }));
@@ -419,7 +427,10 @@ test.describe('Follower: escenario conectado (lider simulado)', () => {
     await expect(page.locator('.prompter-song-name')).toHaveText('Intro');
     await expect(page.getByText('TEMA 01/03')).toBeVisible();
     await expect(page.getByText('SIGUIENTE: Segunda // 96 BPM')).toBeVisible();
-    await expect(page.getByText('SIN LETRA', { exact: true })).toBeVisible();
+    // Prompter (CONTRACT_V3 9.1): stopped, it shows the first section with its chords.
+    await expect(page.locator('.cp-section-name')).toHaveText('INTRO');
+    await expect(page.locator('.cp-chord').first()).toHaveText('Am');
+    await expect(page.getByText('SIGUE: ESTROFA 1')).toBeVisible();
     await expect(page.locator('.network-beacon')).toContainText(/RTT \d+\.\d \/\/ JIT \d+\.\d ms/, { timeout: 10_000 });
 
     const join = leader.joins()[0];
