@@ -125,9 +125,22 @@ def test_stage_view_with_and_without_song(qtbot, qapp):
     sv.show_jump_alert("Desde Lejos", 2)
     sv.set_network_status(False)
     paint(sv, qapp, sizes=[(1280, 720), (640, 400), (1920, 1080)])
+    # Lyrics and chords by section (CONTRACT_V3 9.1), setlist rail, both prompter modes.
+    sections = [
+        {"id": "a", "kind": "intro", "label": "Intro", "bars": 2, "start_bar": 1, "chordpro": "[Am]  [F]", "cue_text": None},
+        {"id": "b", "kind": "verse", "label": "Estrofa", "bars": 8, "start_bar": 3,
+         "chordpro": "[Am]Las luces de la [F]ciudad\n[C]se reflejan en tu [G]piel\n{c: Todos}", "cue_text": None},
+    ]
+    sv.set_setlist([{"song_id": f"s{i}", "title": f"Tema {i}", "bpm": 100 + i} for i in range(30)], "s12")
+    sv.set_song_content({"song_id": "s12", "title": "Medianoche", "artist": "B&O's", "key": "Am", "sections": sections})
+    for bar, mode in ((1, "musician"), (4, "musician"), (4, "singer"), (99, "singer")):
+        sv.set_prompter_mode(mode)
+        sv.set_bar(bar)
+        paint(sv, qapp, sizes=[(1280, 720), (640, 400), (1920, 1080)])
     sv.clear_beat()
     sv.set_bar(None)
     sv.set_song(title="Sin canción")
+    sv.set_setlist([])
     paint(sv, qapp)
 
 

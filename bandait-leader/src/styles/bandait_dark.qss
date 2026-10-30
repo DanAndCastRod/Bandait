@@ -509,3 +509,27 @@ QProgressBar::chunk {
     background: #5CC8C2;
     border-radius: 2px;
 }
+
+/* Escenario: conmutador ACORDES / LETRA del prompter */
+QPushButton#prompterMode {
+    background-color: #1B1F24;
+    border: 1px solid #2E343D;
+    color: #8E97A3;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+QPushButton#prompterMode:hover {
+    border-color: #5CC8C2;
+    color: #D5DAE0;
+}
+
+QPushButton#prompterMode:pressed {
+    background-color: #232830;
+}
+
+QPushButton#prompterMode:focus {
+    border-color: #5CC8C2;
+}
