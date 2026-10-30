@@ -731,3 +731,6 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Hacer merge del PR. Es un despliegue a producción: `landing/hub` ya está regenerado.
   3. Borrar bandas compartidas desde el hub (hoy solo existe la política de borrado; no hay botón).
   4. Una e2e de nube con Supabase local o un proyecto de pruebas.
+  5. Revisar PySide6 6.12 aparte y quitar el tope `<6.12`, que se agregó en este mismo PR. La CI del PR #20 instaló PySide6 6.12.0, publicado después de la última corrida verde (6.11.2, run `37251318217`), y eso trajo dos fallas:
+     - en Linux, `pytest` termina `358 passed, 1 skipped` y luego el proceso muere con "shared QObject was deleted directly" y segfault (exit 139), reproducido dos veces;
+     - en Windows, el chequeo de licencias del instalador falla porque `NOTICE.md` no menciona `PySide6_Pdf` ni `PySide6_WebEngine`, paquetes que 6.12 trae aparte.

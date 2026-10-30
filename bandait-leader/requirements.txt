@@ -1,4 +1,4 @@
-PySide6>=6.6.0
+PySide6>=6.6.0,<6.12  # 6.12.0: segfault de Qt al cerrar pytest en Linux y paquetes Pdf/WebEngine aparte (CI 2026-10-30)
 sounddevice>=0.5.4  # first release with the 2025-11-14 rebuild of the ASIO DLL
 numpy>=1.24.0
 soundfile>=0.12.1
