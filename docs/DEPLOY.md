@@ -361,10 +361,46 @@ Los workspaces que solo existen en `localStorage` de un navegador (perfil local 
 - Ignora los ecos de realtime de sus propias escrituras (`_sync.client_write_id`).
 
 ### 3.10. Límites conocidos (pendientes)
-- **Roles:** "solo un Owner cambia roles, nadie cambia su propio rol, siempre queda un Owner" se valida solo en el navegador. Cada fila es el workspace completo de una persona; aplicar permisos de verdad entre integrantes requiere tablas por banda (`bands`, `band_members`) con RLS por pertenencia en el servidor. Pendiente.
-- Las invitaciones de integrantes no envían correo ni crean cuentas: solo agregan una fila a la lista local.
+- **Roles en bandas personales:** "solo un Owner cambia roles, nadie cambia su propio rol, siempre queda un Owner" se valida solo en el navegador. En una **banda compartida** (sección 3.11) los permisos los aplica el servidor.
+- Bandait no envía correos: en una banda compartida, invitar da acceso al correo y entrega un enlace que se manda por el canal de la banda. En una banda sin compartir, invitar solo agrega una fila a la lista local.
 - La exportación es JSON (`EXPORTAR JSON`); el XLSX real está pendiente.
 - Si alguna vez una clave `service_role` llegó a un bundle, a un override del modal o a un navegador, rótala en Supabase (Project Settings -> API): RLS no la detiene.
+
+### 3.11. Bandas compartidas
+
+Permiten que varios integrantes, cada uno con su cuenta de Google, vean y editen la misma banda.
+
+**Modelo.**
+- Cada banda compartida es una fila de `bandait_bands`. Su `content` es un documento de workspace v2 con una sola banda, cuyo id es el de la fila.
+- La pertenencia vive en `bandait_band_members`: una fila por correo y rol.
+- El workspace personal (`bandait_workspaces`) no cambia. El hub une las dos cosas en pantalla y guarda cada parte en su fila, cada una con el mismo motor de sincronización (sección 3.9).
+
+**Permisos (los aplica RLS, no el navegador).**
+
+| Acción | Quién |
+|---|---|
+| Ver la banda y su lista de integrantes | Cualquier integrante y quien la creó |
+| Editar canciones, setlists, voz y equipamiento | Owner y MusicDirector |
+| Invitar | Owner y MusicDirector (solo un Owner invita a otro Owner) |
+| Cambiar roles o quitar integrantes | Owner |
+| Salirse | Cada integrante (quien la creó siempre conserva el acceso) |
+| Borrar la banda | Solo quien la creó |
+
+El correo que cuenta es el de `auth.users` y solo si está confirmado. Google lo entrega confirmado.
+
+**Aprovisionamiento (una vez, en el SQL Editor).**
+1. Ejecuta [`docs/sql/bandas_compartidas.sql`](sql/bandas_compartidas.sql) completo. Es idempotente: crea las dos tablas, las funciones `bandait_current_email()` y `bandait_band_role(uuid)`, las políticas RLS, los permisos por columna y la publicación de realtime.
+2. Antes de ejecutarlo, prueba el mismo archivo contra Postgres real sin tocar Supabase: `npm run test:rls` desde la raíz del repo (PGlite, 35 casos de permisos).
+3. Mientras el SQL no esté aplicado, el hub sigue funcionando igual y el botón COMPARTIR BANDA muestra el motivo.
+
+**Uso.**
+- En INTEGRANTES, **COMPARTIR BANDA** sube la banda activa con un id nuevo, invita a los integrantes de la lista que tengan correo y la quita del workspace personal.
+- En el líder hay que volver a elegirla en Cuenta > Elegir banda: aparece como `[COMPARTIDA]`.
+- **INVITAR INTEGRANTE** da acceso a un correo de Google y entrega el enlace `https://bandait.releven.cc/hub/?banda=<id>`. El enlace por sí solo no da acceso: abre la banda después de entrar con el correo invitado.
+- En PLAYLISTS, **COPIAR A OTRA BANDA** copia un setlist con sus canciones a cualquier banda donde el usuario pueda editar. Reutiliza las canciones que ya existan con el mismo título y artista.
+- Los integrantes con rol de solo lectura ven un aviso. Si editan, el hub revierte el cambio, y RLS lo rechazaría de todos modos.
+
+**Comprobación.** Con dos cuentas de Google: la primera comparte una banda e invita a la segunda como Musician. La segunda entra con el enlace y ve la banda, pero no puede editarla. La primera la sube a MusicDirector y la segunda ya puede editar.
 
 ---
 

@@ -88,7 +88,7 @@ class _PickerDialog(QDialog):
 
 
 class BandSelectorDialog(_PickerDialog):
-    """``bands``: dicts from ``workspace.band_summaries`` (id, name, genre, songs, setlists)."""
+    """``bands``: dicts from ``workspace.band_summaries`` (id, name, genre, songs, setlists, shared)."""
 
     def __init__(self, bands: List[dict], current: Optional[str] = None, parent=None):
         super().__init__(
@@ -101,7 +101,8 @@ class BandSelectorDialog(_PickerDialog):
         )
         for band in bands:
             genre = f" ({band['genre']})" if band.get("genre") else ""
-            text = f"{band['name']}{genre}  -  {band['songs']} canciones, {band['setlists']} setlists"
+            shared = "  [COMPARTIDA]" if band.get("shared") else ""
+            text = f"{band['name']}{genre}{shared}  -  {band['songs']} canciones, {band['setlists']} setlists"
             self._add(text, band["id"], band["id"] == current)
         if not bands:
             self._show_empty("Tu cuenta no tiene bandas en el hub. Créalas en bandait.releven.cc/hub.")

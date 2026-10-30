@@ -14,6 +14,11 @@
   cache stores the raw document untouched.
 - ``obtain_workspace`` downloads the user's row (read only: the leader never
   writes to Supabase) and falls back to the last good cached copy offline.
+- Shared bands (docs/sql/bandas_compartidas.sql) live in ``bandait_bands``, one
+  single-band v2 document per row; RLS returns only the ones the account belongs
+  to. They are parsed on their own and appended to the personal workspace, so a
+  v1 personal row never changes how a shared band is read. Missing tables (the
+  SQL not applied yet) simply mean "no shared bands".
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 2
 WORKSPACE_TABLE = "bandait_workspaces"
+BANDS_TABLE = "bandait_bands"
 CACHE_FORMAT = 1
 
 SECTION_KINDS = (
@@ -162,6 +168,7 @@ class Band:
     name: str
     genre: str = ""
     extra: Mapping[str, object] = field(default_factory=dict, compare=False)
+    shared: bool = False  # comes from bandait_bands, not from the personal row
 
 
 @dataclass(frozen=True)
@@ -693,6 +700,57 @@ def fetch_workspace(
     return RemoteWorkspace(raw=row["workspace"], updated_at=updated if isinstance(updated, str) else None)
 
 
+def fetch_shared_bands(
+    base_url: str, api_key: str, access_token: str, timeout: float = DEFAULT_TIMEOUT_S
+) -> List[Mapping[str, object]]:
+    """Rows of the shared bands this account can read (RLS filters them).
+    ``[]`` when the tables do not exist yet. Read only, like ``fetch_workspace``."""
+    query = urllib.parse.urlencode({"select": "id,content,updated_at"})
+    try:
+        data = request_json(
+            "GET",
+            f"{base_url.rstrip('/')}/rest/v1/{BANDS_TABLE}?{query}",
+            headers={"apikey": api_key, "Authorization": f"Bearer {access_token}"},
+            timeout=timeout,
+        )
+    except CloudHTTPError as err:
+        if err.status == 404 or err.error_code in ("PGRST205", "42P01"):
+            return []
+        raise
+    if not isinstance(data, list):
+        raise CloudHTTPError(200, "bad_shape", "La nube respondió algo inesperado al leer las bandas compartidas")
+    return [
+        row for row in data
+        if isinstance(row, dict) and isinstance(row.get("id"), str) and isinstance(row.get("content"), dict)
+    ]
+
+
+def with_shared_bands(personal: Workspace, rows: Sequence[Mapping[str, object]]) -> Workspace:
+    """``personal`` plus one band per shared row. A row whose document does not
+    carry exactly its own band, or whose id is already a personal band, is skipped."""
+    bands = list(personal.bands)
+    content: Dict[str, BandContent] = dict(personal.content)
+    warnings = list(personal.warnings)
+    for row in rows:
+        band_id = row.get("id")
+        shared = parse_workspace(row.get("content"))
+        if not isinstance(band_id, str) or len(shared.bands) != 1 or shared.bands[0].id != band_id:
+            warnings.append(f"Banda compartida {band_id!r} con formato inválido: se omite")
+            continue
+        if band_id in content:
+            continue
+        band = replace(shared.bands[0], shared=True)
+        bands.append(band)
+        content[band_id] = replace(shared.content[band_id], band=band)
+        warnings.extend(f"{band.name}: {w}" for w in shared.warnings)
+    active = personal.active_band_id or (bands[0].id if bands else None)
+    return replace(personal, bands=tuple(bands), content=content, warnings=tuple(warnings), active_band_id=active)
+
+
+def _empty_workspace() -> Workspace:
+    return Workspace(schema_version=SCHEMA_VERSION, active_band_id=None, bands=(), content={}, raw={})
+
+
 # --------------------------------------------------------------------------- cache
 @dataclass(frozen=True)
 class CachedWorkspace:
@@ -701,6 +759,11 @@ class CachedWorkspace:
     email: str
     updated_at: Optional[str]
     fetched_at: str  # ISO 8601 UTC
+    shared: Tuple[Mapping[str, object], ...] = field(default=(), repr=False)
+
+    def workspace(self) -> Workspace:
+        base = parse_workspace(self.raw) if self.raw else _empty_workspace()
+        return with_shared_bands(base, self.shared)
 
 
 def utc_now_iso() -> str:
@@ -715,6 +778,7 @@ def save_cache(
     raw: Mapping[str, object],
     updated_at: Optional[str],
     fetched_at: Optional[str] = None,
+    shared: Sequence[Mapping[str, object]] = (),
 ) -> str:
     """Write the snapshot atomically (temp file in the same folder + os.replace)."""
     fetched_at = fetched_at or utc_now_iso()
@@ -727,6 +791,7 @@ def save_cache(
         "updated_at": updated_at,
         "fetched_at": fetched_at,
         "workspace": raw,
+        "shared_bands": list(shared),
     }
     fd, tmp = tempfile.mkstemp(prefix=".workspace.", suffix=".tmp", dir=directory)
     try:
@@ -759,12 +824,14 @@ def load_cache(path: str, user_id: Optional[str] = None) -> Optional[CachedWorks
     fetched = data.get("fetched_at")
     updated = data.get("updated_at")
     email = data.get("email")
+    shared = data.get("shared_bands")
     return CachedWorkspace(
         raw=data["workspace"],
         user_id=owner,
         email=email if isinstance(email, str) else "",
         updated_at=updated if isinstance(updated, str) else None,
         fetched_at=fetched if isinstance(fetched, str) else "",
+        shared=tuple(r for r in shared if isinstance(r, dict)) if isinstance(shared, list) else (),
     )
 
 
@@ -810,18 +877,23 @@ def obtain_workspace(auth, base_url: str, api_key: str, cache_path: str,
                 raise
             token = auth.access_token(force_refresh=True)  # expired or rotated JWT
             remote = fetch_workspace(base_url, api_key, token, user.id, timeout)
-        if remote is None:
+        shared_rows, shared_error = _shared_rows_or_cached(base_url, api_key, token, cache_path, user.id, timeout)
+        if remote is None and not shared_rows:
             error = "Tu cuenta todavía no tiene datos en el hub"
         else:
             fetched_at = utc_now_iso()
+            raw = remote.raw if remote is not None else {}
             try:
-                save_cache(cache_path, user_id=user.id, email=user.email, raw=remote.raw,
-                           updated_at=remote.updated_at, fetched_at=fetched_at)
+                save_cache(cache_path, user_id=user.id, email=user.email, raw=raw,
+                           updated_at=remote.updated_at if remote is not None else None,
+                           fetched_at=fetched_at, shared=shared_rows)
             except OSError as err:
                 logger.warning("No se pudo guardar la copia local del workspace: %s", err)
+            base = parse_workspace(raw) if remote is not None else _empty_workspace()
             return WorkspaceSnapshot(
-                workspace=parse_workspace(remote.raw), source="cloud", user_id=user.id,
-                email=user.email, updated_at=remote.updated_at, fetched_at=fetched_at,
+                workspace=with_shared_bands(base, shared_rows), source="cloud", user_id=user.id,
+                email=user.email, updated_at=remote.updated_at if remote is not None else None,
+                fetched_at=fetched_at, error=shared_error,
             )
     except SessionRevoked as err:
         error, revoked = str(err), True
@@ -840,10 +912,22 @@ def obtain_workspace(auth, base_url: str, api_key: str, cache_path: str,
     if cached is None:
         raise WorkspaceUnavailable(error or "Sin copia local del workspace", revoked=revoked)
     return WorkspaceSnapshot(
-        workspace=parse_workspace(cached.raw), source="cache", user_id=user.id,
+        workspace=cached.workspace(), source="cache", user_id=user.id,
         email=cached.email or user.email, updated_at=cached.updated_at,
         fetched_at=cached.fetched_at, error=error, revoked=revoked,
     )
+
+
+def _shared_rows_or_cached(base_url: str, api_key: str, token: str, cache_path: str, user_id: str,
+                           timeout: float) -> Tuple[Tuple[Mapping[str, object], ...], Optional[str]]:
+    """Shared band rows from the cloud. If only this read fails (the personal row
+    already came through), keep the cached shared bands instead of dropping them."""
+    try:
+        return tuple(fetch_shared_bands(base_url, api_key, token, timeout)), None
+    except CloudError as err:
+        cached = load_cache(cache_path, user_id)
+        logger.warning("No se pudieron leer las bandas compartidas: %s", err)
+        return (cached.shared if cached else ()), f"Bandas compartidas sin actualizar: {err}"
 
 
 def snapshot_from_cache(cache_path: str, user_id: str) -> Optional[WorkspaceSnapshot]:
@@ -852,7 +936,7 @@ def snapshot_from_cache(cache_path: str, user_id: str) -> Optional[WorkspaceSnap
     if cached is None:
         return None
     return WorkspaceSnapshot(
-        workspace=parse_workspace(cached.raw), source="cache", user_id=cached.user_id,
+        workspace=cached.workspace(), source="cache", user_id=cached.user_id,
         email=cached.email, updated_at=cached.updated_at, fetched_at=cached.fetched_at,
     )
 
@@ -868,12 +952,14 @@ def band_summaries(workspace: Workspace) -> List[dict]:
             "genre": band.genre,
             "songs": len(content.songs) if content else 0,
             "setlists": len(content.playlists) if content else 0,
+            "shared": band.shared,
         })
     return result
 
 
 __all__: Sequence[str] = (
     "Band", "BandContent", "Playlist", "PlaylistItem", "Section", "Song", "VoiceConfig", "Workspace",
-    "WorkspaceSnapshot", "WorkspaceUnavailable", "band_summaries", "deterministic_uuid", "fetch_workspace",
-    "load_cache", "obtain_workspace", "parse_workspace", "save_cache", "snapshot_from_cache",
+    "WorkspaceSnapshot", "WorkspaceUnavailable", "band_summaries", "deterministic_uuid", "fetch_shared_bands",
+    "fetch_workspace", "load_cache", "obtain_workspace", "parse_workspace", "save_cache", "snapshot_from_cache",
+    "with_shared_bands",
 )

@@ -676,3 +676,58 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
      - en el hub, borrar setlists y bandas;
      - Fase 1: letra por compases en la PWA, conteo y transiciones automáticas en el líder, avisos de voz (Worker de Cloudflare con Azure TTS) y prueba en ensayo real;
      - al final del refinamiento, reescribir los manuales dentro de la app.
+
+### [2026-10-29] - Bandas compartidas entre cuentas de Google (hub, líder y Supabase)
+* **Sprint / Módulo:** `bandait-leader-web`, `bandait-leader` (nube), `docs/sql`, `bandait-protocol/WORKSPACE_V2.md`
+* **Acción técnica realizada:**
+  - Pedido de Daniel Castañeda: compartir el repertorio entre los integrantes de una banda sin usar otras plataformas. Decisiones suyas:
+    - alcance: compartir dentro de una banda y además copiar entre bandas;
+    - permisos: Owner y MusicDirector editan, el resto solo lee;
+    - invitación: por correo de Google más un enlace.
+  - `docs/sql/bandas_compartidas.sql`:
+    - tablas `bandait_bands` (un documento v2 de una sola banda por fila) y `bandait_band_members` (correo y rol);
+    - funciones `security definer` `bandait_current_email()` (solo correo confirmado de `auth.users`) y `bandait_band_role(uuid)`;
+    - RLS por pertenencia, permisos por columna (`owner_id`, `id` y `email` no se pueden cambiar) y realtime.
+  - Hub:
+    - `services/sharedBands.ts`, módulo puro: partir y unir el workspace, copiar setlists, invitaciones y enlaces;
+    - adaptador por banda y operaciones de integrantes en `supabaseClient.ts`;
+    - `HubContext`: un motor de sincronización por banda compartida, la parte personal sigue en `bandait_workspaces`, detección de ediciones por parte (comparando contra la última versión conocida, no por identidad de objeto), solo lectura según el rol, enlace `?banda=<uuid>` que sobrevive al login de Google, respaldos por banda, e importación de JSON que reemplaza solo la parte personal;
+    - UI: panel COMPARTIR BANDA, invitaciones reales con enlace para copiar, QUITAR, SALIR DE LA BANDA, COPIAR A OTRA BANDA, aviso de solo lectura y etiqueta COMPARTIDA en el selector de bandas.
+  - Líder:
+    - `fetch_shared_bands` y `with_shared_bands`: cada fila se parsea por separado y se agrega a las bandas personales, marcada `shared`;
+    - la caché guarda `shared_bands`;
+    - si solo falla la lectura de compartidas, conserva las de la caché;
+    - si las tablas no existen, no hay compartidas;
+    - el selector muestra `[COMPARTIDA]`.
+  - `landing/hub` regenerado con `npm run build:landing`.
+* **Impacto en Audio / Red / UI:**
+  - Ninguno en el camino de audio ni en la LAN: el líder sigue leyendo la nube solo para importar y nunca escribe.
+  - Compartir una banda le cambia el id. En el líder hay que volver a elegirla en Cuenta > Elegir banda.
+  - Sin el SQL aplicado en Supabase, el hub y el líder se comportan como antes.
+* **Verificación y Pruebas (resultado literal):**
+  - `npm run test:rls` (raíz, PGlite 0.3.10): `35 ok, 0 fallos`, con creación, invitación, lectura, edición por rol, permisos de columna, salida, expulsión y borrado en cascada.
+  - Hub: `npm run verify:logic` da `23 ok`, `34 ok` y `14 ok` (el último es el script nuevo `verify-shared-bands-logic.ts`). `npm run lint`: sin problemas. `npm run build`: correcto.
+  - E2E: `npx playwright test --project=leader-web` da `19 passed`. Las 2 nuevas son COPIAR A OTRA BANDA y el panel de INTEGRANTES sin nube.
+  - Líder:
+    - `ruff check src tests`: `All checks passed!`;
+    - `pytest -q`: `359 passed`, con 6 casos nuevos en `test_cloud_workspace.py`;
+    - el Supabase falso de `conftest.py` ahora sirve `bandait_bands`.
+  - Capturas con el MCP de Playwright de PLAYLISTS (panel de copia), INTEGRANTES a 1440 px e INTEGRANTES a 375 px.
+  - **NO VERIFICADO:** el flujo de nube contra el proyecto `bandait-cloud` real (compartir, invitar, entrar con una segunda cuenta, solo lectura, realtime entre dos navegadores). El SQL todavía no se aplica en Supabase y no hay e2e con Supabase.
+* **Errores propios:**
+  - La primera versión de la política de lectura de `bandait_bands` dependía solo de `bandait_band_role(id)`. En `insert ... returning`, que es lo que hace `.insert().select()`, la fila nueva todavía no es visible para la función y el insert fallaba por RLS. Lo detectó `test:rls` y se agregó `owner_id = auth.uid()` a la política.
+  - Al comparar canciones por título y artista, el recorte de espacios se hacía sobre la clave unida, así que " Artista " no coincidía con "Artista". Lo detectó `verify-shared-bands-logic.ts`; ahora se normaliza cada campo.
+  - En `refreshShared` la banda activa se comparaba después de actualizar la referencia, así que la comparación siempre daba igual. Se corrigió antes de probar.
+  - Una aserción e2e buscaba texto visible dentro de un `<option>`; se cambió por un localizador de opción.
+* **Decisiones:**
+  - Documento v2 de una banda por fila, en vez de tablas normalizadas de canciones y setlists. Reutiliza la validación, la migración, el motor de sincronización y el parser del líder sin cambios.
+  - La pertenencia va por correo y no por id de usuario: se puede invitar a quien todavía no entró nunca a Bandait.
+  - El enlace de invitación no da acceso por sí solo; el acceso lo da el correo invitado.
+  - El adaptador de una banda compartida nunca hace `insert` desde el motor. Si la fila desaparece, recrearla dejaría a un integrante como dueño de una banda ajena.
+  - Para un rol de solo lectura, el motor arranca con `dirty: false`: nunca intenta subir.
+  - Se usó PGlite porque Docker Desktop no estaba corriendo.
+* **Pendientes:**
+  1. Daniel Castañeda: ejecutar `docs/sql/bandas_compartidas.sql` en el SQL Editor de `bandait-cloud` y comprobarlo con dos cuentas (DEPLOY.md 3.11, "Comprobación").
+  2. Hacer merge del PR. Es un despliegue a producción: `landing/hub` ya está regenerado.
+  3. Borrar bandas compartidas desde el hub (hoy solo existe la política de borrado; no hay botón).
+  4. Una e2e de nube con Supabase local o un proyecto de pruebas.

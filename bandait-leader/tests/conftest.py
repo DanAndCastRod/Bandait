@@ -141,6 +141,10 @@ class FakeSupabase:
         self.workspace = None
         self.updated_at = "2026-10-01T12:00:00+00:00"
         self.has_row = True
+        # Shared bands (bandait_bands): None = the table does not exist (SQL not applied),
+        # a list = the rows RLS would return. shared_status forces an HTTP error.
+        self.shared_bands = None
+        self.shared_status = None
         self.requests = []
         self.rest_writes = []
         # Optional threading.Event: when set to an Event, workspace reads wait on it
@@ -267,6 +271,17 @@ class FakeSupabase:
                     if wanted != f"eq.{entry[0]}" or not fake.has_row:
                         return self._json(200, [])  # RLS: only the caller's own row
                     return self._json(200, [{"workspace": fake.workspace, "updated_at": fake.updated_at}])
+                if parsed.path == "/rest/v1/bandait_bands":
+                    if self.headers.get("apikey") != fake.api_key:
+                        return self._json(401, {"message": "No API key found in request"})
+                    entry, _token = self._bearer()
+                    if entry is None:
+                        return self._json(401, {"code": "PGRST301", "message": "JWT expired"})
+                    if fake.shared_status:
+                        return self._json(fake.shared_status, {"message": "upstream error"})
+                    if fake.shared_bands is None:
+                        return self._json(404, {"code": "PGRST205", "message": "Could not find the table"})
+                    return self._json(200, fake.shared_bands)
                 return self._json(404, {"message": "not found"})
 
             def do_POST(self):

@@ -13,9 +13,11 @@
     "test:e2e:follower": "playwright test --project=follower",
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:report": "playwright show-report",
-    "install:browsers": "playwright install"
+    "install:browsers": "playwright install",
+    "test:rls": "node scripts/verify-shared-bands-rls.mjs"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.10",
     "@playwright/test": "^1.60.0",
     "playwright": "^1.60.0"
   }

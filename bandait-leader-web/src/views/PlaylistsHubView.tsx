@@ -18,7 +18,7 @@ import {
 import { SetlistAddSongModal } from '../components/SetlistAddSongModal'
 import { CommitInput } from '../components/CommitInput'
 import { colors, mono } from '../components/hubStyles'
-import { ListMusic, Plus, ArrowUp, ArrowDown, Trash2, Clock, Music, Radio, AlertTriangle, Info } from 'lucide-react'
+import { ListMusic, Plus, ArrowUp, ArrowDown, Trash2, Clock, Music, Radio, AlertTriangle, Info, Copy, Lock } from 'lucide-react'
 
 const MODE_COLOR: Record<TransitionMode, string> = {
   manual_cue: colors.warning,
@@ -45,9 +45,22 @@ export const PlaylistsHubView: React.FC = () => {
     addSongToPlaylist,
     removeSongFromPlaylist,
     createSong,
+    bands,
+    sharing,
+    copyPlaylistToBand,
   } = useHub()
 
   const [showAddSongModal, setShowAddSongModal] = useState(false)
+  const [showCopy, setShowCopy] = useState(false)
+  const [copyTarget, setCopyTarget] = useState('')
+  const [copyResult, setCopyResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const copyTargets = bands.filter((b) => b.id !== activeBand?.id && sharing.editableBandIds.includes(b.id))
+  const handleCopy = () => {
+    if (!activePlaylist) return
+    const target = copyTarget || copyTargets[0]?.id
+    if (!target) return
+    setCopyResult(copyPlaylistToBand(activePlaylist.id, target))
+  }
   const [showNewPlaylistModal, setShowNewPlaylistModal] = useState(false)
   const [newPlaylistName, setNewPlaylistName] = useState('')
 
@@ -185,8 +198,133 @@ export const PlaylistsHubView: React.FC = () => {
             <Plus size={14} />
             <span>AÑADIR CANCIÓN</span>
           </button>
+
+          <button
+            data-testid="copy-setlist-toggle"
+            onClick={() => {
+              setShowCopy((v) => !v)
+              setCopyResult(null)
+            }}
+            disabled={!activePlaylist}
+            title={activePlaylist ? 'Copiar este setlist, con sus canciones, a otra banda' : 'Crea primero un setlist'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#1a202c',
+              border: '1px solid #2a3346',
+              borderRadius: '4px',
+              padding: '8px 14px',
+              color: '#ffffff',
+              fontSize: '12px',
+              fontFamily: "'IBM Plex Mono', monospace",
+              cursor: activePlaylist ? 'pointer' : 'not-allowed',
+              opacity: activePlaylist ? 1 : 0.5,
+            }}
+          >
+            <Copy size={14} />
+            <span>COPIAR A OTRA BANDA</span>
+          </button>
         </div>
       </div>
+
+      {!sharing.activeCanEdit && (
+        <div
+          role="note"
+          data-testid="read-only-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            borderRadius: '4px',
+            padding: '10px 14px',
+            color: '#fcd34d',
+            fontSize: '12px',
+            fontFamily: "'IBM Plex Mono', monospace",
+          }}
+        >
+          <Lock size={14} />
+          SOLO LECTURA: en esta banda compartida tu rol no edita. Puedes estudiar el repertorio y copiar setlists a una banda tuya.
+        </div>
+      )}
+
+      {showCopy && activePlaylist && (
+        <div
+          data-testid="copy-setlist-panel"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '10px',
+            background: '#131720',
+            border: '1px solid #2a3346',
+            borderRadius: '6px',
+            padding: '12px 16px',
+            fontSize: '12px',
+            fontFamily: "'IBM Plex Mono', monospace",
+          }}
+        >
+          {copyTargets.length === 0 ? (
+            <span style={{ color: '#94a3b8' }}>
+              No tienes otra banda donde puedas editar. Crea una banda o pide rol de director en una compartida.
+            </span>
+          ) : (
+            <>
+              <label htmlFor="copy-target" style={{ color: '#94a3b8' }}>
+                COPIAR "{activePlaylist.name}" A
+              </label>
+              <select
+                id="copy-target"
+                value={copyTarget || copyTargets[0].id}
+                onChange={(e) => setCopyTarget(e.target.value)}
+                style={{
+                  background: '#0d1017',
+                  border: '1px solid #2a3346',
+                  borderRadius: '4px',
+                  padding: '6px 10px',
+                  color: '#ffffff',
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: '12px',
+                }}
+              >
+                {copyTargets.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                    {sharing.sharedBandIds.includes(b.id) ? ' (compartida)' : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                data-testid="copy-setlist-confirm"
+                onClick={handleCopy}
+                style={{
+                  background: '#0066ff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '6px 14px',
+                  color: '#ffffff',
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                COPIAR
+              </button>
+              <span style={{ color: '#64748b', flexBasis: '100%' }}>
+                Las canciones que ya existan en la banda de destino (mismo título y artista) se reutilizan; las demás se copian.
+              </span>
+            </>
+          )}
+          {copyResult && (
+            <span role="status" style={{ flexBasis: '100%', color: copyResult.ok ? '#10b981' : '#fca5a5' }}>
+              {copyResult.message}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* METRIC STRIP */}
       <div
