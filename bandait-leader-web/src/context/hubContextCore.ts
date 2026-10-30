@@ -36,6 +36,8 @@ export interface HubActionResult {
   ok: boolean
   message: string
   link?: string
+  /** Banda a la que se refiere el resultado: la UI no lo muestra si la banda activa es otra. */
+  bandId?: string
 }
 
 /** Bandas compartidas (docs/DEPLOY.md, seccion 3.11). */

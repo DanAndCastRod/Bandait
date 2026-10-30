@@ -109,6 +109,8 @@ export const BandMembersHubView: React.FC = () => {
   const [panelResult, setPanelResult] = useState<HubActionResult | null>(null)
 
   const isShared = sharing.activeShared
+  // Un resultado (y su enlace) es de una banda: al cambiar de banda no debe quedar a la vista.
+  const visiblePanelResult = panelResult && (!panelResult.bandId || panelResult.bandId === activeBand?.id) ? panelResult : null
   const isCreator = !!activeBand && !!user && activeBand.ownerId === user.id
   const canInvite = !isShared || sharing.activeCanInvite
 
@@ -134,7 +136,8 @@ export const BandMembersHubView: React.FC = () => {
   const handleShare = async () => {
     if (shareBusy) return
     setShareBusy(true)
-    setPanelResult(await shareActiveBand())
+    const result = await shareActiveBand()
+    setPanelResult({ bandId: activeBand?.id, ...result })
     setShareBusy(false)
   }
 
@@ -145,7 +148,8 @@ export const BandMembersHubView: React.FC = () => {
 
   const handleRemove = async (memberId: string, name: string) => {
     if (!window.confirm(`¿Quitar a ${name} de la banda? Perderá el acceso.`)) return
-    setPanelResult(await removeMember(memberId))
+    const result = await removeMember(memberId)
+    setPanelResult({ bandId: activeBand?.id, ...result })
   }
 
   const handleRoleChange = (memberId: string, newRole: MemberRole) => {
@@ -257,7 +261,7 @@ export const BandMembersHubView: React.FC = () => {
               Cada integrante entra al Hub con "Continuar con Google" usando el correo invitado y ve las mismas canciones y
               setlists. Bandait no envía correos: manda este enlace por el chat de la banda.
             </p>
-            {sharing.activeLink && <InviteLinkBox link={sharing.activeLink} />}
+            {sharing.activeLink && <InviteLinkBox key={sharing.activeLink} link={sharing.activeLink} />}
             {!sharing.activeCanEdit && (
               <p style={{ margin: 0, fontSize: '12px', color: '#f59e0b', fontFamily: MONO }}>
                 Tu rol es de solo lectura: puedes estudiar el repertorio pero no editarlo.
@@ -327,12 +331,12 @@ export const BandMembersHubView: React.FC = () => {
             datos viven solo en este navegador.
           </p>
         )}
-        {panelResult && (
-          <div role="status" style={resultBox(panelResult)}>
-            {panelResult.message}
-            {panelResult.ok && panelResult.link && !isShared && (
+        {visiblePanelResult && (
+          <div role="status" data-testid="sharing-result" style={resultBox(visiblePanelResult)}>
+            {visiblePanelResult.message}
+            {visiblePanelResult.ok && visiblePanelResult.link && !isShared && (
               <div style={{ marginTop: '8px' }}>
-                <InviteLinkBox link={panelResult.link} />
+                <InviteLinkBox key={visiblePanelResult.link} link={visiblePanelResult.link} />
               </div>
             )}
           </div>
@@ -673,7 +677,7 @@ export const BandMembersHubView: React.FC = () => {
                   {inviteResult.message}
                   {inviteResult.link && (
                     <div style={{ marginTop: '8px' }}>
-                      <InviteLinkBox link={inviteResult.link} />
+                      <InviteLinkBox key={inviteResult.link} link={inviteResult.link} />
                     </div>
                   )}
                 </div>
