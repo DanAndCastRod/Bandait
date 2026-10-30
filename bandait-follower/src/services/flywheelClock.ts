@@ -104,6 +104,11 @@ export const PHASE_SLEW_LIMIT_MS = 50
 export const MAX_SLEW_STEP_MS = 5
 export const MAPPER_ALPHA = 0.05
 export const MAPPER_RESET_MS = 25
+/**
+ * Upper bound for the output latency added to the scheduling window. Android is often
+ * 100-200 ms and Bluetooth 200-300 ms; beyond this the device is not usable on stage anyway.
+ */
+export const MAX_OUTPUT_LEAD_MS = 500
 
 const MAX_BEATS_PER_TICK = 64
 const HISTORY_LIMIT = 32
@@ -275,6 +280,18 @@ export class AudioClockMapper {
     return this.deltaMs === null ? null : (localMs + this.deltaMs) / 1000
   }
 
+  /**
+   * How far the render clock (currentTime) runs ahead of what is HEARD now: the output
+   * latency, in ms. A click must be scheduled at least this early or it reaches the audio
+   * clock "late" and is dropped. Clamped to [0, MAX_OUTPUT_LEAD_MS].
+   */
+  outputLeadMs(ctx: AudioContextLike, nowMs: number): number {
+    if (this.deltaMs === null) return 0
+    const lead = ctx.currentTime * 1000 - (nowMs + this.deltaMs)
+    if (!Number.isFinite(lead)) return 0
+    return Math.max(0, Math.min(MAX_OUTPUT_LEAD_MS, lead))
+  }
+
   reset(): void {
     this.deltaMs = null
     this.useOutputTimestamp = false
@@ -392,6 +409,13 @@ export class FlywheelClock {
   setVolume(volume: number): void {
     this.inEarVolume = clamp01(volume)
     this.applyMasterGain(false)
+  }
+
+  /** Output latency of this device in ms (render clock ahead of what is heard), or null without audio. */
+  getOutputLatencyMs(): number | null {
+    const ctx = this.ctx
+    if (!ctx || ctx.state !== 'running') return null
+    return Math.round(this.mapper.outputLeadMs(ctx, this.now()))
   }
 
   getVolume(): number {
@@ -597,7 +621,11 @@ export class FlywheelClock {
     const audioLive = ctx !== null && ctx.state === 'running' && this.clickBus !== null
     if (audioLive && ctx) this.mapper.sample(ctx, now)
     if (!this.cursor) this.initCursor(now)
-    const horizon = now + SCHEDULE_AHEAD_MS
+    // The window is measured on the audio render clock: a click heard at localMs must start
+    // outputLatency earlier. Without this, phones with more than ~95 ms of output latency
+    // (most Android, any Bluetooth) dropped every click after the first one.
+    const outputLeadMs = audioLive && ctx ? this.mapper.outputLeadMs(ctx, now) : 0
+    const horizon = now + SCHEDULE_AHEAD_MS + outputLeadMs
 
     for (let i = 0; i < MAX_BEATS_PER_TICK; i++) {
       const cursor = this.cursor

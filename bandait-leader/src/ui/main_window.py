@@ -303,6 +303,16 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(self._open_connect_musicians)
         self.status_bar.addPermanentWidget(self.connect_btn)
 
+        self.test_click_btn = QPushButton("Probar click")
+        self.test_click_btn.setToolTip("Un compás de click por las salidas configuradas, sin arrancar la canción")
+        self.test_click_btn.setStyleSheet(
+            "QPushButton { border: 1px solid #CCFF00; color: #CCFF00; border-radius: 4px;"
+            " padding: 2px 10px; font-size: 11px; }"
+            "QPushButton:hover { background: #CCFF00; color: #000000; }"
+        )
+        self.test_click_btn.clicked.connect(self._test_click)
+        self.status_bar.addPermanentWidget(self.test_click_btn)
+
         self.setStatusBar(self.status_bar)
 
     def _create_title_bar(self) -> QFrame:
@@ -512,6 +522,9 @@ class MainWindow(QMainWindow):
         self.action_audio_devices = QAction("&Dispositivos de Audio...", self)
         self.action_audio_devices.triggered.connect(self._open_audio_devices)
         audio_menu.addAction(self.action_audio_devices)
+        self.action_test_click = QAction("&Probar click", self)
+        self.action_test_click.triggered.connect(self._test_click)
+        audio_menu.addAction(self.action_test_click)
 
         net_menu = menubar.addMenu("&Red")
         self.action_retry_server = QAction("&Reintentar servidor", self)
@@ -639,6 +652,23 @@ class MainWindow(QMainWindow):
     def _set_audio_status(self, text: str, color: str):
         self.status_audio.setText(text)
         self.status_audio.setStyleSheet(f"color: {color};")
+
+    def _test_click(self):
+        """Audio > Probar click: says where it should sound, or why it cannot."""
+        reason = self.audio_engine.test_click()
+        if reason:
+            self.status_bar.showMessage(f"Probar click: {reason}", 10000)
+            return
+        eng = self.audio_engine
+        outputs = []
+        if eng.enable_pa_click:
+            outputs.append("Salidas 1-2 (PA)")
+        if eng.enable_drummer_click and eng.drummer_click_available:
+            outputs.append("Salida 3 (baterista)")
+        self.status_bar.showMessage(
+            f"Probar click: un compás por {eng.device_name}, {' y '.join(outputs)}. Si no lo oyes, revisa el volumen de Windows y ese dispositivo.",
+            10000,
+        )
 
     def _on_audio_started(self):
         eng = self.audio_engine
