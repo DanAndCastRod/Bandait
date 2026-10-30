@@ -1,6 +1,36 @@
 /* Bandait Follower — Audio Engineering & Stage Display System */
 
+/* Grafito (2026-10-30), predeterminado: la paleta del lider (bandait-leader/src/ui/theme.py)
+   y del hub. Sin negro puro ni acentos saturados: no deslumbra en un escenario oscuro. */
 :root,
+.theme-grafito {
+  --bg-primary: #15181c;
+  --bg-surface: #1b1f24;
+  --bg-elevated: #232830;
+  --text-primary: #d5dae0;
+  --text-secondary: #8e97a3;
+  --text-disabled: #4a525d;
+  --accent-active: #5cc8c2;
+  --accent-focus: #5cc8c2;
+  --accent-success: #b8cf7a;
+  --accent-warning: #d9a24e;
+  --accent-danger: #d96459;
+  --accent-cobalt: #7aa5d6;
+  --accent-special: #b48edb;
+  --font-ui: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --theme-border: #2e343d;
+  --theme-glow: rgba(92, 200, 194, 0.18);
+  --theme-radius: 4px;
+  --theme-card-bg: linear-gradient(180deg, #1e2228 0%, #1a1d22 100%);
+  --theme-panel-bg: rgba(27, 31, 36, 0.92);
+
+  --accent-primary: var(--accent-active);
+  --border-color: var(--theme-border);
+  --text-muted: var(--text-secondary);
+  --font-display: var(--font-ui);
+}
+
 .theme-swiss {
   --bg-primary: #0a0c10;
   --bg-surface: #131720;

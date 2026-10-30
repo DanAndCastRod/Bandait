@@ -39,7 +39,7 @@ class _PickerDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         head = QLabel(heading)
         head.setFont(QFont("Inter", 13, QFont.Bold))
-        head.setStyleSheet("color: #00FFFF;")
+        head.setStyleSheet("color: #5CC8C2;")
         layout.addWidget(head)
         info = QLabel(explanation)
         info.setObjectName("detail")
@@ -63,9 +63,9 @@ class _PickerDialog(QDialog):
         self.accept_btn = QPushButton(accept_text)
         self.accept_btn.setEnabled(False)
         self.accept_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #00FFFF; color: #00FFFF; }"
-            "QPushButton:hover { background: #00FFFF; color: #000000; }"
-            "QPushButton:disabled { border-color: #333333; color: #444444; }"
+            "QPushButton { border: 1px solid #5CC8C2; color: #5CC8C2; }"
+            "QPushButton:hover { background: #5CC8C2; color: #15181C; }"
+            "QPushButton:disabled { border-color: #363D47; color: #4A525D; }"
         )
         self.accept_btn.clicked.connect(self.accept)
         buttons.addWidget(self.accept_btn)
@@ -137,7 +137,7 @@ class SetlistSelectorDialog(_PickerDialog):
         self.empty_warning = QLabel(EMPTY_SETLIST_WARNING)
         self.empty_warning.setWordWrap(True)
         self.empty_warning.setStyleSheet(
-            "color: #000000; background: #FFAA00; padding: 6px 10px; font-weight: bold;"
+            "color: #15181C; background: #D9A24E; padding: 6px 10px; font-weight: bold;"
         )
         self.empty_warning.setVisible(False)
         layout = self.layout()

@@ -32,8 +32,8 @@ const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       style={{
         width: '100%',
         maxWidth: '460px',
-        background: '#131720',
-        border: '1px solid #2a3346',
+        background: '#1B1F24',
+        border: '1px solid #2E343D',
         borderRadius: '8px',
         padding: '24px',
         display: 'flex',
@@ -41,7 +41,7 @@ const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         gap: '14px',
         fontFamily: mono,
         fontSize: '12px',
-        color: '#94a3b8',
+        color: '#8E97A3',
         lineHeight: 1.5,
       }}
     >
@@ -59,7 +59,7 @@ const HubMainContent: React.FC = () => {
   if (user?.authProvider === 'supabase' && !cloud.authReady) {
     return (
       <CenteredPanel>
-        <strong style={{ color: '#ffffff' }}>RESTAURANDO SESIÓN DE NUBE...</strong>
+        <strong style={{ color: '#D5DAE0' }}>RESTAURANDO SESIÓN DE NUBE...</strong>
         <span>Verificando tu sesión de Supabase.</span>
       </CenteredPanel>
     )
@@ -74,7 +74,7 @@ const HubMainContent: React.FC = () => {
   if (initialSyncBlocking) {
     return (
       <CenteredPanel>
-        <strong style={{ color: '#ffffff' }} data-testid="initial-sync">
+        <strong style={{ color: '#D5DAE0' }} data-testid="initial-sync">
           DESCARGANDO TU WORKSPACE DE LA NUBE...
         </strong>
         <span>{syncStatus.state === 'synced' ? 'Listo.' : syncStatus.detail}</span>
@@ -83,21 +83,21 @@ const HubMainContent: React.FC = () => {
             <button
               type="button"
               onClick={retrySync}
-              style={{ background: '#0066ff', border: 'none', color: '#ffffff', borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px', fontWeight: 700 }}
+              style={{ background: '#7AA5D6', border: 'none', color: '#15181C', borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px', fontWeight: 700 }}
             >
               REINTENTAR
             </button>
             <button
               type="button"
               onClick={continueOffline}
-              style={{ background: 'transparent', border: '1px solid #2a3346', color: '#94a3b8', borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
+              style={{ background: 'transparent', border: '1px solid #2E343D', color: '#8E97A3', borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
             >
               TRABAJAR SIN CONEXIÓN
             </button>
             <button
               type="button"
               onClick={() => void logout()}
-              style={{ background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
+              style={{ background: 'transparent', border: '1px solid #D96459', color: '#D96459', borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
             >
               SALIR
             </button>

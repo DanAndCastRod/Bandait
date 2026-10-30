@@ -114,18 +114,18 @@ export const PlaylistsHubView: React.FC = () => {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '16px',
-          borderBottom: '1px solid #2a3346',
+          borderBottom: '1px solid #2E343D',
           paddingBottom: '16px',
         }}
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ListMusic size={22} style={{ color: '#ff4500', flexShrink: 0 }} />
+            <ListMusic size={22} style={{ color: '#5CC8C2', flexShrink: 0 }} />
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>
               Programación de Setlists & Transiciones
             </h2>
           </div>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
             Define el repertorio para {activeBand?.name} con canciones de la librería: BPM y tono del show, transiciones y conteos.
           </p>
         </div>
@@ -141,11 +141,11 @@ export const PlaylistsHubView: React.FC = () => {
                 if (found) setActivePlaylist(found)
               }}
               style={{
-                background: '#1a202c',
-                border: '1px solid #2a3346',
+                background: '#232830',
+                border: '1px solid #2E343D',
                 borderRadius: '4px',
                 padding: '8px 12px',
-                color: '#ffffff',
+                color: '#D5DAE0',
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: '12px',
                 fontWeight: 700,
@@ -168,11 +168,11 @@ export const PlaylistsHubView: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              background: '#1a202c',
-              border: '1px solid #2a3346',
+              background: '#232830',
+              border: '1px solid #2E343D',
               borderRadius: '4px',
               padding: '8px 14px',
-              color: '#ffffff',
+              color: '#D5DAE0',
               fontSize: '12px',
               fontFamily: "'IBM Plex Mono', monospace",
               cursor: 'pointer',
@@ -190,16 +190,16 @@ export const PlaylistsHubView: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              background: activePlaylist ? '#ff4500' : '#475569',
+              background: activePlaylist ? '#5CC8C2' : '#4A525D',
               border: 'none',
               borderRadius: '4px',
               padding: '8px 16px',
-              color: '#ffffff',
+              color: activePlaylist ? '#15181C' : '#8E97A3',
               fontSize: '12px',
               fontFamily: "'IBM Plex Mono', monospace",
               fontWeight: 700,
               cursor: activePlaylist ? 'pointer' : 'not-allowed',
-              boxShadow: activePlaylist ? '0 0 12px rgba(255, 69, 0, 0.3)' : 'none',
+              boxShadow: activePlaylist ? '0 0 12px rgba(92, 200, 194, 0.3)' : 'none',
             }}
           >
             <Plus size={14} />
@@ -218,11 +218,11 @@ export const PlaylistsHubView: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              background: '#1a202c',
-              border: '1px solid #2a3346',
+              background: '#232830',
+              border: '1px solid #2E343D',
               borderRadius: '4px',
               padding: '8px 14px',
-              color: '#ffffff',
+              color: '#D5DAE0',
               fontSize: '12px',
               fontFamily: "'IBM Plex Mono', monospace",
               cursor: activePlaylist ? 'pointer' : 'not-allowed',
@@ -243,10 +243,10 @@ export const PlaylistsHubView: React.FC = () => {
               alignItems: 'center',
               gap: '6px',
               background: 'transparent',
-              border: '1px solid rgba(239, 68, 68, 0.5)',
+              border: '1px solid rgba(217, 100, 89, 0.5)',
               borderRadius: '4px',
               padding: '8px 14px',
-              color: '#fca5a5',
+              color: '#E8A49B',
               fontSize: '12px',
               fontFamily: "'IBM Plex Mono', monospace",
               cursor: activePlaylist && sharing.activeCanEdit ? 'pointer' : 'not-allowed',
@@ -263,7 +263,7 @@ export const PlaylistsHubView: React.FC = () => {
         <div
           role="status"
           data-testid="delete-setlist-result"
-          style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace", color: deleteMessage.ok ? '#10b981' : '#fca5a5' }}
+          style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace", color: deleteMessage.ok ? '#B8CF7A' : '#E8A49B' }}
         >
           {deleteMessage.message}
         </div>
@@ -277,11 +277,11 @@ export const PlaylistsHubView: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            background: 'rgba(245, 158, 11, 0.1)',
-            border: '1px solid rgba(245, 158, 11, 0.4)',
+            background: 'rgba(217, 162, 78, 0.1)',
+            border: '1px solid rgba(217, 162, 78, 0.4)',
             borderRadius: '4px',
             padding: '10px 14px',
-            color: '#fcd34d',
+            color: '#E3C07A',
             fontSize: '12px',
             fontFamily: "'IBM Plex Mono', monospace",
           }}
@@ -299,8 +299,8 @@ export const PlaylistsHubView: React.FC = () => {
             flexWrap: 'wrap',
             alignItems: 'center',
             gap: '10px',
-            background: '#131720',
-            border: '1px solid #2a3346',
+            background: '#1B1F24',
+            border: '1px solid #2E343D',
             borderRadius: '6px',
             padding: '12px 16px',
             fontSize: '12px',
@@ -308,12 +308,12 @@ export const PlaylistsHubView: React.FC = () => {
           }}
         >
           {copyTargets.length === 0 ? (
-            <span style={{ color: '#94a3b8' }}>
+            <span style={{ color: '#8E97A3' }}>
               No tienes otra banda donde puedas editar. Crea una banda o pide rol de director en una compartida.
             </span>
           ) : (
             <>
-              <label htmlFor="copy-target" style={{ color: '#94a3b8' }}>
+              <label htmlFor="copy-target" style={{ color: '#8E97A3' }}>
                 COPIAR "{activePlaylist.name}" A
               </label>
               <select
@@ -321,11 +321,11 @@ export const PlaylistsHubView: React.FC = () => {
                 value={copyTarget || copyTargets[0].id}
                 onChange={(e) => setCopyTarget(e.target.value)}
                 style={{
-                  background: '#0d1017',
-                  border: '1px solid #2a3346',
+                  background: '#181B20',
+                  border: '1px solid #2E343D',
                   borderRadius: '4px',
                   padding: '6px 10px',
-                  color: '#ffffff',
+                  color: '#D5DAE0',
                   fontFamily: "'IBM Plex Mono', monospace",
                   fontSize: '12px',
                 }}
@@ -341,11 +341,11 @@ export const PlaylistsHubView: React.FC = () => {
                 data-testid="copy-setlist-confirm"
                 onClick={handleCopy}
                 style={{
-                  background: '#0066ff',
+                  background: '#7AA5D6',
                   border: 'none',
                   borderRadius: '4px',
                   padding: '6px 14px',
-                  color: '#ffffff',
+                  color: '#15181C',
                   fontFamily: "'IBM Plex Mono', monospace",
                   fontSize: '12px',
                   fontWeight: 700,
@@ -354,13 +354,13 @@ export const PlaylistsHubView: React.FC = () => {
               >
                 COPIAR
               </button>
-              <span style={{ color: '#64748b', flexBasis: '100%' }}>
+              <span style={{ color: '#7C8591', flexBasis: '100%' }}>
                 Las canciones que ya existan en la banda de destino (mismo título y artista) se reutilizan; las demás se copian.
               </span>
             </>
           )}
           {copyResult && (
-            <span role="status" style={{ flexBasis: '100%', color: copyResult.ok ? '#10b981' : '#fca5a5' }}>
+            <span role="status" style={{ flexBasis: '100%', color: copyResult.ok ? '#B8CF7A' : '#E8A49B' }}>
               {copyResult.message}
             </span>
           )}
@@ -375,33 +375,33 @@ export const PlaylistsHubView: React.FC = () => {
           gap: '12px',
         }}
       >
-        <div style={{ background: '#131720', border: '1px solid #2a3346', borderRadius: '6px', padding: '12px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ background: '#1B1F24', border: '1px solid #2E343D', borderRadius: '6px', padding: '12px 16px' }}>
+          <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
             DURACIÓN ESTIMADA DEL SHOW
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-            <Clock size={18} style={{ color: '#0066ff' }} />
+            <Clock size={18} style={{ color: '#7AA5D6' }} />
             <span style={{ fontSize: '20px', fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }}>{formattedDuration}</span>
           </div>
         </div>
 
-        <div style={{ background: '#131720', border: '1px solid #2a3346', borderRadius: '6px', padding: '12px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ background: '#1B1F24', border: '1px solid #2E343D', borderRadius: '6px', padding: '12px 16px' }}>
+          <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
             TOTAL CANCIONES PROGRAMADAS
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-            <Music size={18} style={{ color: '#ff4500' }} />
+            <Music size={18} style={{ color: '#5CC8C2' }} />
             <span style={{ fontSize: '20px', fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }}>{items.length} TEMAS</span>
           </div>
         </div>
 
-        <div style={{ background: '#131720', border: '1px solid #2a3346', borderRadius: '6px', padding: '12px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ background: '#1B1F24', border: '1px solid #2E343D', borderRadius: '6px', padding: '12px 16px' }}>
+          <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
             SINCRONIZACIÓN CON ESCENARIO
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-            <Radio size={18} style={{ color: '#10b981' }} />
-            <span style={{ fontSize: '14px', fontWeight: 700, color: '#10b981', fontFamily: "'IBM Plex Mono', monospace" }}>
+            <Radio size={18} style={{ color: '#B8CF7A' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#B8CF7A', fontFamily: "'IBM Plex Mono', monospace" }}>
               LISTO // REPOSITORIO ACTIVO
             </span>
           </div>
@@ -412,8 +412,8 @@ export const PlaylistsHubView: React.FC = () => {
       <div
         className="touch-scroll-x"
         style={{
-          background: '#131720',
-          border: '1px solid #2a3346',
+          background: '#1B1F24',
+          border: '1px solid #2E343D',
           borderRadius: '6px',
           overflowX: 'auto',
           WebkitOverflowScrolling: 'touch',
@@ -424,11 +424,11 @@ export const PlaylistsHubView: React.FC = () => {
           <thead>
             <tr
               style={{
-                borderBottom: '1px solid #2a3346',
-                background: '#1a202c',
+                borderBottom: '1px solid #2E343D',
+                background: '#232830',
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: '10px',
-                color: '#94a3b8',
+                color: '#8E97A3',
                 letterSpacing: '1px',
               }}
             >
@@ -445,7 +445,7 @@ export const PlaylistsHubView: React.FC = () => {
           <tbody>
             {!activePlaylist || items.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                <td colSpan={8} style={{ padding: '40px', textAlign: 'center', color: '#8E97A3', fontSize: '13px' }}>
                   No hay canciones en este setlist. Pulsa [+ AÑADIR CANCIÓN] para elegirlas de la librería.
                 </td>
               </tr>
@@ -465,20 +465,20 @@ export const PlaylistsHubView: React.FC = () => {
                     data-testid="setlist-row"
                     data-song-title={item.title}
                     style={{
-                      borderBottom: '1px solid #1f2737',
-                      background: index % 2 === 0 ? '#131720' : '#11141c',
+                      borderBottom: '1px solid #2B313A',
+                      background: index % 2 === 0 ? '#1B1F24' : '#1A1E23',
                       verticalAlign: 'top',
                     }}
                   >
                     {/* ORDER # */}
                     <td style={{ padding: '12px 14px', fontFamily: mono, fontWeight: 700 }}>
-                      <span style={{ color: '#ff4500' }}>#{String(index + 1).padStart(2, '0')}</span>
+                      <span style={{ color: '#5CC8C2' }}>#{String(index + 1).padStart(2, '0')}</span>
                     </td>
 
                     {/* TITLE + LIBRERIA */}
                     <td style={{ padding: '12px 14px', minWidth: '160px' }}>
-                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#ffffff' }}>{song?.title ?? item.title}</div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>{song?.artist ?? item.artist}</div>
+                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#D5DAE0' }}>{song?.title ?? item.title}</div>
+                      <div style={{ fontSize: '11px', color: '#8E97A3' }}>{song?.artist ?? item.artist}</div>
                       <div style={{ fontSize: '10px', fontFamily: mono, marginTop: '3px' }}>
                         {!song ? (
                           <span style={{ color: colors.danger }}>NO ESTÁ EN LA LIBRERÍA</span>
@@ -509,7 +509,7 @@ export const PlaylistsHubView: React.FC = () => {
                         title={`${BPM_MIN} a ${BPM_MAX}`}
                       />
                       {song && song.bpm !== item.bpm && (
-                        <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '3px' }}>orig. {song.bpm}</div>
+                        <div style={{ fontSize: '10px', color: '#8E97A3', marginTop: '3px' }}>orig. {song.bpm}</div>
                       )}
                     </td>
 
@@ -529,12 +529,12 @@ export const PlaylistsHubView: React.FC = () => {
                         {item.camelot && (
                           <span
                             style={{
-                              background: '#1e293b',
-                              border: '1px solid #334155',
+                              background: '#2B313A',
+                              border: '1px solid #363D47',
                               padding: '1px 6px',
                               borderRadius: '3px',
                               fontSize: '10px',
-                              color: '#e2e8f0',
+                              color: '#D5DAE0',
                             }}
                           >
                             {item.camelot}
@@ -542,7 +542,7 @@ export const PlaylistsHubView: React.FC = () => {
                         )}
                       </div>
                       {(song?.key ?? item.key) && (song?.key ?? item.key) !== item.showKey && (
-                        <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '3px' }}>orig. {song?.key ?? item.key}</div>
+                        <div style={{ fontSize: '10px', color: '#8E97A3', marginTop: '3px' }}>orig. {song?.key ?? item.key}</div>
                       )}
                     </td>
 
@@ -554,8 +554,8 @@ export const PlaylistsHubView: React.FC = () => {
                         value={item.transitionMode}
                         onChange={(e) => updatePlaylistSong(item.id, { transitionMode: e.target.value as TransitionMode })}
                         style={{
-                          background: '#1a202c',
-                          border: '1px solid #2a3346',
+                          background: '#232830',
+                          border: '1px solid #2E343D',
                           borderRadius: '4px',
                           padding: '4px 8px',
                           color: MODE_COLOR[item.transitionMode],
@@ -571,11 +571,11 @@ export const PlaylistsHubView: React.FC = () => {
                           </option>
                         ))}
                       </select>
-                      <div data-testid="item-transition-help" style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', lineHeight: 1.4 }}>
+                      <div data-testid="item-transition-help" style={{ fontSize: '11px', color: '#8E97A3', marginTop: '4px', lineHeight: 1.4 }}>
                         {TRANSITION_EXPLANATIONS[item.transitionMode]}
                       </div>
 
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 10px', marginTop: '6px', alignItems: 'center', fontSize: '11px', fontFamily: mono, color: '#cbd5e1' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 10px', marginTop: '6px', alignItems: 'center', fontSize: '11px', fontFamily: mono, color: '#BAC2CC' }}>
                         {usesCountIn ? (
                           <>
                             <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -585,7 +585,7 @@ export const PlaylistsHubView: React.FC = () => {
                                 data-testid="item-countin"
                                 value={item.countInBars}
                                 onChange={(e) => updatePlaylistSong(item.id, { countInBars: Number(e.target.value) })}
-                                style={{ background: '#1a202c', border: '1px solid #2a3346', borderRadius: '4px', color: '#ffffff', fontFamily: mono, fontSize: '11px', padding: '2px 4px' }}
+                                style={{ background: '#232830', border: '1px solid #2E343D', borderRadius: '4px', color: '#D5DAE0', fontFamily: mono, fontSize: '11px', padding: '2px 4px' }}
                               >
                                 {Array.from({ length: COUNT_IN_BARS_MAX + 1 }, (_, n) => (
                                   <option key={n} value={n}>
@@ -608,7 +608,7 @@ export const PlaylistsHubView: React.FC = () => {
                             </label>
                           </>
                         ) : (
-                          <span style={{ color: '#94a3b8' }}>Sin conteo.</span>
+                          <span style={{ color: '#8E97A3' }}>Sin conteo.</span>
                         )}
                         {item.transitionMode === 'auto_count_in' && (
                           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -641,7 +641,7 @@ export const PlaylistsHubView: React.FC = () => {
                             marginTop: '6px',
                             fontSize: '11px',
                             lineHeight: 1.4,
-                            color: notice.level === 'warn' ? colors.warning : '#94a3b8',
+                            color: notice.level === 'warn' ? colors.warning : '#8E97A3',
                           }}
                         >
                           {notice.level === 'warn' ? (
@@ -657,11 +657,11 @@ export const PlaylistsHubView: React.FC = () => {
                     {/* DURATION */}
                     <td style={{ padding: '12px 14px', fontFamily: mono, fontSize: '12px', whiteSpace: 'nowrap' }}>
                       {formatDuration(dur.sec)}
-                      <div style={{ fontSize: '10px', color: '#94a3b8' }}>{dur.byBars ? 'por compases' : 'estimada'}</div>
+                      <div style={{ fontSize: '10px', color: '#8E97A3' }}>{dur.byBars ? 'por compases' : 'estimada'}</div>
                     </td>
 
                     {/* NOTES */}
-                    <td style={{ padding: '12px 14px', fontSize: '12px', color: '#94a3b8', maxWidth: '220px', minWidth: '140px' }}>
+                    <td style={{ padding: '12px 14px', fontSize: '12px', color: '#8E97A3', maxWidth: '220px', minWidth: '140px' }}>
                       <input
                         type="text"
                         aria-label={`Notas de ${item.title}`}
@@ -674,10 +674,10 @@ export const PlaylistsHubView: React.FC = () => {
                           border: '1px solid transparent',
                           borderRadius: '3px',
                           padding: '4px 6px',
-                          color: '#cbd5e1',
+                          color: '#BAC2CC',
                           fontSize: '11px',
                         }}
-                        onFocus={(e) => (e.currentTarget.style.borderColor = '#2a3346')}
+                        onFocus={(e) => (e.currentTarget.style.borderColor = '#2E343D')}
                         onBlur={(e) => (e.currentTarget.style.borderColor = 'transparent')}
                       />
                     </td>
@@ -691,9 +691,9 @@ export const PlaylistsHubView: React.FC = () => {
                           title="Mover arriba"
                           aria-label={`Mover ${item.title} arriba`}
                           style={{
-                            background: '#1a202c',
-                            border: '1px solid #2a3346',
-                            color: isFirst ? '#475569' : '#ffffff',
+                            background: '#232830',
+                            border: '1px solid #2E343D',
+                            color: isFirst ? '#4A525D' : '#D5DAE0',
                             borderRadius: '3px',
                             padding: '4px 6px',
                             cursor: isFirst ? 'not-allowed' : 'pointer',
@@ -708,9 +708,9 @@ export const PlaylistsHubView: React.FC = () => {
                           title="Mover abajo"
                           aria-label={`Mover ${item.title} abajo`}
                           style={{
-                            background: '#1a202c',
-                            border: '1px solid #2a3346',
-                            color: isLast ? '#475569' : '#ffffff',
+                            background: '#232830',
+                            border: '1px solid #2E343D',
+                            color: isLast ? '#4A525D' : '#D5DAE0',
                             borderRadius: '3px',
                             padding: '4px 6px',
                             cursor: isLast ? 'not-allowed' : 'pointer',
@@ -724,9 +724,9 @@ export const PlaylistsHubView: React.FC = () => {
                           title="Quitar del setlist (la canción sigue en la librería)"
                           aria-label={`Quitar ${item.title} del setlist`}
                           style={{
-                            background: '#1a202c',
-                            border: '1px solid #2a3346',
-                            color: '#ef4444',
+                            background: '#232830',
+                            border: '1px solid #2E343D',
+                            color: '#D96459',
                             borderRadius: '3px',
                             padding: '4px 6px',
                             cursor: 'pointer',
@@ -776,8 +776,8 @@ export const PlaylistsHubView: React.FC = () => {
         >
           <div
             style={{
-              background: '#161b26',
-              border: '1px solid #2a3346',
+              background: '#20252B',
+              border: '1px solid #2E343D',
               borderRadius: '8px',
               padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
@@ -791,7 +791,7 @@ export const PlaylistsHubView: React.FC = () => {
             </h3>
             <form onSubmit={handleCreateNewPlaylist} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label htmlFor="new-playlist-name" style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label htmlFor="new-playlist-name" style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                   NOMBRE DEL SETLIST
                 </label>
                 <input
@@ -803,11 +803,11 @@ export const PlaylistsHubView: React.FC = () => {
                   required
                   style={{
                     width: '100%',
-                    background: '#0d1017',
-                    border: '1px solid #2a3346',
+                    background: '#181B20',
+                    border: '1px solid #2E343D',
                     borderRadius: '4px',
                     padding: '10px',
-                    color: '#ffffff',
+                    color: '#D5DAE0',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -820,8 +820,8 @@ export const PlaylistsHubView: React.FC = () => {
                   onClick={() => setShowNewPlaylistModal(false)}
                   style={{
                     background: 'transparent',
-                    border: '1px solid #2a3346',
-                    color: '#94a3b8',
+                    border: '1px solid #2E343D',
+                    color: '#8E97A3',
                     padding: '8px 16px',
                     borderRadius: '4px',
                     cursor: 'pointer',
@@ -832,9 +832,9 @@ export const PlaylistsHubView: React.FC = () => {
                 <button
                   type="submit"
                   style={{
-                    background: '#0066ff',
+                    background: '#7AA5D6',
                     border: 'none',
-                    color: '#ffffff',
+                    color: '#15181C',
                     padding: '8px 20px',
                     borderRadius: '4px',
                     fontWeight: 700,

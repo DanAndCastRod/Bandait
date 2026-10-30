@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { SettingsIcon, ShieldIcon, FlywheelIcon, VolumeIcon } from '../components/Icons'
 import { flywheelClock } from '../services/flywheelClock'
+import { THEME_KEY, ThemeStyle, browserStorage, resolveTheme } from '../services/theme'
 
-export type ThemeStyle = 'theme-swiss' | 'theme-milspec' | 'theme-tokyo' | 'theme-concert'
+export type { ThemeStyle } from '../services/theme'
 
 interface Props {
   onBack: () => void
@@ -18,9 +19,16 @@ interface ThemeOption {
 
 const THEMES: ThemeOption[] = [
   {
+    id: 'theme-grafito',
+    name: 'GRAFITO',
+    subtitle: 'Predeterminado • Suave para la vista en escenario oscuro',
+    fonts: 'Space Grotesk + IBM Plex Mono',
+    colors: ['#15181C', '#D5DAE0', '#5CC8C2', '#B8CF7A'],
+  },
+  {
     id: 'theme-swiss',
     name: 'SWISS BAUHAUS LAB',
-    subtitle: 'Predeterminado • Racionalismo métrico clínico',
+    subtitle: 'Alto contraste • Racionalismo métrico clínico',
     fonts: 'Space Grotesk + IBM Plex Mono',
     colors: ['#0A0C10', '#FFFFFF', '#FF4500', '#0066FF'],
   },
@@ -49,7 +57,7 @@ const THEMES: ThemeOption[] = [
 
 export default function SettingsView({ onBack }: Props) {
   const [currentTheme, setCurrentTheme] = useState<ThemeStyle>(() => {
-    return (localStorage.getItem('bandait_theme') as ThemeStyle) || 'theme-swiss'
+    return resolveTheme(browserStorage())
   })
 
   const [clickVolume, setClickVolume] = useState<number>(() => {
@@ -68,7 +76,11 @@ export default function SettingsView({ onBack }: Props) {
   })
 
   useEffect(() => {
-    localStorage.setItem('bandait_theme', currentTheme)
+    try {
+      localStorage.setItem(THEME_KEY, currentTheme)
+    } catch {
+      // almacenamiento bloqueado: el tema vale solo en esta sesion
+    }
     document.body.className = currentTheme
   }, [currentTheme])
 

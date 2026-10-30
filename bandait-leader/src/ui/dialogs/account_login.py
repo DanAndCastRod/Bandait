@@ -18,19 +18,19 @@ from src.cloud.auth import redirect_urls
 HINT_AFTER_MS = 20000
 
 DIALOG_QSS = """
-QDialog { background: #000000; color: #F0F0F0; }
-QLabel { color: #F0F0F0; background: transparent; }
-QLabel#detail { color: #A0A0A0; }
-QLabel#hint { color: #FFAA00; border: 1px solid #333333; border-radius: 4px; padding: 8px; }
-QLabel#error { color: #FF3B3B; }
-QPushButton { background: transparent; border: 1px solid #666666; color: #CCCCCC;
+QDialog { background: #15181C; color: #D5DAE0; }
+QLabel { color: #D5DAE0; background: transparent; }
+QLabel#detail { color: #A3ABB6; }
+QLabel#hint { color: #D9A24E; border: 1px solid #363D47; border-radius: 4px; padding: 8px; }
+QLabel#error { color: #D96459; }
+QPushButton { background: transparent; border: 1px solid #7C8591; color: #BAC2CC;
               border-radius: 4px; padding: 6px 14px; }
-QPushButton:hover { border-color: #00FFFF; color: #00FFFF; }
-QPushButton:disabled { border-color: #333333; color: #444444; }
-QProgressBar { background: #0A0A0A; border: 1px solid #1E1E1E; height: 6px; border-radius: 3px; }
-QProgressBar::chunk { background: #00FFFF; }
-QListWidget { background: #0A0A0A; color: #F0F0F0; border: 1px solid #1E1E1E; }
-QListWidget::item:selected { background: #00FFFF; color: #000000; }
+QPushButton:hover { border-color: #5CC8C2; color: #5CC8C2; }
+QPushButton:disabled { border-color: #363D47; color: #4A525D; }
+QProgressBar { background: #1B1F24; border: 1px solid #262C34; height: 6px; border-radius: 3px; }
+QProgressBar::chunk { background: #5CC8C2; }
+QListWidget { background: #1B1F24; color: #D5DAE0; border: 1px solid #262C34; }
+QListWidget::item:selected { background: #5CC8C2; color: #15181C; }
 """
 
 
@@ -62,7 +62,7 @@ class LoginDialog(QDialog):
 
         title = QLabel("CUENTA DEL HUB")
         title.setFont(QFont("Inter", 13, QFont.Bold))
-        title.setStyleSheet("color: #00FFFF;")
+        title.setStyleSheet("color: #5CC8C2;")
         layout.addWidget(title)
 
         self.status_label = QLabel("Preparando...")
@@ -149,7 +149,7 @@ class LoginDialog(QDialog):
         self.progress.setValue(0)
         self.status_label.setText("No se pudo iniciar sesión")
         self.status_label.setObjectName("error")
-        self.status_label.setStyleSheet("color: #FF3B3B;")
+        self.status_label.setStyleSheet("color: #D96459;")
         self.detail_label.setText(message)
         self.reopen_btn.setEnabled(False)
         self.cancel_btn.setText("Cerrar")

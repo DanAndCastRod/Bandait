@@ -65,7 +65,7 @@ export const SongsHubView: React.FC = () => {
             show.
           </p>
         </div>
-        <button type="button" onClick={() => setEditing('new')} style={{ ...primaryButton(), boxShadow: '0 0 12px rgba(255, 69, 0, 0.3)' }}>
+        <button type="button" onClick={() => setEditing('new')} style={{ ...primaryButton(), boxShadow: '0 0 12px rgba(92, 200, 194, 0.3)' }}>
           <Plus size={14} /> NUEVA CANCIÓN
         </button>
       </div>
@@ -113,7 +113,7 @@ export const SongsHubView: React.FC = () => {
                 </span>
                 {song.key && <span style={{ color: colors.cobalt, fontWeight: 700 }}>{song.key}</span>}
                 {song.camelot && (
-                  <span style={{ background: '#1e293b', border: '1px solid #334155', padding: '0 5px', borderRadius: '3px', color: '#e2e8f0' }}>
+                  <span style={{ background: '#2B313A', border: '1px solid #363D47', padding: '0 5px', borderRadius: '3px', color: '#D5DAE0' }}>
                     {song.camelot}
                   </span>
                 )}

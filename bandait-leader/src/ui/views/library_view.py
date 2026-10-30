@@ -31,9 +31,9 @@ from src.ui.dialogs.library_editors import GigEditorDialog, SetlistEditorDialog,
 
 # origin -> (badge text, color)
 ORIGIN_BADGES = {
-    "cloud": ("NUBE", "#00FFFF"),
-    "local": ("LOCAL", "#9A9A9A"),
-    "demo": ("DEMO", "#FFAA00"),
+    "cloud": ("NUBE", "#5CC8C2"),
+    "local": ("LOCAL", "#8E97A3"),
+    "demo": ("DEMO", "#D9A24E"),
 }
 CLOUD_READ_ONLY_MESSAGE = ops.CLOUD_SONG_EDIT
 BUSY_MESSAGE = "La banda está tocando el setlist en vivo: detenla antes de {what}."
@@ -44,7 +44,7 @@ LOAD_LIVE_TIP = (
 DUPLICATE_TIP = "Crear una copia local, editable en este equipo (también de un setlist del hub)"
 GIG_FILTERS = ("Todos", "Próximos", "Hoy", "Pasados")
 _WEEKDAYS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
-_GIG_COLORS = {ops.GIG_TODAY: "#CCFF00", ops.GIG_UPCOMING: "#00FFFF", ops.GIG_PAST: "#666666"}
+_GIG_COLORS = {ops.GIG_TODAY: "#B8CF7A", ops.GIG_UPCOMING: "#5CC8C2", ops.GIG_PAST: "#7C8591"}
 
 
 def song_origin(song) -> str:
@@ -146,14 +146,14 @@ class LibraryView(QWidget):
         header = QHBoxLayout()
         title = QLabel("BIBLIOTECA MUSICAL")
         title.setFont(QFont("Inter", 18, QFont.Bold))
-        title.setStyleSheet("color: #F0F0F0;")
+        title.setStyleSheet("color: #D5DAE0;")
         header.addWidget(title)
         header.addStretch()
 
         # Datos de demostración: los controles solo aparecen cuando existen.
         self.show_demo_check = QCheckBox("Mostrar demostración")
         self.show_demo_check.setToolTip("Mostrar las canciones, setlists y eventos marcados DEMO")
-        self.show_demo_check.setStyleSheet("color: #FFAA00;")
+        self.show_demo_check.setStyleSheet("color: #D9A24E;")
         self.show_demo_check.toggled.connect(lambda _on: self._on_demo_visibility())
         self.show_demo_check.setVisible(False)
         header.addWidget(self.show_demo_check)
@@ -209,10 +209,10 @@ class LibraryView(QWidget):
             "Título", "Artista", "BPM", "Tonalidad", "Duración", "Origen"
         ])
         self.songs_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.songs_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
-        self.songs_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.songs_table.setColumnWidth(2, 60)
-        self.songs_table.setColumnWidth(3, 80)
+        # BPM, Tonalidad, Duracion y Origen al ancho de su contenido: con 80 px fijos el
+        # encabezado "Tonalidad" salia cortado ("ONALIDAD", captura 2026-10-30).
+        for col in (2, 3, 4, 5):
+            self.songs_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
         self.songs_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.songs_table.setSelectionMode(QTableWidget.SingleSelection)
         self.songs_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -223,7 +223,7 @@ class LibraryView(QWidget):
 
         self.song_info = QLabel("Selecciona una canción para ver detalles")
         self.song_info.setFont(QFont("Inter", 11))
-        self.song_info.setStyleSheet("color: #666666; padding: 8px;")
+        self.song_info.setStyleSheet("color: #7C8591; padding: 8px;")
         self.song_info.setWordWrap(True)
         layout.addWidget(self.song_info)
         self._update_song_actions()
@@ -264,7 +264,7 @@ class LibraryView(QWidget):
         detail_layout = QVBoxLayout(detail_frame)
         self.setlist_detail = QLabel("Selecciona un setlist")
         self.setlist_detail.setFont(QFont("Inter", 12))
-        self.setlist_detail.setStyleSheet("color: #F0F0F0;")
+        self.setlist_detail.setStyleSheet("color: #D5DAE0;")
         self.setlist_detail.setMinimumHeight(44)  # name + song count, never clipped
         detail_layout.addWidget(self.setlist_detail)
 
@@ -337,10 +337,10 @@ class LibraryView(QWidget):
         summary.setObjectName("panel")
         summary_layout = QHBoxLayout(summary)
         self.total_events = QLabel("Total: 0")
-        self.total_events.setStyleSheet("color: #666666;")
+        self.total_events.setStyleSheet("color: #7C8591;")
         summary_layout.addWidget(self.total_events)
         self.upcoming_events = QLabel("Próximos: 0")
-        self.upcoming_events.setStyleSheet("color: #00FFFF;")
+        self.upcoming_events.setStyleSheet("color: #5CC8C2;")
         summary_layout.addWidget(self.upcoming_events)
         summary_layout.addStretch()
         layout.addWidget(summary)
@@ -993,7 +993,7 @@ class LibraryView(QWidget):
     def _create_bpm_item(self, text: str) -> QTableWidgetItem:
         item = QTableWidgetItem(text)
         item.setFont(QFont("JetBrains Mono", 11))
-        item.setForeground(QColor(0, 255, 255))
+        item.setForeground(QColor(92, 200, 194))
         return item
 
     def _create_badge_item(self, origin: str) -> QTableWidgetItem:
@@ -1025,7 +1025,7 @@ class LibraryView(QWidget):
         duration = self.songs_table.item(row, 4).text()
         self.song_info.setText(
             f"<b>{title}</b><br>"
-            f"BPM: <span style='color:#00FFFF'>{bpm}</span> | "
+            f"BPM: <span style='color:#5CC8C2'>{bpm}</span> | "
             f"Tonalidad: {key} | Duración: {duration}"
         )
         self.song_selected.emit(row)

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QDialog, QHeaderView, QLabel, QTableWidget, QTable
 from src.network.link_report import HEALTH_LABELS, link_health
 from src.sync.leader_clock import leader_now_ns
 
-HEALTH_COLORS = {"ok": "#CCFF00", "warn": "#FFAA00", "bad": "#FF4D4D", "stale": "#888888"}
+HEALTH_COLORS = {"ok": "#B8CF7A", "warn": "#D9A24E", "bad": "#E07A70", "stale": "#8E97A3"}
 HEALTH_ORDER = {"bad": 0, "warn": 1, "stale": 2, "ok": 3}
 ROLE_LABELS = {"musician": "Músico", "director": "Director", "foh": "FOH", "hub": "Hub"}
 AUDIO_LABELS = {"armed": "Activo", "unarmed": "Sin activar", "suspended": "Suspendido", "unsupported": "No soportado"}
@@ -73,7 +73,7 @@ class MusiciansPanel(QDialog):
             "teléfono (Bluetooth la sube); se compensa sola. Bueno: RTT < 20 ms y jitter < 3 ms."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #888888; font-size: 11px;")
+        hint.setStyleSheet("color: #8E97A3; font-size: 11px;")
         layout.addWidget(hint)
 
         # Sin reportes nuevos un músico pasa a SIN DATOS: se recalcula aunque nadie reporte.

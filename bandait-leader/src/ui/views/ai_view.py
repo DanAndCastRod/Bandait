@@ -121,7 +121,7 @@ class AIView(QWidget):
 
         title = QLabel("ASISTENTE DE ENSAYOS")
         title.setFont(QFont("Inter", 18, QFont.Bold))
-        title.setStyleSheet("color: #FF00FF;")
+        title.setStyleSheet("color: #B48EDB;")
         header.addWidget(title)
 
         header.addStretch()
@@ -196,14 +196,14 @@ class AIView(QWidget):
             btn = QPushButton(label)
             btn.setStyleSheet("""
                 QPushButton {
-                    border: 1px solid #FF00FF;
-                    color: #FF00FF;
+                    border: 1px solid #B48EDB;
+                    color: #B48EDB;
                     border-radius: 4px;
                     padding: 8px 16px;
                     font-size: 11px;
                 }
                 QPushButton:hover {
-                    background: rgba(255, 0, 255, 30);
+                    background: rgba(180, 142, 219, 30);
                 }
             """)
             btn.clicked.connect(lambda checked, m=mode: self._quick_action(m))
@@ -214,7 +214,7 @@ class AIView(QWidget):
         # === ESTADO ===
         self.status_label = QLabel("Listo")
         self.status_label.setFont(QFont("Inter", 10))
-        self.status_label.setStyleSheet("color: #666666;")
+        self.status_label.setStyleSheet("color: #7C8591;")
         layout.addWidget(self.status_label)
 
         # Mensaje de bienvenida
@@ -244,23 +244,23 @@ class AIView(QWidget):
         if is_user:
             msg_frame.setStyleSheet("""
                 QFrame {
-                    background: #141414;
-                    border: 1px solid #1E1E1E;
+                    background: #232830;
+                    border: 1px solid #262C34;
                     border-radius: 8px;
-                    border-left: 3px solid #00FFFF;
+                    border-left: 3px solid #5CC8C2;
                 }
             """)
-            label.setStyleSheet("color: #F0F0F0;")
+            label.setStyleSheet("color: #D5DAE0;")
         else:
             msg_frame.setStyleSheet("""
                 QFrame {
-                    background: #0A0A0A;
-                    border: 1px solid #1E1E1E;
+                    background: #1B1F24;
+                    border: 1px solid #262C34;
                     border-radius: 8px;
-                    border-left: 3px solid #FF00FF;
+                    border-left: 3px solid #B48EDB;
                 }
             """)
-            label.setStyleSheet("color: #F0F0F0;")
+            label.setStyleSheet("color: #D5DAE0;")
 
         msg_layout.addWidget(label)
 
@@ -286,7 +286,7 @@ class AIView(QWidget):
             mode = "setlist"
 
         self.status_label.setText("Pensando...")
-        self.status_label.setStyleSheet("color: #FFAA00;")
+        self.status_label.setStyleSheet("color: #D9A24E;")
 
         # Obtener canciones disponibles para contexto
         songs_data = []
@@ -311,7 +311,7 @@ class AIView(QWidget):
     def _on_response(self, response: str):
         self._add_message(response, is_user=False)
         self.status_label.setText("Listo")
-        self.status_label.setStyleSheet("color: #666666;")
+        self.status_label.setStyleSheet("color: #7C8591;")
 
     def _on_error(self, error: str):
         self._add_message(
@@ -320,7 +320,7 @@ class AIView(QWidget):
             is_user=False
         )
         self.status_label.setText("Error de conexión")
-        self.status_label.setStyleSheet("color: #FF0000;")
+        self.status_label.setStyleSheet("color: #D96459;")
 
     def _quick_action(self, mode: str):
         prompts = {

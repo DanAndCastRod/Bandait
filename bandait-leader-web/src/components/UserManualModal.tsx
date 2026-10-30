@@ -38,8 +38,8 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
     >
       <div
         style={{
-          background: '#12151c',
-          border: '1px solid #2a3346',
+          background: '#1A1E23',
+          border: '1px solid #2E343D',
           borderRadius: '8px',
           width: '100%',
           maxWidth: '820px',
@@ -54,11 +54,11 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
         <div
           style={{
             padding: '16px 20px',
-            borderBottom: '1px solid #2a3346',
+            borderBottom: '1px solid #2E343D',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            background: '#161b26',
+            background: '#20252B',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -66,13 +66,13 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
               style={{
                 width: '32px',
                 height: '32px',
-                background: 'rgba(0, 102, 255, 0.15)',
-                border: '1px solid #0066ff',
+                background: 'rgba(122, 165, 214, 0.15)',
+                border: '1px solid #7AA5D6',
                 borderRadius: '4px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#0066ff',
+                color: '#7AA5D6',
               }}
             >
               <BookOpen size={18} />
@@ -84,12 +84,12 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   fontWeight: 800,
                   fontSize: '14px',
                   letterSpacing: '1px',
-                  color: '#ffffff',
+                  color: '#D5DAE0',
                 }}
               >
                 MANUAL DE USUARIO & GUIA TECNICA // BANDAIT 3.0
               </div>
-              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+              <div style={{ fontSize: '11px', color: '#8E97A3' }}>
                 Sistema Operativo en Vivo para Escenarios, Ensayo y Administracion de Repertorio
               </div>
             </div>
@@ -101,7 +101,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#94a3b8',
+              color: '#8E97A3',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -118,9 +118,9 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
           style={{
             display: 'flex',
             gap: '4px',
-            background: '#0d1017',
+            background: '#181B20',
             padding: '8px 12px',
-            borderBottom: '1px solid #2a3346',
+            borderBottom: '1px solid #2E343D',
             overflowX: 'auto',
           }}
         >
@@ -139,10 +139,10 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                 alignItems: 'center',
                 gap: '6px',
                 padding: '6px 12px',
-                background: activeSection === tab.id ? '#1a202c' : 'transparent',
-                border: activeSection === tab.id ? '1px solid #0066ff' : '1px solid transparent',
+                background: activeSection === tab.id ? '#232830' : 'transparent',
+                border: activeSection === tab.id ? '1px solid #7AA5D6' : '1px solid transparent',
                 borderRadius: '4px',
-                color: activeSection === tab.id ? '#ffffff' : '#94a3b8',
+                color: activeSection === tab.id ? '#D5DAE0' : '#8E97A3',
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: '11px',
                 fontWeight: activeSection === tab.id ? 700 : 400,
@@ -161,9 +161,9 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
           {/* SECTION 1: QUICKSTART */}
           {activeSection === 'quickstart' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ borderLeft: '3px solid #0066ff', paddingLeft: '12px' }}>
+              <div style={{ borderLeft: '3px solid #7AA5D6', paddingLeft: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Guia de Puesta en Marcha (5 Pasos de Roadie)</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
                   Sigue este flujo para programar tu show, conectar a los musicos y operar en vivo con cero caidas.
                 </p>
               </div>
@@ -199,8 +199,8 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   <div
                     key={idx}
                     style={{
-                      background: '#161b26',
-                      border: '1px solid #2a3346',
+                      background: '#20252B',
+                      border: '1px solid #2E343D',
                       borderRadius: '6px',
                       padding: '14px',
                       display: 'flex',
@@ -212,14 +212,14 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                       style={{
                         fontFamily: "'IBM Plex Mono', monospace",
                         fontSize: '11px',
-                        color: '#ff4500',
+                        color: '#5CC8C2',
                         fontWeight: 800,
                       }}
                     >
                       {item.step}
                     </span>
-                    <strong style={{ fontSize: '14px', color: '#ffffff' }}>{item.title}</strong>
-                    <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                    <strong style={{ fontSize: '14px', color: '#D5DAE0' }}>{item.title}</strong>
+                    <p style={{ margin: 0, fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
                       {item.desc}
                     </p>
                   </div>
@@ -231,27 +231,27 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
           {/* SECTION 2: TOPOLOGY */}
           {activeSection === 'topology' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ borderLeft: '3px solid #10b981', paddingLeft: '12px' }}>
+              <div style={{ borderLeft: '3px solid #B8CF7A', paddingLeft: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Topologia de Escenario e Infraestructura FOH</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
                   Bandait esta disenado con arquitectura "Offline-First". El show nunca depende de internet en el auditorio.
                 </p>
               </div>
 
               <div
                 style={{
-                  background: '#0a0c10',
-                  border: '1px solid #2a3346',
+                  background: '#15181C',
+                  border: '1px solid #2E343D',
                   borderRadius: '6px',
                   padding: '16px',
                   fontFamily: "'IBM Plex Mono', monospace",
                   fontSize: '12px',
-                  color: '#e2e8f0',
+                  color: '#D5DAE0',
                   lineHeight: 1.6,
                   overflowX: 'auto',
                 }}
               >
-                <div style={{ color: '#0066ff', fontWeight: 700, marginBottom: '8px' }}>
+                <div style={{ color: '#7AA5D6', fontWeight: 700, marginBottom: '8px' }}>
                   DIAGRAMA DE CONEXIONES FISICAS & RED LOCAL //
                 </div>
                 <pre style={{ margin: 0 }}>
@@ -270,8 +270,8 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                 </pre>
               </div>
 
-              <div style={{ background: '#161b26', border: '1px solid #2a3346', borderRadius: '6px', padding: '14px', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
-                <strong style={{ color: '#10b981' }}>REGLA DE ORO DE ESCENARIO:</strong> Utiliza siempre un router Wi-Fi de 5 GHz propio en la tarima, sin contrasenas publicas. Los smartphones se conectan a esa red interna y reciben paquetes ligeros de sincronizacion NTP (&lt; 1 KB/s).
+              <div style={{ background: '#20252B', border: '1px solid #2E343D', borderRadius: '6px', padding: '14px', fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
+                <strong style={{ color: '#B8CF7A' }}>REGLA DE ORO DE ESCENARIO:</strong> Utiliza siempre un router Wi-Fi de 5 GHz propio en la tarima, sin contrasenas publicas. Los smartphones se conectan a esa red interna y reciben paquetes ligeros de sincronizacion NTP (&lt; 1 KB/s).
               </div>
             </div>
           )}
@@ -279,9 +279,9 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
           {/* SECTION 3: ROUTING & STEMS */}
           {activeSection === 'routing' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ borderLeft: '3px solid #ff4500', paddingLeft: '12px' }}>
+              <div style={{ borderLeft: '3px solid #5CC8C2', paddingLeft: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Ruteo ASIO & Matriz de Stems Demucs</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
                   Separacion fija de 6 canales en 24-bit / 48 kHz con limitador estricto de proteccion auditiva.
                 </p>
               </div>
@@ -294,14 +294,14 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   { ch: 'CH 05', name: 'Metronomo / Clic de Ataque', dest: 'Salida 3 Cable Baterista', notes: 'Onda sintetizada con ataque de 5ms enviada por cable sin jitter.' },
                   { ch: 'CH 06', name: 'Bajo / Low-End Stems', dest: 'Bus In-Ear Bajo & Bateria', notes: 'Frecuencias sub-graves controladas para el pulso ritmico.' },
                 ].map((track, i) => (
-                  <div key={i} style={{ background: '#161b26', border: '1px solid #2a3346', borderRadius: '6px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div key={i} style={{ background: '#20252B', border: '1px solid #2E343D', borderRadius: '6px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: '#0066ff', fontWeight: 700 }}>{track.ch}</span>
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '9px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', padding: '2px 5px', borderRadius: '3px' }}>-0.5 dBFS OK</span>
+                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: '#7AA5D6', fontWeight: 700 }}>{track.ch}</span>
+                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '9px', background: 'rgba(184, 207, 122, 0.1)', color: '#B8CF7A', padding: '2px 5px', borderRadius: '3px' }}>-0.5 dBFS OK</span>
                     </div>
-                    <strong style={{ fontSize: '13px', color: '#ffffff' }}>{track.name}</strong>
-                    <div style={{ fontSize: '11px', color: '#ff4500', fontFamily: "'IBM Plex Mono', monospace" }}>{track.dest}</div>
-                    <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>{track.notes}</p>
+                    <strong style={{ fontSize: '13px', color: '#D5DAE0' }}>{track.name}</strong>
+                    <div style={{ fontSize: '11px', color: '#5CC8C2', fontFamily: "'IBM Plex Mono', monospace" }}>{track.dest}</div>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#8E97A3' }}>{track.notes}</p>
                   </div>
                 ))}
               </div>
@@ -311,33 +311,33 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
           {/* SECTION 4: FLYWHEEL */}
           {activeSection === 'flywheel' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ borderLeft: '3px solid #f59e0b', paddingLeft: '12px' }}>
+              <div style={{ borderLeft: '3px solid #D9A24E', paddingLeft: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Mecanismo Flywheel: Inercia Ritmica Autonoma</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
                   Que sucede si el baterista o cantante camina detras de una columna de concreto y pierde la senal Wi-Fi?
                 </p>
               </div>
 
-              <div style={{ background: '#161b26', border: '1px solid #2a3346', borderRadius: '6px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ background: '#20252B', border: '1px solid #2E343D', borderRadius: '6px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                  <div style={{ background: 'rgba(245, 158, 11, 0.15)', padding: '8px', borderRadius: '4px', color: '#f59e0b' }}>
+                  <div style={{ background: 'rgba(217, 162, 78, 0.15)', padding: '8px', borderRadius: '4px', color: '#D9A24E' }}>
                     <Zap size={20} />
                   </div>
                   <div>
-                    <strong style={{ fontSize: '14px', color: '#ffffff' }}>Tolerancia Absoluta a Desconexion:</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                    <strong style={{ fontSize: '14px', color: '#D5DAE0' }}>Tolerancia Absoluta a Desconexion:</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
                       A diferencia de los reproductores comunes de streaming que se congelan al perder paquetes, Bandait Follower tiene un motor Flywheel en Web Audio API. El telefono sigue marcando el pulso matematicamente en el compas exacto.
                     </p>
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                  <div style={{ background: 'rgba(16, 185, 129, 0.15)', padding: '8px', borderRadius: '4px', color: '#10b981' }}>
+                  <div style={{ background: 'rgba(184, 207, 122, 0.15)', padding: '8px', borderRadius: '4px', color: '#B8CF7A' }}>
                     <ShieldCheck size={20} />
                   </div>
                   <div>
-                    <strong style={{ fontSize: '14px', color: '#ffffff' }}>Soft Phase-Alignment (Reconexion Silenciosa):</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+                    <strong style={{ fontSize: '14px', color: '#D5DAE0' }}>Soft Phase-Alignment (Reconexion Silenciosa):</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
                       Cuando el dispositivo recupera la antena Wi-Fi, el reloj no pega un frenazo abrupto. Realiza un micro-ajuste de fase en 4 compases hasta alinearse con el reloj FOH de la laptop sin que el musico lo perciba.
                     </p>
                   </div>
@@ -349,9 +349,9 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
           {/* SECTION 5: ROLES */}
           {activeSection === 'roles' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ borderLeft: '3px solid #a855f7', paddingLeft: '12px' }}>
+              <div style={{ borderLeft: '3px solid #B48EDB', paddingLeft: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Vistas Adaptativas por Rol de Musico</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
                   Cada instrumento en vivo requiere una interfaz diferente para no distraer en plena actuacion.
                 </p>
               </div>
@@ -363,10 +363,10 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   { role: 'Guitarrista / Bajista', focus: 'Cifrado armonico destacado', detail: 'Acordes grandes en tipografia monoespaciada con tono show transpuesto.' },
                   { role: 'Director Musical', focus: 'Mando dual y saltos de tema', detail: 'Botones grandes para disparar temas imprevistos con alerta general a la banda.' },
                 ].map((item, idx) => (
-                  <div key={idx} style={{ background: '#161b26', border: '1px solid #2a3346', borderRadius: '6px', padding: '14px' }}>
-                    <div style={{ color: '#a855f7', fontWeight: 800, fontSize: '13px', fontFamily: "'IBM Plex Mono', monospace" }}>{item.role}</div>
-                    <div style={{ color: '#ffffff', fontWeight: 700, fontSize: '12px', marginTop: '4px' }}>{item.focus}</div>
-                    <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '4px', lineHeight: 1.4 }}>{item.detail}</div>
+                  <div key={idx} style={{ background: '#20252B', border: '1px solid #2E343D', borderRadius: '6px', padding: '14px' }}>
+                    <div style={{ color: '#B48EDB', fontWeight: 800, fontSize: '13px', fontFamily: "'IBM Plex Mono', monospace" }}>{item.role}</div>
+                    <div style={{ color: '#D5DAE0', fontWeight: 700, fontSize: '12px', marginTop: '4px' }}>{item.focus}</div>
+                    <div style={{ color: '#8E97A3', fontSize: '11px', marginTop: '4px', lineHeight: 1.4 }}>{item.detail}</div>
                   </div>
                 ))}
               </div>
@@ -378,8 +378,8 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
         <div
           style={{
             padding: '12px 20px',
-            borderTop: '1px solid #2a3346',
-            background: '#161b26',
+            borderTop: '1px solid #2E343D',
+            background: '#20252B',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -387,15 +387,15 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
             gap: '10px',
           }}
         >
-          <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+          <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
             BANDAI SYSTEM SPEC V3.0 // 0 EMOJIS // SWISS BAUHAUS LAB
           </div>
           <button
             onClick={onClose}
             style={{
-              background: '#0066ff',
+              background: '#7AA5D6',
               border: 'none',
-              color: '#ffffff',
+              color: '#15181C',
               borderRadius: '4px',
               padding: '8px 20px',
               fontFamily: "'IBM Plex Mono', monospace",

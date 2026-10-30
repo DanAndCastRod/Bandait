@@ -127,7 +127,7 @@ class TestVisualStartup:
         # Should have substantial QSS content
         assert len(style) > 500
         assert "background-color" in style
-        assert "#000000" in style
+        assert "#15181C" in style  # Grafito BG (src/ui/theme.py)
 
         window.close()
 

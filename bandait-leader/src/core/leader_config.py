@@ -49,6 +49,8 @@ class LeaderSettings:
     # active_setlist_id, the same field local setlists use.
     cloud_band_id: Optional[str] = None
     cloud_user_id: Optional[str] = None
+    # Ver > Brillo: intensidad de toda la ventana del líder, 40..100 (%). No toca Windows.
+    brightness: int = 100
 
 
 # Production Supabase project of the Web Hub. Public values by design (they also
@@ -152,6 +154,9 @@ def load_settings(path: Optional[str] = None) -> LeaderSettings:
         default = getattr(defaults, name)
         if isinstance(default, bool):
             if isinstance(value, bool):
+                values[name] = value
+        elif isinstance(default, int):
+            if isinstance(value, int) and not isinstance(value, bool):
                 values[name] = value
         elif value is None or isinstance(value, str):
             values[name] = value

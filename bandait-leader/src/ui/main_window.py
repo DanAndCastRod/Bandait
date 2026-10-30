@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFrame, QSplitter, QStatusBar, QTabWidget, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QKeyEvent, QAction
+from PySide6.QtGui import QAction, QActionGroup, QFont, QKeyEvent
 
 from src.audio.audio_engine import AudioEngine, AudioUnavailable
 from src.cloud.controller import CloudController
@@ -33,6 +33,7 @@ from src.ui.views.ai_view import AIView
 from src.ui.dialogs.account_select import songs_label
 from src.ui.views.library_view import LibraryView
 from src.ui.views.stage_view import StageView
+from src.ui.widgets.dim_overlay import BRIGHTNESS_LEVELS, DimOverlay, clamp_brightness
 from src.ui.widgets.mixer import MixerWidget
 from src.ui.widgets.timeline import TimelineWidget
 from src.ui.widgets.transport import TransportWidget
@@ -40,6 +41,8 @@ from src.ui.widgets.transport import TransportWidget
 logger = logging.getLogger(__name__)
 
 APP_VERSION = "2.1.4"
+# Ancho maximo del texto "Audio: ..." en la barra de estado (el completo va en el tooltip).
+AUDIO_STATUS_MAX_PX = 420
 
 # Persistent notices while the live setlist has no songs (stage view + status bar).
 EMPTY_SETLIST_NOTICE = (
@@ -171,9 +174,9 @@ class MainWindow(QMainWindow):
         try:
             self.audio_engine.start()
         except AudioUnavailable as e:
-            self._set_audio_status(f"Audio: no disponible ({e}). Los seguidores siguen sincronizados.", "#FFAA00")
+            self._set_audio_status(f"Audio: no disponible ({e}). Los seguidores siguen sincronizados.", "#D9A24E")
         except Exception as e:  # defensive: PortAudio raises many types
-            self._set_audio_status(f"Audio: error al abrir el dispositivo ({e})", "#FF0000")
+            self._set_audio_status(f"Audio: error al abrir el dispositivo ({e})", "#D96459")
         else:
             self._on_audio_started()
 
@@ -209,6 +212,9 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
+        # Ver > Brillo: veladura encima de toda la ventana (no recibe clics).
+        self.dim_overlay = DimOverlay(self)
+        self.dim_overlay.set_brightness(self._settings.brightness)
 
         main_layout = QVBoxLayout(central)
         main_layout.setSpacing(0)
@@ -250,7 +256,7 @@ class MainWindow(QMainWindow):
 
         mixer_title = QLabel("MEZCLADOR")
         mixer_title.setFont(QFont("Inter", 10, QFont.Bold))
-        mixer_title.setStyleSheet("color: #666666; padding: 8px 12px;")
+        mixer_title.setStyleSheet("color: #7C8591; padding: 8px 12px;")
         mixer_layout.addWidget(mixer_title)
 
         mixer_layout.addWidget(self.mixer)
@@ -264,37 +270,36 @@ class MainWindow(QMainWindow):
         self.status_bar.setFont(QFont("Inter", 9))
 
         self.status_net = QLabel("Red: iniciando...")
-        self.status_net.setStyleSheet("color: #666666;")
+        self.status_net.setStyleSheet("color: #7C8591;")
         self.status_bar.addWidget(self.status_net)
 
         self.status_audio = QLabel("Audio: iniciando...")
-        self.status_audio.setStyleSheet("color: #666666;")
+        self.status_audio.setStyleSheet("color: #7C8591;")
         self.status_bar.addWidget(self.status_audio)
 
+        # El reloj es un dato tecnico: va en el tooltip de "Red" para no desbordar la barra.
         res_us = leader_clock_resolution_ns() / 1e3
-        self.status_sync = QLabel(f"Reloj: {CLOCK_NAME} ({res_us:.3g} us)")
-        self.status_sync.setStyleSheet("color: #666666;")
-        self.status_sync.setToolTip("Base de tiempo del líder para anchor_ns y sync_request")
-        self.status_bar.addWidget(self.status_sync)
+        self._clock_tooltip = f"Reloj del líder: {CLOCK_NAME} ({res_us:.3g} us), base de anchor_ns y sync_request"
+        self.status_net.setToolTip(self._clock_tooltip)
 
         # Clic: panel "Músicos conectados" (link_report de cada teléfono).
         self.status_followers = QPushButton("Músicos: 0")
         self.status_followers.setFlat(True)
         self.status_followers.setCursor(Qt.PointingHandCursor)
-        self.status_followers.setStyleSheet("QPushButton { color: #888888; border: 0; padding: 0 6px; }")
+        self.status_followers.setStyleSheet("QPushButton { color: #8E97A3; border: 0; padding: 0 6px; }")
         self.status_followers.clicked.connect(self._open_musicians_panel)
         self.status_bar.addWidget(self.status_followers)
         self._followers = []
         self._musicians_panel = None
 
         self.status_cloud = QLabel("NUBE: sin sesión")
-        self.status_cloud.setStyleSheet("color: #666666;")
+        self.status_cloud.setStyleSheet("color: #7C8591;")
         self.status_bar.addWidget(self.status_cloud)
 
         # Persistent: QStatusBar.showMessage() hides normal widgets, not permanent ones.
         self.status_setlist = QLabel("")
         self.status_setlist.setStyleSheet(
-            "color: #000000; background: #FFAA00; font-weight: bold; padding: 1px 8px; border-radius: 3px;"
+            "color: #15181C; background: #D9A24E; font-weight: bold; padding: 1px 8px; border-radius: 3px;"
         )
         self.status_setlist.hide()
         self.status_bar.addPermanentWidget(self.status_setlist)
@@ -302,9 +307,9 @@ class MainWindow(QMainWindow):
         self.connect_btn = QPushButton("Conectar músicos")
         self.connect_btn.setToolTip("QR para que los teléfonos abran la app desde este líder")
         self.connect_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #00FFFF; color: #00FFFF; border-radius: 4px;"
+            "QPushButton { border: 1px solid #5CC8C2; color: #5CC8C2; border-radius: 4px;"
             " padding: 2px 10px; font-size: 11px; }"
-            "QPushButton:hover { background: #00FFFF; color: #000000; }"
+            "QPushButton:hover { background: #5CC8C2; color: #15181C; }"
         )
         self.connect_btn.clicked.connect(self._open_connect_musicians)
         self.status_bar.addPermanentWidget(self.connect_btn)
@@ -312,9 +317,9 @@ class MainWindow(QMainWindow):
         self.test_click_btn = QPushButton("Probar click")
         self.test_click_btn.setToolTip("Un compás de click por las salidas configuradas, sin arrancar la canción")
         self.test_click_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #CCFF00; color: #CCFF00; border-radius: 4px;"
+            "QPushButton { border: 1px solid #B8CF7A; color: #B8CF7A; border-radius: 4px;"
             " padding: 2px 10px; font-size: 11px; }"
-            "QPushButton:hover { background: #CCFF00; color: #000000; }"
+            "QPushButton:hover { background: #B8CF7A; color: #15181C; }"
         )
         self.test_click_btn.clicked.connect(self._test_click)
         self.status_bar.addPermanentWidget(self.test_click_btn)
@@ -332,12 +337,12 @@ class MainWindow(QMainWindow):
 
         logo = QLabel("◈")
         logo.setFont(QFont("JetBrains Mono", 16, QFont.Bold))
-        logo.setStyleSheet("color: #00FFFF;")
+        logo.setStyleSheet("color: #5CC8C2;")
         layout.addWidget(logo)
 
         title = QLabel("BANDAIT DAW")
         title.setFont(QFont("Inter", 13, QFont.Bold))
-        title.setStyleSheet("color: #F0F0F0;")
+        title.setStyleSheet("color: #D5DAE0;")
         layout.addWidget(title)
 
         subtitle = QLabel("— Líder de Sesión")
@@ -348,15 +353,15 @@ class MainWindow(QMainWindow):
 
         self.session_info = QLabel(f"Sesión: {self.server.session_id}")
         self.session_info.setFont(QFont("Inter", 10))
-        self.session_info.setStyleSheet("color: #666666;")
+        self.session_info.setStyleSheet("color: #7C8591;")
         layout.addWidget(self.session_info)
 
         min_btn = QPushButton("−")
         min_btn.setFixedSize(28, 28)
         min_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #333333; color: #666666; border-radius: 4px; font-size: 14px;
+            QPushButton { border: 1px solid #363D47; color: #7C8591; border-radius: 4px; font-size: 14px;
                           padding: 0; min-height: 0; background: transparent; }
-            QPushButton:hover { border-color: #00FFFF; color: #00FFFF; }
+            QPushButton:hover { border-color: #5CC8C2; color: #5CC8C2; }
         """)
         min_btn.clicked.connect(self.showMinimized)
         layout.addWidget(min_btn)
@@ -364,9 +369,9 @@ class MainWindow(QMainWindow):
         close_btn = QPushButton("×")
         close_btn.setFixedSize(28, 28)
         close_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #333333; color: #666666; border-radius: 4px; font-size: 14px;
+            QPushButton { border: 1px solid #363D47; color: #7C8591; border-radius: 4px; font-size: 14px;
                           padding: 0; min-height: 0; background: transparent; }
-            QPushButton:hover { background: #FF0000; border-color: #FF0000; color: #000000; }
+            QPushButton:hover { background: #D96459; border-color: #D96459; color: #15181C; }
         """)
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn)
@@ -403,10 +408,10 @@ class MainWindow(QMainWindow):
 
         small_btn = """
             QPushButton {
-                border: 1px solid #666666; color: #666666; border-radius: 4px;
+                border: 1px solid #7C8591; color: #7C8591; border-radius: 4px;
                 padding: 4px 12px; font-size: 11px;
             }
-            QPushButton:hover { border-color: #00FFFF; color: #00FFFF; }
+            QPushButton:hover { border-color: #5CC8C2; color: #5CC8C2; }
         """
         zoom_layout = QHBoxLayout()
         zoom_out = QPushButton("− Zoom")
@@ -423,12 +428,15 @@ class MainWindow(QMainWindow):
 
         add_section_btn = QPushButton("+ Agregar Sección")
         add_section_btn.setObjectName("primary")
+        # background explicito: el QSS global pinta #primary de color de acento, y con el texto
+        # tambien de acento el boton quedaba como un rectangulo sin texto (captura 2026-10-30).
         add_section_btn.setStyleSheet("""
             QPushButton {
-                border: 1px solid #00FFFF; color: #00FFFF; border-radius: 4px;
+                background: transparent;
+                border: 1px solid #5CC8C2; color: #5CC8C2; border-radius: 4px;
                 padding: 4px 16px; font-size: 11px;
             }
-            QPushButton:hover { background: #00FFFF; color: #000000; }
+            QPushButton:hover { background: #5CC8C2; color: #15181C; }
         """)
         add_section_btn.clicked.connect(self._on_add_section)
         zoom_layout.addWidget(add_section_btn)
@@ -463,7 +471,7 @@ class MainWindow(QMainWindow):
 
         self.mini_label = QLabel("Setlist en vivo: ninguno")
         self.mini_label.setFont(QFont("Inter", 11))
-        self.mini_label.setStyleSheet("color: #666666;")
+        self.mini_label.setStyleSheet("color: #7C8591;")
         mini_layout.addWidget(self.mini_label)
 
         layout.addWidget(mini_timeline)
@@ -488,20 +496,20 @@ class MainWindow(QMainWindow):
                     print(f"[UI] Error leyendo QSS {qss_path}: {e}")
         print("[UI] WARNING: No se encontró archivo QSS. Usando estilos por defecto.")
         self.setStyleSheet("""
-            QMainWindow, QWidget { background-color: #000000; color: #F0F0F0; }
+            QMainWindow, QWidget { background-color: #15181C; color: #D5DAE0; }
             QPushButton {
-                background: transparent; border: 2px solid #00FFFF; color: #00FFFF;
+                background: transparent; border: 2px solid #5CC8C2; color: #5CC8C2;
                 border-radius: 4px; padding: 8px 20px;
             }
-            QPushButton:hover { background: #00FFFF; color: #000000; }
+            QPushButton:hover { background: #5CC8C2; color: #15181C; }
         """)
 
     def _setup_menu(self):
         menubar = self.menuBar()
         menubar.setStyleSheet("""
-            QMenuBar { background: #0A0A0A; color: #F0F0F0; border-bottom: 1px solid #1E1E1E; }
-            QMenuBar::item:selected { background: #141414; color: #00FFFF; }
-            QMenu::item:disabled { color: #555555; }
+            QMenuBar { background: #1B1F24; color: #D5DAE0; border-bottom: 1px solid #262C34; }
+            QMenuBar::item:selected { background: #232830; color: #5CC8C2; }
+            QMenu::item:disabled { color: #5A626E; }
         """)
 
         # Every action does something. The library saves on its own (SQLite), so
@@ -564,6 +572,16 @@ class MainWindow(QMainWindow):
         fullscreen_action.setShortcut("F11")
         fullscreen_action.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
+        brightness_menu = view_menu.addMenu("&Brillo")
+        self.brightness_group = QActionGroup(self)
+        self.brightness_actions = {}
+        for level in BRIGHTNESS_LEVELS:
+            action = QAction(f"{level} %", self, checkable=True)
+            action.setChecked(level == clamp_brightness(self._settings.brightness))
+            action.triggered.connect(lambda _checked=False, v=level: self._set_brightness(v))
+            self.brightness_group.addAction(action)
+            brightness_menu.addAction(action)
+            self.brightness_actions[level] = action
 
         help_menu = menubar.addMenu("A&yuda")
         self.action_demo_load = QAction("Cargar canciones de &demostración...", self)
@@ -609,7 +627,7 @@ class MainWindow(QMainWindow):
             try:
                 self.audio_engine.set_device(choice.device_id)
             except Exception as e:
-                self._set_audio_status(f"Audio: no se pudo abrir el dispositivo ({e})", "#FF0000")
+                self._set_audio_status(f"Audio: no se pudo abrir el dispositivo ({e})", "#D96459")
             else:
                 if not was_running:
                     self._start_audio()
@@ -651,6 +669,14 @@ class MainWindow(QMainWindow):
             f"Reloj del líder: {CLOCK_NAME}",
         )
 
+    def _set_brightness(self, percent: int):
+        """Ver > Brillo: baja la intensidad de toda la ventana y la recuerda."""
+        self._settings.brightness = self.dim_overlay.set_brightness(percent)
+        action = self.brightness_actions.get(self._settings.brightness)
+        if action is not None:
+            action.setChecked(True)
+        self._save_settings()
+
     def _save_settings(self):
         try:
             save_settings(self._settings)
@@ -659,7 +685,10 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ status callbacks
     def _set_audio_status(self, text: str, color: str):
-        self.status_audio.setText(text)
+        # Texto acortado con "..." para que la barra no se desborde; el completo, en el tooltip.
+        metrics = self.status_audio.fontMetrics()
+        self.status_audio.setText(metrics.elidedText(text, Qt.ElideRight, AUDIO_STATUS_MAX_PX))
+        self.status_audio.setToolTip(text)
         self.status_audio.setStyleSheet(f"color: {color};")
 
     def _test_click(self):
@@ -689,15 +718,15 @@ class MainWindow(QMainWindow):
         text = f"Audio: {eng.device_name} ({eng.output_channels} salidas; {routing})"
         if self._saved_device_missing:
             text += " - el dispositivo guardado no está conectado"
-        self._set_audio_status(text, "#CCFF00")
+        self._set_audio_status(text, "#B8CF7A")
 
     def _on_audio_stopped(self):
-        self._set_audio_status("Audio: detenido", "#666666")
+        self._set_audio_status("Audio: detenido", "#7C8591")
 
     def _on_server_status(self, status: str, message: str):
-        colors = {"running": "#CCFF00", "error": "#FF0000", "starting": "#FFAA00", "stopped": "#666666"}
+        colors = {"running": "#B8CF7A", "error": "#D96459", "starting": "#D9A24E", "stopped": "#7C8591"}
         self.status_net.setText(f"Red: {message}")
-        self.status_net.setStyleSheet(f"color: {colors.get(status, '#666666')};")
+        self.status_net.setStyleSheet(f"color: {colors.get(status, '#7C8591')};")
         ok = status == "running"
         self.stage_view.set_network_status(ok)
         self.transport.set_network_status(ok, "Red OK" if ok else "Red caída")
@@ -710,7 +739,7 @@ class MainWindow(QMainWindow):
         now = leader_now_ns()
         self.status_followers.setText(summary_text(followers, now))
         worst = worst_health(followers, now)
-        color = HEALTH_COLORS.get(worst, "#888888") if worst else "#888888"
+        color = HEALTH_COLORS.get(worst, "#8E97A3") if worst else "#8E97A3"
         self.status_followers.setStyleSheet(f"QPushButton {{ color: {color}; border: 0; padding: 0 6px; }}")
         self.status_followers.setToolTip(
             "\n".join(f"{f.get('alias')} ({f.get('role')})" for f in followers) or "Nadie conectado"
@@ -857,11 +886,11 @@ class MainWindow(QMainWindow):
                 os.makedirs(base_dir, exist_ok=True)
                 folder = self.audio_engine.start_recording(session_name, base_dir=base_dir)
                 self._last_recording_folder = folder
-                self._set_audio_status(f"GRABANDO — {session_name}", "#FF0000")
+                self._set_audio_status(f"GRABANDO — {session_name}", "#D96459")
                 self.status_bar.showMessage(f"Grabación iniciada: {os.path.basename(folder)}", 5000)
             except Exception as e:
                 self.transport.set_recording_state(False)
-                self._set_audio_status(f"Audio: no se pudo grabar ({e})", "#FFAA00")
+                self._set_audio_status(f"Audio: no se pudo grabar ({e})", "#D9A24E")
         else:
             try:
                 self.audio_engine.stop_recording()
