@@ -108,6 +108,25 @@ afterEach(() => {
 })
 
 describe('SessionController', () => {
+  it('reports its link to the leader on join, every 5 s and on audio changes; never after SALIR', async () => {
+    controller.join({ url: 'http://10.0.0.2:4040', sessionId: 'default', role: 'musician', alias: 'Bajo' })
+    socket.serverConnect()
+    await vi.advanceTimersByTimeAsync(100)
+    const reports = () => socket.emitted.filter((e) => e.event === 'link_report').map((e) => e.payload as Json)
+    expect(reports().length).toBe(1) // al unirse
+    expect(reports()[0]).toMatchObject({ session_id: 'default', audio: 'unarmed', muted: false })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(reports().length).toBe(2)
+    expect(reports()[1].rtt_ms).toEqual(expect.any(Number))
+    await clock.armAudio()
+    expect(reports()[reports().length - 1]).toMatchObject({ audio: 'armed' })
+    const before = reports().length
+    const sock = socket
+    controller.leave()
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(sock.emitted.filter((e) => e.event === 'link_report').length).toBe(before)
+  })
+
   it('goes DEGRADED -> LOCKED as samples arrive, LOST after SALIR', async () => {
     controller.join({ url: 'http://10.0.0.2:4040', sessionId: 'default', role: 'musician', alias: 'Bajo' })
     expect(controller.getSnapshot().linkState).toBe('LOST')

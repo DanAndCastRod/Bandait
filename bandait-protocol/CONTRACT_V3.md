@@ -39,6 +39,7 @@ documento y los fixtures, nunca solo el código.
 | `join_session` | `{session_id, client_id, role, alias, protocol_version}` | `{status: "joined", session_id, protocol_version, leader_time_ns}` y además el líder emite `full_state` a ese socket **siempre**, aunque el estado sea IDLE |
 | `sync_request` | `{client_send_ms}` | `{client_send_ms, leader_time_ns}` |
 | `control_command` | `{session_id, command_id, type, origin, sender_id, payload}` | `command_ack` (sección 5) |
+| `link_report` | `{session_id, client_id, rtt_ms, jitter_ms, samples, output_latency_ms, audio, muted}` | ninguna (fire-and-forget) |
 
 - `role`: `"musician" | "director" | "foh" | "hub"`.
 - `origin`: `"director_mobile" | "laptop_foh" | "hub"`.
@@ -55,6 +56,17 @@ documento y los fixtures, nunca solo el código.
     (otro dispositivo ya movió el setlist; evita saltar dos canciones por pulsaciones
     simultáneas).
   - `TEMPO_NUDGE`: `{delta_bpm}` (entero, normalmente ±1). BPM resultante acotado a 40..260.
+- `link_report` (v3.2, 2026-10-30): estado del enlace de cada teléfono, para que el líder lo
+  muestre en "Músicos conectados". El follower lo envía cada 5 s mientras está unido a la
+  sesión y además en cada cambio de `audio` o `muted`. Campos:
+  - `rtt_ms`, `jitter_ms`: los del último cálculo de `sync_request` (sección 2), o `null` si
+    aún no hay muestras. `samples`: muestras en la ventana actual.
+  - `output_latency_ms`: latencia de salida de audio del teléfono (reloj de render menos lo
+    que se oye), o `null` sin audio. Se compensa sola; se reporta porque Bluetooth la sube a
+    200-300 ms.
+  - `audio`: `"unarmed" | "armed" | "suspended" | "unsupported"`. `muted`: mute local o remoto.
+  - Es informativo: el líder nunca cambia el transporte por un `link_report`. Uno inválido se
+    ignora sin responder. El líder guarda solo el último de cada `client_id`.
 - El evento `broadcast_state` desaparece: ningún cliente puede escribir el estado de la
   sesión directamente. El líder de escritorio usa su API interna.
 

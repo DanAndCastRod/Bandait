@@ -35,6 +35,7 @@ from src.domain.concurrent_control import (
 )
 from src.domain.models import LEADER_INSTANCE_ID, PROTOCOL_VERSION, ClientRole, SessionStatus
 from src.network.http_app import LeaderHttpApp, resolve_follower_dir
+from src.network.link_report import parse_link_report
 from src.network.lan import (
     LanCandidate,
     env_lan_override,
@@ -176,8 +177,9 @@ class BandaitServer:
         return self._control_manager.process_local(command_type, payload, command_id)
 
     def followers(self) -> List[dict]:
+        """Joined followers: client_id, alias, role and, once it reports, ``link`` (link_report)."""
         with self._clients_lock:
-            return [dict(info) for info in self._clients.values() if info.get("joined")]
+            return [dict(info, sid=sid) for sid, info in self._clients.items() if info.get("joined")]
 
     def get_app(self) -> Any:
         return self._app
@@ -566,6 +568,20 @@ class BandaitServer:
             if isinstance(echo, bool) or not isinstance(echo, (int, float)) or not math.isfinite(echo):
                 echo = None
             return {"client_send_ms": echo, "leader_time_ns": leader_time_ns}
+
+        @sio.on("link_report")
+        async def link_report(sid, data=None):
+            # Informative (CONTRACT_V3.md section 3): stored for the panel, never answered.
+            report = parse_link_report(data, self._now())
+            if report is None:
+                return None
+            with self._clients_lock:
+                info = self._clients.get(sid)
+                if not info or not info.get("joined"):
+                    return None
+                info["link"] = report
+            self.signals.followers_changed.emit(self.followers())
+            return None
 
         @sio.on("control_command")
         async def control_command(sid, data=None):

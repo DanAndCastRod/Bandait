@@ -23,8 +23,10 @@ import {
   decodeSessionState,
   decodeSetlistJump,
   decodeSyncAck,
+  LinkReport,
   encodeControlCommand,
   encodeJoinSession,
+  encodeLinkReport,
   encodeSyncRequest,
 } from '../protocol/wire'
 import {
@@ -666,6 +668,22 @@ export class SyncService {
 
   getClockEstimate(): ClockEstimate | null {
     return this.estimate
+  }
+
+  /**
+   * link_report (fire-and-forget): solo con el socket conectado y la sesion unida.
+   * Devuelve false si no se envio.
+   */
+  sendLinkReport(report: Omit<LinkReport, 'sessionId' | 'clientId'>): boolean {
+    const socket = this.socket
+    const params = this.params
+    if (!socket?.connected || !this.joined || !params) return false
+    try {
+      socket.emit('link_report', encodeLinkReport({ ...report, sessionId: params.sessionId, clientId: params.clientId }))
+      return true
+    } catch {
+      return false
+    }
   }
 
   getParams(): SessionParams | null {

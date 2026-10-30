@@ -486,6 +486,46 @@ export function encodeSyncRequest(clientSendMs: number): WireSyncRequest {
   return { client_send_ms: clientSendMs }
 }
 
+/** link_report (CONTRACT_V3 seccion 3): estado del enlace de este telefono para el lider. */
+export interface LinkReport {
+  sessionId: string
+  clientId: string
+  rttMs: number | null
+  jitterMs: number | null
+  samples: number
+  outputLatencyMs: number | null
+  audio: 'unarmed' | 'armed' | 'suspended' | 'unsupported'
+  muted: boolean
+}
+
+export interface WireLinkReport {
+  session_id: string
+  client_id: string
+  rtt_ms: number | null
+  jitter_ms: number | null
+  samples: number
+  output_latency_ms: number | null
+  audio: LinkReport['audio']
+  muted: boolean
+}
+
+function msOrNull(v: number | null): number | null {
+  return v === null || !Number.isFinite(v) ? null : Math.round(Math.max(0, v) * 10) / 10
+}
+
+export function encodeLinkReport(r: LinkReport): WireLinkReport {
+  return {
+    session_id: r.sessionId,
+    client_id: r.clientId,
+    rtt_ms: msOrNull(r.rttMs),
+    jitter_ms: msOrNull(r.jitterMs),
+    samples: Math.max(0, Math.floor(r.samples)),
+    output_latency_ms: msOrNull(r.outputLatencyMs),
+    audio: r.audio,
+    muted: r.muted,
+  }
+}
+
 function encodeCommandPayload<T extends CommandType>(type: T, payload: CommandPayloadMap[T] | undefined): WireCommandPayload {
   switch (type) {
     case 'JUMP_SONG': {

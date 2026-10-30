@@ -12,8 +12,8 @@ from pathlib import Path
 FIXTURES_PATH = Path(__file__).resolve().parents[2] / "bandait-protocol" / "fixtures" / "v3_messages.json"
 
 # Contract types that the fixtures can't fully express with one example.
-NUMBER_KEYS = {"bpm", "client_send_ms"}  # "number": int or float
-NULLABLE_KEYS = {"previous_song_id", "client_send_ms"}
+NUMBER_KEYS = {"bpm", "client_send_ms", "rtt_ms", "jitter_ms", "output_latency_ms"}  # "number": int or float
+NULLABLE_KEYS = {"previous_song_id", "client_send_ms", "rtt_ms", "jitter_ms", "output_latency_ms"}
 
 # Required by CONTRACT_V3 section 4 but not (yet) present in the fixtures file:
 # validated here explicitly (string UUID).
@@ -31,6 +31,7 @@ KINDS = {
     "setlist_jump": ["setlist_jump"],
     "follower_joined": ["follower_joined"],
     "follower_left": ["follower_left"],
+    "link_report": ["link_report"],
 }
 
 

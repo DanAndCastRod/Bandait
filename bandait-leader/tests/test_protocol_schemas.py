@@ -26,6 +26,7 @@ CASES = {
     "control_command_cue_next": "message_types.json#/definitions/control_command",
     "control_command_jump_song": "message_types.json#/definitions/control_command",
     "control_command_tempo_nudge": "message_types.json#/definitions/control_command",
+    "link_report": "message_types.json#/definitions/link_report",
     "command_ack_accepted": "message_types.json#/definitions/command_ack",
     "command_ack_rejected": "message_types.json#/definitions/command_ack",
     "beat_beacon": "message_types.json#/definitions/beat_beacon",

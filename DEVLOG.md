@@ -819,3 +819,33 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Publicar el líder 2.1.4 e instalarlo.
   2. En el ensayo: confirmar que el click suena en cada teléfono, anotar el valor de `SALIDA` y pulsar "Probar click" en el portátil.
+
+### [2026-10-30] - Fase 1a: latencia de cada músico en el líder (link_report)
+* **Sprint / Módulo:** `bandait-protocol` (v3.2), `bandait-follower`, `bandait-leader`
+* **Acción técnica realizada:**
+  - Pedido de Daniel Castañeda: "quisiera poder ver la latencia".
+  - **Protocolo** (contrato y fixtures primero):
+    - evento `link_report` cliente → líder, sin respuesta, con `{session_id, client_id, rtt_ms, jitter_ms, samples, output_latency_ms, audio, muted}`;
+    - sección 3 de `CONTRACT_V3.md`, fixture canónico en `v3_messages.json` y definición en `schemas/message_types.json`;
+    - es informativo: el líder nunca toca el transporte por un reporte.
+  - **PWA:**
+    - `wire.encodeLinkReport` (redondea a 0,1 ms y deja null sin medida) y `SyncService.sendLinkReport`, que solo envía con la sesión unida;
+    - `SessionController` reporta al unirse, cada 5 s (`LINK_REPORT_INTERVAL_MS`) y en cada cambio de audio, y deja de reportar con SALIR.
+  - **Líder:**
+    - `src/network/link_report.py`, puro: `parse_link_report` valida y acota (descarta en silencio lo inválido) y `link_health` clasifica en BUENO, REGULAR, MALO o SIN DATOS;
+    - umbrales propuestos: RTT < 20 ms y jitter < 3 ms es bueno; hasta 50 ms u 8 ms, regular; un enlace es "sin datos" tras 15 s sin reportes;
+    - el servidor guarda el último reporte por sid en `followers()[i]["link"]`.
+  - **Interfaz del líder:**
+    - "Seguidores: N" pasa a ser un botón "Músicos: N · peor RTT X ms", con el color del peor estado;
+    - al pulsarlo, o desde Red > Músicos conectados..., se abre el panel `MusiciansPanel`: músico, rol, RTT, jitter, salida de audio, estado del audio y estado con texto, el peor primero, recalculado cada 2 s.
+* **Impacto en Audio / Red / UI:**
+  - Cada teléfono envía un mensaje cada 5 s, del orden de 200 bytes.
+  - No cambia el camino del click ni el transporte.
+  - Un teléfono con la PWA vieja (antes de 2.1.5) simplemente no reporta y aparece como SIN DATOS.
+* **Verificación y Pruebas (resultado literal):**
+  - Líder: `ruff check src tests` da `All checks passed!` y `pytest -q` da `368 passed`, con 5 nuevas: socket de punta a punta con el fixture, parseo y umbrales, y botón y panel.
+  - PWA: `npx vitest run` da `123 passed`, con 3 nuevas: fixture canónico, redondeo y nulls, y ciclo de reportes con SALIR. `npm run lint`, `npx tsc --noEmit` y `npm run build`: sin errores.
+  - NO VERIFICADO: los umbrales en un ensayo real con la banda.
+* **Pendientes:**
+  1. Fase 1b: paleta Grafito en el líder, la PWA y el hub, más el control de brillo y los arreglos visuales.
+  2. Ajustar los umbrales después del primer ensayo.

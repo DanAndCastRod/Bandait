@@ -362,6 +362,30 @@ def test_follower_joined_and_left(leader):
     run(scenario())
 
 
+def test_link_report_is_stored_per_follower_and_never_answered(leader):
+    async def scenario():
+        probe = await joined(leader, alias="Pipe", role="musician")
+        report = dict(FIXTURES["link_report"], client_id=probe.client_id)
+        validate("link_report", report)
+        await probe.sio.emit("link_report", report)
+        for _ in range(50):
+            mine = [f for f in leader.followers() if f["client_id"] == probe.client_id]
+            if mine and mine[0].get("link"):
+                break
+            await asyncio.sleep(0.05)
+        link = mine[0]["link"]
+        assert (link["rtt_ms"], link["jitter_ms"], link["output_latency_ms"]) == (9.8, 1.2, 142.0)
+        assert link["audio"] == "armed" and link["muted"] is False and link["received_ns"] > 0
+        # Garbage is ignored, and nothing about the transport changes.
+        await probe.sio.emit("link_report", {"audio": "loud", "muted": "no"})
+        await probe.nothing("state_update")
+        assert [f for f in leader.followers() if f["client_id"] == probe.client_id][0]["link"] == link
+        assert leader.get_state()["status"] == "IDLE"
+        await probe.close()
+
+    run(scenario())
+
+
 def test_clients_cannot_write_state(leader):
     async def scenario():
         probe = await joined(leader)

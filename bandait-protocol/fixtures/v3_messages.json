@@ -53,6 +53,16 @@
     "sender_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
     "payload": { "delta_bpm": 1 }
   },
+  "link_report": {
+    "session_id": "default",
+    "client_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
+    "rtt_ms": 9.8,
+    "jitter_ms": 1.2,
+    "samples": 12,
+    "output_latency_ms": 142,
+    "audio": "armed",
+    "muted": false
+  },
   "state_playing": {
     "protocol_version": 3,
     "leader_instance_id": "0b7e3f2a-5c19-4d8e-9a61-7f2c4b8d1e05",
