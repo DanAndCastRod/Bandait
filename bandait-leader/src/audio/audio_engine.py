@@ -42,7 +42,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from src.sync.leader_clock import leader_now_ns
-from src.sync.transport_math import EMPTY_SCHEDULE, Schedule, next_click
+from src.sync.transport_math import EMPTY_SCHEDULE, Schedule, Segment, next_click
 
 from .mixer import Mixer
 from .portaudio_setup import ensure_sounddevice
@@ -56,6 +56,7 @@ sd = ensure_sounddevice().module
 
 MAX_OPEN_OUTPUTS = 64
 DRUMMER_CHANNEL = 2  # Salida 3
+TEST_CLICK_LEAD_NS = 150_000_000  # "Probar click" starts 150 ms after the press
 METER_CHANNELS = 4  # VU meters for Salidas 1-4
 _MAX_BLOCK = 4096  # preallocated frames; PortAudio honors the fixed blocksize we ask for
 _LATE_TOLERANCE_NS = 5_000_000
@@ -341,6 +342,31 @@ class AudioEngine(QObject):
     def set_bpm(self, bpm: float) -> None:
         """Display BPM only. Tempo changes go through TEMPO_NUDGE."""
         self._bpm = float(bpm)
+
+    def test_click(self, beats: int = 4) -> Optional[str]:
+        """One bar of click starting ~150 ms from now, through the configured outputs and
+        without touching the transport (the phones hear nothing). Called on the Qt thread.
+        Returns None if it started, or a sentence saying why it cannot sound."""
+        if not self._running:
+            return "El motor de audio no está corriendo (mira 'Audio:' en la barra de abajo)."
+        if self._schedule:
+            return "Hay una canción sonando: el click ya está activo."
+        drummer = self.enable_drummer_click and self.drummer_click_available
+        if not (self.enable_pa_click or drummer):
+            return "El click está apagado en todas las salidas: actívalo en Audio > Dispositivos de Audio."
+        bpm = self._bpm if self._bpm > 0 else 120.0
+        test = (Segment(leader_now_ns() + TEST_CLICK_LEAD_NS, bpm, max(1, int(beats)), 1),)
+        bpm_display = self._bpm
+        self.set_schedule(test)
+        self._bpm = bpm_display  # a test does not change the BPM on screen
+        duration_ms = int(TEST_CLICK_LEAD_NS / 1e6 + beats * 60_000 / bpm + 60)
+        QTimer.singleShot(duration_ms, lambda: self.end_test_click(test))
+        return None
+
+    def end_test_click(self, test: Schedule) -> None:
+        """Ends a test click, unless the transport replaced it in the meantime (PLAY)."""
+        if self._schedule is test:
+            self.set_schedule(EMPTY_SCHEDULE)
 
     # ------------------------------------------------------------------ callback
     def _duplex_callback(self, indata, outdata, frames, time_info, status) -> None:

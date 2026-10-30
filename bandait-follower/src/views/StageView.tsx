@@ -206,10 +206,13 @@ export default function StageView({ setlistId, onLibrary, onSettings, onExit }: 
         ? 'ESPERANDO ESTADO DEL LIDER'
         : 'SIN SESION'
 
+  // SALIDA: latencia de audio de este telefono (Bluetooth la sube a 200-300 ms). Se compensa sola.
+  const outputMs = flywheelClock.getOutputLatencyMs()
+  const outputText = outputMs !== null ? ` // SALIDA ${outputMs} ms` : ''
   const clockText =
     connected && clock
-      ? `RTT ${clock.rttMs.toFixed(1)} // JIT ${clock.jitterMs.toFixed(1)} ms // ${clock.sampleCount}m`
-      : 'RTT -- // JIT --'
+      ? `RTT ${clock.rttMs.toFixed(1)} // JIT ${clock.jitterMs.toFixed(1)} ms // ${clock.sampleCount}m${outputText}`
+      : `RTT -- // JIT --${outputText}`
 
   let footerText: string
   if (!snap.active) footerText = 'SIN SESION // USA SALIR PARA CONECTAR A UN LIDER'

@@ -124,3 +124,10 @@ def test_audio_dialog_choice_is_applied_and_persisted(window, tmp_path):
     saved = load_settings()
     assert (saved.audio_output_device_name, saved.audio_output_hostapi) == ("Interfaz X", "ASIO")
     assert saved.pa_click_enabled and not saved.drummer_click_enabled and saved.enable_asio
+
+
+def test_test_click_button_says_why_it_cannot_sound(window):
+    """Probar click (barra de estado y menu Audio): sin motor de audio lo dice en una frase."""
+    assert window.test_click_btn.text() == "Probar click"
+    window.test_click_btn.click()
+    assert "Probar click: El motor de audio no está corriendo" in window.status_bar.currentMessage()

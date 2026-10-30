@@ -346,6 +346,39 @@ describe('FlywheelClock: audio clock mapping', () => {
     expect(c.oscillators[0].startTime).toBeCloseTo(c.localToCtx(1250) - 0.03, 6)
   })
 
+  // Regresion 2026-10-30 (ensayo de B&O's): "sono solo una vez y no volvio a sonar". Con una
+  // latencia de salida mayor que la ventana de programacion (~95-120 ms), cada click llegaba
+  // "tarde" al reloj de audio y se descartaba en silencio. Android: 100-200 ms; Bluetooth: 200-300.
+  for (const latencySec of [0.15, 0.3]) {
+    it(`keeps clicking with ${latencySec * 1000} ms of output latency (getOutputTimestamp)`, async () => {
+      await armedClock({ outputTimestampLatencySec: latencySec })
+      clock.applyTransport(playing(START + 500))
+      advance(START + 500 + 4000)
+      const c = ctx as FakeAudioContext
+      const heard = c.oscillators.map((o) => c.ctxToLocal((o.startTime ?? 0) + latencySec))
+      expect(heard.length).toBeGreaterThanOrEqual(7) // 120 BPM: a click every 500 ms
+      for (const t of heard) expect(modDist(t - (START + 500), 500)).toBeLessThan(0.5)
+      for (const o of c.oscillators) expect(o.startTime ?? 0).toBeGreaterThan(0)
+    })
+  }
+
+  it('keeps clicking with high outputLatency and no getOutputTimestamp', async () => {
+    await armedClock({ outputLatency: 0.2 })
+    clock.applyTransport(playing(START + 500))
+    advance(START + 500 + 3000)
+    expect((ctx as FakeAudioContext).oscillators.length).toBeGreaterThanOrEqual(5)
+  })
+
+  it('keeps clicking when the browser reports the latency only after the first click', async () => {
+    await armedClock({ outputLatency: 0 })
+    clock.applyTransport(playing(START + 200))
+    advance(START + 300)
+    expect((ctx as FakeAudioContext).oscillators.length).toBe(1)
+    Object.defineProperty(ctx as FakeAudioContext, 'outputLatency', { value: 0.18, configurable: true })
+    advance(START + 200 + 3000)
+    expect((ctx as FakeAudioContext).oscillators.length).toBeGreaterThanOrEqual(6)
+  })
+
   it('IN-EAR volume drives the master gain', async () => {
     await armedClock()
     clock.setVolume(0.3)

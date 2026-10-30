@@ -130,3 +130,44 @@ def test_callback_maps_stream_time_and_survives_bad_time_info(qapp, fake_devices
     assert engine._stream_perf_offset_ns is not None
     # currentTime was taken from perf_counter: the estimated offset must be ~0.
     assert abs(engine._stream_perf_offset_ns) < 50_000_000
+
+
+# --------------------------------------------------------------------------- "Probar click"
+def test_test_click_plays_one_bar_on_the_configured_outputs(qapp, fake_devices, monkeypatch):
+    import src.audio.audio_engine as ae
+
+    monkeypatch.setattr(ae, "leader_now_ns", lambda: ANCHOR - ae.TEST_CLICK_LEAD_NS)
+    engine = AudioEngine(sample_rate=SR, block_size=BLOCK, device=1)  # laptop: 2 outputs
+    engine._running = True
+    engine.enable_pa_click = True
+    engine.set_bpm(120)
+    assert engine.test_click() is None
+    test = engine._schedule
+    assert engine._bpm == 120
+    data = render(engine, ANCHOR - 1_000_000, int(2.2e9 / NSPF / BLOCK), 2)
+    assert len(onsets(data[:, 0])) == 5  # one bar = 4 clicks; the 5th belongs to the next bar
+    engine.end_test_click(test)
+    assert engine._schedule == ()
+
+
+def test_test_click_explains_why_it_cannot_sound(qapp, fake_devices):
+    engine = AudioEngine(sample_rate=SR, block_size=BLOCK, device=1)
+    assert "no está corriendo" in engine.test_click()
+    engine._running = True
+    engine.enable_pa_click = False  # 2 outputs: no Out 3 and PA off -> silence
+    assert "apagado en todas las salidas" in engine.test_click()
+    engine.enable_pa_click = True
+    engine.set_schedule((Segment(ANCHOR, 120, 4, 1),))
+    assert "canción sonando" in engine.test_click()
+
+
+def test_play_during_a_test_click_is_not_cut_by_its_end(qapp, fake_devices):
+    engine = AudioEngine(sample_rate=SR, block_size=BLOCK, device=1)
+    engine._running = True
+    engine.enable_pa_click = True
+    assert engine.test_click() is None
+    test = engine._schedule
+    show = (Segment(ANCHOR, 100, 4, 1),)
+    engine.set_schedule(show)  # PLAY before the test ended
+    engine.end_test_click(test)
+    assert engine._schedule == show

@@ -787,3 +787,35 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - La primera versión de `deleteBand` sacaba la banda compartida de `sharedRef` antes de calcular la parte personal. La banda borrada se tomaba por personal y se volvía a guardar en `bandait_workspaces`. Lo detectó la e2e nueva; ahora la parte personal se calcula antes.
 * **Pendientes:**
   1. Daniel Castañeda: borrar en su cuenta la "Banda de Daniel" de ejemplo que creó la versión anterior.
+
+### [2026-10-30] - Fase 0: el click deja de perderse en teléfonos con latencia de salida alta; "Probar click" en el líder
+* **Sprint / Módulo:** `bandait-follower` (flywheelClock, StageView), `bandait-leader` (audio_engine, main_window)
+* **Acción técnica realizada:**
+  - Reporte de Daniel Castañeda en el primer ensayo con B&O's: "en el teléfono sonó solo una vez y no volvió a sonar".
+  - **Causa (reproducida con pruebas):**
+    - `FlywheelClock.tick()` emitía cada click cuando le faltaban como mucho `SCHEDULE_AHEAD_MS` (120 ms) en el tiempo *oído*; con el intervalo de 25 ms, entre ~95 y 120 ms antes.
+    - El nodo se programa en el reloj de audio (`currentTime`), que va por delante de lo oído en la latencia de salida. Si esa latencia supera ~95 ms (Android 100 a 200 ms, Bluetooth 200 a 300 ms), `ctxTime < currentTime + AUDIO_MIN_LEAD_SEC`: el click se descartaba en silencio y el cursor avanzaba.
+    - El primero sonaba porque, justo al armar el audio, el navegador todavía reporta latencia 0.
+  - **Corrección:**
+    - La ventana se mide sobre el reloj de render: `horizon = now + SCHEDULE_AHEAD_MS + outputLeadMs`.
+    - `AudioClockMapper.outputLeadMs()` vale `currentTime - (lo oído ahora)`, acotado a `MAX_OUTPUT_LEAD_MS` = 500 ms.
+    - La línea inferior de Escenario muestra `SALIDA <ms>` (la latencia de audio del teléfono).
+  - **Líder, "Probar click":**
+    - `AudioEngine.test_click()` suena un compás 150 ms después de pulsarlo, por las salidas configuradas, sin tocar el transporte; los teléfonos no oyen nada.
+    - Si no puede sonar, devuelve en una frase por qué: motor detenido, click apagado en todas las salidas o canción sonando.
+    - Hay un botón en la barra de estado y una acción en el menú Audio.
+    - Un PLAY durante la prueba no lo corta el fin de la prueba.
+  - Revisado en el portátil de Daniel Castañeda (solo lectura y una apertura de flujo en silencio): "Altavoces (3- Realtek XU)" existe, es el predeterminado, MME lo reporta con 8 canales y abre en 8 y en 2 canales a 44,1 y 48 kHz. `leader_config.json` tiene `pa_click_enabled: true`. El click del portátil queda sin síntoma confirmado: "Probar click" sirve para diagnosticarlo.
+* **Impacto en Audio / Red / UI:**
+  - El click de la PWA arranca hasta 500 ms antes en el reloj de audio; lo oído sigue alineado con el líder.
+  - Los teléfonos cargan la PWA desde el líder (`_internal/follower`), así que el arreglo les llega con el instalador 2.1.4. `landing/app` se regenera para la PWA publicada.
+* **Verificación y Pruebas (resultado literal):**
+  - PWA:
+    - `npx vitest run`: `120 passed`. Las 4 pruebas nuevas (latencia de 150 y 300 ms con `getOutputTimestamp`, 200 ms sin él, y latencia reportada después del primer click) fallaban antes de la corrección (`4 failed`).
+    - `npm run lint`, `npx tsc --noEmit` y `npm run build`: sin errores.
+    - `npx playwright test --project=follower`: `28 passed`.
+  - Líder: `ruff check src tests` da `All checks passed!` y `pytest -q` da `363 passed`, con 4 nuevas (`test_audio_phase_lock.py` y `test_leader_ui_path.py`).
+  - NO VERIFICADO: el click en el teléfono de Daniel Castañeda con el instalador 2.1.4 en un ensayo real.
+* **Pendientes:**
+  1. Publicar el líder 2.1.4 e instalarlo.
+  2. En el ensayo: confirmar que el click suena en cada teléfono, anotar el valor de `SALIDA` y pulsar "Probar click" en el portátil.
