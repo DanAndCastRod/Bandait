@@ -734,3 +734,18 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   5. Revisar PySide6 6.12 aparte y quitar el tope `<6.12`, que se agregó en este mismo PR. La CI del PR #20 instaló PySide6 6.12.0, publicado después de la última corrida verde (6.11.2, run `37251318217`), y eso trajo dos fallas:
      - en Linux, `pytest` termina `358 passed, 1 skipped` y luego el proceso muere con "shared QObject was deleted directly" y segfault (exit 139), reproducido dos veces;
      - en Windows, el chequeo de licencias del instalador falla porque `NOTICE.md` no menciona `PySide6_Pdf` ni `PySide6_WebEngine`, paquetes que 6.12 trae aparte.
+
+### [2026-10-29] - Líder 2.1.3: bandas compartidas en el selector
+* **Sprint / Módulo:** `bandait-leader` (distribución)
+* **Acción técnica realizada:**
+  - `APP_VERSION` y `pyproject.toml` pasan a 2.1.3.
+  - Incluye la lectura de bandas compartidas del PR #20: Cuenta > Elegir banda las muestra como `[COMPARTIDA]`.
+  - Incluye el tope `PySide6<6.12`.
+  - Release pedido por Daniel Castañeda ("despleguemos, hagamos todo lo que sea desplegable").
+* **Impacto en Audio / Red / UI:**
+  - Ninguno en el camino de audio.
+  - Quien compartió una banda debe volver a elegirla en el líder, porque cambia de id.
+* **Verificación y Pruebas:**
+  - `tests/test_packaging.py` en local (versión coherente entre `pyproject.toml` y `APP_VERSION`).
+  - CI del PR y run de `release.yml` del tag: ver el Release publicado.
+  - Instalación en el equipo de Daniel Castañeda: NO VERIFICADA.
