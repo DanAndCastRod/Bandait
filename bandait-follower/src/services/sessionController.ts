@@ -66,10 +66,14 @@ export function transportFromState(state: SessionState): TransportInput {
   }
 }
 
+/** Cada cuanto el telefono le reporta al lider su enlace (CONTRACT_V3 seccion 3). */
+export const LINK_REPORT_INTERVAL_MS = 5000
+
 export class SessionController {
   private snapshot: SessionSnapshot
   private readonly listeners = new Set<() => void>()
   private lastPanicCommandId: string | null = null
+  private linkTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(
     private readonly sync: SyncService,
@@ -89,7 +93,10 @@ export class SessionController {
           // disconnected so the last figures stay visible next to FLYWHEEL.
           clock: this.sync.getClockEstimate(),
         }),
-      onJoined: () => this.patch({ joined: true, protocolError: null }),
+      onJoined: () => {
+        this.patch({ joined: true, protocolError: null })
+        this.startLinkReports()
+      },
       onState: (state) => this.handleState(state),
       onBeacon: (beacon) => {
         this.clock.applyTransport({
@@ -112,8 +119,34 @@ export class SessionController {
         if (this.snapshot.protocolError !== message) this.patch({ protocolError: message })
       },
     })
-    this.clock.onAudioChange(() => this.patch({}))
+    this.clock.onAudioChange(() => {
+      this.patch({})
+      this.reportLink() // el lider ve enseguida si alguien no ha activado el audio
+    })
     this.wakeLock.onChange(() => this.patch({}))
+  }
+
+  /** Envia el estado del enlace al lider; sin sesion unida no hace nada. */
+  reportLink = (): boolean => {
+    const est = this.sync.getClockEstimate()
+    return this.sync.sendLinkReport({
+      rttMs: est ? est.rttMs : null,
+      jitterMs: est ? est.jitterMs : null,
+      samples: est ? est.sampleCount : 0,
+      outputLatencyMs: this.clock.getOutputLatencyMs(),
+      audio: this.clock.getAudioState(),
+      muted: this.clock.isLocallyMuted() || this.clock.isRemoteMuted(),
+    })
+  }
+
+  private startLinkReports(): void {
+    this.reportLink()
+    if (this.linkTimer === null) this.linkTimer = setInterval(this.reportLink, LINK_REPORT_INTERVAL_MS)
+  }
+
+  private stopLinkReports(): void {
+    if (this.linkTimer !== null) clearInterval(this.linkTimer)
+    this.linkTimer = null
   }
 
   // ----------------------------------------------------------- store API
@@ -163,6 +196,7 @@ export class SessionController {
 
   /** SALIR: the only path that closes the socket and stops the metronome. */
   leave(): void {
+    this.stopLinkReports()
     this.sync.disconnect()
     this.wakeLock.disable()
     this.clock.reset()

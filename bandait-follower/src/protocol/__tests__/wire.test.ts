@@ -10,6 +10,7 @@ import {
   decodeSyncAck,
   encodeControlCommand,
   encodeJoinSession,
+  encodeLinkReport,
   encodeSyncRequest,
 } from '../wire'
 
@@ -336,5 +337,44 @@ describe('wire decode: malformed payloads are rejected, never thrown', () => {
       expect(() => decodeSessionState(o)).not.toThrow()
       expect(() => decodeCommandAck({ ...fixture('command_ack_accepted'), state: o })).not.toThrow()
     }
+  })
+})
+
+describe('link_report (CONTRACT_V3 seccion 3)', () => {
+  it('encodes exactly the canonical fixture, snake_case', () => {
+    const wire = encodeLinkReport({
+      sessionId: 'default',
+      clientId: '6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23',
+      rttMs: 9.8,
+      jitterMs: 1.2,
+      samples: 12,
+      outputLatencyMs: 142,
+      audio: 'armed',
+      muted: false,
+    })
+    expect(wire).toEqual(fixture('link_report'))
+  })
+
+  it('rounds to 0.1 ms and keeps null when there is no measure yet', () => {
+    const wire = encodeLinkReport({
+      sessionId: 's',
+      clientId: 'c',
+      rttMs: 12.345,
+      jitterMs: Number.NaN,
+      samples: 3.7,
+      outputLatencyMs: null,
+      audio: 'unarmed',
+      muted: true,
+    })
+    expect(wire).toEqual({
+      session_id: 's',
+      client_id: 'c',
+      rtt_ms: 12.3,
+      jitter_ms: null,
+      samples: 3,
+      output_latency_ms: null,
+      audio: 'unarmed',
+      muted: true,
+    })
   })
 })

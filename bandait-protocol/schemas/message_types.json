@@ -12,7 +12,8 @@
         "enum": [
           "join_session",
           "sync_request",
-          "control_command"
+          "control_command",
+          "link_report"
         ]
       }
     },
@@ -203,6 +204,68 @@
               "type": "integer"
             }
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "link_report": {
+      "type": "object",
+      "description": "Follower link health for the leader's 'Músicos conectados' panel (CONTRACT_V3.md section 3). Informative only: never changes the transport.",
+      "required": [
+        "session_id",
+        "client_id",
+        "rtt_ms",
+        "jitter_ms",
+        "samples",
+        "output_latency_ms",
+        "audio",
+        "muted"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "client_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rtt_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "jitter_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "audio": {
+          "type": "string",
+          "enum": [
+            "unarmed",
+            "armed",
+            "suspended",
+            "unsupported"
+          ]
+        },
+        "muted": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

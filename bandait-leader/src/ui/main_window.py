@@ -28,7 +28,7 @@ from src.core.paths import get_db_path, recordings_dir
 from src.db.seed import count_demo_rows, load_demo_data, remove_demo_data
 from src.network.server import BandaitServer
 from src.sync.clock_service import ClockService
-from src.sync.leader_clock import CLOCK_NAME, leader_clock_resolution_ns
+from src.sync.leader_clock import CLOCK_NAME, leader_clock_resolution_ns, leader_now_ns
 from src.ui.views.ai_view import AIView
 from src.ui.dialogs.account_select import songs_label
 from src.ui.views.library_view import LibraryView
@@ -277,9 +277,15 @@ class MainWindow(QMainWindow):
         self.status_sync.setToolTip("Base de tiempo del líder para anchor_ns y sync_request")
         self.status_bar.addWidget(self.status_sync)
 
-        self.status_followers = QLabel("Seguidores: 0")
-        self.status_followers.setStyleSheet("color: #666666;")
+        # Clic: panel "Músicos conectados" (link_report de cada teléfono).
+        self.status_followers = QPushButton("Músicos: 0")
+        self.status_followers.setFlat(True)
+        self.status_followers.setCursor(Qt.PointingHandCursor)
+        self.status_followers.setStyleSheet("QPushButton { color: #888888; border: 0; padding: 0 6px; }")
+        self.status_followers.clicked.connect(self._open_musicians_panel)
         self.status_bar.addWidget(self.status_followers)
+        self._followers = []
+        self._musicians_panel = None
 
         self.status_cloud = QLabel("NUBE: sin sesión")
         self.status_cloud.setStyleSheet("color: #666666;")
@@ -533,6 +539,9 @@ class MainWindow(QMainWindow):
         self.action_connect = QAction("&Conectar músicos...", self)
         self.action_connect.triggered.connect(self._open_connect_musicians)
         net_menu.addAction(self.action_connect)
+        self.action_musicians = QAction("&Músicos conectados...", self)
+        self.action_musicians.triggered.connect(self._open_musicians_panel)
+        net_menu.addAction(self.action_musicians)
 
         # The menu holds only what makes sense for the session (rebuilt on every
         # change). Every action also guards itself: a click at the wrong moment
@@ -694,11 +703,30 @@ class MainWindow(QMainWindow):
         self.transport.set_network_status(ok, "Red OK" if ok else "Red caída")
 
     def _on_followers_changed(self, followers):
+        from src.ui.dialogs.musicians_panel import HEALTH_COLORS, summary_text, worst_health
+
         followers = followers or []
-        self.status_followers.setText(f"Seguidores: {len(followers)}")
+        self._followers = followers
+        now = leader_now_ns()
+        self.status_followers.setText(summary_text(followers, now))
+        worst = worst_health(followers, now)
+        color = HEALTH_COLORS.get(worst, "#888888") if worst else "#888888"
+        self.status_followers.setStyleSheet(f"QPushButton {{ color: {color}; border: 0; padding: 0 6px; }}")
         self.status_followers.setToolTip(
             "\n".join(f"{f.get('alias')} ({f.get('role')})" for f in followers) or "Nadie conectado"
         )
+        if self._musicians_panel is not None:
+            self._musicians_panel.set_followers(followers)
+
+    def _open_musicians_panel(self):
+        from src.ui.dialogs.musicians_panel import MusiciansPanel
+
+        if self._musicians_panel is None:
+            self._musicians_panel = MusiciansPanel(self._followers, parent=self)
+        else:
+            self._musicians_panel.set_followers(self._followers)
+        self._musicians_panel.show()
+        self._musicians_panel.raise_()
 
     def _on_setlist_jump(self, jump: dict):
         try:

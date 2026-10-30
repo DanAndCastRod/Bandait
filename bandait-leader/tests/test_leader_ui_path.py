@@ -131,3 +131,33 @@ def test_test_click_button_says_why_it_cannot_sound(window):
     assert window.test_click_btn.text() == "Probar click"
     window.test_click_btn.click()
     assert "Probar click: El motor de audio no está corriendo" in window.status_bar.currentMessage()
+
+
+def test_musicians_panel_shows_each_phone_link(window):
+    """link_report -> boton 'Músicos: N · peor RTT' en la barra y fila por telefono en el panel."""
+    from src.sync.leader_clock import leader_now_ns
+    from src.ui.dialogs.musicians_panel import HEALTH_COLORS
+
+    now = leader_now_ns()
+    followers = [
+        {"sid": "a", "client_id": "a", "alias": "Pipe", "role": "musician",
+         "link": {"rtt_ms": 9.8, "jitter_ms": 1.2, "samples": 12, "output_latency_ms": 142.0,
+                  "audio": "armed", "muted": False, "received_ns": now}},
+        {"sid": "b", "client_id": "b", "alias": "Voz", "role": "musician",
+         "link": {"rtt_ms": 63.5, "jitter_ms": 11.8, "samples": 12, "output_latency_ms": None,
+                  "audio": "armed", "muted": False, "received_ns": now}},
+        {"sid": "c", "client_id": "c", "alias": "Bajo", "role": "musician"},
+    ]
+    window._on_followers_changed(followers)
+    assert window.status_followers.text() == "Músicos: 3 · peor RTT 63.5 ms"
+    assert HEALTH_COLORS["bad"] in window.status_followers.styleSheet()
+    window.action_musicians.trigger()
+    table = window._musicians_panel.table
+    assert table.rowCount() == 3
+    rows = {table.item(r, 0).text(): [table.item(r, c).text() for c in range(table.columnCount())] for r in range(3)}
+    assert rows["Pipe"][2:5] == ["9.8 ms", "1.2 ms", "142.0 ms"]
+    assert rows["Pipe"][6].startswith("BUENO")
+    assert rows["Voz"][6].startswith("MALO")
+    assert rows["Bajo"][6].startswith("SIN DATOS")
+    assert table.item(0, 0).text() == "Voz"  # el peor primero
+    window._musicians_panel.close()
