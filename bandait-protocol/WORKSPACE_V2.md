@@ -171,3 +171,15 @@ Luego `schemaVersion = 2` y `voiceMap[bandId]` por defecto si falta:
 `cueLeadBars 1`, `output "drummer"`.
 
 El líder acepta también v1: trata cada `PlaylistSong` como una canción sin secciones.
+
+## 7. Bandas compartidas
+
+Una banda compartida se guarda en `public.bandait_bands.content` como un documento de
+este mismo formato con **una sola banda**: `bands[0].id` es el id (UUID) de la fila, y los
+mapas solo traen esa clave. `membersMap[id]` va vacío: la pertenencia vive en
+`bandait_band_members`, con RLS por correo y rol (docs/DEPLOY.md, sección 3.11). `stemsMap`
+va vacío: los stems son de cada cuenta.
+
+El hub y el líder leen cada fila por separado y la agregan a la lista de bandas del
+workspace personal. Una banda compartida cuyo id coincide con el de una personal se ignora.
+El líder nunca escribe en estas tablas.

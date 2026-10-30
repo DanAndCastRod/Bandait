@@ -42,7 +42,7 @@ function syncTitle(status: HubSyncStatus): string {
 }
 
 export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
-  const { user, bands, activeBand, activeBandRole, switchBand, createBand, logout, exportWorkspaceJson, importWorkspaceJson, syncStatus } =
+  const { user, bands, activeBand, activeBandRole, switchBand, createBand, logout, exportWorkspaceJson, importWorkspaceJson, syncStatus, sharing } =
     useHub()
   const importInputRef = useRef<HTMLInputElement>(null)
   const [importMessage, setImportMessage] = useState<{ ok: boolean; text: string } | null>(null)
@@ -164,6 +164,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         {/* MULTI-BAND SELECTOR DROPDOWN */}
         <div style={{ position: 'relative', minWidth: 0, flexShrink: 1 }}>
           <button
+            data-testid="band-switcher"
             onClick={() => setShowBandMenu(!showBandMenu)}
             style={{
               background: '#1a202c',
@@ -270,7 +271,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                       color: b.id === activeBand?.id ? '#ff4500' : '#94a3b8',
                     }}
                   >
-                    [{b.currentUserRole}]
+                    {sharing.sharedBandIds.includes(b.id) ? 'COMPARTIDA ' : ''}[{b.currentUserRole}]
                   </span>
                 </button>
               ))}

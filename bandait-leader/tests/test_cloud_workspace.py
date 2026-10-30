@@ -12,12 +12,14 @@ from src.cloud.auth import AuthManager, GoTrueClient, SessionStore, parse_token_
 from src.cloud.workspace import (
     DEFAULT_CUE_TEXT,
     WorkspaceUnavailable,
+    band_summaries,
     deterministic_uuid,
     derived_song_id,
     load_cache,
     obtain_workspace,
     parse_workspace,
     save_cache,
+    snapshot_from_cache,
 )
 
 FIXTURE = Path(__file__).resolve().parents[2] / "bandait-protocol" / "fixtures" / "workspace_v2.json"
@@ -310,7 +312,7 @@ def test_expired_jwt_is_refreshed_once_and_retried(fake_supabase, tmp_path):
     fake_supabase.expire_access_tokens()  # server says 401 although our clock says valid
     snap = obtain_workspace(manager, fake_supabase.url, fake_supabase.api_key, str(tmp_path / "w.json"))
     assert snap.source == "cloud"
-    rest = [r for r in fake_supabase.requests if r[1].startswith("/rest/")]
+    rest = [r for r in fake_supabase.requests if r[1].startswith("/rest/v1/bandait_workspaces")]
     assert len(rest) == 2
 
 
@@ -357,3 +359,100 @@ def test_account_without_row_keeps_the_cache(fake_supabase, tmp_path):
     fake_supabase.has_row = False
     snap = obtain_workspace(manager, fake_supabase.url, fake_supabase.api_key, cache)
     assert snap.source == "cache" and "no tiene datos" in snap.error
+
+
+# --------------------------------------------------------------------------- shared bands
+SHARED_ID = "9f1c2b3a-1111-4222-8333-444455556666"
+
+
+def shared_row(band_id=SHARED_ID, name="B&O's", doc_band_id=None):
+    """A bandait_bands row: the fixture's band re-keyed as a single-band v2 document."""
+    raw = fixture()
+    doc_id = doc_band_id or band_id
+    band = dict(raw["bands"][0], id=doc_id, name=name)
+    content = {
+        "schemaVersion": 2,
+        "activeBandId": doc_id,
+        "bands": [band],
+        "membersMap": {doc_id: []},
+        "playlistsMap": {doc_id: [dict(p, bandId=doc_id) for p in raw["playlistsMap"]["band_01"]]},
+        "equipmentMap": {doc_id: []},
+        "stemsMap": {},
+        "songsMap": {doc_id: raw["songsMap"]["band_01"]},
+        "voiceMap": {},
+    }
+    return {"id": band_id, "content": content, "updated_at": "2026-10-29T12:00:00+00:00"}
+
+
+def test_shared_bands_are_added_marked_and_cached_without_writes(fake_supabase, tmp_path):
+    fake_supabase.workspace = fixture()
+    fake_supabase.shared_bands = [shared_row()]
+    manager = _manager(fake_supabase)
+    cache = str(tmp_path / "w.json")
+    snap = obtain_workspace(manager, fake_supabase.url, fake_supabase.api_key, cache)
+    assert snap.source == "cloud" and snap.error is None
+    assert [b.id for b in snap.workspace.bands] == ["band_01", SHARED_ID]
+    shared = snap.workspace.band(SHARED_ID)
+    assert shared.band.shared and shared.band.name == "B&O's"
+    assert shared.songs[0].id == SONG_1 and len(shared.playlists) == 1
+    assert not snap.workspace.band("band_01").band.shared
+    summaries = {s["id"]: s for s in band_summaries(snap.workspace)}
+    assert summaries[SHARED_ID]["shared"] is True and summaries["band_01"]["shared"] is False
+    assert fake_supabase.rest_writes == []
+    # The cache keeps them for a venue without Internet.
+    cached = snapshot_from_cache(cache, fake_supabase.user["id"])
+    assert [b.id for b in cached.workspace.bands] == ["band_01", SHARED_ID]
+
+
+def test_missing_shared_tables_mean_no_shared_bands(fake_supabase, tmp_path):
+    fake_supabase.workspace = fixture()
+    fake_supabase.shared_bands = None  # docs/sql/bandas_compartidas.sql not applied yet
+    snap = obtain_workspace(_manager(fake_supabase), fake_supabase.url, fake_supabase.api_key, str(tmp_path / "w.json"))
+    assert snap.source == "cloud" and snap.error is None
+    assert [b.id for b in snap.workspace.bands] == ["band_01"]
+
+
+def test_account_with_only_shared_bands_still_gets_a_workspace(fake_supabase, tmp_path):
+    fake_supabase.has_row = False
+    fake_supabase.shared_bands = [shared_row()]
+    snap = obtain_workspace(_manager(fake_supabase), fake_supabase.url, fake_supabase.api_key, str(tmp_path / "w.json"))
+    assert snap.source == "cloud"
+    assert [b.id for b in snap.workspace.bands] == [SHARED_ID]
+    assert snap.workspace.active_band_id == SHARED_ID
+
+
+def test_shared_row_with_a_foreign_band_or_a_colliding_id_is_skipped(fake_supabase, tmp_path):
+    fake_supabase.workspace = fixture()
+    fake_supabase.shared_bands = [
+        shared_row(doc_band_id="otra-banda"),  # the document does not carry its own band
+        shared_row(band_id="band_01", name="Impostora"),  # same id as a personal band
+    ]
+    snap = obtain_workspace(_manager(fake_supabase), fake_supabase.url, fake_supabase.api_key, str(tmp_path / "w.json"))
+    assert [b.id for b in snap.workspace.bands] == ["band_01"]
+    assert snap.workspace.band("band_01").band.name != "Impostora"
+    assert any("formato inválido" in w for w in snap.workspace.warnings)
+
+
+def test_failed_shared_read_keeps_the_cached_shared_bands(fake_supabase, tmp_path):
+    fake_supabase.workspace = fixture()
+    fake_supabase.shared_bands = [shared_row()]
+    manager = _manager(fake_supabase)
+    cache = str(tmp_path / "w.json")
+    obtain_workspace(manager, fake_supabase.url, fake_supabase.api_key, cache)
+    fake_supabase.shared_status = 503
+    snap = obtain_workspace(manager, fake_supabase.url, fake_supabase.api_key, cache)
+    assert snap.source == "cloud"
+    assert [b.id for b in snap.workspace.bands] == ["band_01", SHARED_ID]
+    assert "compartidas sin actualizar" in snap.error
+
+
+def test_old_cache_without_shared_bands_still_loads(tmp_path):
+    cache = str(tmp_path / "w.json")
+    save_cache(cache, user_id="u1", email="a@b.co", raw=fixture(), updated_at=None)
+    with open(cache, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    doc.pop("shared_bands")
+    with open(cache, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    snap = snapshot_from_cache(cache, "u1")
+    assert [b.id for b in snap.workspace.bands] == ["band_01"]

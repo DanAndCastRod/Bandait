@@ -183,6 +183,50 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await expect(page.getByLabel('Rol de Mateo Gómez')).toHaveAttribute('title', 'Solo un Owner puede cambiar roles.');
   });
 
+  test('COPIAR A OTRA BANDA copia el setlist y sus canciones sin tocar la banda de origen', async ({ page }) => {
+    await enterDemo(page, /Carlos Mendoza/);
+    const before = await storedWorkspace(page);
+    const source = before.playlistsMap.band_01[0];
+
+    await page.getByTestId('copy-setlist-toggle').click();
+    await page.getByLabel(/COPIAR ".*" A/).selectOption({ label: 'Trío Acústico Pereira' });
+    await page.getByTestId('copy-setlist-confirm').click();
+    await expect(page.getByTestId('copy-setlist-panel').getByRole('status')).toContainText('copiado a Trío Acústico Pereira');
+
+    const after = await storedWorkspace(page);
+    expect(after.playlistsMap.band_01).toEqual(before.playlistsMap.band_01);
+    expect(after.songsMap.band_01).toEqual(before.songsMap.band_01);
+    const copy = after.playlistsMap.band_02.find((p: any) => p.name.startsWith(source.name));
+    expect(copy.bandId).toBe('band_02');
+    expect(copy.songs).toHaveLength(source.songs.length);
+    const targetIds = new Set(after.songsMap.band_02.map((s: any) => s.id));
+    for (const item of copy.songs) expect(targetIds.has(item.songId)).toBe(true);
+
+    await page.getByTestId('band-switcher').click();
+    await page.getByRole('button', { name: /Trío Acústico Pereira/ }).click();
+    await expect(page.locator('option', { hasText: source.name })).toHaveCount(1);
+  });
+
+  test('INTEGRANTES: sin cuenta de nube explica cómo compartir y no promete invitaciones reales', async ({ page }) => {
+    const external = trackExternal(page);
+    await enterDemo(page, /Carlos Mendoza/);
+    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    const panel = page.getByTestId('sharing-panel');
+    await expect(panel).toContainText('BANDA SOLO EN TU CUENTA');
+    await expect(panel).toContainText('Continuar con Google (nube)');
+    await expect(page.getByTestId('share-band')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'INVITAR INTEGRANTE' }).click();
+    await expect(page.getByText('Perfil local: la persona quedará solo en la lista de este navegador.')).toBeVisible();
+    await page.getByPlaceholder('Ej: Daniel Restrepo').fill('Pipe');
+    await page.getByPlaceholder('ejemplo@gmail.com').fill('Pipe@Gmail.com');
+    await page.getByPlaceholder('Ej: Batería / Guitarra / Coros').fill('Guitarra');
+    await page.getByRole('button', { name: 'AGREGAR A LA LISTA' }).click();
+    await expect(page.getByTestId('invite-result')).toContainText('solo en la lista de este navegador');
+    await expect(page.getByTestId('invite-link')).toHaveCount(0);
+    expect(external).toEqual([]);
+  });
+
   test('EXPORTAR JSON descarga un archivo .json con el workspace de la banda', async ({ page }) => {
     await enterDemo(page, /Carlos Mendoza/);
     await expect(page.getByText('XLSX', { exact: false })).toHaveCount(0);

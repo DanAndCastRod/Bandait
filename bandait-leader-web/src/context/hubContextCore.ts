@@ -31,6 +31,31 @@ export interface CloudInfo {
   sessionEmail: string | null
 }
 
+/** Resultado de una accion que puede fallar en la nube. `link`: enlace de invitacion para copiar. */
+export interface HubActionResult {
+  ok: boolean
+  message: string
+  link?: string
+}
+
+/** Bandas compartidas (docs/DEPLOY.md, seccion 3.11). */
+export interface SharingInfo {
+  /** null: aun no se comprobo; false: faltan las tablas en Supabase. */
+  available: boolean | null
+  error: string | null
+  /** Hay una sesion de nube (requisito para compartir). */
+  cloudSignedIn: boolean
+  activeShared: boolean
+  /** El rol permite editar canciones y setlists de la banda activa (siempre true en bandas personales). */
+  activeCanEdit: boolean
+  activeCanInvite: boolean
+  /** Enlace para mandar a los invitados de la banda activa (solo si es compartida). */
+  activeLink: string | null
+  sharedBandIds: string[]
+  /** Bandas donde el usuario puede escribir (destino posible de una copia de setlist). */
+  editableBandIds: string[]
+}
+
 export interface HubContextType {
   user: UserProfile | null
   bands: Band[]
@@ -82,7 +107,17 @@ export interface HubContextType {
   /** Motivo por el que el usuario actual no puede cambiar el rol de ese integrante, o null. */
   roleEditBlockReason: (memberId: string) => string | null
   updateMemberRole: (memberId: string, newRole: MemberRole) => RoleChangeCheck
-  inviteMember: (name: string, email: string, role: MemberRole, instrument: string) => void
+  /** En bandas compartidas crea la invitacion en la nube (por correo) y devuelve el enlace. */
+  inviteMember: (name: string, email: string, role: MemberRole, instrument: string) => Promise<HubActionResult>
+  /** Quita a un integrante (en compartidas, solo un Owner; RLS lo hace cumplir). */
+  removeMember: (memberId: string) => Promise<HubActionResult>
+  /** Salir de la banda compartida activa (no aplica a quien la creo). */
+  leaveActiveBand: () => Promise<HubActionResult>
+  /** Sube la banda activa como banda compartida e invita a sus integrantes con correo. */
+  shareActiveBand: () => Promise<HubActionResult>
+  /** Copia un setlist de la banda activa, con sus canciones, a otra banda editable. */
+  copyPlaylistToBand: (playlistId: string, targetBandId: string) => HubActionResult
+  sharing: SharingInfo
   createPlaylist: (name: string, description: string) => void
   setActivePlaylist: (playlist: Playlist) => void
   updatePlaylistSong: (songId: string, updates: Partial<PlaylistSong>) => void

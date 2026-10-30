@@ -5,6 +5,7 @@ import { computeAuthRedirectUrl } from './identity'
 import { uuidv4 } from './uuid'
 import type { CloudAdapter, CloudError, CloudRow, FetchResult, RemoteHint, WriteResult } from './workspaceSync'
 import { loadWorkspaceDocument } from './workspaceSchema'
+import type { MemberRow } from './sharedBands'
 
 /**
  * Supabase en el Web Admin Hub.
@@ -383,6 +384,210 @@ export function createWorkspaceCloudAdapter(client: SupabaseClient, userId: stri
         void client.removeChannel(channel)
       }
     },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bandas compartidas (docs/sql/bandas_compartidas.sql)
+// ---------------------------------------------------------------------------
+
+export const BANDS_TABLE = 'bandait_bands'
+export const MEMBERS_TABLE = 'bandait_band_members'
+
+/** Documento de una banda compartida: valido solo si trae exactamente esa banda. */
+export function toBandCloudRow(bandId: string, record: { content: unknown; updated_at: unknown }): CloudRow<WorkspaceStore> {
+  const row = toWorkspaceCloudRow({ workspace: record.content, updated_at: record.updated_at })
+  const ok = row.data !== null && row.data.bands.length === 1 && row.data.bands[0].id === bandId
+  return ok ? row : { ...row, data: null }
+}
+
+function schemaAwareError(error: PgErrorLike | null, status: number): CloudError {
+  const c = classifySupabaseError(error, status)
+  if (c.kind === 'schema') {
+    return { ...c, message: 'Las tablas de bandas compartidas no existen en Supabase. Ejecuta docs/sql/bandas_compartidas.sql.' }
+  }
+  return c
+}
+
+const thrown = (err: unknown): CloudError =>
+  classifySupabaseError({ message: err instanceof Error ? err.message : String(err) }, 0)
+
+/** Adaptador del motor de sincronizacion para la fila de UNA banda compartida. */
+export function createBandCloudAdapter(client: SupabaseClient, bandId: string): CloudAdapter<WorkspaceStore> {
+  return {
+    async fetchRow(): Promise<FetchResult<WorkspaceStore>> {
+      try {
+        const { data, error, status } = await client.from(BANDS_TABLE).select('content, updated_at').eq('id', bandId).maybeSingle()
+        if (error) return { ok: false, error: schemaAwareError(error, status) }
+        if (!data) return { ok: true, row: null }
+        return { ok: true, row: toBandCloudRow(bandId, data as { content: unknown; updated_at: unknown }) }
+      } catch (err) {
+        return { ok: false, error: thrown(err) }
+      }
+    },
+
+    // La fila se crea al compartir (createSharedBand). Si el motor llega aqui la banda se borro o
+    // se perdio el acceso: recrearla dejaria a este usuario como dueno de una banda ajena.
+    async insertRow(): Promise<WriteResult> {
+      return {
+        ok: false,
+        conflict: false,
+        error: { kind: 'permission', message: 'La banda compartida ya no existe o perdiste el acceso.', retryable: false },
+      }
+    },
+
+    async updateRow(ws, updatedAt, clientWriteId, expectedUpdatedAt): Promise<WriteResult> {
+      try {
+        const { data, error, status } = await client
+          .from(BANDS_TABLE)
+          .update({ content: wrapWorkspace(ws, updatedAt, clientWriteId), updated_at: updatedAt })
+          .eq('id', bandId)
+          .eq('updated_at', expectedUpdatedAt)
+          .select('updated_at')
+        if (error) return { ok: false, conflict: false, error: schemaAwareError(error, status) }
+        const rows = (data ?? []) as Array<{ updated_at: unknown }>
+        // 0 filas: otra escritura en medio o RLS (rol sin permiso de edicion). El motor relee y decide.
+        if (rows.length === 0) return { ok: false, conflict: true }
+        return { ok: true, updatedAt: String(rows[0].updated_at) }
+      } catch (err) {
+        return { ok: false, conflict: false, error: thrown(err) }
+      }
+    },
+
+    subscribe(onHint: (hint: RemoteHint) => void): () => void {
+      const channel = client
+        .channel(`bandait-band-${bandId}-${TAB_CLIENT_ID.slice(0, 8)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: BANDS_TABLE, filter: `id=eq.${bandId}` }, (payload) => {
+          const rec = (payload.new ?? {}) as Record<string, unknown>
+          onHint({
+            updatedAt: typeof rec.updated_at === 'string' ? rec.updated_at : null,
+            clientWriteId: readSyncField(rec.content, 'client_write_id'),
+          })
+        })
+        .subscribe()
+      return () => {
+        void client.removeChannel(channel)
+      }
+    },
+  }
+}
+
+export interface SharedBandRow {
+  id: string
+  owner_id: string
+  updated_at: string
+  content: unknown
+}
+
+export type SharedListResult =
+  | { ok: true; bands: SharedBandRow[]; members: MemberRow[] }
+  | { ok: false; error: CloudError }
+
+/** Bandas compartidas visibles para la sesion (RLS filtra) y sus integrantes. */
+export async function listSharedBands(client: SupabaseClient): Promise<SharedListResult> {
+  try {
+    const bandsRes = await client.from(BANDS_TABLE).select('id, owner_id, updated_at, content')
+    if (bandsRes.error) return { ok: false, error: schemaAwareError(bandsRes.error, bandsRes.status) }
+    const bands = (bandsRes.data ?? []) as SharedBandRow[]
+    if (bands.length === 0) return { ok: true, bands, members: [] }
+    const membersRes = await client
+      .from(MEMBERS_TABLE)
+      .select('band_id, email, role, name, instrument, created_at')
+      .in(
+        'band_id',
+        bands.map((b) => b.id)
+      )
+    if (membersRes.error) return { ok: false, error: schemaAwareError(membersRes.error, membersRes.status) }
+    return { ok: true, bands, members: (membersRes.data ?? []) as MemberRow[] }
+  } catch (err) {
+    return { ok: false, error: thrown(err) }
+  }
+}
+
+export type CloudOpResult = { ok: true } | { ok: false; error: CloudError }
+
+/** Crea la fila de una banda compartida (quien llama queda como owner_id por RLS/default). */
+export async function createSharedBand(
+  client: SupabaseClient,
+  bandId: string,
+  content: WorkspaceStore,
+  updatedAt: string
+): Promise<CloudOpResult> {
+  try {
+    const { error, status } = await client
+      .from(BANDS_TABLE)
+      .insert({ id: bandId, content: wrapWorkspace(content, updatedAt, uuidv4()), updated_at: updatedAt })
+      .select('id')
+    if (error) return { ok: false, error: schemaAwareError(error, status) }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: thrown(err) }
+  }
+}
+
+export async function insertBandMembers(
+  client: SupabaseClient,
+  bandId: string,
+  rows: ReadonlyArray<{ email: string; role: string; name: string; instrument: string }>
+): Promise<CloudOpResult> {
+  if (rows.length === 0) return { ok: true }
+  try {
+    const { error, status } = await client.from(MEMBERS_TABLE).insert(rows.map((r) => ({ band_id: bandId, ...r })))
+    if (error) {
+      if (error.code === '23505' || status === 409) {
+        return { ok: false, error: { kind: 'unknown', message: 'Ese correo ya está invitado a esta banda.', retryable: false } }
+      }
+      return { ok: false, error: schemaAwareError(error, status) }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: thrown(err) }
+  }
+}
+
+/** Cambia el rol de una invitacion. 0 filas = RLS lo impidio (solo un Owner cambia roles). */
+export async function updateBandMemberRole(client: SupabaseClient, bandId: string, email: string, role: string): Promise<CloudOpResult> {
+  try {
+    const { data, error, status } = await client
+      .from(MEMBERS_TABLE)
+      .update({ role })
+      .eq('band_id', bandId)
+      .eq('email', email)
+      .select('email')
+    if (error) return { ok: false, error: schemaAwareError(error, status) }
+    if ((data ?? []).length === 0) {
+      return { ok: false, error: { kind: 'permission', message: 'Solo un Owner de la banda puede cambiar roles.', retryable: false } }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: thrown(err) }
+  }
+}
+
+/** Quita una invitacion (un Owner a cualquiera; cada quien a si mismo para salirse). */
+export async function deleteBandMember(client: SupabaseClient, bandId: string, email: string): Promise<CloudOpResult> {
+  try {
+    const { data, error, status } = await client.from(MEMBERS_TABLE).delete().eq('band_id', bandId).eq('email', email).select('email')
+    if (error) return { ok: false, error: schemaAwareError(error, status) }
+    if ((data ?? []).length === 0) {
+      return { ok: false, error: { kind: 'permission', message: 'No tienes permiso para quitar a ese integrante.', retryable: false } }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: thrown(err) }
+  }
+}
+
+/** Avisos de cambios en la pertenencia (invitaciones nuevas, roles, salidas) y en bandas creadas o borradas. */
+export function subscribeSharedBands(client: SupabaseClient, onChange: () => void): () => void {
+  const channel = client
+    .channel(`bandait-shared-${TAB_CLIENT_ID.slice(0, 8)}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: MEMBERS_TABLE }, () => onChange())
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: BANDS_TABLE }, () => onChange())
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: BANDS_TABLE }, () => onChange())
+    .subscribe()
+  return () => {
+    void client.removeChannel(channel)
   }
 }
 
