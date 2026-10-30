@@ -16,10 +16,10 @@ class VUMeter(QWidget):
     """Medidor de nivel de audio con escala en dB."""
 
     # Colores por rango
-    COLOR_LOW = QColor(0, 255, 255)      # Cyan: -60 a -24 dB
-    COLOR_MID = QColor(204, 255, 0)     # Lime: -24 a -12 dB
-    COLOR_HIGH = QColor(255, 170, 0)    # Naranja: -12 a -6 dB
-    COLOR_PEAK = QColor(255, 0, 0)      # Rojo: > -6 dB
+    COLOR_LOW = QColor(92, 200, 194)      # Cyan: -60 a -24 dB
+    COLOR_MID = QColor(184, 207, 122)     # Lime: -24 a -12 dB
+    COLOR_HIGH = QColor(217, 162, 78)    # Naranja: -12 a -6 dB
+    COLOR_PEAK = QColor(217, 100, 89)      # Rojo: > -6 dB
 
     def __init__(self, label: str = "CH", parent=None):
         super().__init__(parent)
@@ -82,15 +82,15 @@ class VUMeter(QWidget):
 
         # Fondo
         bg_rect = QRect(bar_x, 20, bar_w, h - 40)
-        painter.fillRect(bg_rect, QColor(10, 10, 10))
-        painter.setPen(QPen(QColor(30, 30, 30), 1))
+        painter.fillRect(bg_rect, QColor(27, 31, 36))
+        painter.setPen(QPen(QColor(38, 44, 52), 1))
         painter.drawRect(bg_rect)
 
         # Marcas de dB
         db_marks = [(-60, 1.0), (-48, 0.8), (-36, 0.6), (-24, 0.5),
                     (-18, 0.4), (-12, 0.3), (-6, 0.15), (-3, 0.08), (0, 0.0)]
         painter.setFont(QFont("JetBrains Mono", 7))
-        painter.setPen(QColor(102, 102, 102))
+        painter.setPen(QColor(124, 133, 145))
         for db, y_norm in db_marks:
             y = int(20 + (h - 40) * y_norm)
             painter.drawText(2, y - 4, bar_x - 4, 10, Qt.AlignRight, str(db))
@@ -115,11 +115,11 @@ class VUMeter(QWidget):
         # Peak hold line
         if self._peak > 0:
             peak_y = int(20 + (h - 40) * (1.0 - self._peak))
-            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            painter.setPen(QPen(QColor(230, 234, 238), 2))
             painter.drawLine(bar_x, peak_y, bar_x + bar_w, peak_y)
 
         # Label
-        painter.setPen(QColor(240, 240, 240))
+        painter.setPen(QColor(213, 218, 224))
         painter.setFont(QFont("Inter", 8, QFont.Bold))
         painter.drawText(0, 2, w, 16, Qt.AlignCenter, self.label_text)
 

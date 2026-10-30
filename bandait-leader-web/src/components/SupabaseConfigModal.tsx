@@ -16,15 +16,15 @@ interface Props {
 
 const mono = "'IBM Plex Mono', monospace"
 
-const labelStyle: React.CSSProperties = { fontSize: '11px', color: '#94a3b8', fontFamily: mono }
+const labelStyle: React.CSSProperties = { fontSize: '11px', color: '#8E97A3', fontFamily: mono }
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  background: '#0d1017',
-  border: '1px solid #2a3346',
+  background: '#181B20',
+  border: '1px solid #2E343D',
   borderRadius: '4px',
   padding: '8px 10px',
-  color: '#ffffff',
+  color: '#D5DAE0',
   marginTop: '4px',
   boxSizing: 'border-box',
   fontSize: '13px',
@@ -32,8 +32,8 @@ const inputStyle: React.CSSProperties = {
 
 const smallButton: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid #2a3346',
-  color: '#94a3b8',
+  border: '1px solid #2E343D',
+  color: '#8E97A3',
   padding: '7px 12px',
   borderRadius: '4px',
   fontSize: '11px',
@@ -45,12 +45,12 @@ const smallButton: React.CSSProperties = {
 }
 
 const boxStyle: React.CSSProperties = {
-  background: '#0d1017',
-  border: '1px solid #2a3346',
+  background: '#181B20',
+  border: '1px solid #2E343D',
   borderRadius: '4px',
   padding: '12px',
   fontSize: '11px',
-  color: '#94a3b8',
+  color: '#8E97A3',
   lineHeight: 1.5,
   display: 'flex',
   flexDirection: 'column',
@@ -64,7 +64,7 @@ const SOURCE_LABEL = {
 } as const
 
 function banner(level: 'ok' | 'warn' | 'error', message: string, testId?: string) {
-  const color = level === 'ok' ? '#10b981' : level === 'warn' ? '#f59e0b' : '#ef4444'
+  const color = level === 'ok' ? '#B8CF7A' : level === 'warn' ? '#D9A24E' : '#D96459'
   return (
     <div
       role={level === 'error' ? 'alert' : 'status'}
@@ -164,8 +164,8 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
         role="dialog"
         aria-label="Nube Supabase"
         style={{
-          background: '#161b26',
-          border: '1px solid #2a3346',
+          background: '#20252B',
+          border: '1px solid #2E343D',
           borderRadius: '8px',
           width: '100%',
           maxWidth: '560px',
@@ -180,12 +180,12 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
         }}
       >
         {/* HEADER */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #2a3346', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #2E343D', paddingBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Cloud size={20} style={{ color: '#0066ff' }} />
-            <h3 style={{ margin: 0, fontFamily: mono, fontSize: '15px', color: '#ffffff' }}>NUBE // SUPABASE</h3>
+            <Cloud size={20} style={{ color: '#7AA5D6' }} />
+            <h3 style={{ margin: 0, fontFamily: mono, fontSize: '15px', color: '#D5DAE0' }}>NUBE // SUPABASE</h3>
           </div>
-          <button onClick={onClose} aria-label="Cerrar" style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}>
+          <button onClick={onClose} aria-label="Cerrar" style={{ background: 'transparent', border: 'none', color: '#8E97A3', cursor: 'pointer', padding: '4px' }}>
             <X size={18} />
           </button>
         </div>
@@ -195,10 +195,10 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
         {/* IDENTITY & SYNC STATUS */}
         {user && (
           <div style={boxStyle}>
-            <strong style={{ color: '#ffffff', fontFamily: mono }}>IDENTIDAD Y ESTADO</strong>
+            <strong style={{ color: '#D5DAE0', fontFamily: mono }}>IDENTIDAD Y ESTADO</strong>
             <div>
-              Perfil: <span style={{ color: '#ffffff' }}>{user.email || user.name}</span> //{' '}
-              <span style={{ color: isCloudUser ? '#10b981' : '#f59e0b', fontFamily: mono }}>{PROVIDER_LABELS[user.authProvider]}</span>
+              Perfil: <span style={{ color: '#D5DAE0' }}>{user.email || user.name}</span> //{' '}
+              <span style={{ color: isCloudUser ? '#B8CF7A' : '#D9A24E', fontFamily: mono }}>{PROVIDER_LABELS[user.authProvider]}</span>
             </div>
             {banner(statusLevel, statusText, 'cloud-sync-detail')}
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -209,7 +209,7 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
                 </button>
               )}
               {!isCloudUser && cloud.configured && (
-                <button type="button" onClick={handleCloudLogin} disabled={busy} style={{ ...smallButton, color: '#10b981', borderColor: '#10b981' }}>
+                <button type="button" onClick={handleCloudLogin} disabled={busy} style={{ ...smallButton, color: '#B8CF7A', borderColor: '#B8CF7A' }}>
                   <LogIn size={12} />
                   <span>{cloud.sessionEmail ? `CAMBIAR A LA CUENTA DE NUBE (${cloud.sessionEmail})` : 'INICIAR SESIÓN CON GOOGLE (NUBE)'}</span>
                 </button>
@@ -226,18 +226,18 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
 
         {/* CURRENT CONFIG */}
         <div style={boxStyle}>
-          <strong style={{ color: '#ffffff', fontFamily: mono }}>CONFIGURACIÓN ACTUAL</strong>
+          <strong style={{ color: '#D5DAE0', fontFamily: mono }}>CONFIGURACIÓN ACTUAL</strong>
           <div>
-            Origen: <span style={{ color: '#ffffff' }}>{SOURCE_LABEL[cloud.source]}</span>
+            Origen: <span style={{ color: '#D5DAE0' }}>{SOURCE_LABEL[cloud.source]}</span>
           </div>
           {cloud.url && (
             <div style={{ wordBreak: 'break-all' }}>
-              URL: <span style={{ color: '#ffffff', fontFamily: mono }}>{cloud.url}</span>
+              URL: <span style={{ color: '#D5DAE0', fontFamily: mono }}>{cloud.url}</span>
             </div>
           )}
           <div style={{ wordBreak: 'break-all' }}>
             URL de retorno del login (agrégala en Supabase, Authentication, URL Configuration):{' '}
-            <span style={{ color: '#ffffff', fontFamily: mono }}>{getAuthRedirectUrl()}</span>
+            <span style={{ color: '#D5DAE0', fontFamily: mono }}>{getAuthRedirectUrl()}</span>
           </div>
           {cloud.configError && banner('error', cloud.configError, 'cloud-config-error')}
           {cloud.configured && (
@@ -253,9 +253,9 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
 
         {/* OVERRIDE FORM */}
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <strong style={{ color: '#ffffff', fontFamily: mono, fontSize: '11px' }}>OVERRIDE EN ESTE NAVEGADOR (OPCIONAL)</strong>
-          <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
-            Solo la <strong style={{ color: '#ffffff' }}>anon key</strong> o la <strong style={{ color: '#ffffff' }}>publishable key</strong>.
+          <strong style={{ color: '#D5DAE0', fontFamily: mono, fontSize: '11px' }}>OVERRIDE EN ESTE NAVEGADOR (OPCIONAL)</strong>
+          <p style={{ margin: 0, fontSize: '11px', color: '#8E97A3', lineHeight: 1.5 }}>
+            Solo la <strong style={{ color: '#D5DAE0' }}>anon key</strong> o la <strong style={{ color: '#D5DAE0' }}>publishable key</strong>.
             Las claves service_role y sb_secret_ se rechazan: ignoran RLS y darían acceso a todos los workspaces.
           </p>
           <div>
@@ -289,7 +289,7 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
             {cloud.source === 'override' ? (
-              <button type="button" onClick={handleClearOverride} style={{ ...smallButton, borderColor: '#ef4444', color: '#ef4444' }}>
+              <button type="button" onClick={handleClearOverride} style={{ ...smallButton, borderColor: '#D96459', color: '#D96459' }}>
                 <Trash2 size={12} />
                 <span>QUITAR OVERRIDE</span>
               </button>
@@ -299,9 +299,9 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
             <button
               type="submit"
               style={{
-                background: '#0066ff',
+                background: '#7AA5D6',
                 border: 'none',
-                color: '#ffffff',
+                color: '#15181C',
                 padding: '7px 16px',
                 borderRadius: '4px',
                 fontFamily: mono,
@@ -318,7 +318,7 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
         {/* LOCAL BACKUPS FROM CONFLICTS */}
         {isCloudUser && (
           <div style={boxStyle} data-testid="cloud-backups">
-            <strong style={{ color: '#ffffff', fontFamily: mono }}>RESPALDOS LOCALES DE CONFLICTOS ({backups.length}/3)</strong>
+            <strong style={{ color: '#D5DAE0', fontFamily: mono }}>RESPALDOS LOCALES DE CONFLICTOS ({backups.length}/3)</strong>
             {backups.length === 0 && <div>No hay respaldos. Se crean cuando un conflicto descarta cambios de un lado.</div>}
             {backups.map((b) => (
               <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -340,10 +340,10 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
           </div>
         )}
 
-        <div style={{ ...boxStyle, color: '#94a3b8' }}>
-          <strong style={{ color: '#ffffff', fontFamily: mono }}>BASE DE DATOS</strong>
+        <div style={{ ...boxStyle, color: '#8E97A3' }}>
+          <strong style={{ color: '#D5DAE0', fontFamily: mono }}>BASE DE DATOS</strong>
           <div>
-            Tabla <span style={{ fontFamily: mono, color: '#10b981' }}>public.bandait_workspaces</span> (una fila por usuario,
+            Tabla <span style={{ fontFamily: mono, color: '#B8CF7A' }}>public.bandait_workspaces</span> (una fila por usuario,
             clave <span style={{ fontFamily: mono }}>user_id = auth.uid()</span>). El SQL seguro (RLS, revoke a anon,
             políticas por usuario) está en docs/DEPLOY.md, sección 3. Debe ejecutarse en tu proyecto Supabase.
           </div>

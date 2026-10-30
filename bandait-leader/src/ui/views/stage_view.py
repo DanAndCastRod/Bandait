@@ -45,7 +45,7 @@ class StageView(QWidget):
         # === BEACON DE RED (barra superior) ===
         self.beacon = QFrame()
         self.beacon.setFixedHeight(6)
-        self.beacon.setStyleSheet("background-color: #CCFF00;")
+        self.beacon.setStyleSheet("background-color: #B8CF7A;")
         layout.addWidget(self.beacon)
 
         # === HEADER: Título y controles ===
@@ -58,15 +58,15 @@ class StageView(QWidget):
         self.prev_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                border: 2px solid #666666;
-                color: #666666;
+                border: 2px solid #7C8591;
+                color: #7C8591;
                 border-radius: 8px;
                 padding: 12px 24px;
                 font-size: 14px;
             }
             QPushButton:hover {
-                border-color: #00FFFF;
-                color: #00FFFF;
+                border-color: #5CC8C2;
+                color: #5CC8C2;
             }
         """)
         self.prev_btn.clicked.connect(self.prev_song_clicked.emit)
@@ -78,13 +78,13 @@ class StageView(QWidget):
         info_layout = QVBoxLayout()
         self.song_title = QLabel(self._song_title)
         self.song_title.setFont(QFont("Inter", 18, QFont.Bold))
-        self.song_title.setStyleSheet("color: #F0F0F0;")
+        self.song_title.setStyleSheet("color: #D5DAE0;")
         self.song_title.setAlignment(Qt.AlignCenter)
         info_layout.addWidget(self.song_title)
 
         self.section_label = QLabel(self._section)
         self.section_label.setFont(QFont("Inter", 14))
-        self.section_label.setStyleSheet("color: #00FFFF;")
+        self.section_label.setStyleSheet("color: #5CC8C2;")
         self.section_label.setAlignment(Qt.AlignCenter)
         info_layout.addWidget(self.section_label)
 
@@ -97,15 +97,15 @@ class StageView(QWidget):
         self.next_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                border: 2px solid #666666;
-                color: #666666;
+                border: 2px solid #7C8591;
+                color: #7C8591;
                 border-radius: 8px;
                 padding: 12px 24px;
                 font-size: 14px;
             }
             QPushButton:hover {
-                border-color: #00FFFF;
-                color: #00FFFF;
+                border-color: #5CC8C2;
+                color: #5CC8C2;
             }
         """)
         self.next_btn.clicked.connect(self.next_song_clicked.emit)
@@ -117,7 +117,7 @@ class StageView(QWidget):
         self.jump_alert = QLabel("")
         self.jump_alert.setFont(QFont("Inter", 16, QFont.Bold))
         self.jump_alert.setAlignment(Qt.AlignCenter)
-        self.jump_alert.setStyleSheet("color: #000000; background: #FFAA00; padding: 8px;")
+        self.jump_alert.setStyleSheet("color: #15181C; background: #D9A24E; padding: 8px;")
         self.jump_alert.hide()
         layout.addWidget(self.jump_alert)
         self._jump_timer = QTimer(self)
@@ -131,7 +131,7 @@ class StageView(QWidget):
         self.setlist_notice.setAlignment(Qt.AlignCenter)
         self.setlist_notice.setWordWrap(True)
         self.setlist_notice.setStyleSheet(
-            "color: #000000; background: #FFAA00; padding: 10px 16px;"
+            "color: #15181C; background: #D9A24E; padding: 10px 16px;"
         )
         self.setlist_notice.hide()
         layout.addWidget(self.setlist_notice)
@@ -146,13 +146,13 @@ class StageView(QWidget):
 
         current_label = QLabel("LETRA ACTUAL")
         current_label.setFont(QFont("Inter", 10))
-        current_label.setStyleSheet("color: #666666;")
+        current_label.setStyleSheet("color: #7C8591;")
         current_label.setAlignment(Qt.AlignCenter)
         lyrics_layout.addWidget(current_label)
 
         self.current_lyric = QLabel("Esperando canción...")
         self.current_lyric.setFont(QFont("Inter", 36, QFont.Bold))
-        self.current_lyric.setStyleSheet("color: #F0F0F0;")
+        self.current_lyric.setStyleSheet("color: #D5DAE0;")
         self.current_lyric.setAlignment(Qt.AlignCenter)
         self.current_lyric.setWordWrap(True)
         lyrics_layout.addWidget(self.current_lyric)
@@ -160,7 +160,7 @@ class StageView(QWidget):
         # Próxima línea
         self.next_lyric = QLabel("")
         self.next_lyric.setFont(QFont("Inter", 20))
-        self.next_lyric.setStyleSheet("color: #666666;")
+        self.next_lyric.setStyleSheet("color: #7C8591;")
         self.next_lyric.setAlignment(Qt.AlignCenter)
         self.next_lyric.setWordWrap(True)
         lyrics_layout.addWidget(self.next_lyric)
@@ -169,7 +169,7 @@ class StageView(QWidget):
 
         # Separador
         sep = QFrame()
-        sep.setStyleSheet("background: #1E1E1E; max-width: 2px; min-width: 2px;")
+        sep.setStyleSheet("background: #262C34; max-width: 2px; min-width: 2px;")
         main_area.addWidget(sep)
 
         # Panel derecho: BPM, beat, controles
@@ -180,13 +180,13 @@ class StageView(QWidget):
         # BPM grande
         bpm_label = QLabel("BPM")
         bpm_label.setFont(QFont("Inter", 12))
-        bpm_label.setStyleSheet("color: #666666;")
+        bpm_label.setStyleSheet("color: #7C8591;")
         bpm_label.setAlignment(Qt.AlignCenter)
         right_panel.addWidget(bpm_label)
 
         self.bpm_display = QLabel("120")
         self.bpm_display.setFont(QFont("JetBrains Mono", 72, QFont.Bold))
-        self.bpm_display.setStyleSheet("color: #00FFFF;")
+        self.bpm_display.setStyleSheet("color: #5CC8C2;")
         self.bpm_display.setAlignment(Qt.AlignCenter)
         right_panel.addWidget(self.bpm_display)
 
@@ -197,7 +197,7 @@ class StageView(QWidget):
         for i in range(4):
             led = QLabel("●")
             led.setFont(QFont("JetBrains Mono", 32))
-            led.setStyleSheet("color: #333333;")
+            led.setStyleSheet("color: #363D47;")
             led.setAlignment(Qt.AlignCenter)
             self.beat_indicators.append(led)
             beat_layout.addWidget(led)
@@ -205,20 +205,20 @@ class StageView(QWidget):
 
         self.bar_label = QLabel("COMPÁS -")
         self.bar_label.setFont(QFont("JetBrains Mono", 14, QFont.Bold))
-        self.bar_label.setStyleSheet("color: #666666;")
+        self.bar_label.setStyleSheet("color: #7C8591;")
         self.bar_label.setAlignment(Qt.AlignCenter)
         right_panel.addWidget(self.bar_label)
 
         # Próxima sección
         next_sec_label = QLabel("PRÓXIMA")
         next_sec_label.setFont(QFont("Inter", 10))
-        next_sec_label.setStyleSheet("color: #666666;")
+        next_sec_label.setStyleSheet("color: #7C8591;")
         next_sec_label.setAlignment(Qt.AlignCenter)
         right_panel.addWidget(next_sec_label)
 
         self.next_section_label = QLabel(self._next_section)
         self.next_section_label.setFont(QFont("Inter", 16, QFont.Bold))
-        self.next_section_label.setStyleSheet("color: #CCFF00;")
+        self.next_section_label.setStyleSheet("color: #B8CF7A;")
         self.next_section_label.setAlignment(Qt.AlignCenter)
         right_panel.addWidget(self.next_section_label)
 
@@ -237,14 +237,14 @@ class StageView(QWidget):
         self.fullscreen_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                border: 1px solid #666666;
-                color: #666666;
+                border: 1px solid #7C8591;
+                color: #7C8591;
                 border-radius: 4px;
                 padding: 8px 16px;
             }
             QPushButton:hover {
-                border-color: #00FFFF;
-                color: #00FFFF;
+                border-color: #5CC8C2;
+                color: #5CC8C2;
             }
         """)
         self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
@@ -257,18 +257,18 @@ class StageView(QWidget):
         self.panic_btn.setFont(QFont("Inter", 14, QFont.Bold))
         self.panic_btn.setStyleSheet("""
             QPushButton {
-                background: #FF0000;
+                background: #D96459;
                 border: none;
-                color: #000000;
+                color: #15181C;
                 border-radius: 8px;
                 padding: 16px 32px;
                 font-size: 16px;
             }
             QPushButton:hover {
-                background: #FF3333;
+                background: #D96459;
             }
             QPushButton:pressed {
-                background: #CC0000;
+                background: #B5504A;
             }
         """)
         self.panic_btn.clicked.connect(self.panic_clicked.emit)
@@ -327,19 +327,19 @@ class StageView(QWidget):
         self._beat = beat
         self._beat_lit = True
         if prev is not None and 0 < prev <= len(self.beat_indicators) and prev != beat:
-            self.beat_indicators[prev - 1].setStyleSheet("color: #333333; font-size: 32px;")
+            self.beat_indicators[prev - 1].setStyleSheet("color: #363D47; font-size: 32px;")
         if 0 < beat <= len(self.beat_indicators):
             led = self.beat_indicators[beat - 1]
             if beat == 1:
-                led.setStyleSheet("color: #00FFFF; font-size: 40px; font-weight: bold;")
+                led.setStyleSheet("color: #5CC8C2; font-size: 40px; font-weight: bold;")
             else:
-                led.setStyleSheet("color: #CCFF00; font-size: 32px;")
+                led.setStyleSheet("color: #B8CF7A; font-size: 32px;")
         if beat == 1:
             self._flash_border()
 
     def clear_beat(self):
         for led in self.beat_indicators:
-            led.setStyleSheet("color: #333333; font-size: 32px;")
+            led.setStyleSheet("color: #363D47; font-size: 32px;")
         self._beat_lit = False
 
     def set_bar(self, bar):
@@ -369,7 +369,7 @@ class StageView(QWidget):
             self._flash_widget = QFrame(self)
             self._flash_widget.setStyleSheet("""
                 QFrame {
-                    border: 4px solid #00FFFF;
+                    border: 4px solid #5CC8C2;
                     background: transparent;
                 }
             """)
@@ -386,9 +386,9 @@ class StageView(QWidget):
     def set_network_status(self, ok: bool):
         self._network_ok = ok
         if ok:
-            self.beacon.setStyleSheet("background-color: #CCFF00;")
+            self.beacon.setStyleSheet("background-color: #B8CF7A;")
         else:
-            self.beacon.setStyleSheet("background-color: #FF0000;")
+            self.beacon.setStyleSheet("background-color: #D96459;")
 
     def _toggle_fullscreen(self):
         # Un widget hijo no puede ponerse en pantalla completa por si mismo:

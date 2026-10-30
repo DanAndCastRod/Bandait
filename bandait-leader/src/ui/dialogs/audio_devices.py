@@ -59,9 +59,9 @@ class AudioDevicesDialog(QDialog):
         self.setWindowTitle("Dispositivos de Audio")
         self.setMinimumWidth(560)
         self.setStyleSheet(
-            "QDialog { background: #000000; color: #F0F0F0; }"
-            "QLabel { color: #F0F0F0; }"
-            "QCheckBox { color: #F0F0F0; }"
+            "QDialog { background: #15181C; color: #D5DAE0; }"
+            "QLabel { color: #D5DAE0; }"
+            "QCheckBox { color: #D5DAE0; }"
         )
         self._devices = devices if devices is not None else AudioEngine.get_output_devices()
         self._asio_loaded = any(d.get("is_asio") for d in self._devices)
@@ -84,7 +84,7 @@ class AudioDevicesDialog(QDialog):
 
         self.info_label = QLabel("")
         self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("color: #666666;")
+        self.info_label.setStyleSheet("color: #7C8591;")
         layout.addWidget(self.info_label)
 
         self.drummer_check = QCheckBox("Clic del baterista en Salida 3")
@@ -100,7 +100,7 @@ class AudioDevicesDialog(QDialog):
         layout.addWidget(self.asio_check)
         self.asio_note = QLabel(asio_status_text(self._asio_loaded, last_setup()))
         self.asio_note.setWordWrap(True)
-        self.asio_note.setStyleSheet("color: #666666;")
+        self.asio_note.setStyleSheet("color: #7C8591;")
         layout.addWidget(self.asio_note)
 
         # PortAudio problems found at startup (foreign portaudio.dll on PATH,
@@ -109,7 +109,7 @@ class AudioDevicesDialog(QDialog):
         pa_warnings = setup.warnings() if setup is not None else []
         self.portaudio_warning = QLabel("\n".join(pa_warnings))
         self.portaudio_warning.setWordWrap(True)
-        self.portaudio_warning.setStyleSheet("color: #FFAA00;")
+        self.portaudio_warning.setStyleSheet("color: #D9A24E;")
         self.portaudio_warning.setVisible(bool(pa_warnings))
         layout.addWidget(self.portaudio_warning)
 

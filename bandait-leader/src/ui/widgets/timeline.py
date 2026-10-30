@@ -30,13 +30,13 @@ class SectionItem:
     """Sección de canción (Intro, Verso, Coro, etc.)."""
 
     COLORS = {
-        "Intro": QColor(0, 255, 255, 80),
-        "Verso": QColor(204, 255, 0, 80),
-        "Pre-Coro": QColor(255, 170, 0, 80),
-        "Coro": QColor(255, 0, 255, 80),
-        "Puente": QColor(0, 255, 255, 60),
-        "Solo": QColor(255, 0, 0, 80),
-        "Outro": QColor(102, 102, 102, 80),
+        "Intro": QColor(92, 200, 194, 80),
+        "Verso": QColor(184, 207, 122, 80),
+        "Pre-Coro": QColor(217, 162, 78, 80),
+        "Coro": QColor(180, 142, 219, 80),
+        "Puente": QColor(92, 200, 194, 60),
+        "Solo": QColor(217, 100, 89, 80),
+        "Outro": QColor(124, 133, 145, 80),
     }
 
     def __init__(self, label: str, start_beat: int, duration_beats: int,
@@ -44,7 +44,7 @@ class SectionItem:
         self.label = label
         self.start_beat = start_beat
         self.duration_beats = duration_beats
-        self.color = color or self.COLORS.get(label, QColor(0, 255, 255, 60))
+        self.color = color or self.COLORS.get(label, QColor(92, 200, 194, 60))
 
 
 class TimelineWidget(QWidget):
@@ -144,13 +144,13 @@ class TimelineWidget(QWidget):
 
         w = self.width()
         h = self.height()
-        bg = QColor(0, 0, 0)
+        bg = QColor(21, 24, 28)
         painter.fillRect(self.rect(), bg)
 
         # === RULER (tiempo) ===
         ruler_rect = QRect(0, 0, w, self._ruler_height)
-        painter.fillRect(ruler_rect, QColor(10, 10, 10))
-        painter.setPen(QPen(QColor(30, 30, 30), 1))
+        painter.fillRect(ruler_rect, QColor(27, 31, 36))
+        painter.setPen(QPen(QColor(38, 44, 52), 1))
         painter.drawLine(0, self._ruler_height, w, self._ruler_height)
 
         # Marcas de tiempo: solo los beats visibles (no todos los de la canción).
@@ -170,13 +170,13 @@ class TimelineWidget(QWidget):
 
             if beat_in_bar == 0:
                 # Barra
-                painter.setPen(QPen(QColor(102, 102, 102), 1))
+                painter.setPen(QPen(QColor(124, 133, 145), 1))
                 painter.drawLine(x, 0, x, self._ruler_height)
-                painter.setPen(QColor(240, 240, 240))
+                painter.setPen(QColor(213, 218, 224))
                 painter.drawText(x + 2, 14, f"{bar + 1}")
             else:
                 # Beat
-                painter.setPen(QPen(QColor(51, 51, 51), 1))
+                painter.setPen(QPen(QColor(54, 61, 71), 1))
                 painter.drawLine(x, self._ruler_height - 8, x, self._ruler_height)
 
         # === PISTAS ===
@@ -184,8 +184,8 @@ class TimelineWidget(QWidget):
 
         # Pista de secciones
         track_rect = QRect(0, track_y, w, self._track_height)
-        painter.fillRect(track_rect, QColor(10, 10, 10))
-        painter.setPen(QPen(QColor(30, 30, 30), 1))
+        painter.fillRect(track_rect, QColor(27, 31, 36))
+        painter.setPen(QPen(QColor(38, 44, 52), 1))
         painter.drawRect(track_rect)
 
         # Dibujar secciones
@@ -204,26 +204,26 @@ class TimelineWidget(QWidget):
 
             # Label
             painter.setFont(QFont("Inter", 10, QFont.Bold))
-            painter.setPen(QColor(240, 240, 240))
+            painter.setPen(QColor(213, 218, 224))
             text_rect = QRect(x1 + 4, track_y + 8, width - 8, 20)
             painter.drawText(text_rect, Qt.AlignLeft, section.label)
 
             # Duración en compases
             bars = section.duration_beats // self._beats_per_bar
             painter.setFont(QFont("JetBrains Mono", 8))
-            painter.setPen(QColor(200, 200, 200))
+            painter.setPen(QColor(186, 194, 204))
             dur_rect = QRect(x1 + 4, track_y + 28, width - 8, 16)
             painter.drawText(dur_rect, Qt.AlignLeft, f"{bars} compas{'es' if bars != 1 else ''}")
 
         # === PLAYHEAD ===
         playhead_x = self._seconds_to_x(self._position)
         if 0 <= playhead_x < w:
-            painter.setPen(QPen(QColor(255, 0, 0), 2))
+            painter.setPen(QPen(QColor(217, 100, 89), 2))
             painter.drawLine(playhead_x, 0, playhead_x, h)
 
             # Triángulo en la parte superior. drawPolygon exige QPolygon/QPoint:
             # una lista plana de ints lanza TypeError y tumbaba la app al tocar.
-            painter.setBrush(QBrush(QColor(255, 0, 0)))
+            painter.setBrush(QBrush(QColor(217, 100, 89)))
             painter.drawPolygon(QPolygon([
                 QPoint(playhead_x - 6, 0),
                 QPoint(playhead_x + 6, 0),
@@ -232,7 +232,7 @@ class TimelineWidget(QWidget):
 
         # === TIEMPO ACTUAL ===
         painter.setFont(QFont("JetBrains Mono", 10))
-        painter.setPen(QColor(204, 255, 0))
+        painter.setPen(QColor(184, 207, 122))
         mins = int(self._position) // 60
         secs = int(self._position) % 60
         ms = int((self._position % 1) * 100)
@@ -241,7 +241,7 @@ class TimelineWidget(QWidget):
 
         # === INFO ZOOM ===
         painter.setFont(QFont("JetBrains Mono", 8))
-        painter.setPen(QColor(102, 102, 102))
+        painter.setPen(QColor(124, 133, 145))
         painter.drawText(w - 80, h - 8, f"Zoom: {self._zoom:.1f}x")
 
     def mousePressEvent(self, event: QMouseEvent):

@@ -849,3 +849,34 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Fase 1b: paleta Grafito en el líder, la PWA y el hub, más el control de brillo y los arreglos visuales.
   2. Ajustar los umbrales después del primer ensayo.
+
+### [2026-10-30] - Fase 1b: paleta Grafito en el líder, la PWA y el hub; brillo y arreglos visuales
+* **Sprint / Módulo:** `design-system` (v3.0), `bandait-leader`, `bandait-follower`, `bandait-leader-web`
+* **Acción técnica realizada:**
+  - Pedido de Daniel Castañeda: la paleta neón "quema los ojos". Eligió Grafito entre tres opciones (neón actual, Grafito y Ámbar), en las tres apps.
+  - **`design-system/tokens.json` v3.0 Grafito:** gris muy oscuro en vez de negro puro, blanco apagado y acentos desaturados (activo `#5CC8C2`, pulso y acordes `#B8CF7A`), más `on-accent` para el texto sobre acentos. El README explica por qué se retira la v2 neón (16:1 a 19:1, halo).
+  - **Líder:**
+    - `src/ui/theme.py` con los tokens y la tabla `NEON_TO_GRAFITO`; migración de 19 archivos con unas 666 líneas de color (hex, `QColor(r, g, b)`, `rgba`);
+    - el QR sigue en blanco y negro puros (lo lee la cámara);
+    - `tests/test_theme.py` falla si vuelve un color neón.
+  - **Ver > Brillo** (100, 85, 70, 55 y 40 %): `DimOverlay` es una veladura sobre toda la ventana, transparente al ratón y pintada con `safe_paint`. Se guarda en `leader_config.json` (`brightness`); `load_settings` ahora acepta enteros.
+  - **Arreglos visuales vistos en las capturas:**
+    - el botón "+ Agregar Sección" de Mezcla aparecía como rectángulo cian sin texto: el QSS global pinta `#primary` de acento y el texto también era de acento; ahora tiene fondo transparente;
+    - el encabezado "Tonalidad" salía cortado: las columnas numéricas se ajustan al contenido;
+    - la barra de estado se desbordaba: "Audio:" se acorta con "…" (el texto completo va en el tooltip) y el reloj pasó al tooltip de "Red".
+  - **PWA:**
+    - tema `theme-grafito` predeterminado en `global.css`;
+    - `services/theme.ts`: `resolveTheme` pasa a Grafito una sola vez a quien tenía `theme-swiss` (la app lo guardaba sola, no era una elección) y respeta milspec, tokyo y concert;
+    - Ajustes muestra Grafito primero.
+  - **Hub:**
+    - migración de 13 archivos (unos 45 tonos) y `colors.onAccent` en `hubStyles.ts`;
+    - en los bloques de estilo con fondo de acento y texto claro, el texto pasa a `#15181C` (16 automáticos y 2 condicionales a mano), porque los acentos Grafito son claros.
+* **Impacto en Audio / Red / UI:** solo visual. Ningún cambio de protocolo ni de audio.
+* **Verificación y Pruebas (resultado literal):**
+  - Líder: `ruff check src tests` da `All checks passed!` y `pytest -q` da `370 passed`. Actualicé dos pruebas que verificaban la paleta vieja (`test_paint_guard` y `test_visual_startup` esperaban `#000000`) y agregué otras dos: sin colores neón, y brillo guardado.
+  - PWA: `npx vitest run` da `126 passed` (3 nuevas de `resolveTheme`). `lint`, `tsc` y `build`: sin errores. Playwright follower: `28 passed`.
+  - Hub: `npm run lint` sin problemas; `verify:logic` da `23`, `34` y `14 ok`. Playwright leader-web: `23 passed`, incluida "aplica el tema oscuro" con el fondo nuevo.
+  - Capturas: líder offscreen (Mezcla con el botón visible y la barra completa) y hub demo (PLAYLISTS).
+* **Pendientes:**
+  1. Fase 2: Escenario con letra y acordes; el mezclador del líder solo cuando hay stems.
+  2. Ver en un ensayo si 70 % de brillo es un buen punto de partida.

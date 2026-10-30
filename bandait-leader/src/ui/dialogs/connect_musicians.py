@@ -54,7 +54,7 @@ class _QrPanel(QFrame):
         layout = QVBoxLayout(self)
         heading = QLabel(title)
         heading.setFont(QFont("Inter", 14, QFont.Bold))
-        heading.setStyleSheet("color: #00FFFF;")
+        heading.setStyleSheet("color: #5CC8C2;")
         heading.setAlignment(Qt.AlignCenter)
         layout.addWidget(heading)
         self.qr = QLabel()
@@ -86,9 +86,9 @@ class ConnectMusiciansDialog(QDialog):
         self._on_ip_selected = on_ip_selected
         self.setWindowTitle("Conectar músicos")
         self.setStyleSheet(
-            "QDialog { background: #000000; color: #F0F0F0; }"
-            "QLabel { color: #F0F0F0; }"
-            "QLineEdit { background: #0A0A0A; color: #F0F0F0; border: 1px solid #1E1E1E; padding: 4px; }"
+            "QDialog { background: #15181C; color: #D5DAE0; }"
+            "QLabel { color: #D5DAE0; }"
+            "QLineEdit { background: #1B1F24; color: #D5DAE0; border: 1px solid #262C34; padding: 4px; }"
         )
         layout = QVBoxLayout(self)
 
@@ -114,12 +114,12 @@ class ConnectMusiciansDialog(QDialog):
             "El teléfono debe estar en la misma red Wi-Fi que esta laptop."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #666666;")
+        note.setStyleSheet("color: #7C8591;")
         layout.addWidget(note)
 
         self.warning = QLabel("")
         self.warning.setWordWrap(True)
-        self.warning.setStyleSheet("color: #FFAA00;")
+        self.warning.setStyleSheet("color: #D9A24E;")
         layout.addWidget(self.warning)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)

@@ -176,7 +176,7 @@ def test_guard_ends_the_painter_logs_once_and_never_raises(qapp, caplog):
         assert len(records) == 1 and records[0].exc_info is not None
         # the fallback leaves the black background
         image = widget.grab().toImage()
-        assert image.pixelColor(25, 10) == QColor(0, 0, 0)
+        assert image.pixelColor(25, 10) == QColor(21, 24, 28)  # FALLBACK_BACKGROUND (Grafito)
     finally:
         widget.deleteLater()
         reset_paint_failures()

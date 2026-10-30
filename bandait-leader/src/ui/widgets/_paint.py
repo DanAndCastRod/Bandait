@@ -14,7 +14,7 @@ argument and must not end it::
 
     @safe_paint
     def paintEvent(self, event, painter):
-        painter.fillRect(self.rect(), QColor(0, 0, 0))
+        painter.fillRect(self.rect(), QColor(21, 24, 28))
 
 Guarantees, on stage:
 
@@ -35,7 +35,7 @@ from PySide6.QtGui import QColor, QPainter
 
 logger = logging.getLogger("bandait.ui.paint")
 
-FALLBACK_BACKGROUND = QColor(0, 0, 0)  # OLED black: the widget's own background
+FALLBACK_BACKGROUND = QColor(21, 24, 28)  # Grafito BG (src/ui/theme.py): the widget's own background
 
 # "module.Class" -> failures since start. Paint only runs on the GUI thread.
 _failures: Dict[str, int] = {}

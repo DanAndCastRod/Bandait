@@ -54,16 +54,16 @@ class TransportWidget(QWidget):
 
         time_label = QLabel("TIEMPO")
         time_label.setFont(QFont("Inter", 8))
-        time_label.setStyleSheet("color: #666666;")
+        time_label.setStyleSheet("color: #7C8591;")
         time_layout.addWidget(time_label)
 
         self.time_display = QLabel("00:00.000")
         self.time_display.setObjectName("timeDisplay")
         self.time_display.setFont(QFont("JetBrains Mono", 28, QFont.Bold))
         self.time_display.setStyleSheet("""
-            color: #CCFF00;
-            background-color: #0A0A0A;
-            border: 1px solid #1E1E1E;
+            color: #B8CF7A;
+            background-color: #1B1F24;
+            border: 1px solid #262C34;
             border-radius: 4px;
             padding: 8px 16px;
         """)
@@ -89,13 +89,13 @@ class TransportWidget(QWidget):
                 min-width: 56px; min-height: 56px;
                 border-radius: 8px;
                 font-size: 20px; font-weight: bold;
-                border: 2px solid #FF0000;
-                color: #FF0000;
+                border: 2px solid #D96459;
+                color: #D96459;
                 background: transparent;
             }
             QPushButton:hover {
-                background: #FF0000;
-                color: #000000;
+                background: #D96459;
+                color: #15181C;
             }
         """)
         self.stop_btn.clicked.connect(self._on_stop)
@@ -112,17 +112,17 @@ class TransportWidget(QWidget):
                 min-width: 72px; min-height: 72px;
                 border-radius: 8px;
                 font-size: 28px; font-weight: bold;
-                border: 2px solid #CCFF00;
-                color: #CCFF00;
+                border: 2px solid #B8CF7A;
+                color: #B8CF7A;
                 background: transparent;
             }
             QPushButton:hover {
-                background: #CCFF00;
-                color: #000000;
+                background: #B8CF7A;
+                color: #15181C;
             }
             QPushButton:checked {
-                background: #CCFF00;
-                color: #000000;
+                background: #B8CF7A;
+                color: #15181C;
             }
         """)
         self.play_btn.clicked.connect(self._on_play)
@@ -139,17 +139,17 @@ class TransportWidget(QWidget):
                 min-width: 56px; min-height: 56px;
                 border-radius: 50%;
                 font-size: 20px; font-weight: bold;
-                border: 2px solid #FF0000;
-                color: #FF0000;
+                border: 2px solid #D96459;
+                color: #D96459;
                 background: transparent;
             }
             QPushButton:hover {
-                background: #FF0000;
-                color: #000000;
+                background: #D96459;
+                color: #15181C;
             }
             QPushButton:checked {
-                background: #FF0000;
-                color: #000000;
+                background: #D96459;
+                color: #15181C;
             }
         """)
         self.rec_btn.clicked.connect(self._on_rec)
@@ -167,7 +167,7 @@ class TransportWidget(QWidget):
         bpm_header = QHBoxLayout()
         bpm_label = QLabel("BPM")
         bpm_label.setFont(QFont("Inter", 8))
-        bpm_label.setStyleSheet("color: #666666;")
+        bpm_label.setStyleSheet("color: #7C8591;")
         bpm_header.addWidget(bpm_label)
 
         self.tap_btn = QPushButton("TAP")
@@ -176,14 +176,14 @@ class TransportWidget(QWidget):
             QPushButton {
                 min-width: 40px; min-height: 20px;
                 font-size: 10px;
-                border: 1px solid #666666;
-                color: #666666;
+                border: 1px solid #7C8591;
+                color: #7C8591;
                 border-radius: 2px;
                 padding: 2px 6px;
             }
             QPushButton:hover {
-                border-color: #00FFFF;
-                color: #00FFFF;
+                border-color: #5CC8C2;
+                color: #5CC8C2;
             }
         """)
         self.tap_btn.clicked.connect(self._on_tap_tempo)
@@ -193,14 +193,14 @@ class TransportWidget(QWidget):
             QPushButton {
                 min-width: 28px; min-height: 20px;
                 font-size: 10px;
-                border: 1px solid #666666;
-                color: #666666;
+                border: 1px solid #7C8591;
+                color: #7C8591;
                 border-radius: 2px;
                 padding: 2px 4px;
             }
             QPushButton:hover {
-                border-color: #00FFFF;
-                color: #00FFFF;
+                border-color: #5CC8C2;
+                color: #5CC8C2;
             }
         """
         self.nudge_down_btn = QPushButton("-1")
@@ -218,9 +218,9 @@ class TransportWidget(QWidget):
         self.bpm_display = QLabel("120")
         self.bpm_display.setFont(QFont("JetBrains Mono", 32, QFont.Bold))
         self.bpm_display.setStyleSheet("""
-            color: #00FFFF;
-            background-color: #0A0A0A;
-            border: 1px solid #1E1E1E;
+            color: #5CC8C2;
+            background-color: #1B1F24;
+            border: 1px solid #262C34;
             border-radius: 4px;
             padding: 4px 12px;
         """)
@@ -234,7 +234,7 @@ class TransportWidget(QWidget):
         for i in range(4):
             led = QLabel("●")
             led.setFont(QFont("JetBrains Mono", 14))
-            led.setStyleSheet("color: #333333;")
+            led.setStyleSheet("color: #363D47;")
             led.setAlignment(Qt.AlignCenter)
             self.beat_indicators.append(led)
             beat_layout.addWidget(led)
@@ -259,18 +259,18 @@ class TransportWidget(QWidget):
         self.loop_btn.setStyleSheet("""
             QPushButton {
                 min-height: 28px;
-                border: 1px solid #666666;
-                color: #666666;
+                border: 1px solid #7C8591;
+                color: #7C8591;
                 border-radius: 4px;
                 padding: 4px 12px;
             }
             QPushButton:checked {
-                border-color: #00FFFF;
-                color: #00FFFF;
-                background: rgba(0, 255, 255, 20);
+                border-color: #5CC8C2;
+                color: #5CC8C2;
+                background: rgba(92, 200, 194, 20);
             }
             QPushButton:hover {
-                border-color: #00FFFF;
+                border-color: #5CC8C2;
             }
         """)
         self.loop_btn.clicked.connect(self._on_loop)
@@ -279,7 +279,7 @@ class TransportWidget(QWidget):
         # Estado
         self.status_label = QLabel("Listo")
         self.status_label.setFont(QFont("Inter", 10))
-        self.status_label.setStyleSheet("color: #666666;")
+        self.status_label.setStyleSheet("color: #7C8591;")
         self.status_label.setAlignment(Qt.AlignCenter)
         status_layout.addWidget(self.status_label)
 
@@ -287,12 +287,12 @@ class TransportWidget(QWidget):
         net_layout = QHBoxLayout()
         self.net_led = QLabel("●")
         self.net_led.setFont(QFont("JetBrains Mono", 10))
-        self.net_led.setStyleSheet("color: #CCFF00;")
+        self.net_led.setStyleSheet("color: #B8CF7A;")
         net_layout.addWidget(self.net_led)
 
         self.net_label = QLabel("Sync OK")
         self.net_label.setFont(QFont("Inter", 9))
-        self.net_label.setStyleSheet("color: #666666;")
+        self.net_label.setStyleSheet("color: #7C8591;")
         net_layout.addWidget(self.net_label)
         net_layout.addStretch()
         status_layout.addLayout(net_layout)
@@ -327,17 +327,17 @@ class TransportWidget(QWidget):
             self.play_btn.setToolTip("Pausar (Espacio)")
             if not self._is_recording:
                 self.status_label.setText("Reproduciendo")
-                self.status_label.setStyleSheet("color: #CCFF00;")
+                self.status_label.setStyleSheet("color: #B8CF7A;")
         elif status == "PAUSED":
             self.play_btn.setToolTip("Continuar en el siguiente compas (Espacio)")
             if not self._is_recording:
                 self.status_label.setText("Pausado")
-                self.status_label.setStyleSheet("color: #FFAA00;")
+                self.status_label.setStyleSheet("color: #D9A24E;")
         else:
             self.play_btn.setToolTip("Reproducir (Espacio)")
             if not self._is_recording:
                 self.status_label.setText("Detenido")
-                self.status_label.setStyleSheet("color: #666666;")
+                self.status_label.setStyleSheet("color: #7C8591;")
 
     def _on_rec(self):
         self.set_recording_state(self.rec_btn.isChecked())
@@ -349,7 +349,7 @@ class TransportWidget(QWidget):
         self.rec_btn.setChecked(recording)
         if recording:
             self.status_label.setText("GRABANDO")
-            self.status_label.setStyleSheet("color: #FF0000; font-weight: bold;")
+            self.status_label.setStyleSheet("color: #D96459; font-weight: bold;")
         else:
             self.set_transport_status(self._status)
 
@@ -376,8 +376,8 @@ class TransportWidget(QWidget):
             QPushButton {
                 min-width: 40px; min-height: 20px;
                 font-size: 10px;
-                border: 1px solid #00FFFF;
-                color: #00FFFF;
+                border: 1px solid #5CC8C2;
+                color: #5CC8C2;
                 border-radius: 2px;
                 padding: 2px 6px;
             }
@@ -386,14 +386,14 @@ class TransportWidget(QWidget):
             QPushButton {
                 min-width: 40px; min-height: 20px;
                 font-size: 10px;
-                border: 1px solid #666666;
-                color: #666666;
+                border: 1px solid #7C8591;
+                color: #7C8591;
                 border-radius: 2px;
                 padding: 2px 6px;
             }
             QPushButton:hover {
-                border-color: #00FFFF;
-                color: #00FFFF;
+                border-color: #5CC8C2;
+                color: #5CC8C2;
             }
         """))
 
@@ -419,22 +419,22 @@ class TransportWidget(QWidget):
         if prev == beat:
             return
         if prev is not None and 0 < prev <= len(self.beat_indicators):
-            self.beat_indicators[prev - 1].setStyleSheet("color: #333333;")
+            self.beat_indicators[prev - 1].setStyleSheet("color: #363D47;")
         if 0 < beat <= len(self.beat_indicators):
-            self.beat_indicators[beat - 1].setStyleSheet("color: #CCFF00;")
+            self.beat_indicators[beat - 1].setStyleSheet("color: #B8CF7A;")
         self._lit_beat = beat
 
     def clear_beat(self):
         for led in self.beat_indicators:
-            led.setStyleSheet("color: #333333;")
+            led.setStyleSheet("color: #363D47;")
         self._lit_beat = None
 
     def set_network_status(self, ok: bool, message: str = ""):
         if ok:
-            self.net_led.setStyleSheet("color: #CCFF00;")
+            self.net_led.setStyleSheet("color: #B8CF7A;")
             self.net_label.setText(message or "Sync OK")
-            self.net_label.setStyleSheet("color: #666666;")
+            self.net_label.setStyleSheet("color: #7C8591;")
         else:
-            self.net_led.setStyleSheet("color: #FF0000;")
+            self.net_led.setStyleSheet("color: #D96459;")
             self.net_label.setText(message or "Sin conexión")
-            self.net_label.setStyleSheet("color: #FF0000;")
+            self.net_label.setStyleSheet("color: #D96459;")

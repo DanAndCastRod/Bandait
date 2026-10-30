@@ -161,3 +161,14 @@ def test_musicians_panel_shows_each_phone_link(window):
     assert rows["Bajo"][6].startswith("SIN DATOS")
     assert table.item(0, 0).text() == "Voz"  # el peor primero
     window._musicians_panel.close()
+
+
+def test_brightness_menu_dims_the_window_and_is_saved(window):
+    from src.core.leader_config import load_settings
+
+    assert window.dim_overlay.isHidden()
+    window.brightness_actions[70].trigger()
+    assert not window.dim_overlay.isHidden() and window.dim_overlay.brightness == 70
+    assert load_settings().brightness == 70
+    window.brightness_actions[100].trigger()
+    assert window.dim_overlay.isHidden()

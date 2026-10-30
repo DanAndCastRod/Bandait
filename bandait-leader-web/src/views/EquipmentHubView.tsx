@@ -37,11 +37,11 @@ export const EquipmentHubView: React.FC = () => {
   }
 
   const categoryIcons: Record<EquipmentCategory, React.ReactNode> = {
-    interface: <Cpu size={16} style={{ color: '#0066ff' }} />,
-    in_ear: <Headphones size={16} style={{ color: '#ff4500' }} />,
-    cabling: <Cable size={16} style={{ color: '#10b981' }} />,
-    mic: <Mic size={16} style={{ color: '#f59e0b' }} />,
-    instrument: <Radio size={16} style={{ color: '#a855f7' }} />,
+    interface: <Cpu size={16} style={{ color: '#7AA5D6' }} />,
+    in_ear: <Headphones size={16} style={{ color: '#5CC8C2' }} />,
+    cabling: <Cable size={16} style={{ color: '#B8CF7A' }} />,
+    mic: <Mic size={16} style={{ color: '#D9A24E' }} />,
+    instrument: <Radio size={16} style={{ color: '#B48EDB' }} />,
   }
 
   return (
@@ -54,18 +54,18 @@ export const EquipmentHubView: React.FC = () => {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '16px',
-          borderBottom: '1px solid #2a3346',
+          borderBottom: '1px solid #2E343D',
           paddingBottom: '16px',
         }}
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Radio size={22} style={{ color: '#f59e0b' }} />
+            <Radio size={22} style={{ color: '#D9A24E' }} />
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>
               Rider Técnico & Ruteo de Equipos
             </h2>
           </div>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
             Inventario de hardware en vivo para {activeBand?.name}: interfaces ASIO, frecuencias RF In-Ear y cableado directo.
           </p>
         </div>
@@ -76,16 +76,16 @@ export const EquipmentHubView: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            background: '#f59e0b',
+            background: '#D9A24E',
             border: 'none',
             borderRadius: '4px',
             padding: '10px 18px',
-            color: '#000000',
+            color: '#15181C',
             fontFamily: "'IBM Plex Mono', monospace",
             fontSize: '12px',
             fontWeight: 800,
             cursor: 'pointer',
-            boxShadow: '0 0 12px rgba(245, 158, 11, 0.3)',
+            boxShadow: '0 0 12px rgba(217, 162, 78, 0.3)',
           }}
         >
           <Plus size={16} />
@@ -105,8 +105,8 @@ export const EquipmentHubView: React.FC = () => {
           <div
             key={item.id}
             style={{
-              background: '#131720',
-              border: '1px solid #2a3346',
+              background: '#1B1F24',
+              border: '1px solid #2E343D',
               borderRadius: '6px',
               padding: '18px',
               display: 'flex',
@@ -119,7 +119,7 @@ export const EquipmentHubView: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <div
                   style={{
-                    background: '#1a202c',
+                    background: '#232830',
                     padding: '6px',
                     borderRadius: '4px',
                     display: 'flex',
@@ -130,8 +130,8 @@ export const EquipmentHubView: React.FC = () => {
                   {categoryIcons[item.category]}
                 </div>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: '15px', color: '#ffffff' }}>{item.name}</div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  <div style={{ fontWeight: 800, fontSize: '15px', color: '#D5DAE0' }}>{item.name}</div>
+                  <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                     {item.model}
                   </div>
                 </div>
@@ -143,7 +143,7 @@ export const EquipmentHubView: React.FC = () => {
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: '#ef4444',
+                  color: '#D96459',
                   cursor: 'pointer',
                   padding: '4px',
                 }}
@@ -154,8 +154,8 @@ export const EquipmentHubView: React.FC = () => {
 
             <div
               style={{
-                background: '#0d1017',
-                border: '1px solid #2a3346',
+                background: '#181B20',
+                border: '1px solid #2E343D',
                 borderRadius: '4px',
                 padding: '10px 12px',
                 display: 'flex',
@@ -166,23 +166,23 @@ export const EquipmentHubView: React.FC = () => {
               }}
             >
               <div>
-                <span style={{ color: '#94a3b8' }}>ASIGNADO A:</span>{' '}
-                <strong style={{ color: '#ffffff' }}>{item.assignedTo}</strong>
+                <span style={{ color: '#8E97A3' }}>ASIGNADO A:</span>{' '}
+                <strong style={{ color: '#D5DAE0' }}>{item.assignedTo}</strong>
               </div>
               <div>
-                <span style={{ color: '#94a3b8' }}>RUTEO / SALIDAS:</span>{' '}
-                <strong style={{ color: '#0066ff' }}>{item.channelRouting}</strong>
+                <span style={{ color: '#8E97A3' }}>RUTEO / SALIDAS:</span>{' '}
+                <strong style={{ color: '#7AA5D6' }}>{item.channelRouting}</strong>
               </div>
               {item.rfFrequency && (
                 <div>
-                  <span style={{ color: '#94a3b8' }}>FRECUENCIA RF:</span>{' '}
-                  <strong style={{ color: '#f59e0b' }}>{item.rfFrequency}</strong>
+                  <span style={{ color: '#8E97A3' }}>FRECUENCIA RF:</span>{' '}
+                  <strong style={{ color: '#D9A24E' }}>{item.rfFrequency}</strong>
                 </div>
               )}
             </div>
 
             {item.notes && (
-              <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.4 }}>
+              <div style={{ fontSize: '11px', color: '#8E97A3', lineHeight: 1.4 }}>
                 {item.notes}
               </div>
             )}
@@ -210,8 +210,8 @@ export const EquipmentHubView: React.FC = () => {
         >
           <div
             style={{
-              background: '#161b26',
-              border: '1px solid #2a3346',
+              background: '#20252B',
+              border: '1px solid #2E343D',
               borderRadius: '8px',
               padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
@@ -226,7 +226,7 @@ export const EquipmentHubView: React.FC = () => {
 
             <form onSubmit={handleAddEquipment} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
-                <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                   NOMBRE DEL EQUIPO
                 </label>
                 <input
@@ -237,11 +237,11 @@ export const EquipmentHubView: React.FC = () => {
                   required
                   style={{
                     width: '100%',
-                    background: '#0d1017',
-                    border: '1px solid #2a3346',
+                    background: '#181B20',
+                    border: '1px solid #2E343D',
                     borderRadius: '4px',
                     padding: '8px 10px',
-                    color: '#ffffff',
+                    color: '#D5DAE0',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -250,7 +250,7 @@ export const EquipmentHubView: React.FC = () => {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                     CATEGORÍA
                   </label>
                   <select
@@ -258,11 +258,11 @@ export const EquipmentHubView: React.FC = () => {
                     onChange={(e) => setEqCategory(e.target.value as EquipmentCategory)}
                     style={{
                       width: '100%',
-                      background: '#0d1017',
-                      border: '1px solid #2a3346',
+                      background: '#181B20',
+                      border: '1px solid #2E343D',
                       borderRadius: '4px',
                       padding: '8px 10px',
-                      color: '#ffffff',
+                      color: '#D5DAE0',
                       marginTop: '4px',
                       boxSizing: 'border-box',
                     }}
@@ -276,7 +276,7 @@ export const EquipmentHubView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                     MARCA / MODELO
                   </label>
                   <input
@@ -287,11 +287,11 @@ export const EquipmentHubView: React.FC = () => {
                     required
                     style={{
                       width: '100%',
-                      background: '#0d1017',
-                      border: '1px solid #2a3346',
+                      background: '#181B20',
+                      border: '1px solid #2E343D',
                       borderRadius: '4px',
                       padding: '8px 10px',
-                      color: '#ffffff',
+                      color: '#D5DAE0',
                       marginTop: '4px',
                       boxSizing: 'border-box',
                     }}
@@ -300,7 +300,7 @@ export const EquipmentHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                   ASIGNADO A (MÚSICO / PUESTO)
                 </label>
                 <input
@@ -310,11 +310,11 @@ export const EquipmentHubView: React.FC = () => {
                   placeholder="Ej: Mateo Gómez (Batería) / FOH Soundcraft"
                   style={{
                     width: '100%',
-                    background: '#0d1017',
-                    border: '1px solid #2a3346',
+                    background: '#181B20',
+                    border: '1px solid #2E343D',
                     borderRadius: '4px',
                     padding: '8px 10px',
-                    color: '#ffffff',
+                    color: '#D5DAE0',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -322,7 +322,7 @@ export const EquipmentHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                   RUTEO DE CANALES / CONECTORES
                 </label>
                 <input
@@ -332,11 +332,11 @@ export const EquipmentHubView: React.FC = () => {
                   placeholder="Ej: Salida 1-2 PA Main • Salida 3 Drummer Cable"
                   style={{
                     width: '100%',
-                    background: '#0d1017',
-                    border: '1px solid #2a3346',
+                    background: '#181B20',
+                    border: '1px solid #2E343D',
                     borderRadius: '4px',
                     padding: '8px 10px',
-                    color: '#ffffff',
+                    color: '#D5DAE0',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -344,7 +344,7 @@ export const EquipmentHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: '#94a3b8', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
                   FRECUENCIA RF (SI APLICA)
                 </label>
                 <input
@@ -354,11 +354,11 @@ export const EquipmentHubView: React.FC = () => {
                   placeholder="Ej: 518.200 MHz (Grupo 1 Canal 4)"
                   style={{
                     width: '100%',
-                    background: '#0d1017',
-                    border: '1px solid #2a3346',
+                    background: '#181B20',
+                    border: '1px solid #2E343D',
                     borderRadius: '4px',
                     padding: '8px 10px',
-                    color: '#ffffff',
+                    color: '#D5DAE0',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -371,8 +371,8 @@ export const EquipmentHubView: React.FC = () => {
                   onClick={() => setShowAddModal(false)}
                   style={{
                     background: 'transparent',
-                    border: '1px solid #2a3346',
-                    color: '#94a3b8',
+                    border: '1px solid #2E343D',
+                    color: '#8E97A3',
                     padding: '8px 16px',
                     borderRadius: '4px',
                     cursor: 'pointer',
@@ -383,9 +383,9 @@ export const EquipmentHubView: React.FC = () => {
                 <button
                   type="submit"
                   style={{
-                    background: '#f59e0b',
+                    background: '#D9A24E',
                     border: 'none',
-                    color: '#000000',
+                    color: '#15181C',
                     padding: '8px 20px',
                     borderRadius: '4px',
                     fontWeight: 800,

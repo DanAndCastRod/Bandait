@@ -1,27 +1,29 @@
 import type React from 'react'
 
-/** Estilos compartidos de las vistas del Hub (mismos tokens que el resto: fondo OLED, IBM Plex Mono). */
+/** Estilos compartidos de las vistas del Hub: paleta Grafito (2026-10-30), la misma del lider y la PWA. */
 export const mono = "'IBM Plex Mono', monospace"
 
 export const colors = {
-  oled: '#000000',
-  card: '#131720',
-  cardAlt: '#11141c',
-  modal: '#161b26',
-  input: '#0d1017',
-  elevated: '#1a202c',
-  border: '#2a3346',
-  borderSoft: '#1f2737',
-  text: '#ffffff',
-  muted: '#94a3b8',
-  disabled: '#475569',
-  orange: '#ff4500',
-  cobalt: '#0066ff',
-  success: '#10b981',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-  violet: '#a855f7',
-  cyan: '#38bdf8',
+  oled: '#15181C',
+  card: '#1B1F24',
+  cardAlt: '#1A1E23',
+  modal: '#20252B',
+  input: '#181B20',
+  elevated: '#232830',
+  border: '#2E343D',
+  borderSoft: '#2B313A',
+  text: '#D5DAE0',
+  muted: '#8E97A3',
+  disabled: '#4A525D',
+  orange: '#5CC8C2',
+  cobalt: '#7AA5D6',
+  success: '#B8CF7A',
+  warning: '#D9A24E',
+  danger: '#D96459',
+  violet: '#B48EDB',
+  cyan: '#7AC4D6',
+  /** Texto sobre un fondo de acento: los acentos Grafito son claros. */
+  onAccent: '#15181C',
 }
 
 export const labelStyle: React.CSSProperties = {

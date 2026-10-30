@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import StageView from './views/StageView'
 import ConnectView, { ConnectRequest } from './views/ConnectView'
 import LibraryView from './views/LibraryView'
-import SettingsView, { ThemeStyle } from './views/SettingsView'
+import SettingsView from './views/SettingsView'
+import { browserStorage, resolveTheme } from './services/theme'
 import { FollowerManualModal } from './components/FollowerManualModal'
 import { session } from './services/sessionController'
 import { flywheelClock } from './services/flywheelClock'
@@ -42,8 +43,7 @@ function App() {
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(() => readStorage(SELECTED_SETLIST_KEY))
 
   useEffect(() => {
-    const savedTheme = (readStorage('bandait_theme') as ThemeStyle) || 'theme-swiss'
-    document.body.className = savedTheme
+    document.body.className = resolveTheme(browserStorage())
     // Restore the saved monitor levels before any audio is armed.
     flywheelClock.setVolume(readVolume('bandait_inear_vol', 0.8))
     flywheelClock.setClickVolume(readVolume('bandait_click_vol', 0.8))
