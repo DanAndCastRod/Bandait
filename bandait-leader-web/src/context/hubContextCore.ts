@@ -119,6 +119,10 @@ export interface HubContextType {
   shareActiveBand: () => Promise<HubActionResult>
   /** Copia un setlist de la banda activa, con sus canciones, a otra banda editable. */
   copyPlaylistToBand: (playlistId: string, targetBandId: string) => HubActionResult
+  /** Borra una banda: personal (si era la ultima, queda una vacia) o compartida (solo quien la creo, para todos). */
+  deleteBand: (bandId: string) => Promise<HubActionResult>
+  /** Borra un setlist de la banda activa; las canciones quedan en la libreria. */
+  deletePlaylist: (playlistId: string) => HubActionResult
   sharing: SharingInfo
   createPlaylist: (name: string, description: string) => void
   setActivePlaylist: (playlist: Playlist) => void
