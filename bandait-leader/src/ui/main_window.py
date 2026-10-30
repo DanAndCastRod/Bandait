@@ -39,7 +39,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.1.3"
+APP_VERSION = "2.1.4"
 
 # Persistent notices while the live setlist has no songs (stage view + status bar).
 EMPTY_SETLIST_NOTICE = (
