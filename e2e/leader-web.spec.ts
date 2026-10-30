@@ -207,6 +207,31 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await expect(page.locator('option', { hasText: source.name })).toHaveCount(1);
   });
 
+  test('BORRAR SETLIST y BORRAR BANDA piden confirmación y se guardan', async ({ page }) => {
+    await enterDemo(page, /Carlos Mendoza/);
+    const before = await storedWorkspace(page);
+    const setlist = before.playlistsMap.band_01[0];
+
+    page.once('dialog', (d) => void d.accept());
+    await page.getByTestId('delete-setlist').click();
+    await expect(page.getByTestId('delete-setlist-result')).toContainText(`Setlist "${setlist.name}" borrado`);
+    let ws = await storedWorkspace(page);
+    expect(ws.playlistsMap.band_01.some((p: any) => p.id === setlist.id)).toBe(false);
+    expect(ws.songsMap.band_01).toEqual(before.songsMap.band_01);
+
+    await page.getByTestId('band-switcher').click();
+    await page.getByRole('button', { name: /Sinfónica Pop Bogotá/ }).click();
+    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    page.once('dialog', (d) => void d.accept());
+    await page.getByTestId('delete-band').click();
+    await expect(page.getByTestId('delete-band-result')).toContainText('Sinfónica Pop Bogotá se borró');
+    ws = await storedWorkspace(page);
+    expect(ws.bands.map((b: any) => b.id)).toEqual(['band_01', 'band_02']);
+    expect(ws.songsMap.band_03).toBeUndefined();
+    await page.getByTestId('band-switcher').click();
+    await expect(page.getByRole('button', { name: /Sinfónica Pop Bogotá/ })).toHaveCount(0);
+  });
+
   test('INTEGRANTES: sin cuenta de nube explica cómo compartir y no promete invitaciones reales', async ({ page }) => {
     const external = trackExternal(page);
     await enterDemo(page, /Carlos Mendoza/);

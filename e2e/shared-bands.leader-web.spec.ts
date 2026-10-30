@@ -227,6 +227,35 @@ test.describe('Web Admin Hub - bandas compartidas (Supabase simulado)', () => {
     await expect(page.getByTestId('invite-link').locator('input').first()).toHaveValue(new RegExp(`banda=${shared.id}$`));
   });
 
+  test('quien creó una banda compartida la borra para todos; borrar la última personal deja "Espacio personal"', async ({ page }) => {
+    const fake = new FakeSupabase();
+    const bos = workspaceWith('band_bos', "B&O's", ['Dame tu aire']);
+    fake.workspaces.push({ user_id: USER.id, workspace: bos, updated_at: fake.now() });
+    await signInWithFakeCloud(page, fake);
+    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    await page.getByTestId('share-band').click();
+    await expect.poll(() => fake.bands.length).toBe(1);
+    await expect(page.getByTestId('band-switcher')).toContainText("B&O's");
+
+    // Borrar la compartida (la creo esta cuenta): desaparece de la nube y del selector.
+    page.once('dialog', (d) => {
+      expect(d.message()).toContain('TODOS los integrantes');
+      void d.accept();
+    });
+    await page.getByTestId('delete-band').click();
+    await expect(page.getByTestId('delete-band-result')).toContainText("B&O's se borró para todos");
+    await expect.poll(() => fake.bands.length).toBe(0);
+    await expect(page.getByTestId('band-switcher')).toContainText('Espacio personal');
+
+    // Borrar la ultima personal: queda otra "Espacio personal" vacia, nunca la banda de ejemplo.
+    page.once('dialog', (d) => void d.accept());
+    await page.getByTestId('delete-band').click();
+    await expect(page.getByTestId('delete-band-result')).toContainText('quedó "Espacio personal"');
+    await expect
+      .poll(() => fake.workspaces[0].workspace.bands.map((b: Row) => b.name).join(','), { timeout: 10_000 })
+      .toBe('Espacio personal');
+  });
+
   test('con dos bandas personales, compartir sube la que se eligió en el selector y deja la otra', async ({ page }) => {
     const fake = new FakeSupabase();
     const daniel = workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']);

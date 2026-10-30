@@ -48,6 +48,7 @@ export const PlaylistsHubView: React.FC = () => {
     bands,
     sharing,
     copyPlaylistToBand,
+    deletePlaylist,
   } = useHub()
 
   const [showAddSongModal, setShowAddSongModal] = useState(false)
@@ -55,6 +56,12 @@ export const PlaylistsHubView: React.FC = () => {
   const [copyTarget, setCopyTarget] = useState('')
   const [copyResult, setCopyResult] = useState<{ ok: boolean; message: string } | null>(null)
   const copyTargets = bands.filter((b) => b.id !== activeBand?.id && sharing.editableBandIds.includes(b.id))
+  const [deleteMessage, setDeleteMessage] = useState<{ ok: boolean; message: string } | null>(null)
+  const handleDeletePlaylist = () => {
+    if (!activePlaylist) return
+    if (!window.confirm(`¿Borrar el setlist "${activePlaylist.name}"? Las canciones siguen en la librería.`)) return
+    setDeleteMessage(deletePlaylist(activePlaylist.id))
+  }
   const handleCopy = () => {
     if (!activePlaylist) return
     const target = copyTarget || copyTargets[0]?.id
@@ -225,8 +232,42 @@ export const PlaylistsHubView: React.FC = () => {
             <Copy size={14} />
             <span>COPIAR A OTRA BANDA</span>
           </button>
+
+          <button
+            data-testid="delete-setlist"
+            onClick={handleDeletePlaylist}
+            disabled={!activePlaylist || !sharing.activeCanEdit}
+            title={!activePlaylist ? 'No hay setlist' : sharing.activeCanEdit ? 'Borrar este setlist' : 'Tu rol es de solo lectura'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'transparent',
+              border: '1px solid rgba(239, 68, 68, 0.5)',
+              borderRadius: '4px',
+              padding: '8px 14px',
+              color: '#fca5a5',
+              fontSize: '12px',
+              fontFamily: "'IBM Plex Mono', monospace",
+              cursor: activePlaylist && sharing.activeCanEdit ? 'pointer' : 'not-allowed',
+              opacity: activePlaylist && sharing.activeCanEdit ? 1 : 0.5,
+            }}
+          >
+            <Trash2 size={14} />
+            <span>BORRAR SETLIST</span>
+          </button>
         </div>
       </div>
+
+      {deleteMessage && (
+        <div
+          role="status"
+          data-testid="delete-setlist-result"
+          style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace", color: deleteMessage.ok ? '#10b981' : '#fca5a5' }}
+        >
+          {deleteMessage.message}
+        </div>
+      )}
 
       {!sharing.activeCanEdit && (
         <div

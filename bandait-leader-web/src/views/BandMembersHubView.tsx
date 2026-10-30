@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useHub, type HubActionResult } from '../context/hubContextCore'
 import type { MemberRole } from '../types/hub'
-import { Users, UserPlus, Shield, Mail, Phone, CheckCircle2, Share2, Copy, LogOut, UserMinus } from 'lucide-react'
+import { Users, UserPlus, Shield, Mail, Phone, CheckCircle2, Share2, Copy, LogOut, UserMinus, Trash2 } from 'lucide-react'
 
 const MONO = "'IBM Plex Mono', monospace"
 
@@ -93,6 +93,7 @@ export const BandMembersHubView: React.FC = () => {
     removeMember,
     leaveActiveBand,
     shareActiveBand,
+    deleteBand,
     roleEditBlockReason,
     sharing,
     user,
@@ -107,6 +108,8 @@ export const BandMembersHubView: React.FC = () => {
   const [inviteResult, setInviteResult] = useState<HubActionResult | null>(null)
   const [shareBusy, setShareBusy] = useState(false)
   const [panelResult, setPanelResult] = useState<HubActionResult | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteResult, setDeleteResult] = useState<HubActionResult | null>(null)
 
   const isShared = sharing.activeShared
   // Un resultado (y su enlace) es de una banda: al cambiar de banda no debe quedar a la vista.
@@ -144,6 +147,17 @@ export const BandMembersHubView: React.FC = () => {
   const handleLeave = async () => {
     if (!activeBand || !window.confirm(`¿Salir de ${activeBand.name}? Dejarás de verla hasta que te vuelvan a invitar.`)) return
     setPanelResult(await leaveActiveBand())
+  }
+
+  const handleDeleteBand = async () => {
+    if (!activeBand || deleteBusy) return
+    const scope = isShared
+      ? `Se borrará para TODOS los integrantes, con sus canciones y setlists. Nadie podrá recuperarla.`
+      : `Se borrará de tu cuenta con sus canciones y setlists.`
+    if (!window.confirm(`¿Borrar la banda ${activeBand.name}? ${scope}`)) return
+    setDeleteBusy(true)
+    setDeleteResult(await deleteBand(activeBand.id))
+    setDeleteBusy(false)
   }
 
   const handleRemove = async (memberId: string, name: string) => {
@@ -534,6 +548,58 @@ export const BandMembersHubView: React.FC = () => {
           <div>• <strong>Substitute:</strong> Acceso seguro a notas de canciones sin permisos de edición.</div>
         </div>
       </div>
+
+      {/* DANGER ZONE */}
+      {(!isShared || isCreator) && (
+        <div
+          data-testid="danger-zone"
+          style={{
+            background: '#131720',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            borderRadius: '6px',
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+          }}
+        >
+          <strong style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '1px', color: '#fca5a5' }}>ZONA DE PELIGRO</strong>
+          <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+            {isShared
+              ? `Borrar ${activeBand?.name ?? 'la banda'} la elimina para todos los integrantes. Si solo quieres dejar de verla, pásale el rol de Owner a otro integrante y sal de la banda.`
+              : `Borrar ${activeBand?.name ?? 'la banda'} elimina sus canciones, setlists y equipos de tu cuenta. Exporta un JSON antes si quieres conservar una copia.`}
+          </p>
+          <button
+            type="button"
+            data-testid="delete-band"
+            onClick={() => void handleDeleteBand()}
+            disabled={deleteBusy}
+            style={{
+              alignSelf: 'flex-start',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'transparent',
+              border: '1px solid #ef4444',
+              borderRadius: '4px',
+              padding: '8px 14px',
+              color: '#fca5a5',
+              fontFamily: MONO,
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: deleteBusy ? 'wait' : 'pointer',
+              opacity: deleteBusy ? 0.6 : 1,
+            }}
+          >
+            <Trash2 size={14} /> {deleteBusy ? 'BORRANDO...' : 'BORRAR BANDA'}
+          </button>
+        </div>
+      )}
+      {deleteResult && (
+        <div role="status" data-testid="delete-band-result" style={resultBox(deleteResult)}>
+          {deleteResult.message}
+        </div>
+      )}
 
       {/* INVITE MODAL */}
       {showInviteModal && (

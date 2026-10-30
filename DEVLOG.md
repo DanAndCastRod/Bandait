@@ -767,3 +767,23 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - `npm run verify:logic`: `23`, `34` y `14 ok`. `npm run lint`: sin problemas.
 * **Pendientes:**
   1. En la cuenta de Daniel Castañeda ya quedó creada la "Banda de Daniel" de ejemplo. El hub todavía no puede borrar bandas: se puede ignorar hasta que exista ese botón (pendiente 3 de la entrada del 2026-10-29).
+
+### [2026-10-30] - Borrar bandas y setlists desde el hub
+* **Sprint / Módulo:** `bandait-leader-web` (INTEGRANTES, PLAYLISTS)
+* **Acción técnica realizada:**
+  - Pendiente pedido por Daniel Castañeda. Cierra el pendiente 3 de la entrada del 2026-10-29 y la parte de "borrar setlists y bandas" de la del 2026-10-04.
+  - INTEGRANTES, ZONA DE PELIGRO, botón BORRAR BANDA (con confirmación):
+    - **Banda personal:** sale del workspace personal. Si era la última, queda "Espacio personal" vacío (helper `withPersonalPlaceholder`, compartido con COMPARTIR BANDA).
+    - **Banda compartida:** solo quien la creó. Borra la fila de `bandait_bands`; las invitaciones se borran en cascada y la banda desaparece para todos. Lo exige la política `bandait_bands_delete` de RLS; el cliente devuelve "Solo quien creó la banda puede borrarla" si responde 0 filas.
+  - PLAYLISTS, botón BORRAR SETLIST (con confirmación): las canciones siguen en la librería. Respeta el modo de solo lectura.
+  - `supabaseClient.deleteSharedBand`.
+* **Impacto en Audio / Red / UI:** en el líder, una banda borrada sale de Cuenta > Elegir banda en la siguiente sincronización. Si era la elegida, el líder lo dice y no vacía el show.
+* **Verificación y Pruebas (resultado literal):**
+  - `npx playwright test --project=leader-web`: `23 passed`, con 2 nuevas:
+    - demo: borrar setlist y banda;
+    - Supabase simulado: borrar la compartida, que desaparece de la nube y del selector, y luego la última personal, que deja "Espacio personal" en la fila personal.
+  - `npm run verify:logic`: `23`, `34` y `14 ok`. `npm run lint`: sin problemas.
+* **Errores propios:**
+  - La primera versión de `deleteBand` sacaba la banda compartida de `sharedRef` antes de calcular la parte personal. La banda borrada se tomaba por personal y se volvía a guardar en `bandait_workspaces`. Lo detectó la e2e nueva; ahora la parte personal se calcula antes.
+* **Pendientes:**
+  1. Daniel Castañeda: borrar en su cuenta la "Banda de Daniel" de ejemplo que creó la versión anterior.

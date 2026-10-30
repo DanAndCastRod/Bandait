@@ -578,6 +578,20 @@ export async function deleteBandMember(client: SupabaseClient, bandId: string, e
   }
 }
 
+/** Borra una banda compartida (y en cascada sus invitaciones). 0 filas = RLS: solo quien la creo. */
+export async function deleteSharedBand(client: SupabaseClient, bandId: string): Promise<CloudOpResult> {
+  try {
+    const { data, error, status } = await client.from(BANDS_TABLE).delete().eq('id', bandId).select('id')
+    if (error) return { ok: false, error: schemaAwareError(error, status) }
+    if ((data ?? []).length === 0) {
+      return { ok: false, error: { kind: 'permission', message: 'Solo quien creó la banda puede borrarla.', retryable: false } }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: thrown(err) }
+  }
+}
+
 /** Avisos de cambios en la pertenencia (invitaciones nuevas, roles, salidas) y en bandas creadas o borradas. */
 export function subscribeSharedBands(client: SupabaseClient, onChange: () => void): () => void {
   const channel = client

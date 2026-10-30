@@ -22,6 +22,7 @@ import {
   createSharedBand,
   createWorkspaceCloudAdapter,
   deleteBandMember,
+  deleteSharedBand,
   getAuthRedirectUrl,
   getSupabaseClient,
   getSupabaseConfig,
@@ -213,6 +214,25 @@ function loadStateFor(user: UserProfile | null): LoadedState {
   const shared = user?.authProvider === 'supabase' ? readSharedCache(user.id) : []
   const active = (user && browserStore.get(activeBandKey(user.id))) || personal.activeBandId
   return { personal, shared, merged: mergeWorkspace(personal, shared, active) }
+}
+
+/**
+ * El workspace personal nunca queda vacio (el formato exige al menos una banda). Si se queda sin
+ * bandas (al compartir o borrar la ultima) recibe una banda vacia con nombre explicito: recrear
+ * la banda de ejemplo, con datos de muestra, hacia parecer que se habia compartido otra banda.
+ */
+function withPersonalPlaceholder(personal: WorkspaceStore, ownerId: string): WorkspaceStore {
+  const id = `band_${uuidv4().slice(0, 8)}`
+  return {
+    ...personal,
+    bands: [{ id, name: 'Espacio personal', genre: '', ownerId, currentUserRole: 'Owner', membersCount: 1, createdAt: today() }],
+    activeBandId: id,
+    membersMap: { [id]: [] },
+    playlistsMap: { [id]: [] },
+    equipmentMap: { [id]: [] },
+    songsMap: { [id]: [] },
+    voiceMap: { [id]: defaultVoiceConfig() },
+  }
 }
 
 function firstPlaylistId(ws: WorkspaceStore): string {
@@ -1003,24 +1023,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const current = workspaceRef.current
     let personal = personalPart(current, new Set([...sharedRef.current.keys(), fromId]), personalRef.current.activeBandId)
     const createdPlaceholder = personal.bands.length === 0
-    if (createdPlaceholder) {
-      // El workspace personal nunca queda vacio (el formato exige al menos una banda). Se usa
-      // una banda vacia y con nombre explicito: recrear la banda de ejemplo con datos de
-      // muestra hacia parecer que se habia compartido otra banda.
-      const placeholderId = `band_${uuidv4().slice(0, 8)}`
-      personal = {
-        ...personal,
-        bands: [
-          { id: placeholderId, name: 'Espacio personal', genre: '', ownerId: me.id, currentUserRole: 'Owner', membersCount: 1, createdAt: today() },
-        ],
-        activeBandId: placeholderId,
-        membersMap: { [placeholderId]: [] },
-        playlistsMap: { [placeholderId]: [] },
-        equipmentMap: { [placeholderId]: [] },
-        songsMap: { [placeholderId]: [] },
-        voiceMap: { [placeholderId]: defaultVoiceConfig() },
-      }
-    }
+    if (createdPlaceholder) personal = withPersonalPlaceholder(personal, me.id)
     sharedRef.current.set(newId, { id: newId, ownerId: cloudUserId, role: 'Owner', data: content, members: [] })
     const merged = rebuildMerged(personal, newId)
     workspaceRef.current = merged
@@ -1057,6 +1060,65 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setWorkspace(result.workspace)
     const reused = result.reusedSongs ? `, ${result.reusedSongs} ya estaban` : ''
     return { ok: true, message: `"${result.playlist.name}" copiado a ${target.name}: ${result.createdSongs} canciones nuevas${reused}.` }
+  }
+
+  /**
+   * Borra una banda. Personal: sale del workspace personal (si era la ultima, queda un
+   * "Espacio personal" vacio). Compartida: solo quien la creo; se borra para todos (RLS).
+   */
+  const deleteBand = async (bandId: string): Promise<HubActionResult> => {
+    const me = userRef.current
+    const band = workspaceRef.current.bands.find((b) => b.id === bandId)
+    if (!band || !me) return { ok: false, message: 'Banda no encontrada.' }
+    const current = workspaceRef.current
+    if (sharedFlags.has(bandId)) {
+      if (band.ownerId !== me.id) {
+        return { ok: false, message: 'Solo quien creó la banda puede borrarla. Tú puedes salir de ella.' }
+      }
+      const client = getSupabaseClient()
+      if (!client || !cloudUserId) return { ok: false, message: 'Sin conexión con la nube.' }
+      const res = await deleteSharedBand(client, bandId)
+      if (!res.ok) return { ok: false, message: res.error.message }
+      // La parte personal se calcula ANTES de sacar la banda de sharedRef: despues, la banda
+      // borrada se tomaria por personal y volveria a guardarse en bandait_workspaces.
+      const personal = currentPersonal(current)
+      sharedRef.current.delete(bandId)
+      const merged = rebuildMerged(personal, current.activeBandId === bandId ? personal.activeBandId : current.activeBandId)
+      saveSharedCache(cloudUserId)
+      workspaceRef.current = merged
+      setWorkspace(merged)
+      setActivePlaylistId(firstPlaylistId(merged))
+      setSharedKey(sharedEnginesKey(sharedRef.current.values()))
+      return { ok: true, message: `${band.name} se borró para todos los integrantes.` }
+    }
+    let personal = personalPart(current, new Set([...sharedRef.current.keys(), bandId]), personalRef.current.activeBandId)
+    const createdPlaceholder = personal.bands.length === 0
+    if (createdPlaceholder) personal = withPersonalPlaceholder(personal, me.id)
+    const active = current.activeBandId === bandId ? personal.activeBandId : current.activeBandId
+    // Edicion de la parte personal: el efecto de persistencia la guarda y la sube.
+    const merged = mergeWorkspace(personal, [...sharedRef.current.values()], active)
+    setWorkspace(merged)
+    setActivePlaylistId(firstPlaylistId(merged))
+    return {
+      ok: true,
+      message: `${band.name} se borró.${createdPlaceholder ? ' Era tu única banda personal: quedó "Espacio personal", vacía.' : ''}`,
+    }
+  }
+
+  /** Borra un setlist de la banda activa (las canciones siguen en la libreria). */
+  const deletePlaylist = (playlistId: string): HubActionResult => {
+    if (!activeBand) return { ok: false, message: 'Sin banda activa.' }
+    if (blockIfReadOnly()) return { ok: false, message: READ_ONLY_NOTICE }
+    const bandId = activeBand.id
+    const target = playlists.find((p) => p.id === playlistId)
+    if (!target) return { ok: false, message: 'Setlist no encontrado.' }
+    const remaining = playlists.filter((p) => p.id !== playlistId)
+    setWorkspace((prev) => ({
+      ...prev,
+      playlistsMap: { ...prev.playlistsMap, [bandId]: (prev.playlistsMap[bandId] || []).filter((p) => p.id !== playlistId) },
+    }))
+    if (activePlaylist?.id === playlistId) setActivePlaylistId(remaining[0]?.id ?? '')
+    return { ok: true, message: `Setlist "${target.name}" borrado. Sus canciones siguen en la librería.` }
   }
 
   const sharing: SharingInfo = {
@@ -1362,6 +1424,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     leaveActiveBand,
     shareActiveBand,
     copyPlaylistToBand,
+    deleteBand,
+    deletePlaylist,
     sharing,
     createPlaylist,
     setActivePlaylist: (pl) => setActivePlaylistId(pl.id),
