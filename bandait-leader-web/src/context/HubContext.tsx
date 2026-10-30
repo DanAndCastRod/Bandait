@@ -910,6 +910,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return {
         ok: true,
         message: `${cleanEmail} ya tiene acceso. Mándale el enlace: al entrar con "Continuar con Google" usando ese correo verá la banda.`,
+        bandId,
         link: inviteLink(getAuthRedirectUrl(), bandId),
       }
     }
@@ -1001,10 +1002,24 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Local: la banda sale del workspace personal y entra como compartida.
     const current = workspaceRef.current
     let personal = personalPart(current, new Set([...sharedRef.current.keys(), fromId]), personalRef.current.activeBandId)
-    if (personal.bands.length === 0) {
-      // El workspace personal nunca queda vacio (el formato exige al menos una banda).
-      const seed = createPersonalWorkspace(me)
-      personal = { ...seed, stemsMap: current.stemsMap }
+    const createdPlaceholder = personal.bands.length === 0
+    if (createdPlaceholder) {
+      // El workspace personal nunca queda vacio (el formato exige al menos una banda). Se usa
+      // una banda vacia y con nombre explicito: recrear la banda de ejemplo con datos de
+      // muestra hacia parecer que se habia compartido otra banda.
+      const placeholderId = `band_${uuidv4().slice(0, 8)}`
+      personal = {
+        ...personal,
+        bands: [
+          { id: placeholderId, name: 'Espacio personal', genre: '', ownerId: me.id, currentUserRole: 'Owner', membersCount: 1, createdAt: today() },
+        ],
+        activeBandId: placeholderId,
+        membersMap: { [placeholderId]: [] },
+        playlistsMap: { [placeholderId]: [] },
+        equipmentMap: { [placeholderId]: [] },
+        songsMap: { [placeholderId]: [] },
+        voiceMap: { [placeholderId]: defaultVoiceConfig() },
+      }
     }
     sharedRef.current.set(newId, { id: newId, ownerId: cloudUserId, role: 'Owner', data: content, members: [] })
     const merged = rebuildMerged(personal, newId)
@@ -1015,12 +1030,17 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     saveSharedCache(cloudUserId)
     void refreshShared()
     const others = invites.filter((i) => i.email !== normalizeEmail(sessionEmail)).length
+    const placeholderNote = createdPlaceholder
+      ? ' Era tu única banda personal: se creó "Espacio personal", vacía, para tus bandas privadas.'
+      : ''
     return {
       ok: true,
-      message: invited.ok
-        ? `${activeBand.name} quedó compartida${others ? ` con ${others} integrante(s) invitado(s)` : ''}. Invita a más desde INTEGRANTES y mándales el enlace.`
-        : `${activeBand.name} quedó compartida, pero no se pudieron crear las invitaciones: ${invited.error.message}`,
+      message:
+        (invited.ok
+          ? `${activeBand.name} quedó compartida${others ? ` con ${others} integrante(s) invitado(s)` : ''}. Invita a más desde INTEGRANTES y mándales el enlace.`
+          : `${activeBand.name} quedó compartida, pero no se pudieron crear las invitaciones: ${invited.error.message}`) + placeholderNote,
       link: inviteLink(getAuthRedirectUrl(), newId),
+      bandId: newId,
     }
   }
 

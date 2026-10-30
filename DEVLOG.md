@@ -749,3 +749,21 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - `tests/test_packaging.py` en local (versión coherente entre `pyproject.toml` y `APP_VERSION`).
   - CI del PR y run de `release.yml` del tag: ver el Release publicado.
   - Instalación en el equipo de Daniel Castañeda: NO VERIFICADA.
+
+### [2026-10-30] - Compartir: enlace ligado a su banda y sin recrear la banda de ejemplo
+* **Sprint / Módulo:** `bandait-leader-web` (INTEGRANTES)
+* **Acción técnica realizada:**
+  - Reporte de Daniel Castañeda en producción: "la URL de compartir banda no cambia al cambiar de banda y usó la banda por defecto 'Banda de Daniel' a pesar de que tenía seleccionada B&O's".
+  - Reproducido con una e2e nueva contra un Supabase simulado dentro de Playwright (`e2e/shared-bands.leader-web.spec.ts`: sesión inyectada y PostgREST en memoria). Se encontraron dos causas:
+    1. El resultado de COMPARTIR BANDA, con su enlace, quedaba en el estado de la vista y seguía visible al cambiar de banda. Ahora cada resultado lleva `bandId` (`HubActionResult.bandId`) y solo se muestra en esa banda. El cuadro del enlace se reinicia con `key={link}`.
+    2. Al compartir la única banda personal (B&O's, importada), el hub recreaba la banda de ejemplo "Banda de <nombre>" con un setlist y equipos de muestra, porque el formato exige al menos una banda. Eso hacía parecer que se había compartido otra banda. Ahora crea "Espacio personal" vacío y el mensaje lo explica.
+  - En la reproducción lo que se subió a la nube sí era B&O's con sus canciones: el contenido compartido era correcto.
+  - El botón de cerrar del modal de perfil ahora tiene `aria-label="Cerrar perfil"`.
+* **Impacto en Audio / Red / UI:** solo en la UI del hub.
+* **Verificación y Pruebas (resultado literal):**
+  - `npx playwright test --project=leader-web`: `21 passed`, con 2 nuevas contra el Supabase simulado:
+    - única banda personal → "Espacio personal" y el enlace sigue a la banda activa;
+    - dos bandas personales → se comparte la elegida en el selector y la otra queda en la fila personal.
+  - `npm run verify:logic`: `23`, `34` y `14 ok`. `npm run lint`: sin problemas.
+* **Pendientes:**
+  1. En la cuenta de Daniel Castañeda ya quedó creada la "Banda de Daniel" de ejemplo. El hub todavía no puede borrar bandas: se puede ignorar hasta que exista ese botón (pendiente 3 de la entrada del 2026-10-29).

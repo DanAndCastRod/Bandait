@@ -765,6 +765,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               </div>
               <button
                 onClick={() => setShowProfileModal(false)}
+                aria-label="Cerrar perfil"
                 style={{
                   background: 'transparent',
                   border: 'none',
