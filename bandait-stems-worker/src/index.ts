@@ -175,8 +175,9 @@ async function route(req: Request, env: Env, fetchFn: FetchLike): Promise<Respon
   const method = req.method;
   if (what === 'analysis') {
     if (method !== 'POST' && method !== 'GET') throw new ApiError(405, 'method_not_allowed');
-    // Analysis spends Music AI credits: editors only, for reading the draft too.
-    const editorPrefix = await authorize(req, env, band, true, fetchFn);
+    // Starting an analysis spends Music AI credits: editors only. Reading the draft is free: any
+    // member can see it (read-only in the hub; only Owner / MusicDirector can accept it).
+    const editorPrefix = await authorize(req, env, band, method === 'POST', fetchFn);
     return method === 'POST'
       ? startAnalysis(req, env, `${editorPrefix}songs/${song}/`, song, fetchFn)
       : analysisStatus(env, `${editorPrefix}songs/${song}/`, fetchFn);

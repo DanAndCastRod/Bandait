@@ -109,6 +109,7 @@ test('analysis: start, poll, draft cached; editors only; no key = 503', async ()
   const { call, calls, bucket, setStatus } = setup();
   const mix = new Uint8Array([1, 2, 3, 4]);
   assert.equal((await call('POST', MUSICIAN, mix)).status, 403);
+  assert.equal((await call('GET', MUSICIAN)).status, 404, 'a member can read (no analysis yet)');
   const start = await call('POST', OWNER, mix);
   assert.equal(start.status, 202);
   assert.equal((await start.json()).job_id, 'job-1');
@@ -116,6 +117,7 @@ test('analysis: start, poll, draft cached; editors only; no key = 503', async ()
   assert.equal((await (await call('GET', OWNER)).json()).status, 'STARTED');
   setStatus('SUCCEEDED');
   const done = await (await call('GET', OWNER)).json();
+  assert.equal((await (await call('GET', MUSICIAN)).json()).status, 'SUCCEEDED', 'members read the draft');
   assert.equal(done.status, 'SUCCEEDED');
   assert.equal(done.draft.sections.length, 8);
   const before = calls.length;
