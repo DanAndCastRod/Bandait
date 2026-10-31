@@ -1198,3 +1198,28 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Daniel Castaneda acepta el borrador de "Dame tu aire" en CANCIONES y lo guarda; con eso ENSAYO tiene secciones.
   2. Desplegar el Worker con este cambio (`wrangler deploy` vía ClipVault).
+
+### [2026-10-31] - Worker: borrador de Music AI con acordes sobre la palabra, al estilo de Moises
+* **Sprint / Módulo:** `bandait-stems-worker` (`src/analysis.ts`, `src/index.ts`)
+* **Estado encontrado:** con la letra alineada del workflow (job `028a00f8-...`: 26 líneas, cada palabra con `start`/`end`), el ensamblador pegaba cada línea de letra completa al final de su sección, debajo de una cuadrícula de 4 compases por línea. Daniel Castaneda lo encontró "muy a groso modo". Además, el Worker devolvía el borrador en caché para siempre, sin forma de rehacerlo.
+* **Causa:** el ensamblador anterior se escribió cuando la letra llegaba sin tiempos; solo ubicaba la línea por su inicio. Las secciones con el mismo nombre se fundían sin límite: el coro de "Dame tu aire" salía con 27 compases.
+* **Corrección aplicada:**
+  - Cada palabra se ubica en su sección por su tiempo. Una anacrusa de hasta un tiempo antes del downbeat se cuenta en la sección siguiente.
+  - Frases: se corta en cada línea de Music AI, en cada cambio de sección, en respiraciones de 2 tiempos o más y al pasar de 4 compases.
+  - Cada cambio de acorde va en línea (`[E]palabra`) sobre la palabra cuyo inicio está más cerca. El acorde vigente abre cada frase. Un acorde que llega después de la última palabra queda al final de la línea.
+  - Los compases sin canto quedan como líneas solo de acordes; un compás suelto que mantiene el acorde no se escribe.
+  - Las secciones del mismo nombre se funden hasta 16 compases; una estrofa partida conserva su número.
+  - En la cuadrícula, una relectura de la misma armonía (C#m y luego C#m7) muestra el acorde que venía.
+  - `ASSEMBLER_VERSION = 2`. El registro de `analysis.json` guarda ahora el resultado crudo y la versión. Un borrador de otra versión se rehace desde el resultado guardado, sin llamar a Music AI. Los registros viejos, sin resultado guardado, vuelven a pedir el job una vez.
+* **Verificación:**
+  - Worker: `npm test` da `# pass 15, # fail 0`. Las pruebas usan letra sintética (sin letra real en fixtures): acordes por palabra, anacrusa, respiración, acorde al final, letra sin tiempos y re-ensamblado sin Music AI.
+  - Se corrió el ensamblador sobre el resultado real de "Dame tu aire", con la letra enmascarada en la salida: 11 secciones, ninguna de más de 16 compases, 0 líneas sin ubicar.
+  - `tsc --noEmit` limpio. `wrangler deploy` hecho vía ClipVault: versión `0614fa1e-b83f-4645-b5b4-498febfaf57c`.
+  - El formato `[A][E]palabra` y `palabra [C#m]` se probó con `layout_chord_line` del líder y se maqueta bien.
+  - No verificado: la regeneración en producción del borrador de "Dame tu aire". Ocurre en el primer GET autenticado desde el hub o el líder.
+* **Decisiones:**
+  - El acorde va en la palabra con el inicio más cercano. Se descartó "la última palabra empezada", porque en las anacrusas corría el acorde una palabra.
+  - El resultado crudo se guarda en R2 (es pequeño). Se descartó volver a pedir el job cada vez, porque las URL de resultado de Music AI pueden vencer.
+* **Pendientes:**
+  1. Daniel Castaneda abre el panel de análisis de "Dame tu aire" (hub o líder) para que se rehaga el borrador, y lo acepta en CANCIONES.
+  2. Si un borrador ya aceptado debe cambiar, hay que volver a aceptarlo: aceptar reemplaza las secciones.
