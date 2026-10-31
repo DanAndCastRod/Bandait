@@ -1,7 +1,7 @@
 {
   // Bandait stems (fase 3): R2 + verificacion de sesion de Supabase. Ver README.md.
   // SUPABASE_URL y SUPABASE_ANON_KEY son PUBLICOS (los mismos de bandait-leader-web/.env.production):
-  // el Worker llama a Supabase con el JWT de quien pide, nunca con service_role.
+  // el Worker llama a Supabase con el JWT de quien pide, nunca con la clave de servicio.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bandait-stems",
   "main": "src/index.ts",
