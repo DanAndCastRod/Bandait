@@ -40,6 +40,7 @@ class FakeWorker:
         url = req.full_url
         self.requests.append(url)
         assert req.headers["Authorization"] == "Bearer tok"
+        assert req.get_header("User-agent", "").startswith("Bandait-Leader")  # never Python-urllib
 
         def fail(code, err):
             raise urllib.error.HTTPError(url, code, err, {}, io.BytesIO(json.dumps({"error": err}).encode()))
@@ -115,6 +116,15 @@ def test_truncated_download_keeps_local_stems(tmp_path):
     with pytest.raises(CloudHTTPError):
         sync_song(StemsCloud(lambda: "tok", "https://s", worker), "l1", BAND, "hub-song-1", tmp_path)
     assert lib.load("l1", tmp_path).cloud["updated_at"] != "nuevo"  # previous stems intact
+
+
+def test_cloudflare_block_text_reaches_the_message(tmp_path):
+    def blocked(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b"error code: 1010\n"))
+
+    with pytest.raises(CloudHTTPError) as info:
+        sync_song(StemsCloud(lambda: "tok", "https://s", blocked), "l1", BAND, "x", tmp_path)
+    assert "error code: 1010" in str(info.value) and info.value.status == 403
 
 
 def test_offline_raises_cloud_offline(tmp_path):

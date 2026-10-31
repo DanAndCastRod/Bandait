@@ -29,6 +29,9 @@ DEFAULT_STEMS_URL = "https://bandait-stems.oooglue.workers.dev"
 TIMEOUT_S = 20.0
 CHUNK = 256 * 1024
 MANIFEST_CAP = 64 * 1024
+# Cloudflare answers "error code: 1010" (403) to the default "Python-urllib/x.y" agent:
+# every request names the leader instead (found on 2026-10-31: 30 of 30 songs failed).
+DEFAULT_USER_AGENT = "Bandait-Leader"
 
 
 def stems_url() -> str:
@@ -43,25 +46,31 @@ def _default_open(req: urllib.request.Request, timeout: float):
 
 
 class StemsCloud:
-    def __init__(self, token: Callable[[], str], base_url: Optional[str] = None, opener: Opener = _default_open):
+    def __init__(self, token: Callable[[], str], base_url: Optional[str] = None, opener: Opener = _default_open,
+                 user_agent: str = DEFAULT_USER_AGENT):
         self._token = token
         self._base = (base_url or stems_url()).rstrip("/")
         self._open = opener
+        self._user_agent = user_agent
 
     def _request(self, path: str):
         req = urllib.request.Request(
             f"{self._base}{path}",
-            headers={"Authorization": f"Bearer {self._token()}", "Accept": "*/*"},
+            headers={"Authorization": f"Bearer {self._token()}", "Accept": "*/*", "User-Agent": self._user_agent},
             method="GET",
         )
         try:
             return self._open(req, TIMEOUT_S)
         except urllib.error.HTTPError as err:
+            raw = b""
             try:
-                code = json.loads(err.read(4096) or b"{}").get("error", "")
-            except (ValueError, AttributeError):
+                raw = err.read(4096) or b""
+                code = str(json.loads(raw or b"{}").get("error", ""))
+            except (ValueError, AttributeError, OSError):
                 code = ""
-            raise CloudHTTPError(err.code, code, f"HTTP {err.code} {code}".strip()) from None
+            # Not the Worker's JSON (e.g. Cloudflare's "error code: 1010"): keep its text.
+            detail = code or raw.decode("utf-8", "replace").strip()[:80]
+            raise CloudHTTPError(err.code, code, f"HTTP {err.code} {detail}".strip()) from None
         except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError) as err:
             raise CloudOffline(f"Sin conexión con la nube de stems ({getattr(err, 'reason', err)})") from None
 

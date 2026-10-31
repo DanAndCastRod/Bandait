@@ -1071,3 +1071,27 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Opcional: un `GET` del Worker que devuelva el rol, para que el hub sepa si puede escribir sin intentar un PUT (nota del subagente).
   3. Opcional: progreso por bytes (XHR) para archivos grandes en el hub.
   4. Borrar la rama local vieja `feat/stems-nube` cuando ya no haga falta (`git branch -D feat/stems-nube`, lo corre Daniel Castaneda).
+
+### [2026-10-31] - Líder 2.2.1: la descarga de stems fallaba en todas las canciones (Cloudflare error 1010)
+* **Sprint / Módulo:** `bandait-leader` (`src/cloud/stems_cloud.py`, `src/ui/stems_controller.py`)
+* **Estado encontrado:** Daniel Castaneda subió stems desde el hub y suenan bien allí. En el líder 2.2.0, Audio > "Descargar stems del setlist (nube)" mostró "0 canciones descargadas, 30 con error", sin motivo.
+* **Causa (verificada):** Cloudflare responde `403` con `error code: 1010` (firma de navegador bloqueada) a las peticiones con el User-Agent por defecto de Python (`Python-urllib/3.x`). Con un User-Agent propio responden bien. Prueba en Python contra `https://bandait-stems.oooglue.workers.dev/v1/health`:
+  - sin User-Agent propio: `403 b'error code: 1010\n'`;
+  - con `Bandait-Leader/2.2.0`: `200 {"ok":true,"version":"1.0.0"}`.
+
+  Fallaban también las canciones sin stems, porque la petición nunca llegaba al Worker. El motivo no aparecía porque el resumen solo contaba errores y el detalle iba al log.
+* **Corrección aplicada:**
+  - `StemsCloud` manda `User-Agent: Bandait-Leader/<APP_VERSION>`; la ventana le pasa la versión, porque en el instalador no hay código fuente que leer.
+  - Si la respuesta de error no es el JSON del Worker, el error HTTP conserva su texto (por ejemplo "error code: 1010").
+  - El resumen del setlist dice el primer error: "N con error (primero: <canción>: <motivo>)".
+  - Versión 2.2.1.
+* **Verificaciones:**
+  - `pytest -q` da `442 passed`, con dos pruebas nuevas: el User-Agent nunca es Python-urllib, y el texto del bloqueo llega al mensaje.
+  - Contra el Worker real, con un token falso:
+    - con `Python-urllib/3.11`, `403` con la página HTML de bloqueo de Cloudflare;
+    - con `Bandait-Leader/2.2.1`, `401 invalid_token`: llega al Worker.
+  - **No verificado:** la descarga con la sesión real de Daniel Castaneda; queda para cuando instale la 2.2.1.
+* **Errores propios:** las pruebas de la versión anterior usaban un servidor simulado que no reproduce la protección de Cloudflare, y la verificación en producción del Worker se hizo con `curl`, que Cloudflare no bloquea. Nada probó el cliente de Python contra el Worker real antes de publicar la 2.2.0.
+* **Pendientes:**
+  1. Instalar la 2.2.1 y repetir Audio > "Descargar stems del setlist (nube)".
+  2. Si otro cliente en Python (por ejemplo el de Supabase en `src/cloud/http.py`) pasa algún día por un dominio con esa protección, necesitará el mismo User-Agent. Hoy Supabase responde bien.
