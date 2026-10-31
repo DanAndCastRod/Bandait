@@ -200,7 +200,6 @@ def test_mixer_strips_and_faders(qtbot, qapp):
 def test_library_ai_and_pickers(qtbot, qapp):
     from src.db.seed import load_demo_data
     from src.ui.dialogs.account_select import BandSelectorDialog, SetlistSelectorDialog
-    from src.ui.views.ai_view import AIView
     from src.ui.views.library_view import LibraryView
 
     lib = shown(qtbot, LibraryView(), size=(1000, 700))
@@ -213,8 +212,6 @@ def test_library_ai_and_pickers(qtbot, qapp):
         paint(lib, qapp)
     lib.set_cloud_mode(True)
     paint(lib, qapp)
-    ai = shown(qtbot, AIView(), size=(900, 600))
-    paint(ai, qapp)
     bands = shown(qtbot, BandSelectorDialog([{"id": "b", "name": "Banda", "genre": "", "songs": 0, "setlists": 1}]),
                   size=(460, 360))
     paint(bands, qapp)
@@ -245,22 +242,26 @@ def window(qapp):
 
 
 def test_main_window_without_songs(window, qapp):
+    from src.ui.shell import VIEWS
+
     win = window()
-    for tab in range(win.tabs.count()):
-        win.tabs.setCurrentIndex(tab)
+    for key, _label in VIEWS:
+        win.show_view(key)
         paint(win, qapp)
     assert win.setlist_notice()  # no setlist: the notice is painted too
 
 
 def test_main_window_playing_with_the_playhead_visible(window, qapp, qtbot):
     """The exact path of the 2026-10-01 crash: playback moves the timeline's
-    playhead (visible only while playing) on the Mezcla tab."""
+    playhead (visible only while playing) on the Pistas view (it was the Mezcla tab)."""
+    from src.ui.shell import VIEWS
+
     from src.db.seed import seed_database
 
     seed_database()
     win = window()
     assert win.server.get_state()["setlist"]
-    win.tabs.setCurrentIndex(1)  # Mezcla: timeline visible
+    win.show_view("pistas")  # timeline visible
     paint(win, qapp)
     win.send_command("PLAY")
     qtbot.waitUntil(lambda: win.clock_service.status == "PLAYING", timeout=5000)
@@ -270,8 +271,8 @@ def test_main_window_playing_with_the_playhead_visible(window, qapp, qtbot):
         paint(win.timeline, qapp)
         qtbot.wait(40)
     win._on_clock_beat(3, 1, 120.0)
-    for tab in range(win.tabs.count()):
-        win.tabs.setCurrentIndex(tab)
+    for key, _label in VIEWS:
+        win.show_view(key)
         paint(win, qapp)
     win.send_command("STOP")
     qtbot.waitUntil(lambda: win.clock_service.status == "IDLE", timeout=5000)

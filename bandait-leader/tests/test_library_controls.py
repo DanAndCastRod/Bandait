@@ -78,10 +78,12 @@ def window(qapp):
 
 
 def _all_pages(win):
-    """Every main tab and every library sub-tab, so hidden pages are checked too."""
-    for i in range(win.tabs.count()):
-        win.tabs.setCurrentIndex(i)
-        if win.tabs.widget(i) is win.library_view:
+    """Every view of the rail and every library page, so hidden pages are checked too."""
+    from src.ui.shell import VIEWS
+
+    for key, _label in VIEWS:
+        win.show_view(key)
+        if key == "setlists":
             for j in range(win.library_view.tabs.count()):
                 win.library_view.tabs.setCurrentIndex(j)
                 yield
@@ -113,11 +115,11 @@ def test_file_menu_actions_open_the_library_editors(window, monkeypatch):
     lv = window.library_view
     opened = []
     monkeypatch.setattr(lv, "_run_dialog", lambda dialog: opened.append(type(dialog).__name__) or False)
-    window.tabs.setCurrentIndex(0)
+    window.show_view("escenario")
     window.action_new_setlist.trigger()
-    assert window.tabs.currentWidget() is lv and lv.tabs.currentIndex() == 1
+    assert window.current_view() == "setlists" and lv.tabs.currentIndex() == 1
     window.action_new_song.trigger()
-    assert lv.tabs.currentIndex() == 0
+    assert window.current_view() == "canciones" and lv.tabs.currentIndex() == 0
     window.action_new_gig.trigger()
     assert lv.tabs.currentIndex() == 2
     assert opened == ["SetlistEditorDialog", "SongEditorDialog", "GigEditorDialog"]

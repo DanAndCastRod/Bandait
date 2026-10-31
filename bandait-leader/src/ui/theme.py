@@ -114,7 +114,9 @@ RADIUS = 4
 RADIUS_LG = 6
 
 _FONT_FILES = (
-    "SpaceGrotesk-Variable.ttf",
+    "SpaceGrotesk-Regular.ttf",
+    "SpaceGrotesk-Medium.ttf",
+    "SpaceGrotesk-Bold.ttf",
     "IBMPlexMono-Regular.ttf",
     "IBMPlexMono-Medium.ttf",
     "IBMPlexMono-SemiBold.ttf",
@@ -134,13 +136,17 @@ def fonts_dir():
 def load_fonts() -> bool:
     """Register the bundled fonts once (needs a QGuiApplication). True if both families exist."""
     global _fonts_loaded
-    from PySide6.QtGui import QFontDatabase
+    from PySide6.QtGui import QFont, QFontDatabase
 
     if not _fonts_loaded:
         for name in _FONT_FILES:
             path = fonts_dir() / name
             if path.is_file():
                 QFontDatabase.addApplicationFont(str(path))
+        # Older code asks for "Inter" / "JetBrains Mono", which Windows does not have: Qt
+        # fell back to Agency FB (a condensed face) and the leader looked hand-made.
+        QFont.insertSubstitution("Inter", FONT_UI)
+        QFont.insertSubstitution("JetBrains Mono", FONT_MONO)
         _fonts_loaded = True
     families = set(QFontDatabase.families())
     return FONT_UI in families and FONT_MONO in families

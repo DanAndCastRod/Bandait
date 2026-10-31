@@ -27,7 +27,8 @@ SAVE_DEBOUNCE_MS = 800
 
 
 class StemsController(QObject):
-    _loaded = Signal(object)  # (token, song_id, stem_set or None, decoded list, error text)
+    _loaded = Signal(object)  # (token, song_id, stem_set or None, decoded list, error text, envelopes)
+    lanes_changed = Signal(list, float)  # [(label, envelope, gain)], duration in seconds
     stems_shown = Signal(bool)  # the live song has playable stems
     message = Signal(str)
 
@@ -53,6 +54,9 @@ class StemsController(QObject):
         self._save_timer.timeout.connect(self._save)
         self._loaded.connect(self._on_loaded)
         mixer.gains_changed.connect(engine.set_stem_gains)
+        mixer.gains_changed.connect(lambda gains: self._emit_lanes(gains))
+        self._lanes: list = []
+        self._lanes_duration = 0.0
         mixer.stem_changed.connect(self._on_stem_changed)
         mixer.offset_changed.connect(self._on_offset_changed)
         container.setVisible(False)
@@ -80,6 +84,7 @@ class StemsController(QObject):
         self._index = []
         self._engine.clear_stems()
         self._show(False)
+        self.lanes_changed.emit([], 0.0)
         if not self._song_id:
             return
         ref = self._cloud_ref(self._song_id) if allow_network else None
@@ -139,7 +144,7 @@ class StemsController(QObject):
     def _worker_load(self, token: int, song_id: str) -> None:
         stem_set = lib.load(song_id, self._root)
         decoded = lib.decode(stem_set, self._engine.sample_rate, self._root) if stem_set else []
-        self._loaded.emit((token, song_id, stem_set, decoded, ""))
+        self._loaded.emit((token, song_id, stem_set, decoded, "", _envelopes(decoded)))
 
     def _sync(self, client: StemsCloud, song_id: str, ref, title: str, force: bool) -> str:
         band, song = ref
@@ -180,23 +185,23 @@ class StemsController(QObject):
         if live_song:
             self._worker_load(token, live_song)
         else:
-            self._loaded.emit((token, None, None, None, ""))
+            self._loaded.emit((token, None, None, None, "", []))
 
     def _worker_import(self, token: int, song_id: str, paths: List[str]) -> None:
         try:
             stem_set = lib.import_stems(song_id, paths, self._root)
         except lib.StemImportError as exc:
-            self._loaded.emit((token, song_id, lib.load(song_id, self._root), None, str(exc)))
+            self._loaded.emit((token, song_id, lib.load(song_id, self._root), None, str(exc), []))
             return
         except OSError as exc:
-            self._loaded.emit((token, song_id, lib.load(song_id, self._root), None, f"No se pudo copiar: {exc}"))
+            self._loaded.emit((token, song_id, lib.load(song_id, self._root), None, f"No se pudo copiar: {exc}", []))
             return
         decoded = lib.decode(stem_set, self._engine.sample_rate, self._root)
-        self._loaded.emit((token, song_id, stem_set, decoded, ""))
+        self._loaded.emit((token, song_id, stem_set, decoded, "", _envelopes(decoded)))
 
     # ------------------------------------------------------------------ Qt thread
     def _on_loaded(self, payload) -> None:
-        token, song_id, stem_set, decoded, error = payload
+        token, song_id, stem_set, decoded, error, envelopes = payload
         self._busy = False
         if token != self._token or song_id != self._song_id:
             return  # the live song changed while decoding
@@ -221,8 +226,18 @@ class StemsController(QObject):
             return
         self._engine.set_stems([d for _i, _info, d in ok], self._mixer.gains(), self._ref_bpm, stem_set.offset_ms)
         self._show(True)
+        rate = float(self._engine.sample_rate)
+        duration = max(d.shape[0] for _i, _info, d in ok) / rate
+        self._lanes = [(info.label, envelopes[i] if i < len(envelopes) else None) for i, info, _d in ok]
+        self._emit_lanes(self._mixer.gains(), duration)
         roles = ", ".join(info.label for info in infos)
         self.message.emit(f"Stems listos: {roles}")
+
+    def _emit_lanes(self, gains, duration: float = -1.0) -> None:
+        if duration >= 0:
+            self._lanes_duration = duration
+        lanes = [(label, env, gains[i] if i < len(gains) else 1.0) for i, (label, env) in enumerate(self._lanes)]
+        self.lanes_changed.emit(lanes, self._lanes_duration)
 
     def _show(self, visible: bool) -> None:
         self._container.setVisible(visible)
@@ -266,3 +281,8 @@ def song_bpm(entry: Optional[dict], fallback: float) -> float:
     except (TypeError, ValueError):
         bpm = 0.0
     return bpm if bpm > 0 else float(fallback or 120.0)
+
+
+def _envelopes(decoded) -> list:
+    """Drawing envelopes of the decoded stems (worker thread). None for a stem that failed."""
+    return [lib.envelope(data) if data is not None else None for _info, data, _err in decoded or []]

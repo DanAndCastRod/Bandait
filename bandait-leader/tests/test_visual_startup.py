@@ -34,15 +34,20 @@ class TestVisualStartup:
         """All tabs are created and accessible."""
         window = MainWindow()
 
-        # Check tabs exist
-        assert window.tabs is not None
-        assert window.tabs.count() >= 4
+        # Rail with the seven views of 2.3, same names and order as the hub
+        from src.ui.shell import VIEWS
+
+        assert [k for k, _ in VIEWS] == ["escenario", "ensayo", "setlists", "canciones", "pistas", "banda", "ajustes"]
+        assert set(window.nav.buttons) == {k for k, _ in VIEWS}
+        for key, _label in VIEWS:
+            window.show_view(key)
+            assert window.current_view() == key and window.nav.buttons[key].isChecked()
+        assert not hasattr(window, "ai_view")  # the IA tab answered canned text: removed
 
         # Check each major view
         assert window.stage_view is not None
         assert window.timeline is not None
         assert window.library_view is not None
-        assert window.ai_view is not None
         assert window.transport is not None
         assert window.mixer is not None
 

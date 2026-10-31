@@ -1,23 +1,30 @@
 """
-Bandait DAW — Barra de Transporte Profesional
-Controles de reproducción con display de tiempo, BPM, y estado.
+Bandait Líder: transporte compacto de la barra superior (2.3).
+
+Botones de transporte, compás y tiempo, tempo con TAP y ±1, pulso y estado. Todo el estilo
+sale del QSS por propiedades (objectName "transport", role "beat", kind "readout"...).
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel,
-    QFrame, QSizePolicy
-)
+import time
+
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+from src.ui import components as ui
+from src.ui import theme
+
+_STATUS = {
+    "PLAYING": ("EN VIVO", "ok"),
+    "COUNTING": ("CONTEO", "act"),
+    "PAUSED": ("PAUSA", "warn"),
+    "IDLE": ("DETENIDO", ""),
+}
 
 
 class TransportWidget(QWidget):
-    """Barra de transporte profesional tipo DAW.
-
-    El widget solo expresa intenciones (play, pausa, stop, tempo). El estado que
-    muestra lo fija la ventana principal desde el SessionState del lider, de modo
-    que los botones nunca muestran un estado que el transporte no tiene.
-    """
+    """El widget solo expresa intenciones (play, pausa, stop, tempo). El estado que muestra
+    lo fija la ventana principal desde el SessionState del líder, de modo que los botones
+    nunca muestran un estado que el transporte no tiene."""
 
     play_clicked = Signal()
     pause_clicked = Signal()
@@ -37,274 +44,111 @@ class TransportWidget(QWidget):
         self._seconds = 0.0
         self._tap_times = []
         self._status = "IDLE"
-
+        self._lit_beat = None
         self._setup_ui()
+
+    def _transport_btn(self, text: str, ident: str, tooltip: str, checkable: bool = False) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setObjectName("transport")
+        btn.setProperty("id", ident)
+        btn.setToolTip(tooltip)
+        btn.setCheckable(checkable)
+        btn.setFixedSize(44, 40)
+        return btn
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(theme.SPACE_5)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # === TIEMPO ===
-        time_frame = QFrame()
-        time_frame.setObjectName("panel")
-        time_layout = QVBoxLayout(time_frame)
-        time_layout.setSpacing(2)
-        time_layout.setContentsMargins(12, 8, 12, 8)
-
-        time_label = QLabel("TIEMPO")
-        time_label.setFont(QFont("Inter", 8))
-        time_label.setStyleSheet("color: #7C8591;")
-        time_layout.addWidget(time_label)
-
-        self.time_display = QLabel("00:00.000")
-        self.time_display.setObjectName("timeDisplay")
-        self.time_display.setFont(QFont("JetBrains Mono", 28, QFont.Bold))
-        self.time_display.setStyleSheet("""
-            color: #B8CF7A;
-            background-color: #1B1F24;
-            border: 1px solid #262C34;
-            border-radius: 4px;
-            padding: 8px 16px;
-        """)
-        self.time_display.setAlignment(Qt.AlignCenter)
-        time_layout.addWidget(self.time_display)
-
-        layout.addWidget(time_frame)
-
-        # === CONTROLES PRINCIPALES ===
-        controls_frame = QFrame()
-        controls_frame.setObjectName("panel")
-        controls_layout = QHBoxLayout(controls_frame)
-        controls_layout.setSpacing(8)
-        controls_layout.setContentsMargins(12, 8, 12, 8)
-
-        # Botón Detener
-        self.stop_btn = QPushButton("■")
-        self.stop_btn.setObjectName("transport")
-        self.stop_btn.setProperty("id", "stop")
-        self.stop_btn.setToolTip("Detener (Espacio)")
-        self.stop_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 56px; min-height: 56px;
-                border-radius: 8px;
-                font-size: 20px; font-weight: bold;
-                border: 2px solid #D96459;
-                color: #D96459;
-                background: transparent;
-            }
-            QPushButton:hover {
-                background: #D96459;
-                color: #15181C;
-            }
-        """)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(theme.SPACE_2)
+        self.stop_btn = self._transport_btn("■", "stop", "Detener")
         self.stop_btn.clicked.connect(self._on_stop)
-        controls_layout.addWidget(self.stop_btn)
-
-        # Botón Reproducir
-        self.play_btn = QPushButton("▶")
-        self.play_btn.setObjectName("transport")
-        self.play_btn.setProperty("id", "play")
-        self.play_btn.setToolTip("Reproducir (Espacio)")
-        self.play_btn.setCheckable(True)
-        self.play_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 72px; min-height: 72px;
-                border-radius: 8px;
-                font-size: 28px; font-weight: bold;
-                border: 2px solid #B8CF7A;
-                color: #B8CF7A;
-                background: transparent;
-            }
-            QPushButton:hover {
-                background: #B8CF7A;
-                color: #15181C;
-            }
-            QPushButton:checked {
-                background: #B8CF7A;
-                color: #15181C;
-            }
-        """)
+        self.play_btn = self._transport_btn("▶", "play", "Reproducir (Espacio)", checkable=True)
         self.play_btn.clicked.connect(self._on_play)
-        controls_layout.addWidget(self.play_btn)
-
-        # Botón Grabar
-        self.rec_btn = QPushButton("●")
-        self.rec_btn.setObjectName("transport")
-        self.rec_btn.setProperty("id", "rec")
-        self.rec_btn.setToolTip("Grabar (R)")
-        self.rec_btn.setCheckable(True)
-        self.rec_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 56px; min-height: 56px;
-                border-radius: 50%;
-                font-size: 20px; font-weight: bold;
-                border: 2px solid #D96459;
-                color: #D96459;
-                background: transparent;
-            }
-            QPushButton:hover {
-                background: #D96459;
-                color: #15181C;
-            }
-            QPushButton:checked {
-                background: #D96459;
-                color: #15181C;
-            }
-        """)
+        self.rec_btn = self._transport_btn("●", "rec", "Grabar las entradas", checkable=True)
         self.rec_btn.clicked.connect(self._on_rec)
-        controls_layout.addWidget(self.rec_btn)
+        for b in (self.stop_btn, self.play_btn, self.rec_btn):
+            buttons.addWidget(b)
+        layout.addLayout(buttons)
 
-        layout.addWidget(controls_frame)
+        # Compás y tiempo
+        readout = QVBoxLayout()
+        readout.setSpacing(2)
+        readout.addWidget(ui.label("Compás · tiempo", "label"))
+        row = QHBoxLayout()
+        row.setSpacing(theme.SPACE_2)
+        self.bar_display = ui.label("---:--", "readout")
+        self.time_display = ui.label("00:00.000", "muted")
+        row.addWidget(self.bar_display)
+        row.addWidget(self.time_display)
+        readout.addLayout(row)
+        layout.addLayout(readout)
 
-        # === BPM Y METRÓNOMO ===
-        bpm_frame = QFrame()
-        bpm_frame.setObjectName("panel")
-        bpm_layout = QVBoxLayout(bpm_frame)
-        bpm_layout.setSpacing(4)
-        bpm_layout.setContentsMargins(12, 8, 12, 8)
-
-        bpm_header = QHBoxLayout()
-        bpm_label = QLabel("BPM")
-        bpm_label.setFont(QFont("Inter", 8))
-        bpm_label.setStyleSheet("color: #7C8591;")
-        bpm_header.addWidget(bpm_label)
-
-        self.tap_btn = QPushButton("TAP")
-        self.tap_btn.setFont(QFont("Inter", 8, QFont.Bold))
-        self.tap_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 40px; min-height: 20px;
-                font-size: 10px;
-                border: 1px solid #7C8591;
-                color: #7C8591;
-                border-radius: 2px;
-                padding: 2px 6px;
-            }
-            QPushButton:hover {
-                border-color: #5CC8C2;
-                color: #5CC8C2;
-            }
-        """)
+        # Tempo
+        tempo = QVBoxLayout()
+        tempo.setSpacing(2)
+        tempo.addWidget(ui.label("Tempo", "label"))
+        trow = QHBoxLayout()
+        trow.setSpacing(theme.SPACE_2)
+        self.bpm_display = ui.label("120", "readout-active")
+        self.bpm_display.setToolTip("BPM del transporte")
+        trow.addWidget(self.bpm_display)
+        self.tap_btn = ui.button("TAP", "chip", "Marca el tempo con varios toques")
+        self.tap_btn.setCheckable(False)
         self.tap_btn.clicked.connect(self._on_tap_tempo)
-        bpm_header.addWidget(self.tap_btn)
-
-        nudge_style = """
-            QPushButton {
-                min-width: 28px; min-height: 20px;
-                font-size: 10px;
-                border: 1px solid #7C8591;
-                color: #7C8591;
-                border-radius: 2px;
-                padding: 2px 4px;
-            }
-            QPushButton:hover {
-                border-color: #5CC8C2;
-                color: #5CC8C2;
-            }
-        """
-        self.nudge_down_btn = QPushButton("-1")
-        self.nudge_down_btn.setToolTip("Bajar 1 BPM en el siguiente compas")
-        self.nudge_down_btn.setStyleSheet(nudge_style)
+        self.nudge_down_btn = ui.button("−1", "chip", "Bajar 1 BPM en el siguiente compás")
+        self.nudge_down_btn.setCheckable(False)
         self.nudge_down_btn.clicked.connect(lambda: self.tempo_nudge_clicked.emit(-1))
-        bpm_header.addWidget(self.nudge_down_btn)
-        self.nudge_up_btn = QPushButton("+1")
-        self.nudge_up_btn.setToolTip("Subir 1 BPM en el siguiente compas")
-        self.nudge_up_btn.setStyleSheet(nudge_style)
+        self.nudge_up_btn = ui.button("+1", "chip", "Subir 1 BPM en el siguiente compás")
+        self.nudge_up_btn.setCheckable(False)
         self.nudge_up_btn.clicked.connect(lambda: self.tempo_nudge_clicked.emit(1))
-        bpm_header.addWidget(self.nudge_up_btn)
-        bpm_layout.addLayout(bpm_header)
+        for b in (self.tap_btn, self.nudge_down_btn, self.nudge_up_btn):
+            trow.addWidget(b)
+        tempo.addLayout(trow)
+        layout.addLayout(tempo)
 
-        self.bpm_display = QLabel("120")
-        self.bpm_display.setFont(QFont("JetBrains Mono", 32, QFont.Bold))
-        self.bpm_display.setStyleSheet("""
-            color: #5CC8C2;
-            background-color: #1B1F24;
-            border: 1px solid #262C34;
-            border-radius: 4px;
-            padding: 4px 12px;
-        """)
-        self.bpm_display.setAlignment(Qt.AlignCenter)
-        bpm_layout.addWidget(self.bpm_display)
-
-        # Indicador de beat
-        beat_layout = QHBoxLayout()
-        beat_layout.setSpacing(4)
+        # Pulso y estado
+        pulse = QVBoxLayout()
+        pulse.setSpacing(6)
+        pulse.addStretch()
+        self.status_label = ui.tag("DETENIDO")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        pulse.addWidget(self.status_label, 0, Qt.AlignLeft)
+        beats = QHBoxLayout()
+        beats.setSpacing(4)
         self.beat_indicators = []
         for i in range(4):
-            led = QLabel("●")
-            led.setFont(QFont("JetBrains Mono", 14))
-            led.setStyleSheet("color: #363D47;")
-            led.setAlignment(Qt.AlignCenter)
+            led = QFrame()
+            led.setProperty("role", "beat")
+            led.setProperty("state", "")
+            led.setFixedSize(18, 6)
+            beats.addWidget(led)
             self.beat_indicators.append(led)
-            beat_layout.addWidget(led)
-        bpm_layout.addLayout(beat_layout)
+        pulse.addLayout(beats)
+        pulse.addStretch()
+        layout.addLayout(pulse)
 
-        layout.addWidget(bpm_frame)
-
-        # === ESTADO Y OPCIONES ===
-        status_frame = QFrame()
-        status_frame.setObjectName("panel")
-        status_layout = QVBoxLayout(status_frame)
-        status_layout.setSpacing(4)
-        status_layout.setContentsMargins(12, 8, 12, 8)
-
-        # Loop
+        # BUCLE quedó sin uso en el transporte: el bucle de sección vive en la vista Ensayo.
         self.loop_btn = QPushButton("BUCLE")
         self.loop_btn.setCheckable(True)
-        # Sin bucle en el transporte v3: oculto hasta que exista (ningún control sin función).
-        self.loop_btn.setEnabled(False)
-        self.loop_btn.setVisible(False)
-        self.loop_btn.setFont(QFont("Inter", 9, QFont.Bold))
-        self.loop_btn.setStyleSheet("""
-            QPushButton {
-                min-height: 28px;
-                border: 1px solid #7C8591;
-                color: #7C8591;
-                border-radius: 4px;
-                padding: 4px 12px;
-            }
-            QPushButton:checked {
-                border-color: #5CC8C2;
-                color: #5CC8C2;
-                background: rgba(92, 200, 194, 20);
-            }
-            QPushButton:hover {
-                border-color: #5CC8C2;
-            }
-        """)
         self.loop_btn.clicked.connect(self._on_loop)
-        status_layout.addWidget(self.loop_btn)
+        self.loop_btn.hide()
+        # Compatibilidad: el estado de red ahora va en la barra de estado.
+        self.net_label = QLabel("")
+        self.net_label.hide()
 
-        # Estado
-        self.status_label = QLabel("Listo")
-        self.status_label.setFont(QFont("Inter", 10))
-        self.status_label.setStyleSheet("color: #7C8591;")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        status_layout.addWidget(self.status_label)
-
-        # Indicador de red
-        net_layout = QHBoxLayout()
-        self.net_led = QLabel("●")
-        self.net_led.setFont(QFont("JetBrains Mono", 10))
-        self.net_led.setStyleSheet("color: #B8CF7A;")
-        net_layout.addWidget(self.net_led)
-
-        self.net_label = QLabel("Sync OK")
-        self.net_label.setFont(QFont("Inter", 9))
-        self.net_label.setStyleSheet("color: #7C8591;")
-        net_layout.addWidget(self.net_label)
-        net_layout.addStretch()
-        status_layout.addLayout(net_layout)
-
-        layout.addWidget(status_frame)
-        layout.addStretch()
-
+    # ------------------------------------------------------------------ display
     def _update_time_display(self):
         minutes = int(self._seconds) // 60
         seconds = int(self._seconds) % 60
         millis = int((self._seconds % 1) * 1000)
         self.time_display.setText(f"{minutes:02d}:{seconds:02d}.{millis:03d}")
+
+    def _show_status(self, text: str, kind: str):
+        self.status_label.setText(text)
+        ui.set_prop(self.status_label, "tag", kind)
 
     def _on_play(self):
         # The click toggled the checkable button; the real state comes back
@@ -323,21 +167,12 @@ class TransportWidget(QWidget):
         self._status = status
         self._is_playing = status == "PLAYING"
         self.play_btn.setChecked(self._is_playing)
-        if status == "PLAYING":
-            self.play_btn.setToolTip("Pausar (Espacio)")
-            if not self._is_recording:
-                self.status_label.setText("Reproduciendo")
-                self.status_label.setStyleSheet("color: #B8CF7A;")
-        elif status == "PAUSED":
-            self.play_btn.setToolTip("Continuar en el siguiente compas (Espacio)")
-            if not self._is_recording:
-                self.status_label.setText("Pausado")
-                self.status_label.setStyleSheet("color: #D9A24E;")
-        else:
-            self.play_btn.setToolTip("Reproducir (Espacio)")
-            if not self._is_recording:
-                self.status_label.setText("Detenido")
-                self.status_label.setStyleSheet("color: #7C8591;")
+        tips = {"PLAYING": "Pausar (Espacio)", "PAUSED": "Continuar en el siguiente compás (Espacio)"}
+        self.play_btn.setToolTip(tips.get(status, "Reproducir (Espacio)"))
+        if not self._is_recording:
+            self._show_status(*_STATUS.get(status, _STATUS["IDLE"]))
+        if status == "IDLE":
+            self.bar_display.setText("---:--")
 
     def _on_rec(self):
         self.set_recording_state(self.rec_btn.isChecked())
@@ -348,8 +183,7 @@ class TransportWidget(QWidget):
         self._is_recording = recording
         self.rec_btn.setChecked(recording)
         if recording:
-            self.status_label.setText("GRABANDO")
-            self.status_label.setStyleSheet("color: #D96459; font-weight: bold;")
+            self._show_status("GRABANDO", "danger")
         else:
             self.set_transport_status(self._status)
 
@@ -358,44 +192,16 @@ class TransportWidget(QWidget):
         self.loop_clicked.emit(self._is_looping)
 
     def _on_tap_tempo(self):
-        import time
         now = time.time()
         self._tap_times.append(now)
-        # Mantener solo últimos 4 taps
         self._tap_times = [t for t in self._tap_times if now - t < 2.0]
-
         if len(self._tap_times) >= 2:
-            intervals = [self._tap_times[i] - self._tap_times[i-1]
-                        for i in range(1, len(self._tap_times))]
+            intervals = [self._tap_times[i] - self._tap_times[i - 1] for i in range(1, len(self._tap_times))]
             avg_interval = sum(intervals) / len(intervals)
             if avg_interval > 0:
-                bpm = int(60.0 / avg_interval)
-                self.set_bpm(max(40, min(300, bpm)))
-
-        self.tap_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 40px; min-height: 20px;
-                font-size: 10px;
-                border: 1px solid #5CC8C2;
-                color: #5CC8C2;
-                border-radius: 2px;
-                padding: 2px 6px;
-            }
-        """)
-        QTimer.singleShot(200, lambda: self.tap_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 40px; min-height: 20px;
-                font-size: 10px;
-                border: 1px solid #7C8591;
-                color: #7C8591;
-                border-radius: 2px;
-                padding: 2px 6px;
-            }
-            QPushButton:hover {
-                border-color: #5CC8C2;
-                color: #5CC8C2;
-            }
-        """))
+                self.set_bpm(max(40, min(300, int(60.0 / avg_interval))))
+        self.tap_btn.setDown(True)
+        QTimer.singleShot(150, lambda: self.tap_btn.setDown(False))
 
     def set_bpm(self, bpm: int):
         """BPM pedido por el usuario (TAP): se emite para que el lider lo aplique."""
@@ -413,28 +219,29 @@ class TransportWidget(QWidget):
         self._seconds = seconds
         self._update_time_display()
 
+    def set_bar(self, bar, beat=None):
+        """Compás y pulso actuales (None: transporte detenido)."""
+        if bar is None:
+            self.bar_display.setText("---:--")
+        else:
+            self.bar_display.setText(f"{int(bar):03d}:{int(beat or 1)}")
+
     def set_beat(self, beat: int):
-        """Actualizar indicador de beat (1-4). Solo toca los dos LEDs que cambian."""
-        prev = getattr(self, "_lit_beat", None)
+        """Pulso actual (1-4). Solo repule los dos indicadores que cambian."""
+        prev = self._lit_beat
         if prev == beat:
             return
         if prev is not None and 0 < prev <= len(self.beat_indicators):
-            self.beat_indicators[prev - 1].setStyleSheet("color: #363D47;")
+            ui.set_prop(self.beat_indicators[prev - 1], "state", "")
         if 0 < beat <= len(self.beat_indicators):
-            self.beat_indicators[beat - 1].setStyleSheet("color: #B8CF7A;")
+            ui.set_prop(self.beat_indicators[beat - 1], "state", "one" if beat == 1 else "on")
         self._lit_beat = beat
 
     def clear_beat(self):
         for led in self.beat_indicators:
-            led.setStyleSheet("color: #363D47;")
+            ui.set_prop(led, "state", "")
         self._lit_beat = None
 
     def set_network_status(self, ok: bool, message: str = ""):
-        if ok:
-            self.net_led.setStyleSheet("color: #B8CF7A;")
-            self.net_label.setText(message or "Sync OK")
-            self.net_label.setStyleSheet("color: #7C8591;")
-        else:
-            self.net_led.setStyleSheet("color: #D96459;")
-            self.net_label.setText(message or "Sin conexión")
-            self.net_label.setStyleSheet("color: #D96459;")
+        """El estado de red se muestra en la barra de estado; se guarda por compatibilidad."""
+        self.net_label.setText(message or ("Sync OK" if ok else "Sin conexión"))

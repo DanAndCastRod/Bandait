@@ -1,357 +1,230 @@
 """
-Bandait DAW — Vista de Escenario (Modo Evento en Vivo)
-Pantalla fullscreen minimalista para performance en vivo.
-Flash de bordes para metrónomo, letras grandes, beacon de red.
+Bandait Líder: vista Escenario (2.3).
+
+Tres columnas, como la maqueta aprobada: el setlist en vivo; el prompter con la sección
+actual, su ChordPro y el avance por secciones; y a la derecha el pulso, los músicos
+conectados y el estado de los stems. PANIC vive en la barra superior de la ventana.
+Todo el estilo sale del QSS por propiedades (role, kind, state); nada de setStyleSheet.
 """
 
 import html
-from typing import Optional
+from typing import List, Optional
 
+from PySide6.QtCore import QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QKeyEvent
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QListWidget, QListWidgetItem, QAbstractItemView
+    QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
+    QVBoxLayout, QWidget,
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QBrush, QColor, QFont, QKeyEvent
 
+from src.ui import components as ui
 from src.ui import theme
 from src.ui.chordpro_layout import MUSICIAN, SINGER, preview_text, section_html, section_index_at
-
 
 # Prompter text size by mode (px): the musician view is monospace, so it is smaller.
 LYRIC_PX = {SINGER: 40, MUSICIAN: 28}
 
 
 class StageView(QWidget):
-    """Vista de escenario para eventos en vivo. Pantalla completa, minimalista."""
+    """Vista de escenario para eventos en vivo."""
 
     panic_clicked = Signal()
     next_song_clicked = Signal()
     prev_song_clicked = Signal()
     fullscreen_requested = Signal()
+    open_tracks = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bpm = 120
         self._beat = 1
+        self._beat_lit = False
         self._song_title = "Sin canción"
-        self._section = "Intro"
-        self._next_section = "Verso"
+        self._section = ""
+        self._next_section = ""
         self._is_fullscreen = False
         self._network_ok = True
-        self._beat_flash = False
         self._lyrics = []
         self._current_lyric_idx = 0
         # Song content of the live item (CONTRACT_V3 9.1): sections with ChordPro.
         self._content: Optional[dict] = None
         self._section_idx = -1
         self._prompter_mode = MUSICIAN
-
+        self._strip_labels: List[QLabel] = []
         self._setup_ui()
-        self._setup_animations()
-        self._setup_timer()
+        self._flash_anim = QPropertyAnimation(self, b"windowOpacity")
 
+    # ------------------------------------------------------------------ layout
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # === BEACON DE RED (barra superior) ===
-        self.beacon = QFrame()
-        self.beacon.setFixedHeight(6)
-        self.beacon.setStyleSheet("background-color: #B8CF7A;")
-        layout.addWidget(self.beacon)
+        # Network beacon: a thin line, green while the LAN is up.
+        self.beacon = ui.frame("beacon")
+        self.beacon.setProperty("state", "ok")
+        self.beacon.setFixedHeight(3)
+        root.addWidget(self.beacon)
 
-        # === HEADER: Título y controles ===
-        header = QHBoxLayout()
-        header.setContentsMargins(24, 16, 24, 16)
-
-        # Botón anterior
-        self.prev_btn = QPushButton("◀ Anterior")
-        self.prev_btn.setFont(QFont("Inter", 12, QFont.Bold))
-        self.prev_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 2px solid #7C8591;
-                color: #7C8591;
-                border-radius: 8px;
-                padding: 12px 24px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                border-color: #5CC8C2;
-                color: #5CC8C2;
-            }
-        """)
-        self.prev_btn.clicked.connect(self.prev_song_clicked.emit)
-        header.addWidget(self.prev_btn)
-
-        header.addStretch()
-
-        # Info de canción
-        info_layout = QVBoxLayout()
-        self.song_title = QLabel(self._song_title)
-        self.song_title.setFont(QFont("Inter", 18, QFont.Bold))
-        self.song_title.setStyleSheet(f"color: {theme.FG}; font-size: 26px; font-weight: 700;")
-        self.song_title.setAlignment(Qt.AlignCenter)
-        info_layout.addWidget(self.song_title)
-
-        self.section_label = QLabel(self._section)
-        self.section_label.setFont(QFont("Inter", 14))
-        self.section_label.setStyleSheet(f"color: {theme.ACTIVE}; font-size: 15px;")
-        self.section_label.setAlignment(Qt.AlignCenter)
-        info_layout.addWidget(self.section_label)
-
-        header.addLayout(info_layout)
-        header.addStretch()
-
-        # Botón siguiente
-        self.next_btn = QPushButton("Siguiente ▶")
-        self.next_btn.setFont(QFont("Inter", 12, QFont.Bold))
-        self.next_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 2px solid #7C8591;
-                color: #7C8591;
-                border-radius: 8px;
-                padding: 12px 24px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                border-color: #5CC8C2;
-                color: #5CC8C2;
-            }
-        """)
-        self.next_btn.clicked.connect(self.next_song_clicked.emit)
-        header.addWidget(self.next_btn)
-
-        layout.addLayout(header)
-
-        # Aviso de salto de setlist (setlist_jump): visible unos segundos.
-        self.jump_alert = QLabel("")
-        self.jump_alert.setFont(QFont("Inter", 16, QFont.Bold))
+        # Avisos: salto no secuencial (temporal) y setlist vacío (persistente).
+        self.jump_alert = ui.tag("", "warn")
         self.jump_alert.setAlignment(Qt.AlignCenter)
-        self.jump_alert.setStyleSheet("color: #15181C; background: #D9A24E; padding: 8px;")
         self.jump_alert.hide()
-        layout.addWidget(self.jump_alert)
         self._jump_timer = QTimer(self)
         self._jump_timer.setSingleShot(True)
         self._jump_timer.timeout.connect(self.jump_alert.hide)
-
-        # Aviso persistente mientras el setlist en vivo está vacío (no se borra solo).
-        self.setlist_notice = QLabel("")
+        self.setlist_notice = ui.label("", "body", wrap=True)
         self.setlist_notice.setObjectName("setlistNotice")
-        self.setlist_notice.setFont(QFont("Inter", 15, QFont.Bold))
         self.setlist_notice.setAlignment(Qt.AlignCenter)
-        self.setlist_notice.setWordWrap(True)
-        self.setlist_notice.setStyleSheet(
-            "color: #15181C; background: #D9A24E; padding: 10px 16px;"
-        )
         self.setlist_notice.hide()
-        layout.addWidget(self.setlist_notice)
+        alerts = QVBoxLayout()
+        alerts.setContentsMargins(theme.SPACE_4, theme.SPACE_2, theme.SPACE_4, 0)
+        alerts.addWidget(self.jump_alert)
+        alerts.addWidget(self.setlist_notice)
+        root.addLayout(alerts)
 
-        # === ÁREA PRINCIPAL: setlist, letra y acordes, metrónomo ===
-        main_area = QHBoxLayout()
-        main_area.setContentsMargins(24, 16, 24, 16)
-        main_area.setSpacing(20)
+        grid = QHBoxLayout()
+        grid.setContentsMargins(theme.SPACE_4, theme.SPACE_4, theme.SPACE_4, theme.SPACE_4)
+        grid.setSpacing(theme.SPACE_4)
+        grid.addWidget(self._build_setlist_panel())
+        grid.addWidget(self._build_prompter_panel(), 1)
+        grid.addLayout(self._build_right_column())
+        root.addLayout(grid, 1)
 
-        # Riel del setlist en vivo (solo lectura: el transporte se mueve con Anterior/Siguiente).
-        rail_layout = QVBoxLayout()
-        rail_layout.setSpacing(6)
-        rail_title = QLabel("SETLIST")
-        rail_title.setFont(QFont("JetBrains Mono", 10, QFont.Bold))
-        rail_title.setStyleSheet(f"color: {theme.MUTED}; letter-spacing: 2px; font-size: 12px; font-weight: 700;")
-        rail_layout.addWidget(rail_title)
+    def _build_setlist_panel(self) -> QFrame:
+        box, body, actions = ui.panel("Setlist")
+        box.setFixedWidth(280)
+        body.setContentsMargins(0, 0, 0, 0)
+        self.prev_btn = ui.button("◀", "ghost", "Canción anterior")
+        self.prev_btn.clicked.connect(self.prev_song_clicked.emit)
+        self.next_btn = ui.button("▶", "ghost", "Siguiente canción")
+        self.next_btn.clicked.connect(self.next_song_clicked.emit)
+        actions.addWidget(self.prev_btn)
+        actions.addWidget(self.next_btn)
         self.setlist_rail = QListWidget()
         self.setlist_rail.setObjectName("setlistRail")
         self.setlist_rail.setFocusPolicy(Qt.NoFocus)
         self.setlist_rail.setSelectionMode(QAbstractItemView.NoSelection)
-        self.setlist_rail.setFixedWidth(230)
-        self.setlist_rail.setFont(QFont("Inter", 11))
-        self.setlist_rail.setStyleSheet(
-            f"QListWidget {{ background: {theme.SURFACE}; border: 1px solid {theme.LINE};"
-            f" border-radius: 4px; color: {theme.SECONDARY}; font-size: 15px; }}"
-            f"QListWidget::item {{ padding: 8px 10px; border-bottom: 1px solid {theme.LINE}; }}"
-        )
-        rail_layout.addWidget(self.setlist_rail, 1)
-        main_area.addLayout(rail_layout)
+        self.setlist_rail.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setlist_rail.setTextElideMode(Qt.ElideRight)
+        body.addWidget(self.setlist_rail, 1)
+        return box
 
-        # Letra y acordes de la sección actual (centro, grande)
-        lyrics_layout = QVBoxLayout()
-        lyrics_layout.setSpacing(10)
+    def _build_prompter_panel(self) -> QFrame:
+        box = ui.frame("panel")
+        col = QVBoxLayout(box)
+        col.setContentsMargins(theme.SPACE_5, theme.SPACE_4, theme.SPACE_5, theme.SPACE_4)
+        col.setSpacing(theme.SPACE_3)
 
         head = QHBoxLayout()
-        self.section_head = QLabel("")
-        self.section_head.setFont(QFont("JetBrains Mono", 13, QFont.Bold))
-        self.section_head.setStyleSheet(
-            f"color: {theme.ACTIVE}; letter-spacing: 2px; font-size: 16px; font-weight: 700;"
-            " font-family: 'JetBrains Mono', Consolas, monospace;"
-        )
+        head.setSpacing(theme.SPACE_2)
+        self.section_head = ui.label("", "section-head")
         head.addWidget(self.section_head)
         head.addStretch()
         self.mode_btn = QPushButton("ACORDES")
         self.mode_btn.setObjectName("prompterMode")
-        self.mode_btn.setFont(QFont("JetBrains Mono", 10, QFont.Bold))
         self.mode_btn.setCursor(Qt.PointingHandCursor)
         self.mode_btn.setToolTip("Alternar entre acordes con letra y solo letra")
         self.mode_btn.clicked.connect(self.toggle_prompter_mode)
         self.mode_btn.hide()
         head.addWidget(self.mode_btn)
-        lyrics_layout.addLayout(head)
+        self.fullscreen_btn = ui.button("Pantalla completa", "ghost", "F11")
+        self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
+        head.addWidget(self.fullscreen_btn)
+        col.addLayout(head)
 
-        lyrics_layout.addStretch(1)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(theme.SPACE_3)
+        self.song_title = ui.label(self._song_title, "display")
+        self.section_label = ui.label("", "muted")
+        title_row.addWidget(self.song_title)
+        title_row.addWidget(self.section_label, 0, Qt.AlignBottom)
+        title_row.addStretch()
+        col.addLayout(title_row)
+
+        col.addStretch(1)
         self.current_lyric = QLabel("Esperando canción...")
-        self._style_lyric(SINGER)
-        self.current_lyric.setAlignment(Qt.AlignCenter)
         self.current_lyric.setWordWrap(True)
         self.current_lyric.setTextFormat(Qt.RichText)
-        lyrics_layout.addWidget(self.current_lyric)
-        lyrics_layout.addStretch(1)
+        self._style_lyric(SINGER)
+        col.addWidget(self.current_lyric)
+        col.addStretch(1)
 
-        # Próxima sección (o próxima línea, sin contenido del hub)
-        self.next_lyric = QLabel("")
-        self.next_lyric.setFont(QFont("Inter", 16))
-        self.next_lyric.setStyleSheet(
-            f"color: {theme.MUTED}; border-top: 1px solid {theme.LINE}; padding-top: 8px; font-size: 18px;"
-        )
-        self.next_lyric.setAlignment(Qt.AlignCenter)
-        self.next_lyric.setWordWrap(True)
+        sep = ui.frame("divider-h")
+        sep.setFixedHeight(1)
+        col.addWidget(sep)
+        self.next_lyric = ui.label("", "next")
         self.next_lyric.setTextFormat(Qt.PlainText)
-        lyrics_layout.addWidget(self.next_lyric)
+        self.next_lyric.setWordWrap(True)
+        col.addWidget(self.next_lyric)
+        self.section_strip = QWidget()
+        self._strip_layout = QHBoxLayout(self.section_strip)
+        self._strip_layout.setContentsMargins(0, 0, 0, 0)
+        self._strip_layout.setSpacing(3)
+        self.section_strip.setFixedHeight(28)
+        col.addWidget(self.section_strip)
+        return box
 
-        main_area.addLayout(lyrics_layout, 3)
+    def _build_right_column(self) -> QVBoxLayout:
+        col = QVBoxLayout()
+        col.setSpacing(theme.SPACE_4)
 
-        # Separador
-        sep = QFrame()
-        sep.setStyleSheet("background: #262C34; max-width: 2px; min-width: 2px;")
-        main_area.addWidget(sep)
-
-        # Panel derecho: BPM, beat, controles
-        right_panel = QVBoxLayout()
-        right_panel.setAlignment(Qt.AlignCenter)
-        right_panel.setSpacing(20)
-
-        # BPM grande
-        bpm_label = QLabel("BPM")
-        bpm_label.setFont(QFont("Inter", 12))
-        bpm_label.setStyleSheet(f"color: {theme.MUTED}; font-size: 13px; letter-spacing: 2px;")
-        bpm_label.setAlignment(Qt.AlignCenter)
-        right_panel.addWidget(bpm_label)
-
-        self.bpm_display = QLabel("120")
-        self.bpm_display.setFont(QFont("JetBrains Mono", 72, QFont.Bold))
-        self.bpm_display.setStyleSheet(
-            f"color: {theme.ACTIVE}; font-size: 88px; font-weight: 700;"
-            " font-family: 'JetBrains Mono', Consolas, monospace;"
-        )
+        pulse, pbody, _ = ui.panel("Pulso")
+        pulse.setFixedWidth(300)
+        self.bpm_display = ui.label("120", "giant")
         self.bpm_display.setAlignment(Qt.AlignCenter)
-        right_panel.addWidget(self.bpm_display)
-
-        # Indicadores de beat
-        beat_layout = QHBoxLayout()
-        beat_layout.setSpacing(16)
+        pbody.addWidget(self.bpm_display)
+        beats = QHBoxLayout()
+        beats.setSpacing(6)
+        beats.addStretch()
         self.beat_indicators = []
-        for i in range(4):
-            led = QLabel("●")
-            led.setFont(QFont("JetBrains Mono", 32))
-            led.setStyleSheet("color: #363D47;")
-            led.setAlignment(Qt.AlignCenter)
+        for _i in range(4):
+            led = QFrame()
+            led.setProperty("role", "beat")
+            led.setProperty("state", "")
+            led.setFixedSize(40, 8)
+            beats.addWidget(led)
             self.beat_indicators.append(led)
-            beat_layout.addWidget(led)
-        right_panel.addLayout(beat_layout)
+        beats.addStretch()
+        pbody.addLayout(beats)
+        stats = QHBoxLayout()
+        bar_w, self.bar_label = ui.stat("Compás", "-", "readout-plain")
+        next_w, self.next_section_label = ui.stat("Próxima", "-", "next-section")
+        stats.addWidget(bar_w)
+        stats.addStretch()
+        stats.addWidget(next_w)
+        pbody.addLayout(stats)
+        col.addWidget(pulse)
 
-        self.bar_label = QLabel("COMPÁS -")
-        self.bar_label.setFont(QFont("JetBrains Mono", 14, QFont.Bold))
-        self.bar_label.setStyleSheet(
-            f"color: {theme.SECONDARY}; font-size: 20px; font-weight: 700;"
-            " font-family: 'JetBrains Mono', Consolas, monospace;"
-        )
-        self.bar_label.setAlignment(Qt.AlignCenter)
-        right_panel.addWidget(self.bar_label)
+        musicians, mbody, mactions = ui.panel("Músicos")
+        musicians.setFixedWidth(300)
+        self.musicians_tag = ui.tag("0 en línea", "")
+        mactions.addWidget(self.musicians_tag)
+        mbody.setSpacing(theme.SPACE_1)
+        self._musicians_body = mbody
+        self._musician_rows: List[QWidget] = []
+        self.musicians_empty = ui.label("Nadie conectado todavía. Usa Conectar músicos.", "muted", wrap=True)
+        mbody.addWidget(self.musicians_empty)
+        col.addWidget(musicians, 1)
 
-        # Próxima sección
-        next_sec_label = QLabel("PRÓXIMA")
-        next_sec_label.setFont(QFont("Inter", 10))
-        next_sec_label.setStyleSheet(f"color: {theme.MUTED}; font-size: 13px; letter-spacing: 2px;")
-        next_sec_label.setAlignment(Qt.AlignCenter)
-        right_panel.addWidget(next_sec_label)
+        stems, sbody, sactions = ui.panel("Stems")
+        stems.setFixedWidth(300)
+        self.stems_tag = ui.tag("Sin stems", "")
+        sactions.addWidget(self.stems_tag)
+        self.stems_summary = ui.label("Esta canción no tiene stems.", "muted", wrap=True)
+        sbody.addWidget(self.stems_summary)
+        go = ui.button("Abrir Pistas", "ghost")
+        go.clicked.connect(self.open_tracks.emit)
+        sbody.addWidget(go, 0, Qt.AlignLeft)
+        col.addWidget(stems)
 
-        self.next_section_label = QLabel(self._next_section)
-        self.next_section_label.setFont(QFont("Inter", 16, QFont.Bold))
-        self.next_section_label.setStyleSheet(f"color: {theme.SUCCESS}; font-size: 24px; font-weight: 700;")
-        self.next_section_label.setAlignment(Qt.AlignCenter)
-        right_panel.addWidget(self.next_section_label)
-
-        right_panel.addStretch()
-        main_area.addLayout(right_panel, 1)
-
-        layout.addLayout(main_area, 1)
-
-        # === CONTROLES INFERIORES ===
-        bottom = QHBoxLayout()
-        bottom.setContentsMargins(24, 16, 24, 16)
-
-        # Botón pantalla completa
-        self.fullscreen_btn = QPushButton("Pantalla Completa")
-        self.fullscreen_btn.setFont(QFont("Inter", 11))
-        self.fullscreen_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #7C8591;
-                color: #7C8591;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                border-color: #5CC8C2;
-                color: #5CC8C2;
-            }
-        """)
-        self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
-        bottom.addWidget(self.fullscreen_btn)
-
-        bottom.addStretch()
-
-        # Botón pánico (slide to stop)
+        # PANIC está en la barra superior; este botón se conserva oculto para atajos y pruebas.
         self.panic_btn = QPushButton("DETENER SESIÓN")
-        self.panic_btn.setFont(QFont("Inter", 14, QFont.Bold))
-        self.panic_btn.setStyleSheet("""
-            QPushButton {
-                background: #D96459;
-                border: none;
-                color: #15181C;
-                border-radius: 8px;
-                padding: 16px 32px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background: #D96459;
-            }
-            QPushButton:pressed {
-                background: #B5504A;
-            }
-        """)
         self.panic_btn.clicked.connect(self.panic_clicked.emit)
-        bottom.addWidget(self.panic_btn)
+        self.panic_btn.hide()
+        return col
 
-        layout.addLayout(bottom)
-
-    def _setup_animations(self):
-        """Configurar animaciones de flash para metrónomo."""
-        self._flash_anim = QPropertyAnimation(self, b"styleSheet")
-        self._flash_anim.setDuration(100)
-        self._flash_anim.setEasingCurve(QEasingCurve.OutQuad)
-
-    def _setup_timer(self):
-        """Timer solo para decay de UI, no para generar beats."""
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._update_ui)
-        self._timer.start(33)  # 30fps para animaciones suaves
-
-    def _update_ui(self):
-        """Actualizar animaciones de UI (flash decay, etc)."""
-        pass  # Las animaciones de beat se manejan en set_beat
-
+    # ------------------------------------------------------------------ legacy song path
     def set_song(self, title: str, current_lyric: str = "", next_lyric: str = "",
                  section: str = "", next_section: str = ""):
         """Song without content from the hub: plain lyrics (legacy path)."""
@@ -367,8 +240,9 @@ class StageView(QWidget):
         self.section_label.setText(section)
         self._section = section
         self._next_section = next_section
-        self.next_section_label.setText(next_section)
+        self.next_section_label.setText(next_section or "-")
         self._current_lyric_idx = 0
+        self._build_strip([])
 
     def set_lyrics(self, lyrics: list):
         """Guardar lista de letras para scroll sincronizado."""
@@ -376,40 +250,30 @@ class StageView(QWidget):
         self._current_lyric_idx = 0
         if lyrics and self._content is None:
             self.current_lyric.setText(html.escape(lyrics[0]["text"]))
-            if len(lyrics) > 1:
-                self.next_lyric.setText(lyrics[1]["text"])
-            else:
-                self.next_lyric.setText("")
+            self.next_lyric.setText(lyrics[1]["text"] if len(lyrics) > 1 else "")
 
+    # ------------------------------------------------------------------ pulse
     def set_bpm(self, bpm: int):
         self._bpm = bpm
         self.bpm_display.setText(str(bpm))
 
     def set_beat(self, beat: int):
-        """Actualizar indicador de beat (1-4) con flash visual en el beat 1.
-
-        Solo se reestilizan los dos LEDs que cambian (sin reconstruir widgets)."""
-        prev = self._beat if getattr(self, "_beat_lit", False) else None
+        """Pulso actual (1-4). Solo repule los dos indicadores que cambian."""
+        prev = self._beat if self._beat_lit else None
         self._beat = beat
         self._beat_lit = True
         if prev is not None and 0 < prev <= len(self.beat_indicators) and prev != beat:
-            self.beat_indicators[prev - 1].setStyleSheet("color: #363D47; font-size: 32px;")
+            ui.set_prop(self.beat_indicators[prev - 1], "state", "")
         if 0 < beat <= len(self.beat_indicators):
-            led = self.beat_indicators[beat - 1]
-            if beat == 1:
-                led.setStyleSheet("color: #5CC8C2; font-size: 40px; font-weight: bold;")
-            else:
-                led.setStyleSheet("color: #B8CF7A; font-size: 32px;")
-        if beat == 1:
-            self._flash_border()
+            ui.set_prop(self.beat_indicators[beat - 1], "state", "one" if beat == 1 else "on")
 
     def clear_beat(self):
         for led in self.beat_indicators:
-            led.setStyleSheet("color: #363D47; font-size: 32px;")
+            ui.set_prop(led, "state", "")
         self._beat_lit = False
 
     def set_bar(self, bar):
-        self.bar_label.setText(f"COMPÁS {bar}" if bar is not None else "COMPÁS -")
+        self.bar_label.setText(str(bar) if bar is not None else "-")
         if self._content is not None:
             self._show_section(section_index_at(self._content.get("sections") or [], bar))
 
@@ -419,19 +283,26 @@ class StageView(QWidget):
         self.setlist_rail.clear()
         for i, e in enumerate(entries or []):
             title = e.get("title") or e.get("song_id")
-            item = QListWidgetItem(f"{i + 1:02d}  {title}\n      {e.get('bpm', '')} BPM")
+            item = QListWidgetItem(f"{i + 1:02d}   {title}\n        {e.get('bpm', '')} BPM")
             item.setData(Qt.UserRole, e.get("song_id"))
             self.setlist_rail.addItem(item)
         self.set_current_song_id(current_song_id)
 
     def set_current_song_id(self, song_id):
+        live_row = -1
         for i in range(self.setlist_rail.count()):
             item = self.setlist_rail.item(i)
-            live = song_id is not None and item.data(Qt.UserRole) == song_id
+            if song_id is not None and item.data(Qt.UserRole) == song_id:
+                live_row = i
+        for i in range(self.setlist_rail.count()):
+            item = self.setlist_rail.item(i)
+            live = i == live_row
+            done = live_row >= 0 and i < live_row
             font = item.font()
             font.setBold(live)
             item.setFont(font)
-            item.setForeground(QBrush(QColor(theme.ACTIVE if live else theme.SECONDARY)))
+            color = theme.FG_STRONG if live else (theme.MUTED if done else theme.SECONDARY)
+            item.setForeground(QBrush(QColor(color)))
             item.setBackground(QBrush(QColor(theme.ELEVATED if live else theme.SURFACE)))
             if live:
                 self.setlist_rail.scrollToItem(item, QAbstractItemView.PositionAtCenter)
@@ -453,6 +324,7 @@ class StageView(QWidget):
         artist = content.get("artist") or ""
         self.song_title.setText(title)
         self.section_label.setText(" // ".join(p for p in (artist, key) if p))
+        self._build_strip(content.get("sections") or [])
         self._show_section(0)
 
     def toggle_prompter_mode(self):
@@ -473,12 +345,25 @@ class StageView(QWidget):
 
     def _style_lyric(self, mode: str):
         """Singer: big centered lyrics. Musician: monospace, left aligned, so chords stay over syllables."""
-        singer = mode == SINGER
-        family = "'Inter', 'Segoe UI', sans-serif" if singer else "'JetBrains Mono', Consolas, monospace"
-        self.current_lyric.setStyleSheet(
-            f"color: {theme.FG}; font-size: {LYRIC_PX[mode]}px; font-weight: 700; font-family: {family};"
-        )
-        self.current_lyric.setAlignment(Qt.AlignCenter if singer else (Qt.AlignLeft | Qt.AlignVCenter))
+        ui.set_prop(self.current_lyric, "kind", "prompter-singer" if mode == SINGER else "prompter-musician")
+        self.current_lyric.setAlignment(Qt.AlignCenter if mode == SINGER else (Qt.AlignLeft | Qt.AlignVCenter))
+
+    def _build_strip(self, sections: list):
+        """Progress through the song: one block per section, as wide as its bars."""
+        for lab in self._strip_labels:
+            lab.setParent(None)
+            lab.deleteLater()
+        self._strip_labels = []
+        while self._strip_layout.count():
+            self._strip_layout.takeAt(0)
+        for sec in sections:
+            lab = QLabel((sec.get("label") or sec.get("kind") or "").strip())
+            lab.setProperty("role", "sec")
+            lab.setProperty("state", "")
+            lab.setToolTip(f"{sec.get('label', '')} · {sec.get('bars', 0)} compases")
+            self._strip_layout.addWidget(lab, max(1, int(sec.get("bars", 1))))
+            self._strip_labels.append(lab)
+        self.section_strip.setVisible(bool(sections))
 
     def _show_section(self, idx: int):
         """Re-render only when the section changes (set_bar runs on every beat)."""
@@ -505,7 +390,50 @@ class StageView(QWidget):
         else:
             self.next_lyric.setText("FIN DE LA CANCION")
             self.next_section_label.setText("-")
+        for i, lab in enumerate(self._strip_labels):
+            ui.set_prop(lab, "state", "now" if i == idx else ("done" if i < idx else ""))
 
+    # ------------------------------------------------------------------ right column
+    def set_followers(self, rows: List[dict]):
+        """Músicos conectados: [{alias, detail, latency, health}] ya formateados por la ventana."""
+        for w in self._musician_rows:
+            w.setParent(None)
+            w.deleteLater()
+        self._musician_rows = []
+        self.musicians_empty.setVisible(not rows)
+        for r in rows[:8]:
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 2, 0, 2)
+            h.setSpacing(theme.SPACE_2)
+            dot = QFrame()
+            dot.setProperty("role", "dot")
+            dot.setProperty("health", r.get("health") or "stale")
+            dot.setFixedSize(8, 8)
+            h.addWidget(dot)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            col.addWidget(ui.label(str(r.get("alias", "")), "body"))
+            col.addWidget(ui.label(str(r.get("detail", "")), "muted"))
+            h.addLayout(col, 1)
+            h.addWidget(ui.label(str(r.get("latency", "—")), "mono"))
+            self._musicians_body.addWidget(row)
+            self._musician_rows.append(row)
+        self.musicians_tag.setText(f"{len(rows)} EN LÍNEA")
+        ui.set_prop(self.musicians_tag, "tag", "ok" if rows else "")
+
+    def set_stems_status(self, labels: List[str], cloud: str = ""):
+        """Stems of the live song (names) and where they come from."""
+        if labels:
+            self.stems_summary.setText(", ".join(labels))
+            self.stems_tag.setText(cloud or f"{len(labels)} PISTAS")
+            ui.set_prop(self.stems_tag, "tag", "ok")
+        else:
+            self.stems_summary.setText("Esta canción no tiene stems.")
+            self.stems_tag.setText("SIN STEMS")
+            ui.set_prop(self.stems_tag, "tag", "")
+
+    # ------------------------------------------------------------------ alerts and window
     def show_jump_alert(self, title: str, order_index: int):
         """Aviso grande de salto no secuencial (order_index 0-based)."""
         self.jump_alert.setText(f"SALTO: {title} (tema {order_index + 1})")
@@ -523,33 +451,9 @@ class StageView(QWidget):
     def setlist_notice_text(self) -> str:
         return self.setlist_notice.text() if not self.setlist_notice.isHidden() else ""
 
-    def _flash_border(self):
-        """Flash de borde en beat 1 — simulación de frame OLED."""
-        # Usar un widget overlay para el flash en vez de cambiar stylesheet completo
-        if not hasattr(self, '_flash_widget'):
-            self._flash_widget = QFrame(self)
-            self._flash_widget.setStyleSheet("""
-                QFrame {
-                    border: 4px solid #5CC8C2;
-                    background: transparent;
-                }
-            """)
-            self._flash_widget.setGeometry(self.rect())
-            self._flash_widget.setAttribute(Qt.WA_TransparentForMouseEvents)
-            self._flash_widget.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-            self._flash_widget.hide()
-
-        self._flash_widget.setGeometry(self.rect())
-        self._flash_widget.show()
-        self._flash_widget.raise_()
-        QTimer.singleShot(100, lambda: self._flash_widget.hide() if hasattr(self, '_flash_widget') else None)
-
     def set_network_status(self, ok: bool):
         self._network_ok = ok
-        if ok:
-            self.beacon.setStyleSheet("background-color: #B8CF7A;")
-        else:
-            self.beacon.setStyleSheet("background-color: #D96459;")
+        ui.set_prop(self.beacon, "state", "ok" if ok else "bad")
 
     def _toggle_fullscreen(self):
         # Un widget hijo no puede ponerse en pantalla completa por si mismo:
@@ -558,7 +462,7 @@ class StageView(QWidget):
 
     def set_fullscreen_state(self, fullscreen: bool):
         self._is_fullscreen = fullscreen
-        self.fullscreen_btn.setText("Salir de Pantalla Completa" if fullscreen else "Pantalla Completa")
+        self.fullscreen_btn.setText("Salir de pantalla completa" if fullscreen else "Pantalla completa")
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Escape and self._is_fullscreen:

@@ -136,7 +136,6 @@ def test_test_click_button_says_why_it_cannot_sound(window):
 def test_musicians_panel_shows_each_phone_link(window):
     """link_report -> boton 'Músicos: N · peor RTT' en la barra y fila por telefono en el panel."""
     from src.sync.leader_clock import leader_now_ns
-    from src.ui.dialogs.musicians_panel import HEALTH_COLORS
 
     now = leader_now_ns()
     followers = [
@@ -150,7 +149,7 @@ def test_musicians_panel_shows_each_phone_link(window):
     ]
     window._on_followers_changed(followers)
     assert window.status_followers.text() == "Músicos: 3 · peor RTT 63.5 ms"
-    assert HEALTH_COLORS["bad"] in window.status_followers.styleSheet()
+    assert window.status_followers.property("health") == "bad"  # color from the QSS template
     window.action_musicians.trigger()
     table = window._musicians_panel.table
     assert table.rowCount() == 3

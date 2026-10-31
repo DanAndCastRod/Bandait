@@ -7,10 +7,13 @@
 */
 
 /* ===== BASE ===== */
-QMainWindow, QWidget, QDialog {
+/* Solo las ventanas pintan el fondo: si QWidget lo pintara, cada etiqueta dibujaria un
+   rectangulo oscuro sobre los paneles (visto en las capturas de 2.3). */
+QMainWindow, QDialog, QStackedWidget, QScrollArea > QWidget > QWidget {
     background-color: @BG;
     color: @FG;
 }
+QWidget { color: @FG; }
 
 QFrame#panel {
     background-color: @SURFACE;
@@ -166,12 +169,12 @@ QPushButton#success:disabled {
 
 /* ===== BOTONES DE TRANSPORTE ===== */
 QPushButton#transport {
-    min-width: 56px;
-    min-height: 56px;
-    border-radius: 8px;
-    font-size: 20px;
+    min-width: 44px;
+    min-height: 40px;
+    border-radius: @RADIUS;
+    font-size: 16px;
     font-weight: bold;
-    border: 2px solid;
+    border: 1.5px solid @LINE_STRONG;
     background: transparent;
     padding: 0;
 }
@@ -179,9 +182,7 @@ QPushButton#transport {
 QPushButton#transport[id="play"] {
     border-color: @SUCCESS;
     color: @SUCCESS;
-    min-width: 72px;
-    min-height: 72px;
-    font-size: 28px;
+    background: @SUCCESS_SOFT;
 }
 
 QPushButton#transport[id="play"]:checked,
@@ -203,7 +204,6 @@ QPushButton#transport[id="stop"]:hover {
 QPushButton#transport[id="rec"] {
     border-color: @DANGER;
     color: @DANGER;
-    border-radius: 50%;
 }
 
 QPushButton#transport[id="rec"]:checked,
@@ -211,6 +211,10 @@ QPushButton#transport[id="rec"]:hover {
     background: @DANGER;
     color: @BG;
 }
+
+QFrame[role="beat"] { background-color: @RAISED; border: none; border-radius: 2px; }
+QFrame[role="beat"][state="on"] { background-color: @SUCCESS; }
+QFrame[role="beat"][state="one"] { background-color: @ACTIVE; }
 
 /* ===== BOTONES TOGGLE ===== */
 QPushButton#toggle {
@@ -648,3 +652,45 @@ QPushButton[variant="chip"] {
 }
 QPushButton[variant="chip"]:hover { color: @FG; border-color: @ACTIVE; }
 QPushButton[variant="chip"]:checked { background-color: @ACTIVE; color: @ON_ACCENT; border-color: @ACTIVE; }
+
+/* Barra de titulo, bloque de banda y estado (2.3) */
+QFrame#titleBar { background-color: @SURFACE; border: none; border-bottom: 1px solid @LINE; }
+QLabel#titleLogo { color: @ACTIVE; }
+QPushButton#winbtn, QPushButton#winclose {
+    background-color: transparent; border: 1px solid @LINE; border-radius: @RADIUS;
+    color: @MUTED; padding: 0; min-height: 0; font-size: @SIZE_BASE;
+}
+QPushButton#winbtn:hover { border-color: @ACTIVE; color: @ACTIVE; }
+QPushButton#winclose:hover { background-color: @DANGER; border-color: @DANGER; color: @ON_ACCENT; }
+QFrame[role="brand"] { background-color: transparent; border: none; border-right: 1px solid @LINE; }
+QStatusBar { background-color: @SURFACE; border-top: 1px solid @LINE; }
+QStatusBar QLabel { padding: 0 @SPACE_2; }
+QStatusBar::item { border: none; }
+
+QPushButton[health="ok"], QLabel[health="ok"] { color: @SUCCESS; }
+QPushButton[health="warn"], QLabel[health="warn"], QPushButton[health="stale"] { color: @WARNING; }
+QPushButton[health="bad"], QLabel[health="bad"] { color: @DANGER_HOVER; }
+
+/* Escenario (2.3) */
+QFrame[role="beacon"] { background-color: @SUCCESS; border: none; }
+QFrame[role="beacon"][state="bad"] { background-color: @DANGER; }
+QFrame[role="divider-h"] { background-color: @LINE; border: none; }
+QLabel#setlistNotice { background-color: @WARNING; color: @ON_ACCENT; font-weight: 600; padding: @SPACE_2 @SPACE_4; border-radius: @RADIUS; }
+QLabel[kind="section-head"] { font-family: @FONT_MONO_STACK; font-size: @SIZE_BASE; font-weight: 600; letter-spacing: 2px; color: @ACTIVE; }
+QLabel[kind="prompter-singer"] { font-size: 40px; font-weight: 700; color: @FG_STRONG; }
+QLabel[kind="prompter-musician"] { font-family: @FONT_MONO_STACK; font-size: 28px; font-weight: 600; color: @FG_STRONG; }
+QLabel[kind="next"] { font-size: @SIZE_BODY; color: @MUTED; }
+QLabel[kind="readout-plain"] { font-family: @FONT_MONO_STACK; font-size: 22px; font-weight: 600; color: @FG; }
+QLabel[kind="next-section"] { font-size: 22px; font-weight: 700; color: @SUCCESS; }
+QLabel[role="sec"] {
+    background-color: @RAISED; color: @MUTED; border-radius: 3px; padding: 0 @SPACE_2;
+    font-family: @FONT_MONO_STACK; font-size: @SIZE_CAPTION;
+}
+QLabel[role="sec"][state="done"] { background-color: @ELEVATED; color: @FAINT; }
+QLabel[role="sec"][state="now"] { background-color: @ACTIVE; color: @ON_ACCENT; font-weight: 600; }
+QFrame[role="dot"] { border-radius: 4px; background-color: @FAINT; border: none; }
+QFrame[role="dot"][health="ok"] { background-color: @SUCCESS; }
+QFrame[role="dot"][health="warn"] { background-color: @WARNING; }
+QFrame[role="dot"][health="bad"] { background-color: @DANGER; }
+QListWidget#setlistRail { background-color: transparent; border: none; font-size: @SIZE_BODY; }
+QListWidget#setlistRail::item { padding: @SPACE_2 @SPACE_3; border-bottom: 1px solid @LINE; }
