@@ -46,6 +46,9 @@ export interface Env {
   SUPABASE_ANON_KEY: string;
   ALLOWED_ORIGINS: string;
   MAX_FILE_MB?: string;
+  /** Secret (wrangler secret put): Music AI API key. Without it, analysis answers 503. */
+  MUSICAI_API_KEY?: string;
+  MUSICAI_WORKFLOW?: string;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
