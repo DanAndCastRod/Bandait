@@ -934,3 +934,57 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Revisar el resto de vistas del líder por el mismo `font-size: 13px` del QSS.
   3. Fase 3: stems en MP3 desde el ZIP de Moises (hub), reproducción en el líder y vista multipista; mostrar el mezclador solo cuando la canción tenga stems.
   4. Crear el tag de la versión del líder que incluya esta fase (los tags los crea Daniel Castaneda).
+
+### [2026-10-30] - Fase 3 (líder): stems de la canción en vivo por la PA, sincronizados con el clic
+* **Sprint / Módulo:** `bandait-protocol` (fixture `stem_names.json`), `bandait-leader`
+* **Acción técnica realizada:**
+  - **Reconocimiento por nombre** (`src/audio/stem_names.py`):
+    - reglas y casos en `bandait-protocol/fixtures/stem_names.json`, compartidos con el hub;
+    - gana la palabra clave que termina más a la derecha ("La Voz del Mar - Drums" da batería);
+    - sin coincidencia, el rol queda `unknown`.
+    - Daniel Castaneda no puede abrir Moises desde este equipo: los casos se escribieron a partir de los nombres típicos de exportación y faltan contrastarlos con un ZIP real.
+  - **Biblioteca en disco** (`src/audio/stem_library.py`):
+    - ruta `<BANDAIT_HOME>/Stems/<carpeta segura por song_id>/` con `manifest.json` (rol, etiqueta, ganancia, mute y alineación);
+    - importar un ZIP (exportación de Moises) o archivos sueltos reemplaza los stems de la canción;
+    - de cada miembro del ZIP solo se usa el nombre base, así que un `../../x` no sale de la carpeta;
+    - topes de 400 MB por archivo, 2 GB por importación y 16 pistas;
+    - reintentos cortos ante `PermissionError` de Windows.
+  - **Decodificación** con `soundfile` (libsndfile 1.2.2, lee MP3) a int16 estéreo a la frecuencia del motor:
+    - remuestreo con scipy si está y lineal si no; scipy no está en `requirements.txt`, así que el instalador usa el lineal;
+    - **M4A/AAC no se puede leer en el líder** (libsndfile no lo soporta y no hay ffmpeg): la pista muestra "exporta los stems en MP3".
+  - **Motor de audio**:
+    - los stems suenan en las Salidas 1-2 (nunca en la del baterista);
+    - la posición sale del mismo horario que el clic: posición musical desde el compás 1 al BPM de la canción, más la alineación;
+    - el puntero corre libre y solo se realinea cuando cambia el horario (PLAY, reanudar, salto, nudge) o llegan stems o alineación nuevos;
+    - así, si el BPM del hub no coincide exacto con la grabación, el stem deriva suave en vez de saltar cada pocos segundos.
+  - **Interfaz**:
+    - panel STEMS a la derecha, visible solo cuando la canción en vivo tiene stems, con un canal por pista (M, S y volumen), alineación en ms, Reemplazar y Quitar;
+    - Audio > "Importar stems de la canción en vivo...";
+    - importar y quitar solo con la banda detenida;
+    - la carga corre en un hilo aparte y se descarta si la canción cambió mientras tanto;
+    - los ajustes se guardan en el manifiesto (con espera de 800 ms tras el último cambio).
+* **Impacto en Audio / Red / UI:**
+  - Audio: nueva fuente en Salidas 1-2. El callback sigue sin reservar memoria por bloque (lo prueba `test_audio_stems.py`).
+  - Red: ninguno.
+  - UI: panel STEMS condicional.
+* **Verificación y Pruebas (resultado literal):**
+  - `ruff check src tests` da `All checks passed!` y `pytest -q` da `432 passed`. Nuevas:
+    - `test_stem_names.py` (27): los 25 casos del fixture, más que las reglas coincidan con él;
+    - `test_stem_library.py` (5): ZIP tipo Moises con un miembro malicioso, reemplazo que conserva la alineación, límites, MP3 real a 44,1 kHz remuestreado a 48 kHz, y M4A rechazado con el mensaje;
+    - `test_audio_stems.py` (5):
+      - el impulso del stem cae en el sample exacto con conteo de 2 compases y al reanudar desde el compás 3 con -250 ms de alineación;
+      - ganancias, mute y STOP;
+      - deriva libre sin saltos con BPM 120 contra una grabación a 121;
+      - sin reservas por bloque con 5 stems;
+    - `test_stems_controller.py` (5) y una prueba de ventana completa: importar, ver el panel, cambiar de canción (el panel se oculta) y volver (los stems se recargan del disco).
+  - Captura fuera de pantalla de la ventana con 7 stems sintéticos.
+  - **No verificado:** sonido real por una interfaz ASIO; un ZIP real de Moises; canciones de 4 minutos o más (tiempo de carga y memoria: unos 46 MB por stem de 4 minutos).
+* **Errores propios y hallazgos:**
+  - La primera mezcla sumaba sobre una vista 2D con saltos (`outdata[:, 0:2]`) y numpy reservaba unos 17 KB por bloque. Ahora se suma canal por canal con vistas 1D.
+  - La prueba de memoria medía su propia lista de picos (20 KB de "crecimiento" falso). Medido aparte, el callback crece 288 B en 1.500 bloques, frente a 224 B sin stems.
+  - Primera regla de sincronía: realinear si la deriva pasaba de 30 ms. La cambié antes de integrar, porque con un BPM inexacto habría saltos audibles cada pocos segundos.
+* **Pendientes:**
+  1. Probar con un ZIP real de Moises en MP3 (desde otro equipo) y agregar al fixture los nombres que no reconozca.
+  2. Ensayo con interfaz real: confirmar la alineación stems-clic y el tiempo de carga de un setlist con stems.
+  3. Decidir dónde guardar los stems en la nube (R2 por URiT o Supabase Storage) para que el hub y el líder los compartan. Hoy cada uno importa los suyos.
+  4. Decidir si se agrega scipy al instalador (mejor remuestreo de 44,1 kHz a 48 kHz) o si se abre el stream a 44,1 kHz cuando la canción tiene stems.

@@ -27,6 +27,15 @@ garbage collector (tests/test_audio_realtime.py checks both). Communication
 with the Qt thread uses single-writer attributes and counters that the Qt
 thread polls. Process-wide GIL and GC policy: ``rt_policy``.
 
+Stems: the live song's stems (int16 stereo, preloaded off the audio thread) play on
+Salidas 1-2. Their position comes from the same schedule as the click: the musical
+position since bar 1 at the song's own BPM, plus a per-song offset. A read pointer
+advances one frame per frame and is realigned to the schedule only when the
+schedule changes (PLAY, resume, jump, TEMPO_NUDGE) or new stems/offset arrive, and
+only if it is off by more than STEM_RESYNC_MS. In between it runs free: if the
+song's BPM does not exactly match the recording, stems drift smoothly instead of
+jumping every few seconds (stems are not time-stretched).
+
 Routing: Salidas 1-2 = PA (FOH), Salida 3 (channel index 2) = drummer click.
 Fallback on devices with fewer than 3 outputs: the drummer click has nowhere to
 go and is NOT sent to Salidas 1-2 (that would put the click in the PA). Enable
@@ -42,7 +51,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from src.sync.leader_clock import leader_now_ns
-from src.sync.transport_math import EMPTY_SCHEDULE, Schedule, Segment, next_click
+from src.sync.transport_math import EMPTY_SCHEDULE, Schedule, Segment, active_index, next_click
 
 from .mixer import Mixer
 from .portaudio_setup import ensure_sounddevice
@@ -58,6 +67,8 @@ MAX_OPEN_OUTPUTS = 64
 DRUMMER_CHANNEL = 2  # Salida 3
 TEST_CLICK_LEAD_NS = 150_000_000  # "Probar click" starts 150 ms after the press
 METER_CHANNELS = 4  # VU meters for Salidas 1-4
+STEM_RESYNC_MS = 5  # on a schedule/stems change, realign only beyond this
+STEM_SCRATCH_FRAMES = 8192  # largest block that plays stems (bigger blocks: stems silent)
 _MAX_BLOCK = 4096  # preallocated frames; PortAudio honors the fixed blocksize we ask for
 _LATE_TOLERANCE_NS = 5_000_000
 _OFFSET_LEAK_NS = 2_000
@@ -138,6 +149,23 @@ class AudioEngine(QObject):
         self._click = self._generate_click()
         self._click_accent = self._click.copy()
         self._click_normal = (self._click * 0.6).astype(np.float32)
+
+        # Stems of the live song: (voices, ref_bpm, offset_frames), voices =
+        # ((int16 data (n, 2), float32 gain incl. 1/32768), ...). Tuple swap from the
+        # Qt thread, read once per block. _stem_pos belongs to the callback.
+        self._stems_cfg = None
+        self._stem_data: tuple = ()
+        self._stem_ref_bpm = 120.0
+        self._stem_offset_frames = 0.0
+        self._stem_pos = 0
+        self._stem_epoch = 0  # bumped by the Qt thread on new stems / offset
+        self._stem_epoch_seen = -1  # callback-owned
+        self._stem_sched_seen = None  # callback-owned
+        self._stem_resync_frames = STEM_RESYNC_MS * sample_rate / 1000.0
+        # Channel-major: 1-D contiguous rows. A 2-D strided out= view makes numpy
+        # allocate a ~17 KB buffer per call; 1-D column views do not.
+        self._stem_scratch = np.zeros((2, STEM_SCRATCH_FRAMES), dtype=np.float32)
+        self.stem_frames_played = 0
         for arr in (self._click, self._click_accent, self._click_normal):
             arr.setflags(write=False)
         self._click_arr = self._click_normal
@@ -339,6 +367,41 @@ class AudioEngine(QObject):
             self._bpm = float(sched[-1].bpm)
         self._schedule = sched
 
+    # ------------------------------------------------------------------ stems (Qt thread)
+    def set_stems(self, data, gains, ref_bpm: float, offset_ms: float = 0.0) -> None:
+        """Stems of the live song: ``data`` int16 (n, 2) arrays at the engine rate (read
+        only from now on), ``gains`` linear 0..n per stem, ``ref_bpm`` the song's BPM."""
+        self._stem_data = tuple(data)
+        self._stem_ref_bpm = float(ref_bpm) if ref_bpm and ref_bpm > 0 else 120.0
+        self._stem_offset_frames = float(offset_ms) * self.sample_rate / 1000.0
+        self.set_stem_gains(gains)
+        self._stem_epoch += 1
+
+    def set_stem_gains(self, gains) -> None:
+        """Mute/solo/volume already resolved to one linear gain per stem."""
+        if not self._stem_data:
+            self._stems_cfg = None
+            return
+        g = list(gains) + [0.0] * (len(self._stem_data) - len(gains))
+        voices = tuple(
+            (d, np.float32(max(0.0, float(x)) / 32768.0)) for d, x in zip(self._stem_data, g)
+        )
+        self._stems_cfg = (voices, self._stem_ref_bpm, self._stem_offset_frames)
+
+    def set_stem_offset(self, offset_ms: float) -> None:
+        self._stem_offset_frames = float(offset_ms) * self.sample_rate / 1000.0
+        cfg = self._stems_cfg
+        if cfg is not None:
+            self._stems_cfg = (cfg[0], cfg[1], self._stem_offset_frames)
+        self._stem_epoch += 1
+
+    def clear_stems(self) -> None:
+        self._stems_cfg = None
+        self._stem_data = ()
+
+    def has_stems(self) -> bool:
+        return self._stems_cfg is not None
+
     def set_bpm(self, bpm: float) -> None:
         """Display BPM only. Tempo changes go through TEMPO_NUDGE."""
         self._bpm = float(bpm)
@@ -421,6 +484,9 @@ class AudioEngine(QObject):
             k = min(nch, mixed.shape[1])
             outdata[:, :k] = mixed[:, :k]
 
+        if self._stems_cfg is not None:
+            self._render_stems(outdata, frames, block_start_ns)
+
         drummer = self.enable_drummer_click and nch > DRUMMER_CHANNEL
         pa = self.enable_pa_click
 
@@ -482,6 +548,44 @@ class AudioEngine(QObject):
 
         if self._recording and indata is not None:
             self.recorder.write_block(indata)
+
+    def _render_stems(self, outdata, frames: int, block_start_ns: int) -> None:
+        """Add the live song's stems to Salidas 1-2. Views and out= ufuncs only."""
+        cfg = self._stems_cfg
+        sched = self._schedule
+        if cfg is None or not sched or frames > STEM_SCRATCH_FRAMES:
+            return
+        voices, ref_bpm, offset_frames = cfg
+        idx = active_index(sched, block_start_ns)
+        seg = sched[idx if idx >= 0 else 0]
+        beats = (seg.bar_offset - 1) * seg.beats_per_bar + (block_start_ns - seg.anchor_ns) / seg.beat_ns
+        target = beats * (60.0 / ref_bpm) * self.sample_rate + offset_frames
+        pos = self._stem_pos
+        epoch = self._stem_epoch
+        if sched is not self._stem_sched_seen or epoch != self._stem_epoch_seen:
+            self._stem_sched_seen = sched
+            self._stem_epoch_seen = epoch
+            if abs(target - pos) > self._stem_resync_frames:
+                pos = int(round(target))
+        self._stem_pos = pos + frames
+        start = -pos if pos < 0 else 0
+        if start >= frames:
+            return  # count-in: the song has not started yet
+        i0 = pos + start
+        n = frames - start
+        scratch = self._stem_scratch
+        channels = 2 if outdata.shape[1] >= 2 else 1  # mono device: left channel only
+        for data, gain in voices:
+            if gain <= 0.0 or i0 >= data.shape[0]:
+                continue
+            m = n if data.shape[0] - i0 >= n else data.shape[0] - i0
+            for c in range(channels):
+                buf = scratch[c, :m]
+                np.copyto(buf, data[i0 : i0 + m, c], casting="unsafe")
+                np.multiply(buf, gain, out=buf)
+                dst = outdata[start : start + m, c]
+                np.add(dst, buf, out=dst)
+        self.stem_frames_played += n
 
     @staticmethod
     def _write_click(outdata, start: int, arr, offset: int, n: int, drummer: bool, pa: bool) -> None:

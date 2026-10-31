@@ -23,10 +23,13 @@ class ChannelStrip(QWidget):
     pan_changed = Signal(int, float)
     routing_changed = Signal(int, str)
 
-    def __init__(self, channel_id: int, name: str = "Canal", parent=None):
+    def __init__(self, channel_id: int, name: str = "Canal", parent=None, stem: bool = False):
         super().__init__(parent)
         self.channel_id = channel_id
         self._name = name
+        # Stem strip: no VU (levels are per output, not per stem) and no output
+        # routing (stems always go to Salidas 1-2).
+        self._stem = stem
         self._muted = False
         self._soloed = False
 
@@ -49,6 +52,7 @@ class ChannelStrip(QWidget):
         self.vu = VUMeter(f"CH{self.channel_id + 1}")
         self.vu.setMinimumHeight(150)
         layout.addWidget(self.vu)
+        self.vu.setVisible(not self._stem)
 
         # === BOTONES MUTE/SOLO ===
         buttons_layout = QHBoxLayout()
@@ -165,6 +169,8 @@ class ChannelStrip(QWidget):
         routing_label.setStyleSheet("color: #7C8591;")
         routing_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(routing_label)
+        routing_label.setVisible(not self._stem)
+        self.routing_label = routing_label
 
         self.routing_combo = QComboBox()
         self.routing_combo.addItems([
@@ -193,6 +199,7 @@ class ChannelStrip(QWidget):
         """)
         self.routing_combo.currentTextChanged.connect(self._on_routing)
         layout.addWidget(self.routing_combo)
+        self.routing_combo.setVisible(not self._stem)
 
         layout.addStretch()
 

@@ -195,6 +195,7 @@ class StageView(QWidget):
         self.mode_btn.setCursor(Qt.PointingHandCursor)
         self.mode_btn.setToolTip("Alternar entre acordes con letra y solo letra")
         self.mode_btn.clicked.connect(self.toggle_prompter_mode)
+        self.mode_btn.hide()
         head.addWidget(self.mode_btn)
         lyrics_layout.addLayout(head)
 
@@ -357,6 +358,7 @@ class StageView(QWidget):
         self._content = None
         self._section_idx = -1
         self.section_head.setText("")
+        self.mode_btn.hide()  # only songs with hub sections have chords to toggle
         self._song_title = title
         self.song_title.setText(title)
         self._style_lyric(SINGER)
@@ -444,6 +446,7 @@ class StageView(QWidget):
             return
         self._content = content
         self._section_idx = -1
+        self.mode_btn.show()
         title = content.get("title") or self._song_title
         self._song_title = title
         key = content.get("show_key") or content.get("key") or ""
