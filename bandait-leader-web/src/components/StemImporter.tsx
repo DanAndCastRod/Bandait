@@ -13,6 +13,8 @@ interface Props {
   onSaved: (record: StemSongRecord) => void
   /** Ausente cuando la cancion aun no tiene stems: no hay nada a que volver. */
   onCancel?: () => void
+  /** Aviso sobre la nube de la banda (si se subiran al guardar, o por que no). */
+  cloudNote?: string | null
 }
 
 interface Row extends StemCandidate {
@@ -21,7 +23,7 @@ interface Row extends StemCandidate {
 
 const ACCEPT = '.zip,.mp3,.m4a,.wav,.flac,.ogg,.aac,audio/*,application/zip'
 
-export const StemImporter: React.FC<Props> = ({ song, existingLabels, onSaved, onCancel }) => {
+export const StemImporter: React.FC<Props> = ({ song, existingLabels, onSaved, onCancel, cloudNote }) => {
   const [rows, setRows] = useState<Row[]>([])
   const [ignored, setIgnored] = useState<string[]>([])
   const [errors, setErrors] = useState<string[]>([])
@@ -91,7 +93,7 @@ export const StemImporter: React.FC<Props> = ({ song, existingLabels, onSaved, o
         <div style={{ minWidth: 0 }}>
           <div style={{ fontFamily: mono, fontSize: '12px', fontWeight: 700, color: colors.text }}>IMPORTAR STEMS</div>
           <div style={{ fontSize: '12px', color: colors.muted, overflowWrap: 'anywhere' }}>
-            Para <strong style={{ color: colors.text }}>{song.title}</strong>. Se guardan solo en este navegador.
+            Para <strong style={{ color: colors.text }}>{song.title}</strong>. Se guardan en este navegador.
           </div>
         </div>
         {onCancel && (
@@ -247,6 +249,11 @@ export const StemImporter: React.FC<Props> = ({ song, existingLabels, onSaved, o
       {unknownCount > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: colors.warning, fontSize: '12px' }}>
           <AlertTriangle size={13} /> {unknownCount} pista(s) sin rol reconocido: elige el rol o desmárcalas para guardar.
+        </div>
+      )}
+      {cloudNote && rows.length > 0 && (
+        <div data-testid="stem-import-cloud-note" style={{ fontSize: '12px', color: colors.muted }}>
+          {cloudNote}
         </div>
       )}
       {saveError && (

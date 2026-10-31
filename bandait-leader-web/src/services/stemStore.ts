@@ -8,8 +8,8 @@
  *   - songs: { songId, offsetMs, updatedAt, tracks: StoredStemTrack[] }    (metadatos livianos)
  *   - files: { id, songId, blob }                                          (audio, indice songId)
  */
-import { isStemRole, type StemRole } from './stemNames'
-import { OFFSET_MAX_MS, OFFSET_MIN_MS } from './stemTiming'
+import { isStemRole, type StemRole } from './stemNames.ts'
+import { OFFSET_MAX_MS, OFFSET_MIN_MS } from './stemTiming.ts'
 
 const DB_NAME = 'bandait_stems'
 const DB_VERSION = 1
@@ -189,7 +189,9 @@ export async function loadStemSong(songId: string): Promise<{ record: StemSongRe
 export async function saveStemSong(
   songId: string,
   tracks: NewStemTrack[],
-  mode: 'replace' | 'append'
+  mode: 'replace' | 'append',
+  /** Offset a guardar (p. ej. el de la nube al descargar); por defecto se conserva el anterior. */
+  offsetMs?: number
 ): Promise<StemSongRecord> {
   try {
     const db = await openDb()
@@ -215,7 +217,7 @@ export async function saveStemSong(
     }
     const record: StemSongRecord = {
       songId,
-      offsetMs: previous?.offsetMs ?? 0,
+      offsetMs: offsetMs !== undefined ? clampOffset(offsetMs) : previous?.offsetMs ?? 0,
       updatedAt: new Date().toISOString(),
       tracks: [...kept, ...added],
     }
