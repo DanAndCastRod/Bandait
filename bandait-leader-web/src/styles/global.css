@@ -131,3 +131,72 @@ input, select, textarea {
     display: none !important;
   }
 }
+
+/* Estudio de stems (StemsHubView): estados de lo interactivo. Solo se animan transform y
+   opacity; los colores cambian sin transicion. */
+.stx-btn {
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.stx-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.stx-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.stx-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed !important;
+}
+.stx-btn:focus-visible,
+.stx-field:focus-visible,
+.stx-drop:focus-within {
+  outline: 2px solid var(--accent-cobalt);
+  outline-offset: 2px;
+}
+.stx-field:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.stx-field:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.stx-range {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent-cobalt);
+  cursor: pointer;
+}
+.stx-range:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.stx-drop {
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.stx-drop[data-over='true'] {
+  transform: scale(1.01);
+}
+.stx-fade-in {
+  animation: stx-fade-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes stx-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stx-btn,
+  .stx-drop {
+    transition: none;
+  }
+  .stx-fade-in {
+    animation: none;
+  }
+}
