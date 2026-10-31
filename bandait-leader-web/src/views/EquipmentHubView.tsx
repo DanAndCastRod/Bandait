@@ -1,403 +1,257 @@
 import React, { useState } from 'react'
 import { useHub } from '../context/hubContextCore'
-import type { EquipmentCategory } from '../types/hub'
-import { Radio, Plus, Trash2, Cpu, Headphones, Cable, Mic } from 'lucide-react'
+import type { EquipmentCategory, EquipmentItem } from '../types/hub'
+import { Radio, Plus, Trash2, Cpu, Headphones, Cable, Mic, Pencil } from 'lucide-react'
+import { HubModal } from '../components/HubModal'
+import { cardStyle, colors, ghostButton, headerBarStyle, iconButton, inputStyle, labelStyle, mono, primaryButton, viewStyle } from '../components/hubStyles'
 
+type EquipmentForm = Omit<EquipmentItem, 'id' | 'bandId'>
+
+const EMPTY_FORM: EquipmentForm = {
+  category: 'interface',
+  name: '',
+  model: '',
+  assignedTo: '',
+  channelRouting: '',
+  rfFrequency: '',
+  notes: '',
+}
+
+const CATEGORY_LABELS: Record<EquipmentCategory, string> = {
+  interface: 'Interfaz / Consola ASIO',
+  in_ear: 'Transmisor / In-Ear RF',
+  cabling: 'Cable Físico Escenario',
+  mic: 'Microfonía & DI Box',
+  instrument: 'Instrumento / Módulo',
+}
+
+/** AJUSTES > Equipamiento: rider tecnico de la banda (agregar, editar y quitar equipos). */
 export const EquipmentHubView: React.FC = () => {
-  const { activeBand, equipment, addEquipment, removeEquipment } = useHub()
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [eqName, setEqName] = useState('')
-  const [eqModel, setEqModel] = useState('')
-  const [eqCategory, setEqCategory] = useState<EquipmentCategory>('interface')
-  const [eqAssignedTo, setEqAssignedTo] = useState('')
-  const [eqRouting, setEqRouting] = useState('')
-  const [eqRf, setEqRf] = useState('')
-  const [eqNotes, setEqNotes] = useState('')
+  const { activeBand, equipment, addEquipment, updateEquipment, removeEquipment } = useHub()
+  /** null = cerrado; 'new' = agregar; un id = editar ese equipo. */
+  const [editing, setEditing] = useState<string | null>(null)
+  const [form, setForm] = useState<EquipmentForm>(EMPTY_FORM)
 
-  const handleAddEquipment = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!eqName.trim()) return
-
-    addEquipment({
-      category: eqCategory,
-      name: eqName.trim(),
-      model: eqModel.trim(),
-      assignedTo: eqAssignedTo.trim() || 'Escenario General',
-      channelRouting: eqRouting.trim() || 'No especificado',
-      rfFrequency: eqRf.trim() || undefined,
-      notes: eqNotes.trim() || undefined,
-    })
-
-    setEqName('')
-    setEqModel('')
-    setEqRouting('')
-    setEqRf('')
-    setEqNotes('')
-    setShowAddModal(false)
+  const openNew = () => {
+    setForm(EMPTY_FORM)
+    setEditing('new')
   }
 
+  const openEdit = (item: EquipmentItem) => {
+    setForm({
+      category: item.category,
+      name: item.name,
+      model: item.model,
+      assignedTo: item.assignedTo,
+      channelRouting: item.channelRouting,
+      rfFrequency: item.rfFrequency ?? '',
+      notes: item.notes ?? '',
+    })
+    setEditing(item.id)
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.name.trim() || !editing) return
+    const data: EquipmentForm = {
+      category: form.category,
+      name: form.name.trim(),
+      model: form.model.trim(),
+      assignedTo: form.assignedTo.trim() || 'Escenario General',
+      channelRouting: form.channelRouting.trim() || 'No especificado',
+      rfFrequency: form.rfFrequency?.trim() || undefined,
+      notes: form.notes?.trim() || undefined,
+    }
+    if (editing === 'new') addEquipment(data)
+    else updateEquipment(editing, data)
+    setEditing(null)
+  }
+
+  const set = (patch: Partial<EquipmentForm>) => setForm((prev) => ({ ...prev, ...patch }))
+
   const categoryIcons: Record<EquipmentCategory, React.ReactNode> = {
-    interface: <Cpu size={16} style={{ color: '#7AA5D6' }} />,
-    in_ear: <Headphones size={16} style={{ color: '#5CC8C2' }} />,
-    cabling: <Cable size={16} style={{ color: '#B8CF7A' }} />,
-    mic: <Mic size={16} style={{ color: '#D9A24E' }} />,
-    instrument: <Radio size={16} style={{ color: '#B48EDB' }} />,
+    interface: <Cpu size={16} style={{ color: colors.cobalt }} />,
+    in_ear: <Headphones size={16} style={{ color: colors.orange }} />,
+    cabling: <Cable size={16} style={{ color: colors.success }} />,
+    mic: <Mic size={16} style={{ color: colors.warning }} />,
+    instrument: <Radio size={16} style={{ color: colors.violet }} />,
   }
 
   return (
-    <div style={{ padding: 'clamp(12px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* HEADER BAR */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '16px',
-          borderBottom: '1px solid #2E343D',
-          paddingBottom: '16px',
-        }}
-      >
-        <div>
+    <div style={viewStyle}>
+      <div style={headerBarStyle}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Radio size={22} style={{ color: '#D9A24E' }} />
-            <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>
-              Rider Técnico & Ruteo de Equipos
-            </h2>
+            <Radio size={22} style={{ color: colors.warning, flexShrink: 0 }} />
+            <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>Rider Técnico & Ruteo de Equipos</h2>
           </div>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: colors.muted }}>
             Inventario de hardware en vivo para {activeBand?.name}: interfaces ASIO, frecuencias RF In-Ear y cableado directo.
           </p>
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            background: '#D9A24E',
-            border: 'none',
-            borderRadius: '4px',
-            padding: '10px 18px',
-            color: '#15181C',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: '12px',
-            fontWeight: 800,
-            cursor: 'pointer',
-            boxShadow: '0 0 12px rgba(217, 162, 78, 0.3)',
-          }}
+          type="button"
+          className="stx-btn"
+          onClick={openNew}
+          style={{ ...primaryButton(colors.warning), color: colors.onAccent, padding: '10px 18px', fontWeight: 800 }}
         >
           <Plus size={16} />
           <span>+ AGREGAR EQUIPO / HARDWARE</span>
         </button>
       </div>
 
-      {/* EQUIPMENT CARDS GRID */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: '16px',
-        }}
-      >
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '16px' }}>
         {equipment.map((item) => (
           <div
             key={item.id}
-            style={{
-              background: '#1B1F24',
-              border: '1px solid #2E343D',
-              borderRadius: '6px',
-              padding: '18px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-              position: 'relative',
-            }}
+            data-testid="equipment-card"
+            style={{ ...cardStyle, padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div
-                  style={{
-                    background: '#232830',
-                    padding: '6px',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {categoryIcons[item.category]}
-                </div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '15px', color: '#D5DAE0' }}>{item.name}</div>
-                  <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
-                    {item.model}
-                  </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <div style={{ background: colors.elevated, padding: '6px', borderRadius: '4px', display: 'flex' }}>{categoryIcons[item.category]}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: '15px', color: colors.text, overflowWrap: 'anywhere' }}>{item.name}</div>
+                  <div style={{ fontSize: '11px', color: colors.muted, fontFamily: mono, overflowWrap: 'anywhere' }}>{item.model}</div>
                 </div>
               </div>
-
-              <button
-                onClick={() => removeEquipment(item.id)}
-                title="Eliminar equipo"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#D96459',
-                  cursor: 'pointer',
-                  padding: '4px',
-                }}
-              >
-                <Trash2 size={15} />
-              </button>
+              <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                <button type="button" className="stx-btn" onClick={() => openEdit(item)} aria-label={`Editar ${item.name}`} title="Editar equipo" style={iconButton(colors.text)}>
+                  <Pencil size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="stx-btn"
+                  onClick={() => removeEquipment(item.id)}
+                  aria-label={`Eliminar ${item.name}`}
+                  title="Eliminar equipo"
+                  style={iconButton(colors.danger)}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </div>
 
             <div
               style={{
-                background: '#181B20',
-                border: '1px solid #2E343D',
+                background: colors.input,
+                border: `1px solid ${colors.border}`,
                 borderRadius: '4px',
                 padding: '10px 12px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '4px',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '11px',
               }}
             >
               <div>
-                <span style={{ color: '#8E97A3' }}>ASIGNADO A:</span>{' '}
-                <strong style={{ color: '#D5DAE0' }}>{item.assignedTo}</strong>
+                <span style={{ color: colors.muted }}>ASIGNADO A:</span> <strong style={{ color: colors.text }}>{item.assignedTo}</strong>
               </div>
               <div>
-                <span style={{ color: '#8E97A3' }}>RUTEO / SALIDAS:</span>{' '}
-                <strong style={{ color: '#7AA5D6' }}>{item.channelRouting}</strong>
+                <span style={{ color: colors.muted }}>RUTEO / SALIDAS:</span> <strong style={{ color: colors.cobalt }}>{item.channelRouting}</strong>
               </div>
               {item.rfFrequency && (
                 <div>
-                  <span style={{ color: '#8E97A3' }}>FRECUENCIA RF:</span>{' '}
-                  <strong style={{ color: '#D9A24E' }}>{item.rfFrequency}</strong>
+                  <span style={{ color: colors.muted }}>FRECUENCIA RF:</span> <strong style={{ color: colors.warning }}>{item.rfFrequency}</strong>
                 </div>
               )}
             </div>
 
-            {item.notes && (
-              <div style={{ fontSize: '11px', color: '#8E97A3', lineHeight: 1.4 }}>
-                {item.notes}
-              </div>
-            )}
+            {item.notes && <div style={{ fontSize: '11px', color: colors.muted, lineHeight: 1.4 }}>{item.notes}</div>}
           </div>
         ))}
       </div>
 
-      {/* ADD EQUIPMENT MODAL */}
-      {showAddModal && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(0, 0, 0, 0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '16px',
-            boxSizing: 'border-box',
-          }}
+      {editing && (
+        <HubModal
+          title={editing === 'new' ? 'REGISTRAR EQUIPO TÉCNICO' : 'EDITAR EQUIPO TÉCNICO'}
+          onClose={() => setEditing(null)}
+          maxWidth="480px"
+          testId="equipment-editor"
         >
-          <div
-            style={{
-              background: '#20252B',
-              border: '1px solid #2E343D',
-              borderRadius: '8px',
-              padding: 'clamp(16px, 4vw, 24px)',
-              width: '100%',
-              maxWidth: '480px',
-              maxHeight: '90dvh',
-              overflowY: 'auto',
-            }}
-          >
-            <h3 style={{ margin: '0 0 16px 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: '16px' }}>
-              REGISTRAR EQUIPO TÉCNICO
-            </h3>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label htmlFor="eq-name" style={labelStyle}>
+                NOMBRE DEL EQUIPO
+              </label>
+              <input id="eq-name" type="text" value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="Ej: Interfaz Principal FOH" required style={inputStyle} />
+            </div>
 
-            <form onSubmit={handleAddEquipment} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  NOMBRE DEL EQUIPO
+                <label htmlFor="eq-category" style={labelStyle}>
+                  CATEGORÍA
                 </label>
-                <input
-                  type="text"
-                  value={eqName}
-                  onChange={(e) => setEqName(e.target.value)}
-                  placeholder="Ej: Interfaz Principal FOH"
-                  required
-                  style={{
-                    width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
-                    padding: '8px 10px',
-                    color: '#D5DAE0',
-                    marginTop: '4px',
-                    boxSizing: 'border-box',
-                  }}
-                />
+                <select id="eq-category" value={form.category} onChange={(e) => set({ category: e.target.value as EquipmentCategory })} style={inputStyle}>
+                  {(Object.keys(CATEGORY_LABELS) as EquipmentCategory[]).map((c) => (
+                    <option key={c} value={c}>
+                      {CATEGORY_LABELS[c]}
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
-                    CATEGORÍA
-                  </label>
-                  <select
-                    value={eqCategory}
-                    onChange={(e) => setEqCategory(e.target.value as EquipmentCategory)}
-                    style={{
-                      width: '100%',
-                      background: '#181B20',
-                      border: '1px solid #2E343D',
-                      borderRadius: '4px',
-                      padding: '8px 10px',
-                      color: '#D5DAE0',
-                      marginTop: '4px',
-                      boxSizing: 'border-box',
-                    }}
-                  >
-                    <option value="interface">Interfaz / Consola ASIO</option>
-                    <option value="in_ear">Transmisor / In-Ear RF</option>
-                    <option value="cabling">Cable Físico Escenario</option>
-                    <option value="mic">Microfonía & DI Box</option>
-                    <option value="instrument">Instrumento / Módulo</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
-                    MARCA / MODELO
-                  </label>
-                  <input
-                    type="text"
-                    value={eqModel}
-                    onChange={(e) => setEqModel(e.target.value)}
-                    placeholder="Ej: Soundcraft Ui24R"
-                    required
-                    style={{
-                      width: '100%',
-                      background: '#181B20',
-                      border: '1px solid #2E343D',
-                      borderRadius: '4px',
-                      padding: '8px 10px',
-                      color: '#D5DAE0',
-                      marginTop: '4px',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-              </div>
-
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  ASIGNADO A (MÚSICO / PUESTO)
+                <label htmlFor="eq-model" style={labelStyle}>
+                  MARCA / MODELO
                 </label>
-                <input
-                  type="text"
-                  value={eqAssignedTo}
-                  onChange={(e) => setEqAssignedTo(e.target.value)}
-                  placeholder="Ej: Mateo Gómez (Batería) / FOH Soundcraft"
-                  style={{
-                    width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
-                    padding: '8px 10px',
-                    color: '#D5DAE0',
-                    marginTop: '4px',
-                    boxSizing: 'border-box',
-                  }}
-                />
+                <input id="eq-model" type="text" value={form.model} onChange={(e) => set({ model: e.target.value })} placeholder="Ej: Soundcraft Ui24R" required style={inputStyle} />
               </div>
+            </div>
 
-              <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  RUTEO DE CANALES / CONECTORES
-                </label>
-                <input
-                  type="text"
-                  value={eqRouting}
-                  onChange={(e) => setEqRouting(e.target.value)}
-                  placeholder="Ej: Salida 1-2 PA Main • Salida 3 Drummer Cable"
-                  style={{
-                    width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
-                    padding: '8px 10px',
-                    color: '#D5DAE0',
-                    marginTop: '4px',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
+            <div>
+              <label htmlFor="eq-assigned" style={labelStyle}>
+                ASIGNADO A (MÚSICO / PUESTO)
+              </label>
+              <input
+                id="eq-assigned"
+                type="text"
+                value={form.assignedTo}
+                onChange={(e) => set({ assignedTo: e.target.value })}
+                placeholder="Ej: Mateo Gómez (Batería) / FOH Soundcraft"
+                style={inputStyle}
+              />
+            </div>
 
-              <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  FRECUENCIA RF (SI APLICA)
-                </label>
-                <input
-                  type="text"
-                  value={eqRf}
-                  onChange={(e) => setEqRf(e.target.value)}
-                  placeholder="Ej: 518.200 MHz (Grupo 1 Canal 4)"
-                  style={{
-                    width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
-                    padding: '8px 10px',
-                    color: '#D5DAE0',
-                    marginTop: '4px',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
+            <div>
+              <label htmlFor="eq-routing" style={labelStyle}>
+                RUTEO DE CANALES / CONECTORES
+              </label>
+              <input
+                id="eq-routing"
+                type="text"
+                value={form.channelRouting}
+                onChange={(e) => set({ channelRouting: e.target.value })}
+                placeholder="Ej: Salida 1-2 PA Main / Salida 3 Drummer Cable"
+                style={inputStyle}
+              />
+            </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #2E343D',
-                    color: '#8E97A3',
-                    padding: '8px 16px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  CANCELAR
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    background: '#D9A24E',
-                    border: 'none',
-                    color: '#15181C',
-                    padding: '8px 20px',
-                    borderRadius: '4px',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  REGISTRAR EQUIPO
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <div>
+              <label htmlFor="eq-rf" style={labelStyle}>
+                FRECUENCIA RF (SI APLICA)
+              </label>
+              <input id="eq-rf" type="text" value={form.rfFrequency ?? ''} onChange={(e) => set({ rfFrequency: e.target.value })} placeholder="Ej: 518.200 MHz (Grupo 1 Canal 4)" style={inputStyle} />
+            </div>
+
+            <div>
+              <label htmlFor="eq-notes" style={labelStyle}>
+                NOTAS
+              </label>
+              <input id="eq-notes" type="text" value={form.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} placeholder="Ej: Limiter interno activado" style={inputStyle} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px', flexWrap: 'wrap' }}>
+              <button type="button" className="stx-btn" onClick={() => setEditing(null)} style={{ ...ghostButton, background: 'transparent', color: colors.muted }}>
+                CANCELAR
+              </button>
+              <button type="submit" className="stx-btn" data-testid="equipment-save" style={{ ...primaryButton(colors.warning), color: colors.onAccent, fontWeight: 800 }}>
+                {editing === 'new' ? 'REGISTRAR EQUIPO' : 'GUARDAR CAMBIOS'}
+              </button>
+            </div>
+          </form>
+        </HubModal>
       )}
     </div>
   )

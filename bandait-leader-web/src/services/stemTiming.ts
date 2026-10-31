@@ -71,6 +71,31 @@ export function sectionSpans(song: Pick<Song, 'bpm' | 'beatsPerBar' | 'sections'
 }
 
 /**
+ * Compas (1-based, fraccionario) en que esta la reproduccion:
+ * (posicion - offset) * bpm / 60 / beatsPerBar + 1. Menor que 1 = antes del compas 1.
+ * NaN si el tempo no es valido.
+ */
+export function barAtTime(sec: number, bpm: number, beatsPerBar: number, offsetMs = 0): number {
+  if (!validTempo(bpm, beatsPerBar) || !Number.isFinite(sec)) return Number.NaN
+  const offset = Number.isFinite(offsetMs) ? offsetMs / 1000 : 0
+  return ((sec - offset) * bpm) / 60 / beatsPerBar + 1
+}
+
+/**
+ * Indice de la seccion que contiene el compas `bar` (start_bar <= compas < start_bar + bars).
+ * -1 antes de la primera seccion (o sin datos), spans.length despues de la ultima.
+ */
+export function sectionIndexAtBar(spans: readonly Pick<SectionSpan, 'startBar' | 'bars'>[], bar: number): number {
+  if (spans.length === 0 || !Number.isFinite(bar)) return -1
+  const whole = Math.floor(bar)
+  if (whole < spans[0].startBar) return -1
+  for (let i = 0; i < spans.length; i++) {
+    if (whole < spans[i].startBar + spans[i].bars) return i
+  }
+  return spans.length
+}
+
+/**
  * Ajusta una region de repeticion a la duracion del audio. null si no queda una region util
  * (al menos 50 ms dentro del audio).
  */

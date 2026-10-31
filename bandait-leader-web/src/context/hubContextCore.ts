@@ -132,6 +132,8 @@ export interface HubContextType {
   removeSongFromPlaylist: (songId: string) => void
   updateStemTrackVolume: (channel: number, volumeDb: number) => void
   addEquipment: (item: Omit<EquipmentItem, 'id' | 'bandId'>) => void
+  /** Reemplaza los datos de un equipo de la banda activa (mismo id). */
+  updateEquipment: (id: string, item: Omit<EquipmentItem, 'id' | 'bandId'>) => void
   removeEquipment: (id: string) => void
   /** Crea una cancion en la libreria de la banda activa (id UUID v4 nuevo). */
   createSong: (data: Omit<Song, 'id' | 'updatedAt'>) => Song | null
