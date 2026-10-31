@@ -34,7 +34,9 @@ from src.ui.dialogs.account_select import songs_label
 from src.ui.views.library_view import LibraryView
 from src.ui.views.stage_view import StageView
 from src.ui.widgets.dim_overlay import BRIGHTNESS_LEVELS, DimOverlay, clamp_brightness
+from src.ui.stems_controller import StemsController, import_dialog_filter, song_bpm
 from src.ui.widgets.mixer import MixerWidget
+from src.ui.widgets.stem_mixer import StemMixerWidget
 from src.ui.widgets.timeline import TimelineWidget
 from src.ui.widgets.transport import TransportWidget
 
@@ -152,6 +154,7 @@ class MainWindow(QMainWindow):
         self._ui_timer.start(33)
 
         self._setup_ui()
+        self._setup_stems()
         self._apply_styles()
         self._setup_menu()
         self._update_setlist_notice()
@@ -266,6 +269,17 @@ class MainWindow(QMainWindow):
         # song brings stems it stays hidden so Escenario gets the room; Ver > Mezclador shows it.
         self.mixer_container = mixer_container
         mixer_container.setVisible(False)
+
+        # --- Stems de la canción en vivo (fase 3): solo visible cuando la canción los tiene ---
+        self.stem_mixer = StemMixerWidget()
+        stems_container = QFrame()
+        stems_container.setObjectName("panel")
+        stems_layout = QVBoxLayout(stems_container)
+        stems_layout.setContentsMargins(0, 0, 0, 0)
+        stems_layout.addWidget(self.stem_mixer)
+        splitter.addWidget(stems_container)
+        splitter.setStretchFactor(2, 1)
+        self.stems_container = stems_container
 
         main_layout.addWidget(splitter, 1)
 
@@ -543,6 +557,11 @@ class MainWindow(QMainWindow):
         self.action_test_click = QAction("&Probar click", self)
         self.action_test_click.triggered.connect(self._test_click)
         audio_menu.addAction(self.action_test_click)
+        audio_menu.addSeparator()
+        self.action_import_stems = QAction("&Importar stems de la canción en vivo...", self)
+        self.action_import_stems.setToolTip("ZIP de Moises (MP3) o archivos sueltos; reemplaza los stems de la canción")
+        self.action_import_stems.triggered.connect(self._import_stems_dialog)
+        audio_menu.addAction(self.action_import_stems)
 
         net_menu = menubar.addMenu("&Red")
         self.action_retry_server = QAction("&Reintentar servidor", self)
@@ -603,6 +622,43 @@ class MainWindow(QMainWindow):
         self.action_about = QAction("&Acerca de Bandait", self)
         self.action_about.triggered.connect(self._show_about)
         help_menu.addAction(self.action_about)
+
+    # ------------------------------------------------------------------ stems (fase 3)
+    def _setup_stems(self):
+        self.stems = StemsController(self.audio_engine, self.stem_mixer, self.stems_container, parent=self)
+        self.stems.message.connect(lambda text: self.status_bar.showMessage(text, 8000))
+        self.stem_mixer.import_requested.connect(self._import_stems_dialog)
+        self.stem_mixer.remove_requested.connect(self._remove_live_stems)
+
+    def _show_live_stems(self, song_id, state: dict):
+        title = next((e.get("title") for e in (state or {}).get("setlist", []) if e.get("song_id") == song_id), "")
+        self.stems.show_song(song_id, title, song_bpm(self._live_entry(song_id), self._bpm))
+
+    def _import_stems_dialog(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        if not self._live_song_id:
+            QMessageBox.information(self, "Stems", "Primero elige una canción del setlist en vivo.")
+            return
+        if self._status != "IDLE":
+            QMessageBox.information(self, "Stems", "Detén la banda para importar stems.")
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Importar stems de la canción en vivo", "", import_dialog_filter()
+        )
+        if paths and not self.stems.import_paths(paths):
+            self.status_bar.showMessage("Ya hay una importación de stems en curso", 6000)
+
+    def _remove_live_stems(self):
+        if self._status != "IDLE":
+            QMessageBox.information(self, "Stems", "Detén la banda para quitar los stems.")
+            return
+        answer = QMessageBox.question(
+            self, "Quitar stems", "¿Borrar del portátil los stems de esta canción?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.stems.remove_live()
 
     def set_mixer_visible(self, visible: bool):
         """Ver > Mezclador. Hidden by default while no song has stems."""
@@ -809,6 +865,7 @@ class MainWindow(QMainWindow):
     def _show_live_song(self, song_id, state: dict):
         if not song_id:
             self.stage_view.set_song(title="Sin canción")
+            self._show_live_stems(None, state)
             return
         data = self.library_view.get_song_data_by_id(song_id)
         entry = self._live_entry(song_id)
@@ -826,6 +883,7 @@ class MainWindow(QMainWindow):
             self.stage_view.set_song(title=title)
         # Lyrics and chords by section, the same content phones get (CONTRACT_V3 9.1).
         self.stage_view.set_song_content(entry)
+        self._show_live_stems(song_id, state)
 
     def _on_clock_beat(self, bar: int, beat: int, bpm: float):
         self.transport.set_beat(beat)

@@ -187,3 +187,25 @@ def test_stage_rail_follows_live_song_and_mixer_starts_hidden(window, qtbot):
     qtbot.waitUntil(lambda: window.clock_service.session_state["current_song_id"] == "song-002", timeout=3000)
     assert not window._live_entry("song-002").get("sections")
     assert window.stage_view.current_section_index() == -1
+
+
+def test_live_song_stems_import_show_and_follow_the_song(window, qtbot, tmp_path):
+    import numpy as np
+    import soundfile as sf
+
+    assert window.stems_container.isHidden()  # demo songs have no stems
+    for name in ("Vocals.wav", "Drums.wav"):
+        sf.write(str(tmp_path / name), np.zeros((4800, 2), dtype=np.float32), 48000)
+    assert window._status == "IDLE"
+    assert window.stems.import_paths([str(tmp_path / "Vocals.wav"), str(tmp_path / "Drums.wav")])
+    qtbot.waitUntil(lambda: window.audio_engine.has_stems(), timeout=5000)
+    assert not window.stems_container.isHidden()
+    assert [s.name_label.text() for s in window.stem_mixer.strips] == ["VOZ", "BATERIA"]
+    # Next song has no stems: the panel hides and the engine drops them.
+    window.stage_view.next_btn.click()
+    qtbot.waitUntil(lambda: window.clock_service.session_state["current_song_id"] == "song-002", timeout=3000)
+    qtbot.waitUntil(lambda: window.stems_container.isHidden(), timeout=3000)
+    assert not window.audio_engine.has_stems()
+    # Back to the first song: its stems load again from disk.
+    window.stage_view.prev_btn.click()
+    qtbot.waitUntil(lambda: window.audio_engine.has_stems(), timeout=5000)

@@ -145,6 +145,19 @@ def test_stage_view_with_and_without_song(qtbot, qapp):
 
 
 # --------------------------------------------------------------------------- transport / mixer
+def test_stem_mixer_with_many_and_no_stems(qtbot, qapp):
+    from src.audio.stem_library import StemInfo
+    from src.ui.widgets.stem_mixer import StemMixerWidget
+
+    mixer = shown(qtbot, StemMixerWidget(), size=(420, 600))
+    labels = ["Voz", "Coros", "Bateria", "Bajo", "Guitarra", "Teclados", "Otros"]
+    stems = [StemInfo(file=f"{n}.mp3", role="x", label=n, gain_db=-3.0 * i, muted=i == 2) for i, n in enumerate(labels)]
+    mixer.set_stems("Hoy vuelvo a casa", stems, 25.0, ["Drums.m4a: exporta los stems en MP3"])
+    paint(mixer, qapp, sizes=[(420, 600), (260, 400), (900, 700)])
+    mixer.set_stems("", [], 0.0)
+    paint(mixer, qapp)
+
+
 def test_transport_playing_and_stopped(qtbot, qapp):
     from src.ui.widgets.transport import TransportWidget
 

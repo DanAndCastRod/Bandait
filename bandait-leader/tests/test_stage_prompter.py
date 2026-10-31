@@ -60,7 +60,9 @@ def test_stage_view_follows_sections(qtbot):
     assert sv.rail_song_ids() == ["s1", "s2"]
 
     sv.set_song(title="Hoy vuelvo a casa")  # legacy path first, as MainWindow does
+    assert sv.mode_btn.isHidden()
     sv.set_song_content(ENTRY)
+    assert not sv.mode_btn.isHidden()
     assert sv.current_section_index() == 0
     assert sv.section_head.text().startswith("INTRO")
     assert sv.section_label.text() == "B&O's // Am"
