@@ -5,7 +5,9 @@
  * Cubre: src/services/stemNames.ts contra TODOS los casos de bandait-protocol/fixtures/stem_names.json
  * (y que su copia de roles, etiquetas, palabras clave y extensiones sea identica al fixture), y
  * src/services/stemTiming.ts (inicio y fin de secciones, offset, recorte de la region de repeticion), y
- * src/services/stemCloud.ts contra un Worker simulado (orden de subida, errores, nombres validos).
+ * src/services/stemCloud.ts contra un Worker simulado (orden de subida, errores, nombres validos),
+ * src/services/wav.ts (cabecera y largo del WAV de la mezcla), el compas y la seccion de ENSAYO
+ * (stemTiming.barAtTime / sectionIndexAtBar) y src/services/stemAnalysis.ts (borrador y errores).
  */
 import assert from 'node:assert/strict'
 import fixture from '../../bandait-protocol/fixtures/stem_names.json' with { type: 'json' }
@@ -17,7 +19,9 @@ import {
   normalizeStemName,
   recognizeStem,
 } from '../src/services/stemNames.ts'
-import { barStartSeconds, clampLoop, dbToGain, formatClock, sectionSpans } from '../src/services/stemTiming.ts'
+import { barAtTime, barStartSeconds, clampLoop, dbToGain, formatClock, sectionIndexAtBar, sectionSpans } from '../src/services/stemTiming.ts'
+import { WAV_HEADER_BYTES, encodeWav16, limitPeak, wavByteLength } from '../src/services/wav.ts'
+import { analysisErrorMessage, draftToSongSections, getAnalysis, parseDraft, startAnalysis } from '../src/services/stemAnalysis.ts'
 import type { SongSection } from '../src/types/hub.ts'
 import {
   CLOUD_MAX_STEMS,
@@ -299,6 +303,168 @@ async function main() {
     const many = { ...record, tracks: Array.from({ length: CLOUD_MAX_STEMS + 1 }, (_, i) => ({ ...record.tracks[0], id: `m${i}` })) }
     await assert.rejects(uploadStems(target, 'song_1', { record: many, blobs }), (e: unknown) => e instanceof StemCloudError && e.code === 'too_many_stems')
     assert.equal(worker.calls.length, 0)
+  })
+
+  console.log('\nwav.ts (mezcla para el analisis)')
+
+  await check('encodeWav16: cabecera RIFF/WAVE PCM mono 16 bits y largo 44 + 2n', () => {
+    const n = 22050 * 2
+    const samples = new Float32Array(n)
+    for (let i = 0; i < n; i++) samples[i] = Math.sin(i / 10)
+    const buf = encodeWav16(samples, 22050)
+    assert.equal(buf.byteLength, WAV_HEADER_BYTES + 2 * n)
+    assert.equal(wavByteLength(n), buf.byteLength)
+    const v = new DataView(buf)
+    const ascii = (o: number) => String.fromCharCode(v.getUint8(o), v.getUint8(o + 1), v.getUint8(o + 2), v.getUint8(o + 3))
+    assert.equal(ascii(0), 'RIFF')
+    assert.equal(v.getUint32(4, true), 36 + 2 * n)
+    assert.equal(ascii(8), 'WAVE')
+    assert.equal(ascii(12), 'fmt ')
+    assert.equal(v.getUint16(20, true), 1)
+    assert.equal(v.getUint16(22, true), 1)
+    assert.equal(v.getUint32(24, true), 22050)
+    assert.equal(v.getUint32(28, true), 44100)
+    assert.equal(v.getUint16(32, true), 2)
+    assert.equal(v.getUint16(34, true), 16)
+    assert.equal(ascii(36), 'data')
+    assert.equal(v.getUint32(40, true), 2 * n)
+  })
+
+  await check('encodeWav16 satura fuera de [-1, 1] y 4 min a 22 050 Hz pesan ~10 MB', () => {
+    const v = new DataView(encodeWav16(new Float32Array([2, -2, 0.5, Number.NaN]), 8000))
+    assert.deepEqual([v.getInt16(44, true), v.getInt16(46, true), v.getInt16(48, true), v.getInt16(50, true)], [32767, -32768, 16384, 0])
+    const mb = wavByteLength(240 * 22050) / (1024 * 1024)
+    assert.ok(mb > 9.9 && mb < 10.2, String(mb))
+  })
+
+  await check('limitPeak baja el pico de una suma de stems y no toca una mezcla floja', () => {
+    const loud = new Float32Array([0.5, -1.8, 1.2])
+    const gain = limitPeak(loud)
+    close(Math.max(...[...loud].map(Math.abs)), 0.89, 1e-6)
+    close(gain, 0.89 / 1.8, 1e-6)
+    const soft = new Float32Array([0.2, -0.3])
+    assert.equal(limitPeak(soft), 1)
+    assert.deepEqual([...soft], [new Float32Array([0.2])[0], new Float32Array([-0.3])[0]])
+  })
+
+  console.log('\nENSAYO: compas y seccion')
+
+  await check('barAtTime: (posicion - offset) * bpm / 60 / tiempos + 1', () => {
+    close(barAtTime(0, 120, 4), 1)
+    close(barAtTime(2, 120, 4), 2)
+    close(barAtTime(9, 124, 4), (9 * 124) / 60 / 4 + 1)
+    close(barAtTime(2.5, 120, 4, 500), 2)
+    assert.ok(barAtTime(0.2, 120, 4, 500) < 1)
+    assert.ok(Number.isNaN(barAtTime(1, 0, 4)))
+  })
+
+  await check('sectionIndexAtBar: start_bar <= compas < start_bar + bars', () => {
+    const spans = [
+      { startBar: 1, bars: 4 },
+      { startBar: 5, bars: 8 },
+      { startBar: 13, bars: 8 },
+    ]
+    assert.equal(sectionIndexAtBar(spans, 0.9), -1)
+    assert.equal(sectionIndexAtBar(spans, 1), 0)
+    assert.equal(sectionIndexAtBar(spans, 4.99), 0)
+    assert.equal(sectionIndexAtBar(spans, 5), 1)
+    assert.equal(sectionIndexAtBar(spans, 12.5), 1)
+    assert.equal(sectionIndexAtBar(spans, 13), 2)
+    assert.equal(sectionIndexAtBar(spans, 21), 3)
+    assert.equal(sectionIndexAtBar([], 3), -1)
+    assert.equal(sectionIndexAtBar(spans, Number.NaN), -1)
+  })
+
+  await check('posicion -> seccion con las secciones de la cancion (offset incluido)', () => {
+    const spans = sectionSpans({ bpm: 124, beatsPerBar: 4, sections: [section('intro', 4, 'Intro'), section('v1', 8, 'Estrofa 1')] })
+    assert.equal(spans[sectionIndexAtBar(spans, barAtTime(3, 124, 4))].label, 'Intro')
+    assert.equal(spans[sectionIndexAtBar(spans, barAtTime(9, 124, 4))].label, 'Estrofa 1')
+    assert.equal(sectionIndexAtBar(spans, barAtTime(1, 124, 4, 2000)), -1)
+  })
+
+  console.log('\nstemAnalysis.ts (borrador de Music AI)')
+
+  const rawDraft = {
+    source: 'music.ai',
+    bpm: 128.4,
+    key: 'C#m',
+    beats_per_bar: 4,
+    sections: [
+      { kind: 'intro', label: 'Intro', bars: 4, start_bar: 1, chordpro: '[C#m]    [A]', cue_text: null },
+      { kind: 'verse', label: 'Estrofa 1', bars: 8, start_bar: 5, chordpro: '[E]  [B]\n', cue_text: null },
+      { kind: 'rap', label: 'Rap', bars: 2, start_bar: 13, chordpro: '', cue_text: 'Rap' },
+      { kind: 'verse', label: 'Mala', bars: 0, start_bar: 15, chordpro: '' },
+    ],
+    lyrics_unplaced: ['linea uno', '', 'linea dos'],
+    notes: ['Music AI no ubicó la letra.'],
+  }
+
+  await check('parseDraft: tipos desconocidos a custom, descarta compases invalidos y lineas vacias', () => {
+    const d = parseDraft(rawDraft)
+    assert.equal(d.bpm, 128.4)
+    assert.equal(d.key, 'C#m')
+    assert.deepEqual(d.sections.map((s) => [s.kind, s.label, s.bars, s.start_bar]), [
+      ['intro', 'Intro', 4, 1],
+      ['verse', 'Estrofa 1', 8, 5],
+      ['custom', 'Rap', 2, 13],
+    ])
+    assert.deepEqual(d.lyrics_unplaced, ['linea uno', 'linea dos'])
+    assert.throws(() => parseDraft({ bpm: 120 }))
+  })
+
+  await check('draftToSongSections: ids nuevos, ChordPro sin espacios finales, aviso solo si viene texto', () => {
+    let n = 0
+    const secs = draftToSongSections(parseDraft(rawDraft), () => `id-${++n}`)
+    assert.deepEqual(secs.map((s) => [s.id, s.kind, s.label, s.bars]), [
+      ['id-1', 'intro', 'Intro', 4],
+      ['id-2', 'verse', 'Estrofa 1', 8],
+      ['id-3', 'custom', 'Rap', 2],
+    ])
+    assert.equal(secs[1].chordpro, '[E]  [B]')
+    assert.equal('cueText' in secs[0], false)
+    assert.equal(secs[2].cueText, 'Rap')
+  })
+
+  await check('mensajes de error del analisis en espanol', () => {
+    assert.match(analysisErrorMessage('analysis_unavailable', 503), /no está disponible/)
+    assert.match(analysisErrorMessage('analysis_failed', 502), /falló/)
+    assert.match(analysisErrorMessage('analysis_upload_failed', 502), /enviar la mezcla/)
+    assert.match(analysisErrorMessage('not_an_editor', 403), /Owner o el Director musical/)
+    assert.match(analysisErrorMessage('file_too_large', 413), /95 MB/)
+    assert.match(analysisErrorMessage('not_audio', 415), /solo acepta audio/)
+  })
+
+  const calls: string[] = []
+  let reply: { status: number; body: unknown } = { status: 404, body: { error: 'no_analysis' } }
+  const fetchAnalysis = async (input: string, init?: RequestInit) => {
+    const h = new Headers(init?.headers)
+    calls.push(`${init?.method ?? 'GET'} ${new URL(input).pathname} ${h.get('Content-Type') ?? ''} ${init?.body instanceof Blob ? init.body.size : 0}`)
+    return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'Content-Type': 'application/json' } })
+  }
+  const aTarget: CloudTarget = { baseUrl: 'https://stems.test', band: 'me', getToken: async () => 'token-de-prueba-123456789', fetchFn: fetchAnalysis }
+
+  await check('getAnalysis: 404 no_analysis, STARTED, SUCCEEDED con fecha y FAILED', async () => {
+    assert.deepEqual(await getAnalysis(aTarget, 'song_1'), { status: 'none' })
+    reply = { status: 200, body: { status: 'STARTED', job_id: 'job-1' } }
+    assert.deepEqual(await getAnalysis(aTarget, 'song_1'), { status: 'STARTED', jobId: 'job-1' })
+    reply = { status: 200, body: { status: 'SUCCEEDED', job_id: 'job-1', created_at: '2026-10-31T15:00:00Z', draft: rawDraft } }
+    const ok = await getAnalysis(aTarget, 'song_1')
+    assert.equal(ok.status, 'SUCCEEDED')
+    assert.equal(ok.status === 'SUCCEEDED' && ok.createdAt, '2026-10-31T15:00:00Z')
+    reply = { status: 200, body: { status: 'FAILED', error: 'audio muy corto' } }
+    assert.deepEqual(await getAnalysis(aTarget, 'song_1'), { status: 'FAILED', error: 'audio muy corto' })
+  })
+
+  await check('startAnalysis: POST con el WAV como cuerpo y Content-Type audio/wav; 403 y 503 legibles', async () => {
+    calls.length = 0
+    reply = { status: 202, body: { status: 'STARTED', job_id: 'job-2' } }
+    const wav = new Blob([encodeWav16(new Float32Array(100), 22050)], { type: 'audio/wav' })
+    assert.deepEqual(await startAnalysis(aTarget, 'song_1', wav), { jobId: 'job-2' })
+    assert.deepEqual(calls, [`POST /v1/bands/me/songs/song_1/analysis audio/wav ${wav.size}`])
+    reply = { status: 403, body: { error: 'not_an_editor' } }
+    await assert.rejects(startAnalysis(aTarget, 'song_1', wav), (e: unknown) => e instanceof StemCloudError && /Director musical de la banda pueden analizar/.test(e.message))
+    reply = { status: 503, body: { error: 'analysis_unavailable' } }
+    await assert.rejects(getAnalysis(aTarget, 'song_1'), (e: unknown) => e instanceof StemCloudError && /no está disponible/.test(e.message))
   })
 
   console.log(`\n${passed} ok, ${failures.length} fallas`)

@@ -14,6 +14,11 @@ interface Props {
   record: StemSongRecord
   /** Metadatos cambiados (offset, rol) o null si se borro la ultima pista. */
   onRecordChange: (record: StemSongRecord | null) => void
+  /**
+   * Recibe el reproductor al crearlo y null al liberarlo. Lo usa ENSAYO para seguir la posicion
+   * con rAF (el reproductor es el mismo; no se duplica).
+   */
+  onPlayer?: (player: StemPlayer | null) => void
 }
 
 interface Mix {
@@ -51,7 +56,7 @@ function toggleStyle(active: boolean, accent: string): React.CSSProperties {
  * Se monta con key = cancion + ids de pistas: cambiar de cancion o de pistas crea un reproductor
  * nuevo y libera el anterior (AudioContext cerrado, nodos desconectados).
  */
-export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange }) => {
+export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPlayer }) => {
   const [initialTracks] = useState(() => record.tracks)
   const [status, setStatus] = useState<Record<string, TrackStatus>>(() =>
     Object.fromEntries(record.tracks.map((t) => [t.id, { kind: 'loading' } as TrackStatus]))
@@ -74,10 +79,17 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange }) =>
   const posRangeRef = useRef<HTMLInputElement>(null)
   const draggingRef = useRef(false)
 
+  // Ultimo onPlayer sin recrear el reproductor si el padre pasa otra funcion en cada render.
+  const onPlayerRef = useRef(onPlayer)
+  useEffect(() => {
+    onPlayerRef.current = onPlayer
+  }, [onPlayer])
+
   // Crear el reproductor y decodificar. Solo los callbacks async tocan el estado.
   useEffect(() => {
     const player = new StemPlayer()
     playerRef.current = player
+    onPlayerRef.current?.(player)
     let cancelled = false
     const off = player.onStateChange((s) => {
       if (!cancelled) setPlayState(s)
@@ -105,6 +117,7 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange }) =>
       off()
       player.dispose()
       if (playerRef.current === player) playerRef.current = null
+      onPlayerRef.current?.(null)
     }
   }, [song.id, initialTracks])
 
