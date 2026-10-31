@@ -239,6 +239,7 @@ Proyecto de producción (desde el 2026-10-01): `bandait-cloud`, URL `https://xft
 | `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` (Project Settings -> API) | Para la nube |
 | `VITE_SUPABASE_ANON_KEY` | anon key (JWT con `role: anon`) o publishable key (`sb_publishable_...`) | Para la nube |
 | `VITE_GOOGLE_CLIENT_ID` | `<numero>-<id>.apps.googleusercontent.com` | No (solo perfil local con Google) |
+| `VITE_BANDAIT_STEMS_URL` | `https://bandait-stems.oooglue.workers.dev` (Worker `bandait-stems`, `bandait-stems-worker/README.md`), versionada en `.env.production` | No (sin ella, o sin sesión de nube, los stems del estudio quedan solo en el navegador) |
 
 Todas son públicas: quedan dentro del JavaScript que descarga cualquier visitante. La seguridad depende de RLS (sección 3.3), no de ocultar la anon key. El modal **NUBE** del Hub permite además un override por navegador (se guarda en `localStorage` y tiene prioridad); acepta las mismas claves y rechaza `service_role` / `sb_secret_`.
 

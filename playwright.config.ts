@@ -81,6 +81,9 @@ export default defineConfig({
       url: 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
       timeout: 60000,
+      // Worker de stems FALSO (dominio .invalid): e2e/stems-cloud.leader-web.spec.ts lo simula con
+      // page.route y cualquier peticion sin simular falla en vez de llegar a produccion.
+      env: { VITE_BANDAIT_STEMS_URL: 'https://stems.e2e.invalid' },
     },
     {
       command: 'npm run dev -- --port 5174 --strictPort',
