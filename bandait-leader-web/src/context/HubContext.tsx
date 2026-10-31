@@ -1040,7 +1040,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ok: true,
       message:
         (invited.ok
-          ? `${activeBand.name} quedó compartida${others ? ` con ${others} integrante(s) invitado(s)` : ''}. Invita a más desde INTEGRANTES y mándales el enlace.`
+          ? `${activeBand.name} quedó compartida${others ? ` con ${others} integrante(s) invitado(s)` : ''}. Invita a más desde BANDA y mándales el enlace.`
           : `${activeBand.name} quedó compartida, pero no se pudieron crear las invitaciones: ${invited.error.message}`) + placeholderNote,
       link: inviteLink(getAuthRedirectUrl(), newId),
       bandId: newId,
@@ -1345,6 +1345,18 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }))
   }
 
+  /** Edita un equipo de la banda activa (conserva id y banda). */
+  const updateEquipment = (id: string, updates: Omit<EquipmentItem, 'id' | 'bandId'>) => {
+    if (!activeBand || blockIfReadOnly()) return
+    setWorkspace((prev) => ({
+      ...prev,
+      equipmentMap: {
+        ...prev.equipmentMap,
+        [activeBand.id]: (prev.equipmentMap[activeBand.id] || []).map((eq) => (eq.id === id ? { ...eq, ...updates, id: eq.id, bandId: eq.bandId } : eq)),
+      },
+    }))
+  }
+
   const removeEquipment = (id: string) => {
     if (!activeBand || blockIfReadOnly()) return
     setWorkspace((prev) => ({
@@ -1435,6 +1447,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     removeSongFromPlaylist,
     updateStemTrackVolume,
     addEquipment,
+    updateEquipment,
     removeEquipment,
     createSong,
     saveSong,

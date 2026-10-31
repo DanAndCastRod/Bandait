@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { deflateRawSync } from 'node:zlib';
 
 /**
- * E2E del estudio de stems del hub (PISTAS & STEMS). Los archivos se generan en la prueba (WAV
+ * E2E del estudio de stems del hub (vista PISTAS). Los archivos se generan en la prueba (WAV
  * sinteticos de 3 s y un ZIP armado a mano, con entradas deflate como las de Moises): no hay binarios versionados. Todo corre en
  * MODO DEMO; el audio queda en IndexedDB del contexto aislado de Playwright.
  */
@@ -100,8 +100,8 @@ async function enterDemoStems(page: Page) {
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
   await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
   const bottom = page.locator('nav.hub-mobile-nav');
-  if (await bottom.isVisible()) await bottom.getByRole('button', { name: 'STEMS' }).click();
-  else await page.getByRole('button', { name: 'PISTAS & STEMS' }).click();
+  if (await bottom.isVisible()) await bottom.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  else await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
 }
 
@@ -204,7 +204,7 @@ test.describe('Web Admin Hub - estudio de stems', () => {
     // Persisten al recargar (IndexedDB) y se pueden borrar.
     await page.reload();
     await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'PISTAS & STEMS' }).click();
+    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
     await expect(page.getByTestId('stem-song-select')).toContainText('Medianoche en Pereira · 6 stems');
     await expect(page.getByTestId('stem-studio').getByTestId('stem-track')).toHaveCount(6);
 

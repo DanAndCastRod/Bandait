@@ -203,12 +203,12 @@ export function parseManifest(raw: unknown, songId: string): CloudManifest {
 
 // ---- HTTP ----
 
-function songUrl(target: CloudTarget, songId: string): string {
+export function songUrl(target: CloudTarget, songId: string): string {
   if (!isCloudSongId(songId)) throw new StemCloudError('bad_song', 400)
   return `${target.baseUrl.replace(/\/+$/, '')}/v1/bands/${encodeURIComponent(target.band)}/songs/${encodeURIComponent(songId)}`
 }
 
-async function authHeaders(target: CloudTarget): Promise<Record<string, string>> {
+export async function authHeaders(target: CloudTarget): Promise<Record<string, string>> {
   let token: string | null
   try {
     token = await target.getToken()
@@ -219,7 +219,7 @@ async function authHeaders(target: CloudTarget): Promise<Record<string, string>>
   return { Authorization: `Bearer ${token}` }
 }
 
-async function send(target: CloudTarget, url: string, init: RequestInit): Promise<Response> {
+export async function send(target: CloudTarget, url: string, init: RequestInit): Promise<Response> {
   const fetchFn = target.fetchFn ?? ((input: string, i?: RequestInit) => fetch(input, i))
   let res: Response
   try {
@@ -230,7 +230,7 @@ async function send(target: CloudTarget, url: string, init: RequestInit): Promis
   return res
 }
 
-async function failFrom(res: Response): Promise<StemCloudError> {
+export async function failFrom(res: Response): Promise<StemCloudError> {
   let code = ''
   try {
     const body = (await res.json()) as unknown

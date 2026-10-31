@@ -42,7 +42,7 @@ function errorText(err: unknown, fallback: string): string {
 }
 
 /**
- * PISTAS & STEMS: cada musico carga los stems de una cancion de la libreria y los estudia en casa.
+ * PISTAS: cada musico carga los stems de una cancion de la libreria y los estudia en casa.
  * El audio vive en ESTE navegador (IndexedDB, services/stemStore.ts). Con VITE_BANDAIT_STEMS_URL y
  * sesion de nube, ademas se sincroniza con el Worker bandait-stems (services/stemCloud.ts):
  * Owner y Director suben y borran; cualquier integrante descarga.
