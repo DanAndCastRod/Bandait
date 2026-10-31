@@ -144,7 +144,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
 
     await page.getByRole('button', { name: 'PISTAS & STEMS' }).click();
-    await expect(page.getByRole('heading', { name: 'Gestión de Pistas & Stems Multicanal' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
 
     await page.getByRole('button', { name: 'INTEGRANTES' }).click();
     await expect(page.getByRole('heading', { name: 'Integrantes & Matriz de Roles' })).toBeVisible();
