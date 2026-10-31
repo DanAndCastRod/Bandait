@@ -38,6 +38,9 @@ from src.ui import components as ui
 from src.ui import theme
 from src.ui.analysis_controller import AnalysisController
 from src.ui.shell import NavRail
+from src.ui.views.band_view import BandView
+from src.ui.views.rehearsal_view import RehearsalView
+from src.ui.views.settings_view import SettingsView
 from src.ui.views.song_inspector import SongInspector
 from src.ui.stems_controller import StemsController, import_dialog_filter, song_bpm
 from src.ui.widgets.mixer import MixerWidget
@@ -47,7 +50,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.3.0"
 # Ancho maximo del texto "Audio: ..." en la barra de estado (el completo va en el tooltip).
 AUDIO_STATUS_MAX_PX = 420
 
@@ -364,15 +367,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(close_btn)
         return bar
 
-    def _placeholder_view(self, title: str, lede: str) -> QWidget:
-        page = QWidget()
-        col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 0, 0)
-        header, _actions = ui.view_header(title, lede)
-        col.addWidget(header)
-        col.addStretch()
-        return page
-
     def _build_views(self):
         """One page per rail entry. Setlists and Canciones share the library (two of its pages)."""
         # Escenario
@@ -384,7 +378,18 @@ class MainWindow(QMainWindow):
         self.stage_view.open_tracks.connect(lambda: self.show_view("pistas"))
         self._add_view("escenario", self.stage_view)
 
-        self._add_view("ensayo", self._placeholder_view("Ensayo", "Repetir secciones con stems y clic"))
+        # Ensayo: bucle de sección en el transporte (los teléfonos lo siguen como un re-anclaje).
+        self.rehearsal_view = RehearsalView()
+        manager = self.server.get_control_manager()
+        self.rehearsal_view.loop_requested.connect(self._on_loop_requested)
+        self.rehearsal_view.loop_cancelled.connect(manager.clear_loop)
+        self.rehearsal_view.back_to_show.connect(lambda: self.show_view("escenario"))
+        self.rehearsal_view.practice_tempo_changed.connect(self._on_practice_tempo)
+        self._loop_timer = QTimer(self)
+        self._loop_timer.setInterval(100)
+        self._loop_timer.timeout.connect(self._tick_loop)
+        self._loop_timer.start()
+        self._add_view("ensayo", self.rehearsal_view)
 
         # Setlists y Canciones: la biblioteca, sin su barra de pestañas propia.
         self.library_view = LibraryView()
@@ -427,8 +432,84 @@ class MainWindow(QMainWindow):
         # Pistas: secciones, stems de la canción en vivo y el mezclador de entradas plegado.
         self._add_view("pistas", self._create_tracks_view())
 
-        self._add_view("banda", self._placeholder_view("Banda", "Integrantes, conectados y QR"))
-        self._add_view("ajustes", self._placeholder_view("Ajustes", "Audio, clic, red, cuenta y pantalla"))
+        self.band_view = BandView()
+        self.band_view.open_hub.connect(self._open_hub)
+        self._add_view("banda", self.band_view)
+
+        self.settings_view = SettingsView()
+        sv = self.settings_view
+        sv.open_audio_devices.connect(self._open_audio_devices)
+        sv.test_click.connect(self._test_click)
+        sv.drummer_click_changed.connect(lambda on: self._set_click_routing(drummer=on))
+        sv.pa_click_changed.connect(lambda on: self._set_click_routing(pa=on))
+        sv.brightness_changed.connect(self._set_brightness)
+        sv.open_account_login.connect(self._cloud_login)
+        sv.cloud_sync.connect(self._cloud_sync_now)
+        sv.choose_band.connect(self._cloud_choose_band)
+        sv.sign_out.connect(self._cloud_logout)
+        sv.retry_server.connect(self._restart_server)
+        sv.set_click_routing(self._settings.drummer_click_enabled, self._settings.pa_click_enabled)
+        sv.set_brightness(clamp_brightness(self._settings.brightness))
+        self._add_view("ajustes", sv)
+
+    # ------------------------------------------------------------------ Ensayo, Banda, Ajustes
+    def _on_loop_requested(self, start_bar: int, end_bar: int, repeats: int):
+        try:
+            self.server.get_control_manager().set_loop(start_bar, end_bar, repeats)
+        except ValueError as e:
+            self.status_bar.showMessage(f"No se pudo repetir la sección: {e}", 8000)
+            return
+        self.status_bar.showMessage(
+            f"Repitiendo compases {start_bar}-{end_bar}" + (f" ({repeats} veces)" if repeats else " sin fin"), 6000)
+
+    def _tick_loop(self):
+        manager = self.server.get_control_manager()
+        manager.tick()
+        info = manager.loop_info()
+        self.rehearsal_view.set_loop_status(info.active, info.current_repeat, info.repeats)
+
+    def _on_practice_tempo(self, percent: int):
+        # Stems are not time-stretched: practice tempo is announced, not applied (pending).
+        if percent != 100:
+            self.status_bar.showMessage(
+                f"Tempo de práctica {percent} %: todavía no cambia el transporte (los stems no se estiran)", 8000)
+
+    def _set_click_routing(self, drummer=None, pa=None):
+        if drummer is not None:
+            self.audio_engine.enable_drummer_click = bool(drummer)
+            self._settings.drummer_click_enabled = bool(drummer)
+        if pa is not None:
+            self.audio_engine.enable_pa_click = bool(pa)
+            self._settings.pa_click_enabled = bool(pa)
+        self._save_settings()
+
+    def _open_hub(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        band = self._settings.cloud_band_id
+        url = "https://bandait.releven.cc/hub/" + (f"?banda={band}" if band else "")
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _refresh_band_members(self):
+        """Integrantes de la banda compartida (en segundo plano; RLS filtra)."""
+        import threading
+
+        band_id = self._settings.cloud_band_id
+        if not band_id or not self.cloud.is_signed_in():
+            self.band_view.set_members([])
+            return
+        from src.cloud.members import fetch_band_members
+
+        def work():
+            try:
+                members = fetch_band_members(self.cloud.config, self.cloud.auth.access_token(), band_id)
+            except Exception as e:  # sin red o sesión vencida: la vista queda con lo que tenía
+                logger.info("No se pudieron leer los integrantes: %s", e)
+                return
+            QTimer.singleShot(0, self, lambda: self.band_view.set_members(members))
+
+        threading.Thread(target=work, name="bandait-members", daemon=True).start()
 
     def _add_view(self, key: str, widget: QWidget):
         self.views.addWidget(widget)
@@ -496,6 +577,9 @@ class MainWindow(QMainWindow):
         self.nav.select(key)
         if key in ("setlists", "canciones"):
             self._show_library_page(key)
+        if key == "banda":
+            self.band_view.set_urls(self.server.follower_url(), self.server.director_url())
+            self._refresh_band_members()
         self._current_view = key
 
     def current_view(self) -> str:
@@ -681,6 +765,10 @@ class MainWindow(QMainWindow):
         else:
             self.now_next.setText("Última canción del setlist")
 
+    def _show_live_in_rehearsal(self, song_id):
+        entry = self._live_entry(song_id) if song_id else None
+        self.rehearsal_view.set_song(entry if entry and entry.get("sections") else None)
+
     def _show_live_stems(self, song_id, state: dict):
         title = next((e.get("title") for e in (state or {}).get("setlist", []) if e.get("song_id") == song_id), "")
         # Network only with the band stopped: during the show the laptop's stems are used as they are.
@@ -817,6 +905,7 @@ class MainWindow(QMainWindow):
         action = self.brightness_actions.get(self._settings.brightness)
         if action is not None:
             action.setChecked(True)
+        self.settings_view.set_brightness(self._settings.brightness)
         self._save_settings()
 
     def _save_settings(self):
@@ -831,6 +920,8 @@ class MainWindow(QMainWindow):
         metrics = self.status_audio.fontMetrics()
         self.status_audio.setText(metrics.elidedText(text, Qt.ElideRight, AUDIO_STATUS_MAX_PX))
         self.status_audio.setToolTip(text)
+        if hasattr(self, "settings_view"):
+            self.settings_view.set_audio_status(text)
         ui.set_prop(self.status_audio, "health", {theme.SUCCESS: "ok", theme.DANGER: "bad", theme.WARNING: "warn"}
                     .get(color.upper(), ""))
 
@@ -868,6 +959,8 @@ class MainWindow(QMainWindow):
 
     def _on_server_status(self, status: str, message: str):
         self.status_net.setText(f"Red: {message}")
+        if hasattr(self, "settings_view"):
+            self.settings_view.set_network_status(message, self.server.follower_url() if status == "running" else "")
         ui.set_prop(self.status_net, "health", {"running": "ok", "error": "bad", "starting": "warn"}.get(status, ""))
         ok = status == "running"
         self.stage_view.set_network_status(ok)
@@ -888,6 +981,7 @@ class MainWindow(QMainWindow):
         if self._musicians_panel is not None:
             self._musicians_panel.set_followers(followers)
         self.stage_view.set_followers(_stage_follower_rows(followers, now))
+        self.band_view.set_followers(followers)
 
     def _open_musicians_panel(self):
         from src.ui.dialogs.musicians_panel import MusiciansPanel
@@ -956,6 +1050,7 @@ class MainWindow(QMainWindow):
             self.stage_view.set_song(title=title)
         # Lyrics and chords by section, the same content phones get (CONTRACT_V3 9.1).
         self.stage_view.set_song_content(entry)
+        self._show_live_in_rehearsal(song_id)
         self._show_live_stems(song_id, state)
 
     def _on_clock_beat(self, bar: int, beat: int, bpm: float):
@@ -1334,6 +1429,9 @@ class MainWindow(QMainWindow):
         band = snapshot.workspace.band(band_id) if (snapshot and band_id) else None
         band_name = band.band.name if band else ""
         self.band_label.setText(band_name or "Sin banda")
+        self.band_view.set_band(band_name or "Sin banda")
+        user_label = (self.cloud.user.email or self.cloud.user.name) if self.cloud.user else ""
+        self.settings_view.set_cloud_status(self.cloud.is_signed_in(), user_label, band_name)
         user = self.cloud.user
         if user is None:
             self.nav.set_account("Sin sesión", "Menú Cuenta")

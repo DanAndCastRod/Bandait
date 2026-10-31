@@ -54,7 +54,7 @@ class MusiciansPanel(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
         self.summary = QLabel()
-        self.summary.setStyleSheet("font-size: 14px; font-weight: 600;")
+        self.summary.setProperty("kind", "title")
         layout.addWidget(self.summary)
 
         self.table = QTableWidget(0, len(COLUMNS))
@@ -73,7 +73,7 @@ class MusiciansPanel(QDialog):
             "teléfono (Bluetooth la sube); se compensa sola. Bueno: RTT < 20 ms y jitter < 3 ms."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #8E97A3; font-size: 11px;")
+        hint.setProperty("kind", "muted")
         layout.addWidget(hint)
 
         # Sin reportes nuevos un músico pasa a SIN DATOS: se recalcula aunque nadie reporte.

@@ -102,7 +102,9 @@ def test_no_control_without_a_function(window):
         for b in window.findChildren(QPushButton):
             if not b.isVisibleTo(window):
                 continue
-            if not connected(b, "clicked()", "clicked(bool)", "toggled(bool)", "pressed()", "released()"):
+            # A button of a QButtonGroup works through the group (exclusive choice or idClicked).
+            if b.group() is None and not connected(b, "clicked()", "clicked(bool)", "toggled(bool)",
+                                                   "pressed()", "released()"):
                 problems.append(f"sin acción: {b.text()!r}")
             if not b.isEnabled() and not b.toolTip().startswith("Selecciona"):
                 problems.append(f"deshabilitado sin motivo visible: {b.text()!r} ({b.toolTip()!r})")

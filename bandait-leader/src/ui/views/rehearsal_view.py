@@ -287,7 +287,12 @@ class RehearsalView(QWidget):
         self._update_repeat_enabled()
 
     def _update_repeat_enabled(self) -> None:
-        self.repeat_btn.setEnabled(self._loop_active or self._current_section() is not None)
+        enabled = self._loop_active or self._current_section() is not None
+        self.repeat_btn.setEnabled(enabled)
+        self.repeat_btn.setToolTip(
+            "Repite la sección elegida con stems y clic" if enabled
+            else "Selecciona una canción con secciones en el setlist en vivo para repetir una de ellas"
+        )
 
     def _on_repeat_clicked(self) -> None:
         if self._loop_active:
