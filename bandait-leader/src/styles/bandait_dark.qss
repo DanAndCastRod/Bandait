@@ -703,3 +703,22 @@ QLabel[kind="accent"] { color: @ACTIVE; font-weight: 600; }
 QHeaderView { background-color: @SURFACE; border: none; }
 QHeaderView::section:vertical { background-color: @SURFACE; color: @FAINT; border: none; padding: 0 @SPACE_1; }
 QTableView QTableCornerButton::section, QTableWidget QTableCornerButton::section { background-color: @SURFACE; border: none; }
+
+/* Tonos de texto (propiedad tone) */
+QLabel[tone="muted"] { color: @MUTED; }
+QLabel[tone="secondary"] { color: @SECONDARY; }
+QLabel[tone="faint"] { color: @FAINT; }
+QLabel[tone="fg"] { color: @FG; }
+QLabel[tone="active"] { color: @ACTIVE; }
+QLabel[tone="success"] { color: @SUCCESS; }
+QLabel[tone="warning"] { color: @WARNING; }
+QLabel[tone="danger"] { color: @DANGER; }
+
+/* Dialogos (antes DIALOG_QSS en account_login.py) */
+QLabel#detail { color: @SECONDARY; }
+QLabel#hint { color: @WARNING; border: 1px solid @LINE_STRONG; border-radius: @RADIUS; padding: @SPACE_2; }
+QLabel#error { color: @DANGER; }
+QProgressBar { background-color: @SURFACE; border: 1px solid @RAISED; max-height: 6px; border-radius: 3px; }
+QProgressBar::chunk { background-color: @ACTIVE; }
+QListWidget { background-color: @SURFACE; color: @FG; border: 1px solid @RAISED; }
+QListWidget::item:selected { background-color: @ACTIVE; color: @ON_ACCENT; }

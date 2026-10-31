@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.ui.dialogs.account_login import DIALOG_QSS
 
 EMPTY_SETLIST_WARNING = (
     "Este setlist está vacío: agrega canciones en bandait.releven.cc/hub "
@@ -33,13 +32,12 @@ class _PickerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumSize(460, 360)
-        self.setStyleSheet(DIALOG_QSS)
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.setContentsMargins(20, 20, 20, 20)
         head = QLabel(heading)
         head.setFont(QFont("Inter", 13, QFont.Bold))
-        head.setStyleSheet("color: #5CC8C2;")
+        _tone(head, "active")
         layout.addWidget(head)
         info = QLabel(explanation)
         info.setObjectName("detail")
@@ -62,11 +60,7 @@ class _PickerDialog(QDialog):
         buttons.addWidget(cancel)
         self.accept_btn = QPushButton(accept_text)
         self.accept_btn.setEnabled(False)
-        self.accept_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #5CC8C2; color: #5CC8C2; }"
-            "QPushButton:hover { background: #5CC8C2; color: #15181C; }"
-            "QPushButton:disabled { border-color: #363D47; color: #4A525D; }"
-        )
+        self.accept_btn.setProperty("variant", "primary")
         self.accept_btn.clicked.connect(self.accept)
         buttons.addWidget(self.accept_btn)
         layout.addLayout(buttons)
@@ -136,9 +130,7 @@ class SetlistSelectorDialog(_PickerDialog):
         # Inline warning for an empty setlist (it can still be chosen).
         self.empty_warning = QLabel(EMPTY_SETLIST_WARNING)
         self.empty_warning.setWordWrap(True)
-        self.empty_warning.setStyleSheet(
-            "color: #15181C; background: #D9A24E; padding: 6px 10px; font-weight: bold;"
-        )
+        self.empty_warning.setObjectName("setlistNotice")
         self.empty_warning.setVisible(False)
         layout = self.layout()
         layout.insertWidget(layout.indexOf(self.empty_label) + 1, self.empty_warning)
@@ -158,3 +150,9 @@ class SetlistSelectorDialog(_PickerDialog):
 
     def selected_setlist_id(self) -> Optional[str]:
         return self.selected_value()
+
+def _tone(widget, tone: str) -> None:
+    """Text color from the QSS template (QLabel[tone=...]); no inline styles."""
+    from src.ui.components import set_prop
+
+    set_prop(widget, "tone", tone)

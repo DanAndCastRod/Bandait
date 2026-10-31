@@ -183,9 +183,9 @@ class MainWindow(QMainWindow):
         try:
             self.audio_engine.start()
         except AudioUnavailable as e:
-            self._set_audio_status(f"Audio: no disponible ({e}). Los seguidores siguen sincronizados.", "#D9A24E")
+            self._set_audio_status(f"Audio: no disponible ({e}). Los seguidores siguen sincronizados.", theme.WARNING)
         except Exception as e:  # defensive: PortAudio raises many types
-            self._set_audio_status(f"Audio: error al abrir el dispositivo ({e})", "#D96459")
+            self._set_audio_status(f"Audio: error al abrir el dispositivo ({e})", theme.DANGER)
         else:
             self._on_audio_started()
 
@@ -769,7 +769,7 @@ class MainWindow(QMainWindow):
             try:
                 self.audio_engine.set_device(choice.device_id)
             except Exception as e:
-                self._set_audio_status(f"Audio: no se pudo abrir el dispositivo ({e})", "#D96459")
+                self._set_audio_status(f"Audio: no se pudo abrir el dispositivo ({e})", theme.DANGER)
             else:
                 if not was_running:
                     self._start_audio()
@@ -831,7 +831,8 @@ class MainWindow(QMainWindow):
         metrics = self.status_audio.fontMetrics()
         self.status_audio.setText(metrics.elidedText(text, Qt.ElideRight, AUDIO_STATUS_MAX_PX))
         self.status_audio.setToolTip(text)
-        self.status_audio.setStyleSheet(f"color: {color};")
+        ui.set_prop(self.status_audio, "health", {theme.SUCCESS: "ok", theme.DANGER: "bad", theme.WARNING: "warn"}
+                    .get(color.upper(), ""))
 
     def _test_click(self):
         """Audio > Probar click: says where it should sound, or why it cannot."""
@@ -860,15 +861,14 @@ class MainWindow(QMainWindow):
         text = f"Audio: {eng.device_name} ({eng.output_channels} salidas; {routing})"
         if self._saved_device_missing:
             text += " - el dispositivo guardado no está conectado"
-        self._set_audio_status(text, "#B8CF7A")
+        self._set_audio_status(text, theme.SUCCESS)
 
     def _on_audio_stopped(self):
-        self._set_audio_status("Audio: detenido", "#7C8591")
+        self._set_audio_status("Audio: detenido", theme.MUTED)
 
     def _on_server_status(self, status: str, message: str):
-        colors = {"running": "#B8CF7A", "error": "#D96459", "starting": "#D9A24E", "stopped": "#7C8591"}
         self.status_net.setText(f"Red: {message}")
-        self.status_net.setStyleSheet(f"color: {colors.get(status, '#7C8591')};")
+        ui.set_prop(self.status_net, "health", {"running": "ok", "error": "bad", "starting": "warn"}.get(status, ""))
         ok = status == "running"
         self.stage_view.set_network_status(ok)
         self.transport.set_network_status(ok, "Red OK" if ok else "Red caída")
@@ -1035,11 +1035,11 @@ class MainWindow(QMainWindow):
                 os.makedirs(base_dir, exist_ok=True)
                 folder = self.audio_engine.start_recording(session_name, base_dir=base_dir)
                 self._last_recording_folder = folder
-                self._set_audio_status(f"GRABANDO — {session_name}", "#D96459")
+                self._set_audio_status(f"GRABANDO — {session_name}", theme.DANGER)
                 self.status_bar.showMessage(f"Grabación iniciada: {os.path.basename(folder)}", 5000)
             except Exception as e:
                 self.transport.set_recording_state(False)
-                self._set_audio_status(f"Audio: no se pudo grabar ({e})", "#D9A24E")
+                self._set_audio_status(f"Audio: no se pudo grabar ({e})", theme.WARNING)
         else:
             try:
                 self.audio_engine.stop_recording()
