@@ -145,6 +145,8 @@ class FakeSupabase:
         # a list = the rows RLS would return. shared_status forces an HTTP error.
         self.shared_bands = None
         self.shared_status = None
+        # bandait_band_members: None = the table does not exist; else {band_id: rows}.
+        self.band_members = None
         self.requests = []
         self.rest_writes = []
         # Optional threading.Event: when set to an Event, workspace reads wait on it
@@ -282,6 +284,20 @@ class FakeSupabase:
                     if fake.shared_bands is None:
                         return self._json(404, {"code": "PGRST205", "message": "Could not find the table"})
                     return self._json(200, fake.shared_bands)
+                if parsed.path == "/rest/v1/bandait_band_members":
+                    if self.headers.get("apikey") != fake.api_key:
+                        return self._json(401, {"message": "No API key found in request"})
+                    entry, _token = self._bearer()
+                    if entry is None:
+                        return self._json(401, {"code": "PGRST301", "message": "JWT expired"})
+                    if fake.band_members is None:
+                        return self._json(404, {"code": "PGRST205", "message": "Could not find the table"})
+                    if query.get("select", [""])[0] != "email,role,name,instrument":
+                        return self._json(400, {"message": "bad select"})
+                    band = query.get("band_id", [""])[0]
+                    if not band.startswith("eq."):
+                        return self._json(400, {"message": "bad filter"})
+                    return self._json(200, fake.band_members.get(band[3:], []))  # RLS: [] if not a member
                 return self._json(404, {"message": "not found"})
 
             def do_POST(self):
