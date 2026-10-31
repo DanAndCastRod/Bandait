@@ -1,10 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, RefreshCw, Sparkles, X } from 'lucide-react'
-import { useHub } from '../context/hubContextCore'
+import React, { useEffect, useRef, useState } from 'react'
+import { CloudDownload, Copy, RefreshCw, Sparkles, X } from 'lucide-react'
 import type { Song, SongSection } from '../types/hub'
-import { cloudBandKey, isCloudSongId, StemCloudError } from '../services/stemCloud'
-import { stemCloudTarget } from '../services/stemCloudConfig'
-import { listStemSongs, loadStemSong } from '../services/stemStore'
+import { downloadStems, getManifest, isCloudSongId, StemCloudError } from '../services/stemCloud'
+import { listStemSongs, loadStemSong, StemStoreError } from '../services/stemStore'
 import { mixStemsToWav, MixError } from '../services/stemMix'
 import {
   ANALYSIS_POLL_MS,
@@ -17,6 +15,7 @@ import {
 } from '../services/stemAnalysis'
 import { BPM_MAX, BPM_MIN, SECTION_KIND_LABELS } from '../services/workspaceSchema'
 import { uuidv4 } from '../services/uuid'
+import { useStemCloudTarget } from '../hooks/useStemCloudTarget'
 import { ChordProPreview } from './ChordProPreview'
 import { cardStyle, colors, ghostButton, inputStyle, mono, primaryButton } from './hubStyles'
 
@@ -36,7 +35,6 @@ interface Props {
 }
 
 type Phase =
-  | { kind: 'closed' }
   | { kind: 'loading' }
   | { kind: 'none' }
   | { kind: 'working'; text: string }
@@ -45,10 +43,14 @@ type Phase =
   | { kind: 'failed'; message: string }
   | { kind: 'accepted'; count: number }
   | { kind: 'dismissed' }
+  /** Quien no es editor y no hay borrador que mostrar: el panel no aparece. */
+  | { kind: 'hidden' }
+
+/** De donde saldria la mezcla para analizar. */
+type StemSource = 'checking' | 'local' | 'cloud' | 'none'
 
 function errorText(err: unknown): string {
-  if (err instanceof MixError) return err.message
-  if (err instanceof StemCloudError) return err.message
+  if (err instanceof MixError || err instanceof StemCloudError || err instanceof StemStoreError) return err.message
   return 'No se pudo completar el análisis.'
 }
 
@@ -64,35 +66,33 @@ function formatDate(iso: string | null): string {
 }
 
 /**
- * ANALIZAR CON IA, dentro del editor de una cancion: solo editores y solo si la cancion tiene
- * stems en este equipo. Primero consulta el ultimo analisis guardado en la nube (lo pudo lanzar
- * el lider); ACEPTAR reemplaza las secciones del formulario sin guardar la cancion.
+ * ANALIZAR CON IA, dentro del editor de una cancion. Con sesion de nube, al abrir el editor
+ * consulta el ultimo analisis guardado (lo pudo lanzar el lider): el borrador se ve aunque los
+ * stems no esten en este navegador. Editores: ACEPTAR (reemplaza las secciones del formulario sin
+ * guardar), DESCARTAR y ANALIZAR, que usa los stems de este equipo o primero los descarga de la
+ * nube. Los demas integrantes ven el borrador en solo lectura, si el Worker se lo entrega.
  */
 export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept }) => {
-  const { sharing, activeBand } = useHub()
-  const [hasStems, setHasStems] = useState<boolean | null>(null)
-  const [phase, setPhase] = useState<Phase>({ kind: 'closed' })
+  const { target, canEdit } = useStemCloudTarget()
+  const [hasLocal, setHasLocal] = useState<boolean | null>(null)
+  const [cloudStems, setCloudStems] = useState<number | null>(null)
+  const [phase, setPhase] = useState<Phase>({ kind: 'loading' })
   const [applyBpm, setApplyBpm] = useState(false)
   const [applyKey, setApplyKey] = useState(false)
   const [copied, setCopied] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const aliveRef = useRef(true)
 
-  const canEdit = sharing.activeCanEdit
-  const target = useMemo(
-    () => (sharing.cloudSignedIn && activeBand ? stemCloudTarget(cloudBandKey(activeBand.id, sharing.activeShared)) : null),
-    [sharing.cloudSignedIn, sharing.activeShared, activeBand]
-  )
-
+  // Stems en este equipo (IndexedDB); sin nube, son la unica fuente.
   useEffect(() => {
     aliveRef.current = true
     let cancelled = false
     listStemSongs()
       .then((list) => {
-        if (!cancelled) setHasStems(list.some((r) => r.songId === song.id && r.tracks.length > 0))
+        if (!cancelled) setHasLocal(list.some((r) => r.songId === song.id && r.tracks.length > 0))
       })
       .catch(() => {
-        if (!cancelled) setHasStems(false)
+        if (!cancelled) setHasLocal(false)
       })
     return () => {
       cancelled = true
@@ -101,51 +101,89 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
     }
   }, [song.id])
 
-  if (!canEdit || !hasStems) return null
-
   const clearTimer = () => {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = null
   }
 
-  const showState = (state: Awaited<ReturnType<typeof getAnalysis>>, since: number) => {
-    if (!aliveRef.current) return
-    if (state.status === 'SUCCEEDED') {
-      setApplyBpm(false)
-      setApplyKey(false)
-      setPhase({ kind: 'draft', draft: state.draft, createdAt: state.createdAt })
-    } else if (state.status === 'FAILED') setPhase({ kind: 'failed', message: state.error })
-    else if (state.status === 'none') setPhase({ kind: 'none' })
-    else {
-      if (nowMs() - since > ANALYSIS_TIMEOUT_MS) {
-        setPhase({ kind: 'failed', message: analysisErrorMessage('timeout') })
-        return
-      }
-      setPhase({ kind: 'running', since })
-      clearTimer()
-      timerRef.current = setTimeout(() => void poll(since), ANALYSIS_POLL_MS)
-    }
-  }
-
   const poll = async (since: number) => {
     if (!target || !aliveRef.current) return
     try {
-      showState(await getAnalysis(target, song.id), since)
+      const state = await getAnalysis(target, song.id)
+      if (!aliveRef.current) return
+      if (state.status === 'SUCCEEDED') {
+        setApplyBpm(false)
+        setApplyKey(false)
+        setPhase({ kind: 'draft', draft: state.draft, createdAt: state.createdAt })
+      } else if (!canEdit) {
+        // Solo lectura: sin borrador terminado no hay nada que mostrarle.
+        setPhase({ kind: 'hidden' })
+      } else if (state.status === 'FAILED') setPhase({ kind: 'failed', message: state.error })
+      else if (state.status === 'none') setPhase({ kind: 'none' })
+      else if (nowMs() - since > ANALYSIS_TIMEOUT_MS) setPhase({ kind: 'failed', message: analysisErrorMessage('timeout') })
+      else {
+        setPhase({ kind: 'running', since })
+        clearTimer()
+        timerRef.current = setTimeout(() => void poll(since), ANALYSIS_POLL_MS)
+      }
     } catch (err) {
-      if (aliveRef.current) setPhase({ kind: 'failed', message: errorText(err) })
+      if (!aliveRef.current) return
+      // Un no editor recibe 403 del Worker (hoy solo editores leen el analisis): sin panel.
+      setPhase(canEdit ? { kind: 'failed', message: errorText(err) } : { kind: 'hidden' })
     }
   }
 
-  const open = () => {
-    if (!target) return
-    setPhase({ kind: 'loading' })
-    void poll(nowMs())
+  // Al abrir el editor: primero el ultimo analisis; y si no hay stems aqui, si estan en la nube.
+  const songCloudOk = !!target && isCloudSongId(song.id)
+  useEffect(() => {
+    if (!songCloudOk || !target) return
+    let cancelled = false
+    void (async () => {
+      await poll(nowMs())
+      if (cancelled || !canEdit) return
+      try {
+        const manifest = await getManifest(target, song.id)
+        if (!cancelled) setCloudStems(manifest ? manifest.stems.length : 0)
+      } catch {
+        if (!cancelled) setCloudStems(0)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // poll lee target/canEdit/song.id del render actual; solo se lanza al cambiar estos.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songCloudOk, target, canEdit, song.id])
+
+  const source: StemSource = hasLocal === null ? 'checking' : hasLocal ? 'local' : cloudStems === null ? 'checking' : cloudStems > 0 ? 'cloud' : 'none'
+
+  // Sin nube (o con un id que el Worker no acepta): solo un aviso para editores.
+  if (!songCloudOk) {
+    if (!canEdit || (!target && !hasLocal)) return null
+    return (
+      <div data-testid="song-analysis" data-phase="no-cloud" style={{ ...cardStyle, padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontFamily: mono, fontSize: '12px', fontWeight: 700, color: colors.text }}>
+          <Sparkles size={14} style={{ color: colors.violet }} /> ANALIZAR CON IA
+        </span>
+        <div style={{ fontSize: '12px', color: colors.muted }}>
+          {target ? 'El id de esta canción no es válido para la nube.' : 'Necesitas una sesión de nube activa: el análisis corre en la nube de la banda.'}
+        </div>
+      </div>
+    )
   }
+  if (phase.kind === 'hidden' || (!canEdit && phase.kind !== 'draft')) return null
 
   const analyze = async () => {
-    if (!target) return
+    if (!target || !canEdit) return
     clearTimer()
     try {
+      if (!hasLocal) {
+        // Los stems estan en la nube y no en este navegador: primero se descargan a IndexedDB.
+        setPhase({ kind: 'working', text: 'DESCARGANDO STEMS DE LA NUBE...' })
+        await downloadStems(target, song.id, (done, total) => aliveRef.current && setPhase({ kind: 'working', text: `DESCARGANDO STEMS ${done}/${total}...` }))
+        if (!aliveRef.current) return
+        setHasLocal(true)
+      }
       setPhase({ kind: 'working', text: 'LEYENDO STEMS...' })
       const loaded = await loadStemSong(song.id)
       if (!loaded) throw new MixError('La canción no tiene stems en este equipo.')
@@ -181,30 +219,50 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
     }
   }
 
+  const reload = () => {
+    setPhase({ kind: 'loading' })
+    void poll(nowMs())
+  }
+
   const busy = phase.kind === 'loading' || phase.kind === 'working' || phase.kind === 'running'
   const small: React.CSSProperties = { ...ghostButton, padding: '6px 10px', fontSize: '11px' }
-  const analyzeButton = (label: string) => (
-    <button type="button" className="stx-btn" data-testid="analysis-start" disabled={busy} onClick={() => void analyze()} style={{ ...primaryButton(colors.violet), color: colors.onAccent, padding: '6px 12px', fontSize: '11px' }}>
-      <Sparkles size={13} /> {label}
-    </button>
-  )
+  const analyzeButton = (again: boolean) => {
+    const fromCloud = source === 'cloud'
+    const label = fromCloud ? `DESCARGAR STEMS Y ANALIZAR${again ? ' DE NUEVO' : ''}` : again ? 'ANALIZAR DE NUEVO' : 'ANALIZAR'
+    return (
+      <button
+        type="button"
+        className="stx-btn"
+        data-testid="analysis-start"
+        disabled={busy || source === 'checking' || source === 'none'}
+        title={source === 'none' ? 'No hay stems de esta canción en este equipo ni en la nube' : undefined}
+        onClick={() => void analyze()}
+        style={{ ...primaryButton(colors.violet), color: colors.onAccent, padding: '6px 12px', fontSize: '11px' }}
+      >
+        {fromCloud ? <CloudDownload size={13} /> : <Sparkles size={13} />} {label}
+      </button>
+    )
+  }
+  const noStemsNote =
+    canEdit && source === 'none' ? (
+      <div data-testid="analysis-no-stems" style={{ fontSize: '12px', color: colors.warning }}>
+        No hay stems de esta canción en este equipo ni en la nube: cárgalos en PISTAS para poder analizarla.
+      </div>
+    ) : null
 
   return (
     <div data-testid="song-analysis" data-phase={phase.kind} style={{ ...cardStyle, padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontFamily: mono, fontSize: '12px', fontWeight: 700, color: colors.text }}>
-          <Sparkles size={14} style={{ color: colors.violet }} /> ANALIZAR CON IA
+          <Sparkles size={14} style={{ color: colors.violet }} /> {canEdit ? 'ANALIZAR CON IA' : 'BORRADOR DEL ANÁLISIS CON IA'}
         </span>
-        <span style={{ fontSize: '11px', color: colors.muted }}>Secciones, acordes por compás, BPM y tono a partir de los stems de este equipo.</span>
-        {phase.kind === 'closed' && (
-          <button type="button" className="stx-btn" data-testid="analysis-open" disabled={!target} onClick={open} style={{ ...small, marginLeft: 'auto' }}>
-            ABRIR ANÁLISIS
-          </button>
-        )}
+        <span style={{ fontSize: '11px', color: colors.muted }}>Secciones, acordes por compás, BPM y tono a partir de los stems de la canción.</span>
       </div>
 
-      {!target && (
-        <div style={{ fontSize: '12px', color: colors.muted }}>Necesitas una sesión de nube activa: el análisis corre en la nube de la banda.</div>
+      {!canEdit && (
+        <div data-testid="analysis-readonly" style={{ fontSize: '12px', color: colors.muted }}>
+          Solo lectura: solo el Owner o el Director musical pueden aceptar este borrador o analizar de nuevo.
+        </div>
       )}
 
       {phase.kind === 'loading' && <div style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>CONSULTANDO EL ÚLTIMO ANÁLISIS...</div>}
@@ -213,8 +271,9 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '12px', color: colors.muted }}>
             Esta canción no tiene análisis. Se envía una mezcla mono de los stems (sin clic ni guía) y tarda uno a tres minutos.
+            {source === 'cloud' && ' Los stems están en la nube: primero se descargan a este equipo.'}
           </span>
-          {analyzeButton('ANALIZAR')}
+          {analyzeButton(false)}
         </div>
       )}
 
@@ -235,10 +294,10 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
             {phase.message}
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button type="button" className="stx-btn" onClick={open} style={small}>
+            <button type="button" className="stx-btn" onClick={reload} style={small}>
               <RefreshCw size={12} /> CONSULTAR DE NUEVO
             </button>
-            {analyzeButton('ANALIZAR DE NUEVO')}
+            {analyzeButton(true)}
           </div>
         </div>
       )}
@@ -251,10 +310,10 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
       {phase.kind === 'dismissed' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '12px', color: colors.muted }}>Borrador descartado. Sigue guardado en la nube.</span>
-          <button type="button" className="stx-btn" onClick={open} style={small}>
+          <button type="button" className="stx-btn" onClick={reload} style={small}>
             VER DE NUEVO
           </button>
-          {analyzeButton('ANALIZAR DE NUEVO')}
+          {analyzeButton(true)}
         </div>
       )}
 
@@ -264,6 +323,7 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
           createdAt={phase.createdAt}
           song={song}
           beatsPerBar={beatsPerBar}
+          readOnly={!canEdit}
           applyBpm={applyBpm}
           applyKey={applyKey}
           setApplyBpm={setApplyBpm}
@@ -272,10 +332,10 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
           onCopy={copyLyrics}
           onAccept={() => accept(phase.draft)}
           onDismiss={() => setPhase({ kind: 'dismissed' })}
-          analyzeAgain={analyzeButton('ANALIZAR DE NUEVO')}
+          analyzeAgain={canEdit ? analyzeButton(true) : null}
         />
       )}
-      {!isCloudSongId(song.id) && <div style={{ fontSize: '11px', color: colors.warning }}>El id de esta canción no es válido para la nube.</div>}
+      {noStemsNote}
     </div>
   )
 }
@@ -285,6 +345,8 @@ interface DraftViewProps {
   createdAt: string | null
   song: Song
   beatsPerBar: number
+  /** Quien no es editor: sin casillas ni ACEPTAR / DESCARTAR. */
+  readOnly: boolean
   applyBpm: boolean
   applyKey: boolean
   setApplyBpm: (v: boolean) => void
@@ -293,7 +355,7 @@ interface DraftViewProps {
   onCopy: (text: string) => void
   onAccept: () => void
   onDismiss: () => void
-  analyzeAgain: React.ReactNode
+  analyzeAgain: React.ReactNode | null
 }
 
 const DraftView: React.FC<DraftViewProps> = (p) => {
@@ -307,9 +369,19 @@ const DraftView: React.FC<DraftViewProps> = (p) => {
         <span>
           BORRADOR{p.createdAt ? ` DEL ${formatDate(p.createdAt).toUpperCase()}` : ''} · {draft.sections.length} SECCIONES · {totalBars} COMPASES
         </span>
-        <span style={{ marginLeft: 'auto' }}>{p.analyzeAgain}</span>
+        {p.analyzeAgain && <span style={{ marginLeft: 'auto' }}>{p.analyzeAgain}</span>}
       </div>
 
+      {p.readOnly ? (
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '12px', color: colors.text }}>
+          <span>
+            BPM sugerido: <strong>{draft.bpm ?? 'sin dato'}</strong> <span style={{ color: colors.muted }}>(actual {p.song.bpm})</span>
+          </span>
+          <span>
+            Tono sugerido: <strong>{draft.key ?? 'sin dato'}</strong> <span style={{ color: colors.muted }}>(actual {p.song.key || 'sin tono'})</span>
+          </span>
+        </div>
+      ) : (
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: bpmOk ? colors.text : colors.disabled, cursor: bpmOk ? 'pointer' : 'not-allowed' }}>
           <input
@@ -336,6 +408,7 @@ const DraftView: React.FC<DraftViewProps> = (p) => {
           Tono sugerido: <strong>{draft.key ?? 'sin dato'}</strong> <span style={{ color: colors.muted }}>(actual {p.song.key || 'sin tono'})</span>
         </label>
       </div>
+      )}
       {draft.beats_per_bar !== p.beatsPerBar && (
         <div style={{ fontSize: '11px', color: colors.warning }}>
           El borrador cuenta {draft.beats_per_bar} tiempos por compás y la canción tiene {p.beatsPerBar}: revisa los compases después de aceptar.
@@ -374,6 +447,7 @@ const DraftView: React.FC<DraftViewProps> = (p) => {
         </ul>
       )}
 
+      {!p.readOnly && (
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         <button type="button" className="stx-btn" data-testid="analysis-dismiss" onClick={p.onDismiss} style={{ ...ghostButton, background: 'transparent', color: colors.muted }}>
           <X size={13} /> DESCARTAR
@@ -390,6 +464,7 @@ const DraftView: React.FC<DraftViewProps> = (p) => {
           ACEPTAR
         </button>
       </div>
+      )}
     </div>
   )
 }

@@ -28,7 +28,7 @@ en el líder, `songs.cloud_id`). `{name}` es el nombre del archivo, codificado c
 | `PUT /v1/bands/{band}/songs/{song}/manifest` | Owner, MusicDirector | manifiesto guardado (con `updated_at`) |
 | `DELETE /v1/bands/{band}/songs/{song}` | Owner, MusicDirector | `{"deleted": n}` |
 | `POST /v1/bands/{band}/songs/{song}/analysis` | Owner, MusicDirector | 202 `{"status":"STARTED","job_id"}`; cuerpo = mezcla de audio, `Content-Length` obligatorio, `Content-Type` `audio/*`, máximo 95 MB |
-| `GET /v1/bands/{band}/songs/{song}/analysis` | Owner, MusicDirector | `{"status":"STARTED","job_id"}`, `{"status":"SUCCEEDED","job_id","created_at","draft"}`, `{"status":"FAILED","job_id","error"}` o 404 `no_analysis` |
+| `GET /v1/bands/{band}/songs/{song}/analysis` | integrante (leer no gasta créditos) | `{"status":"STARTED","job_id"}`, `{"status":"SUCCEEDED","job_id","created_at","draft"}`, `{"status":"FAILED","job_id","error"}` o 404 `no_analysis` |
 
 Subir: primero cada archivo, después el manifiesto. El manifiesto es el commit: cada archivo que
 lista debe existir con ese `size` (si no, 409 `missing_file`) y los archivos que ya no lista se

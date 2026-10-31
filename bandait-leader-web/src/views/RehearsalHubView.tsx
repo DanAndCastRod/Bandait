@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Music, Sliders } from 'lucide-react'
+import { CloudDownload, Music, Pencil, Sliders } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
 import { StemStudio } from '../components/StemStudio'
 import { ChordProPreview } from '../components/ChordProPreview'
 import { listStemSongs, StemStoreError, type StemSongRecord } from '../services/stemStore'
+import { downloadStems, getManifest, isCloudSongId, StemCloudError, type CloudManifest } from '../services/stemCloud'
+import { formatBytes } from '../services/stemImport'
 import type { StemPlayer } from '../services/stemPlayer'
 import { barAtTime, sectionIndexAtBar, sectionSpans } from '../services/stemTiming'
+import { useStemCloudTarget } from '../hooks/useStemCloudTarget'
 import type { Song } from '../types/hub'
 import { cardStyle, colors, headerBarStyle, labelStyle, mono, primaryButton, smallInputStyle, viewStyle } from '../components/hubStyles'
 
@@ -13,18 +16,31 @@ type PrompterMode = 'chords' | 'lyrics'
 
 interface Props {
   onOpenTracks: () => void
+  /** Abre la cancion en el editor de CANCIONES (para agregarle secciones). */
+  onEditSong: (songId: string) => void
 }
 
+/** Consultas de manifiesto en paralelo al abrir ENSAYO (una por cancion sin stems locales). */
+const MANIFEST_CONCURRENCY = 4
+
 /**
- * ENSAYO: reproducir los stems guardados en este equipo y seguir la seccion actual con su
- * ChordPro. Usa el mismo reproductor que PISTAS (StemStudio); el prompter lee la posicion con
- * rAF y solo vuelve a pintar React cuando cambia la seccion.
+ * ENSAYO: ensayo individual en casa. Reproduce los stems de una cancion (de este equipo, o
+ * descargados de la nube de la banda) y sigue la seccion actual con su ChordPro. Usa el mismo
+ * reproductor que PISTAS (StemStudio); el prompter lee la posicion con rAF y solo vuelve a pintar
+ * React cuando cambia la seccion. Descargar es lectura: cualquier integrante puede hacerlo.
  */
-export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks }) => {
+export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) => {
   const { songs } = useHub()
+  const { target, bandKey } = useStemCloudTarget()
   const [records, setRecords] = useState<Map<string, StemSongRecord> | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pickedId, setPickedId] = useState<string | null>(null)
+  /** Manifiestos de la nube por `${bandKey}:${songId}` (null = sin stems en la nube). */
+  const [cloud, setCloud] = useState<Map<string, CloudManifest | null>>(() => new Map())
+  const [cloudError, setCloudError] = useState<string | null>(null)
+  const [download, setDownload] = useState<{ songId: string; done: number; total: number } | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const inFlight = useRef(new Set<string>())
 
   useEffect(() => {
     let cancelled = false
@@ -42,12 +58,58 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks }) => {
     }
   }, [])
 
-  const withStems = useMemo(
-    () => (records ? songs.filter((s) => records.has(s.id)).sort((a, b) => a.title.localeCompare(b.title, 'es')) : []),
-    [songs, records]
+  const cloudKey = useCallback((songId: string) => `${bandKey}:${songId}`, [bandKey])
+
+  // Canciones sin stems en este navegador cuyo manifiesto falta consultar.
+  const pending = useMemo(
+    () => (target && records ? songs.filter((s) => !records.has(s.id) && isCloudSongId(s.id) && !cloud.has(cloudKey(s.id))) : []),
+    [target, records, songs, cloud, cloudKey]
   )
-  const song = withStems.find((s) => s.id === pickedId) ?? withStems[0] ?? null
+
+  useEffect(() => {
+    if (!target || pending.length === 0) return
+    const queue = pending.filter((s) => !inFlight.current.has(cloudKey(s.id)))
+    if (queue.length === 0) return
+    for (const s of queue) inFlight.current.add(cloudKey(s.id))
+    let firstError: string | null = null
+    const results = new Map<string, CloudManifest | null>()
+    const worker = async () => {
+      for (let s = queue.shift(); s; s = queue.shift()) {
+        const key = cloudKey(s.id)
+        try {
+          results.set(key, await getManifest(target, s.id))
+        } catch (err) {
+          results.set(key, null)
+          if (!firstError) firstError = err instanceof StemCloudError ? err.message : 'No se pudo consultar la nube.'
+        }
+      }
+    }
+    void Promise.all(Array.from({ length: Math.min(MANIFEST_CONCURRENCY, queue.length) }, worker)).then(() => {
+      for (const key of results.keys()) inFlight.current.delete(key)
+      setCloud((prev) => new Map([...prev, ...results]))
+      if (firstError) setCloudError(firstError)
+    })
+  }, [target, pending, cloudKey])
+
+  const cloudOnly = useMemo(
+    () =>
+      records && target
+        ? songs.filter((s) => !records.has(s.id) && (cloud.get(cloudKey(s.id))?.stems.length ?? 0) > 0)
+        : [],
+    [songs, records, target, cloud, cloudKey]
+  )
+  const options = useMemo(() => {
+    const local = records ? songs.filter((s) => records.has(s.id)) : []
+    return [...local.map((s) => ({ song: s, where: 'local' as const })), ...cloudOnly.map((s) => ({ song: s, where: 'cloud' as const }))].sort((a, b) =>
+      a.song.title.localeCompare(b.song.title, 'es')
+    )
+  }, [songs, records, cloudOnly])
+
+  const picked = options.find((o) => o.song.id === pickedId) ?? options[0] ?? null
+  const song = picked?.song ?? null
   const record = song && records ? records.get(song.id) ?? null : null
+  const manifest = song ? cloud.get(cloudKey(song.id)) ?? null : null
+  const checkingCloud = pending.length > 0
 
   const setRecord = (songId: string, next: StemSongRecord | null) =>
     setRecords((prev) => {
@@ -57,6 +119,20 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks }) => {
       return map
     })
 
+  const downloadSong = async (songId: string) => {
+    if (!target || download) return
+    setDownloadError(null)
+    setDownload({ songId, done: 0, total: manifest?.stems.length ?? 0 })
+    try {
+      const { record: rec } = await downloadStems(target, songId, (done, total) => setDownload({ songId, done, total }))
+      setRecord(songId, rec)
+    } catch (err) {
+      setDownloadError(err instanceof StemCloudError || err instanceof StemStoreError ? err.message : 'No se pudieron descargar los stems.')
+    } finally {
+      setDownload(null)
+    }
+  }
+
   return (
     <div style={viewStyle}>
       <div style={headerBarStyle}>
@@ -65,8 +141,9 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks }) => {
             <Music size={22} style={{ color: colors.cyan, flexShrink: 0 }} />
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>Ensayo</h2>
           </div>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: colors.muted }}>
-            Toca con los stems de la canción y sigue la sección actual con sus acordes o su letra. Repite una sección desde REPETIR.
+          <p data-testid="rehearsal-context" style={{ margin: '4px 0 0 0', fontSize: '13px', color: colors.muted }}>
+            Ensayo individual, en casa: toca encima de los stems de la canción y sigue la sección actual con sus acordes o su letra. Repite una
+            sección desde REPETIR. En vivo manda el líder.
           </p>
         </div>
       </div>
@@ -78,39 +155,88 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks }) => {
       )}
 
       {records === null && <div style={{ fontFamily: mono, fontSize: '12px', color: colors.muted }}>LEYENDO STEMS GUARDADOS...</div>}
+      {checkingCloud && (
+        <div data-testid="rehearsal-cloud-checking" style={{ fontFamily: mono, fontSize: '12px', color: colors.muted }}>
+          CONSULTANDO LOS STEMS DE LA NUBE DE LA BANDA...
+        </div>
+      )}
+      {cloudError && <div style={{ fontSize: '12px', color: colors.warning }}>{cloudError}</div>}
 
-      {records !== null && withStems.length === 0 && (
+      {records !== null && !checkingCloud && options.length === 0 && (
         <div data-testid="rehearsal-empty" style={{ ...cardStyle, padding: '24px 16px', textAlign: 'center', color: colors.muted, fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-          Ninguna canción de esta banda tiene stems en este equipo. Cárgalos en PISTAS y vuelve a ensayar.
+          {target
+            ? 'Ninguna canción de esta banda tiene stems en este equipo ni en la nube. Cárgalos en PISTAS y vuelve a ensayar.'
+            : 'Ninguna canción de esta banda tiene stems en este equipo. Cárgalos en PISTAS y vuelve a ensayar.'}
           <button type="button" className="stx-btn" onClick={onOpenTracks} style={{ ...primaryButton(colors.cobalt), color: colors.onAccent }}>
             <Sliders size={13} /> IR A PISTAS
           </button>
         </div>
       )}
 
-      {song && record && (
-        <>
-          <div style={{ ...cardStyle, padding: '12px 14px', minWidth: 0 }}>
-            <label htmlFor="rehearsal-song" style={labelStyle}>
-              CANCIÓN CON STEMS EN ESTE EQUIPO
-            </label>
-            <select
-              id="rehearsal-song"
-              data-testid="rehearsal-song-select"
-              className="stx-field"
-              value={song.id}
-              onChange={(e) => setPickedId(e.target.value)}
-              style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '7px 8px', fontSize: '13px' }}
-            >
-              {withStems.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title} · {s.bpm} BPM
-                </option>
-              ))}
-            </select>
+      {song && (
+        <div style={{ ...cardStyle, padding: '12px 14px', minWidth: 0 }}>
+          <label htmlFor="rehearsal-song" style={labelStyle}>
+            CANCIÓN
+          </label>
+          <select
+            id="rehearsal-song"
+            data-testid="rehearsal-song-select"
+            className="stx-field"
+            value={song.id}
+            onChange={(e) => {
+              setPickedId(e.target.value)
+              setDownloadError(null)
+            }}
+            style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '7px 8px', fontSize: '13px' }}
+          >
+            {options.map((o) => (
+              <option key={o.song.id} value={o.song.id}>
+                {o.song.title} · {o.song.bpm} BPM · {o.where === 'local' ? 'en este equipo' : 'en la nube'}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {song && !record && manifest && (
+        <div data-testid="rehearsal-cloud-only" style={{ ...cardStyle, padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
+          <div style={{ fontSize: '13px', color: colors.text }}>
+            Los stems de <strong>{song.title}</strong> están en la nube de la banda ({manifest.stems.length} stems,{' '}
+            {formatBytes(manifest.stems.reduce((n, s) => n + s.size, 0))}). Descárgalos a este equipo para ensayar; quedan guardados aquí.
           </div>
-          <RehearsalSession key={`${song.id}:${record.tracks.map((t) => t.id).join(',')}`} song={song} record={record} onRecordChange={(next) => setRecord(song.id, next)} />
-        </>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="stx-btn"
+              data-testid="rehearsal-download"
+              disabled={!!download}
+              onClick={() => void downloadSong(song.id)}
+              style={{ ...primaryButton(colors.cyan), color: colors.onAccent }}
+            >
+              <CloudDownload size={14} /> DESCARGAR PARA ENSAYAR
+            </button>
+            {download && download.songId === song.id && (
+              <span data-testid="rehearsal-download-progress" style={{ fontFamily: mono, fontSize: '12px', color: colors.cobalt }}>
+                DESCARGANDO {download.done}/{download.total}...
+              </span>
+            )}
+          </div>
+          {downloadError && (
+            <div role="alert" style={{ fontSize: '12px', color: colors.danger }}>
+              {downloadError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {song && record && (
+        <RehearsalSession
+          key={`${song.id}:${record.tracks.map((t) => t.id).join(',')}`}
+          song={song}
+          record={record}
+          onRecordChange={(next) => setRecord(song.id, next)}
+          onEditSong={() => onEditSong(song.id)}
+        />
       )}
     </div>
   )
@@ -120,10 +246,11 @@ interface SessionProps {
   song: Song
   record: StemSongRecord
   onRecordChange: (record: StemSongRecord | null) => void
+  onEditSong: () => void
 }
 
 /** Prompter + reproductor de una cancion. Se monta de nuevo al cambiar de cancion o de pistas. */
-const RehearsalSession: React.FC<SessionProps> = ({ song, record, onRecordChange }) => {
+const RehearsalSession: React.FC<SessionProps> = ({ song, record, onRecordChange, onEditSong }) => {
   const [mode, setMode] = useState<PrompterMode>('chords')
   const [current, setCurrent] = useState(-1)
   const playerRef = useRef<StemPlayer | null>(null)
@@ -202,10 +329,15 @@ const RehearsalSession: React.FC<SessionProps> = ({ song, record, onRecordChange
         </div>
 
         {status === 'none' && (
-          <div data-testid="rehearsal-no-sections" style={{ fontSize: '13px', color: colors.muted }}>
-            {song.sections.length === 0
-              ? 'Esta canción no tiene secciones con compases. Agrégalas en CANCIONES (o con ANALIZAR CON IA) para seguirla aquí.'
-              : 'El tempo o los compases de la canción no son válidos: revísalos en CANCIONES.'}
+          <div data-testid="rehearsal-no-sections" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
+            <span style={{ fontSize: '13px', color: colors.muted }}>
+              {song.sections.length === 0
+                ? 'Esta canción no tiene secciones con compases, así que no hay nada que seguir. Agrégalas en CANCIONES: a mano, pegando ChordPro o aceptando el borrador de ANALIZAR CON IA.'
+                : 'El tempo o los compases de la canción no son válidos: revísalos en CANCIONES.'}
+            </span>
+            <button type="button" className="stx-btn" data-testid="rehearsal-edit-song" onClick={onEditSong} style={{ ...primaryButton(colors.violet), color: colors.onAccent }}>
+              <Pencil size={13} /> ABRIR EN CANCIONES
+            </button>
           </div>
         )}
 

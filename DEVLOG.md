@@ -1176,3 +1176,25 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - Líder: `pytest -q` da `450 passed`.
   - Hub: `npm run verify:logic` da `57 ok, 0 fallas` en el script de stems.
 * **Pendientes:** integración con Music AI para proponer secciones y ChordPro (entrada aparte cuando exista).
+
+### [2026-10-31] - Hub: borrador de IA y ENSAYO desde la nube (PR #37); el Worker deja leer el análisis a toda la banda
+* **Sprint / Módulo:** `bandait-leader-web` (subagente), `bandait-stems-worker`
+* **Estado encontrado:** con la 2.3.0, Daniel Castaneda analizó "Dame tu aire" desde el líder, pero no veía el borrador en el hub ni podía usar Analizar ni ENSAYO.
+  - El análisis sí funcionó de punta a punta: `wrangler r2 object get` de `bands/32056489-.../songs/c68e20c5-.../analysis.json` muestra un `draft` con 8 secciones, 124 BPM y tono E, creado el 2026-10-31T22:04:37Z.
+* **Causa:**
+  - El hub mostraba el panel de análisis y ENSAYO solo si los stems estaban en el IndexedDB de ese navegador (`if (!canEdit || !hasStems) return null`). Los stems estaban solo en la nube.
+  - Además, el Worker exigía rol de editor también para leer el borrador.
+* **Corrección aplicada:**
+  - Hub (subagente, PR #37):
+    - el borrador se ve y se acepta sin stems locales;
+    - DESCARGAR STEMS Y ANALIZAR;
+    - ENSAYO lista las canciones que están en la nube, con DESCARGAR PARA ENSAYAR;
+    - si una canción no tiene secciones, ofrece abrirla en CANCIONES;
+    - quien no es editor ve el borrador en solo lectura.
+  - Worker: `GET .../analysis` abierto a cualquier integrante (leer no gasta créditos de Music AI); `POST` sigue siendo solo para editores.
+* **Verificación:**
+  - Hub (según el informe del subagente): `verify:logic` da `68 ok, 0 fallas`; Playwright leader-web da `44 passed`, 5 de ellas nuevas.
+  - Worker: `npm test` da `# pass 13`, con la lectura de un integrante cubierta.
+* **Pendientes:**
+  1. Daniel Castaneda acepta el borrador de "Dame tu aire" en CANCIONES y lo guarda; con eso ENSAYO tiene secciones.
+  2. Desplegar el Worker con este cambio (`wrangler deploy` vía ClipVault).
