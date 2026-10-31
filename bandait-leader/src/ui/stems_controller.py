@@ -164,24 +164,21 @@ class StemsController(QObject):
         self._worker_load(token, song_id)
 
     def _worker_setlist(self, token: int, live_song: Optional[str], client: StemsCloud, songs) -> None:
-        done = errors = 0
+        counts = {"updated": 0, "current": 0, "none": 0, "local": 0, "error": 0, "no_cloud": 0}
         first_error = ""
         for i, (song_id, title) in enumerate(songs):
             ref = self._cloud_ref(song_id)
             if ref is None:
+                counts["no_cloud"] += 1
                 continue
             self.message.emit(f"Stems del setlist {i + 1}/{len(songs)}: {title}")
             try:
-                if self._sync(client, song_id, ref, title, force=True) == "updated":
-                    done += 1
+                counts[self._sync(client, song_id, ref, title, force=True)] += 1
             except (CloudError, lib.StemImportError) as exc:
-                errors += 1
+                counts["error"] += 1
                 first_error = first_error or f"{title}: {exc}"
                 logger.warning("Stems de %s: %s", title, exc)
-        self.message.emit(
-            f"Stems del setlist: {done} canciones descargadas"
-            + (f", {errors} con error (primero: {first_error})" if errors else "")
-        )
+        self.message.emit(setlist_summary(counts, first_error))
         if live_song:
             self._worker_load(token, live_song)
         else:
@@ -286,3 +283,16 @@ def song_bpm(entry: Optional[dict], fallback: float) -> float:
 def _envelopes(decoded) -> list:
     """Drawing envelopes of the decoded stems (worker thread). None for a stem that failed."""
     return [lib.envelope(data) if data is not None else None for _info, data, _err in decoded or []]
+
+
+def setlist_summary(counts: dict, first_error: str = "") -> str:
+    """One status-bar line for Descargar stems del setlist. Every outcome is counted:
+    "0 descargadas" alone used to hide that a song was already up to date (2026-10-31)."""
+    parts = [f"{counts.get('updated', 0)} descargadas"]
+    for key, text in (("current", "ya al día"), ("none", "sin stems en la nube"),
+                      ("no_cloud", "solo locales (sin id del hub)")):
+        if counts.get(key):
+            parts.append(f"{counts[key]} {text}")
+    if counts.get("error"):
+        parts.append(f"{counts['error']} con error (primero: {first_error})")
+    return "Stems del setlist: " + ", ".join(parts)

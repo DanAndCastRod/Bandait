@@ -1,45 +1,271 @@
 {
-  "description": "Recognition of stem files by name (Moises exports and hand-made files). Hub and leader both test against these cases. Rules: (1) only audio extensions count (mp3, m4a, wav, flac, ogg, aac); paths under __MACOSX/ and files starting with '.' are ignored (role null). (2) Normalize the base name without extension: lower case, accents removed, the characters _ - . ( ) [ ] replaced by spaces, spaces collapsed. (3) Find every keyword below as whole words; the match that ENDS LAST in the name wins (the stem name usually follows the song title); on a tie, the longer keyword wins. (4) No match: role 'unknown' (the user picks the role).",
-  "extensions": ["mp3", "m4a", "wav", "flac", "ogg", "aac"],
+  "description": "Recognition of stem files by name (Moises exports and hand-made files). Hub and leader both test against these cases. Rules: (1) only audio extensions count (mp3, m4a, wav, flac, ogg, aac); paths under __MACOSX/ and files starting with '.' are ignored (role null). (2) Normalize the base name without extension: lower case, accents removed, the characters _ - . ( ) [ ] replaced by spaces, spaces collapsed. (3) Find every keyword below as whole words; the match that ENDS LAST in the name wins (the stem name usually follows the song title); on a tie, the longer keyword wins. (4) No match: role 'unknown' (the user picks the role). Real Moises export names (2026-10-31): '<artist> - <title>_<stem>_mixed.mp3'.",
+  "extensions": [
+    "mp3",
+    "m4a",
+    "wav",
+    "flac",
+    "ogg",
+    "aac"
+  ],
   "roles": {
-    "vocals": { "label": "Voz", "keywords": ["lead vocals", "lead vocal", "vocals", "vocal", "vox", "voz", "voces", "voz principal"] },
-    "backing_vocals": { "label": "Coros", "keywords": ["backing vocals", "backing vocal", "back vocals", "backing", "bvs", "coros", "coro", "segundas voces"] },
-    "drums": { "label": "Bateria", "keywords": ["drums", "drum", "bateria", "percussion", "percusion", "perc"] },
-    "bass": { "label": "Bajo", "keywords": ["bass", "bajo"] },
-    "guitar": { "label": "Guitarra", "keywords": ["guitar", "guitars", "guitarra", "guitarras", "gtr"] },
-    "keys": { "label": "Teclados", "keywords": ["piano", "keys", "keyboard", "keyboards", "teclado", "teclados", "synth", "synths", "sintetizador", "organ", "organo"] },
-    "strings": { "label": "Cuerdas", "keywords": ["strings", "cuerdas", "violin", "violins"] },
-    "wind": { "label": "Vientos", "keywords": ["wind", "winds", "brass", "metales", "vientos", "sax", "trumpet"] },
-    "other": { "label": "Otros", "keywords": ["other", "others", "otros", "otro", "rest", "residual"] },
-    "instrumental": { "label": "Instrumental", "keywords": ["instrumental", "accompaniment", "karaoke"] },
-    "click": { "label": "Clic", "keywords": ["click", "clic", "metronome", "metronomo"] },
-    "guide": { "label": "Guia", "keywords": ["guide", "guia", "cues", "cue"] }
+    "vocals": {
+      "label": "Voz",
+      "keywords": [
+        "lead vocals",
+        "lead vocal",
+        "vocals",
+        "vocal",
+        "vox",
+        "voz",
+        "voces",
+        "voz principal"
+      ]
+    },
+    "backing_vocals": {
+      "label": "Coros",
+      "keywords": [
+        "backing vocals",
+        "backing vocal",
+        "back vocals",
+        "backing",
+        "bvs",
+        "coros",
+        "coro",
+        "segundas voces"
+      ]
+    },
+    "drums": {
+      "label": "Bateria",
+      "keywords": [
+        "drums",
+        "drum",
+        "bateria",
+        "percussion",
+        "percusion",
+        "perc"
+      ]
+    },
+    "bass": {
+      "label": "Bajo",
+      "keywords": [
+        "bass",
+        "bajo"
+      ]
+    },
+    "guitar": {
+      "label": "Guitarra",
+      "keywords": [
+        "guitar",
+        "guitars",
+        "guitarra",
+        "guitarras",
+        "gtr"
+      ]
+    },
+    "keys": {
+      "label": "Teclados",
+      "keywords": [
+        "piano",
+        "keys",
+        "keyboard",
+        "keyboards",
+        "teclado",
+        "teclados",
+        "synth",
+        "synths",
+        "sintetizador",
+        "organ",
+        "organo"
+      ]
+    },
+    "strings": {
+      "label": "Cuerdas",
+      "keywords": [
+        "strings",
+        "cuerdas",
+        "violin",
+        "violins"
+      ]
+    },
+    "wind": {
+      "label": "Vientos",
+      "keywords": [
+        "wind",
+        "winds",
+        "brass",
+        "metales",
+        "vientos",
+        "sax",
+        "trumpet"
+      ]
+    },
+    "other": {
+      "label": "Otros",
+      "keywords": [
+        "other",
+        "others",
+        "otros",
+        "otro",
+        "rest",
+        "residual"
+      ]
+    },
+    "instrumental": {
+      "label": "Instrumental",
+      "keywords": [
+        "instrumental",
+        "accompaniment",
+        "karaoke"
+      ]
+    },
+    "click": {
+      "label": "Clic",
+      "keywords": [
+        "click",
+        "clic",
+        "metronome",
+        "metronomo"
+      ]
+    },
+    "guide": {
+      "label": "Guia",
+      "keywords": [
+        "guide",
+        "guia",
+        "cues",
+        "cue"
+      ]
+    }
   },
   "cases": [
-    { "file": "vocals.mp3", "role": "vocals" },
-    { "file": "Hoy vuelvo a casa - Vocals.mp3", "role": "vocals" },
-    { "file": "Hoy vuelvo a casa - Backing Vocals.mp3", "role": "backing_vocals" },
-    { "file": "Hoy vuelvo a casa_bass.m4a", "role": "bass" },
-    { "file": "Hoy vuelvo a casa (Drums).mp3", "role": "drums" },
-    { "file": "Hoy vuelvo a casa [Other].mp3", "role": "other" },
-    { "file": "Hoy vuelvo a casa - Guitar.mp3", "role": "guitar" },
-    { "file": "Hoy vuelvo a casa - Piano.MP3", "role": "keys" },
-    { "file": "Hoy vuelvo a casa - Instrumental.mp3", "role": "instrumental" },
-    { "file": "La Voz del Mar - Drums.mp3", "role": "drums" },
-    { "file": "Coro de ninos - Vocals.wav", "role": "vocals" },
-    { "file": "Mi tema - Coros.mp3", "role": "backing_vocals" },
-    { "file": "Batería.wav", "role": "drums" },
-    { "file": "Guitarra Eléctrica.flac", "role": "guitar" },
-    { "file": "Bajo.ogg", "role": "bass" },
-    { "file": "click track.wav", "role": "click" },
-    { "file": "Guia de voz.mp3", "role": "vocals" },
-    { "file": "Cues.mp3", "role": "guide" },
-    { "file": "Moises/Hoy vuelvo a casa/drums.mp3", "role": "drums" },
-    { "file": "Track 7.mp3", "role": "unknown" },
-    { "file": "Basslines and Vox.mp3", "role": "vocals" },
-    { "file": "notes.txt", "role": null },
-    { "file": "cover.jpg", "role": null },
-    { "file": "__MACOSX/Hoy vuelvo a casa/._vocals.mp3", "role": null },
-    { "file": ".DS_Store", "role": null }
+    {
+      "file": "vocals.mp3",
+      "role": "vocals"
+    },
+    {
+      "file": "Hoy vuelvo a casa - Vocals.mp3",
+      "role": "vocals"
+    },
+    {
+      "file": "Hoy vuelvo a casa - Backing Vocals.mp3",
+      "role": "backing_vocals"
+    },
+    {
+      "file": "Hoy vuelvo a casa_bass.m4a",
+      "role": "bass"
+    },
+    {
+      "file": "Hoy vuelvo a casa (Drums).mp3",
+      "role": "drums"
+    },
+    {
+      "file": "Hoy vuelvo a casa [Other].mp3",
+      "role": "other"
+    },
+    {
+      "file": "Hoy vuelvo a casa - Guitar.mp3",
+      "role": "guitar"
+    },
+    {
+      "file": "Hoy vuelvo a casa - Piano.MP3",
+      "role": "keys"
+    },
+    {
+      "file": "Hoy vuelvo a casa - Instrumental.mp3",
+      "role": "instrumental"
+    },
+    {
+      "file": "La Voz del Mar - Drums.mp3",
+      "role": "drums"
+    },
+    {
+      "file": "Coro de ninos - Vocals.wav",
+      "role": "vocals"
+    },
+    {
+      "file": "Mi tema - Coros.mp3",
+      "role": "backing_vocals"
+    },
+    {
+      "file": "Batería.wav",
+      "role": "drums"
+    },
+    {
+      "file": "Guitarra Eléctrica.flac",
+      "role": "guitar"
+    },
+    {
+      "file": "Bajo.ogg",
+      "role": "bass"
+    },
+    {
+      "file": "click track.wav",
+      "role": "click"
+    },
+    {
+      "file": "Guia de voz.mp3",
+      "role": "vocals"
+    },
+    {
+      "file": "Cues.mp3",
+      "role": "guide"
+    },
+    {
+      "file": "Moises/Hoy vuelvo a casa/drums.mp3",
+      "role": "drums"
+    },
+    {
+      "file": "Alex Ubago - Dame tu aire (Home Session 2020)_bass_mixed.mp3",
+      "role": "bass"
+    },
+    {
+      "file": "Alex Ubago - Dame tu aire (Home Session 2020)_drums_mixed.mp3",
+      "role": "drums"
+    },
+    {
+      "file": "Alex Ubago - Dame tu aire (Home Session 2020)_guitars_mixed.mp3",
+      "role": "guitar"
+    },
+    {
+      "file": "Alex Ubago - Dame tu aire (Home Session 2020)_other_mixed.mp3",
+      "role": "other"
+    },
+    {
+      "file": "Alex Ubago - Dame tu aire (Home Session 2020)_piano_mixed.mp3",
+      "role": "keys"
+    },
+    {
+      "file": "Alex Ubago - Dame tu aire (Home Session 2020)_vocals_mixed.mp3",
+      "role": "vocals"
+    },
+    {
+      "file": "Alex Ubago - Dame tu aire (Home Session 2020)_bass_mixed (2).mp3",
+      "role": "bass"
+    },
+    {
+      "file": "Track 7.mp3",
+      "role": "unknown"
+    },
+    {
+      "file": "Basslines and Vox.mp3",
+      "role": "vocals"
+    },
+    {
+      "file": "notes.txt",
+      "role": null
+    },
+    {
+      "file": "cover.jpg",
+      "role": null
+    },
+    {
+      "file": "__MACOSX/Hoy vuelvo a casa/._vocals.mp3",
+      "role": null
+    },
+    {
+      "file": ".DS_Store",
+      "role": null
+    }
   ]
 }
