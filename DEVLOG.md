@@ -988,3 +988,35 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Ensayo con interfaz real: confirmar la alineación stems-clic y el tiempo de carga de un setlist con stems.
   3. Decidir dónde guardar los stems en la nube (R2 por URiT o Supabase Storage) para que el hub y el líder los compartan. Hoy cada uno importa los suyos.
   4. Decidir si se agrega scipy al instalador (mejor remuestreo de 44,1 kHz a 48 kHz) o si se abre el stream a 44,1 kHz cuando la canción tiene stems.
+
+### [2026-10-30] - Fase 3 (hub): estudio de stems en casa (PR #28)
+* **Sprint / Módulo:** `bandait-leader-web` (vista PISTAS & STEMS), `e2e`, `landing/hub`. Lo hizo un subagente en un worktree aparte; la sesión principal lo integra.
+* **Acción técnica realizada:**
+  - `StemsHubView` era una maqueta (matriz fija de 6 canales, input sin manejador, Demucs inexistente). Ahora:
+    - por cada canción, importar un ZIP de Moises o archivos sueltos;
+    - lista reconocida con `stemNames.ts`, que aplica las mismas reglas y casos que el líder;
+    - un rol `unknown` bloquea el guardado hasta corregirlo o desmarcar la pista;
+    - opciones AGREGAR o REEMPLAZAR, y quitar.
+  - Almacenamiento: audio en IndexedDB (`bandait_stems`, por `song_id`), solo en el navegador. No se tocó el esquema del workspace ni la sincronización con Supabase.
+  - Reproductor Web Audio:
+    - todas las pistas arrancan en el mismo instante del AudioContext;
+    - mute, solo, volumen por pista y general;
+    - repetir una sección o un tramo A-B programando tramos consecutivos, sin `source.loop`, para que pistas de distinta duración no se desalineen;
+    - el AudioContext se cierra al salir de la vista.
+  - ZIP con `fflate` 0.8.2, cargado solo cuando se suelta un ZIP (fragmento de 7.6 KB).
+* **Impacto en Audio / Red / UI:** solo el hub; en el escenario no cambia nada. Ninguna red nueva.
+* **Verificación y Pruebas (resultado literal, del informe del subagente):**
+  - `npm run lint && npm run verify:logic && npm run build` dan EXIT=0. `verify:logic` da `38 ok, 0 fallas` en el script nuevo (los 25 casos del fixture, más los tiempos de sección).
+  - Playwright leader-web da `26 passed`, y luego `3 passed` en el spec nuevo tras agregar dos pruebas. Las pruebas usan WAV y ZIP generados dentro de la prueba y cubren:
+    - lista reconocida y un MP3 corrupto con su error en la pista;
+    - reproducir, detener, mute y repetir la Intro;
+    - stems que siguen tras recargar, y borrado;
+    - un ZIP dañado con error legible;
+    - 390 px sin scroll horizontal y el AudioContext cerrado al salir.
+  - Capturas a 1440 y 390 px revisadas por el subagente.
+* **Pendientes:**
+  1. No se escuchó el audio (Chromium sin pantalla). Solo se probó WAV; MP3, M4A, FLAC y OGG dependen del navegador.
+  2. Memoria: 6 stems de 4 minutos ocupan unos 0.5 GB decodificados; hay que medirlo en un móvil.
+  3. Decidir si al SALIR del hub en equipos compartidos se borran los stems de IndexedDB.
+  4. Retirar en un cambio aparte `stemsMap`, `SongStems`, `updateStemTrackVolume` y los datos demo de 6 canales, que ya no usa ninguna vista.
+  5. Nube: los mismos pendientes que el líder (dónde guardar y si los metadatos van al workspace).
