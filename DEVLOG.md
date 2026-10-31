@@ -1095,3 +1095,18 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Instalar la 2.2.1 y repetir Audio > "Descargar stems del setlist (nube)".
   2. Si otro cliente en Python (por ejemplo el de Supabase en `src/cloud/http.py`) pasa algún día por un dominio con esa protección, necesitará el mismo User-Agent. Hoy Supabase responde bien.
+
+### [2026-10-31] - Líder 2.2.2: el resumen de "Descargar stems del setlist" cuenta todos los resultados
+* **Sprint / Módulo:** `bandait-leader` (`stems_controller.py`), `bandait-protocol/fixtures/stem_names.json`
+* **Estado encontrado:** con la 2.2.1, Daniel Castaneda vio "0 canciones descargadas" y lo leyó como un fallo. En realidad la descarga funcionó:
+  - `logs/bandait-leader.log` no tiene errores desde que arrancó la 2.2.1 (00:02); los 60 `HTTP 403` son de la 2.2.0, a las 23:35;
+  - `Documents/Bandait/Stems/c68e20c5-.../manifest.json` tiene los 6 stems de "Dame tu aire" con `cloud.updated_at = 2026-10-31T04:29:48.259Z`.
+* **Causa:** solo una canción tenía stems en la nube. Si ya estaba bajada, porque se descarga sola al elegirla con la banda detenida, contaba como "current"; las otras 29 contaban como "none". El resumen solo mostraba las descargadas y los errores.
+* **Corrección aplicada:**
+  - `setlist_summary` cuenta descargadas, ya al día, sin stems en la nube, solo locales y con error. Ejemplo: "0 descargadas, 1 ya al día, 29 sin stems en la nube".
+  - El fixture de nombres suma los nombres reales de la exportación de Moises (`<artista> - <título>_<stem>_mixed.mp3`, incluido `guitars` y `piano`). Los reconocen el líder y el hub.
+  - Versión 2.2.2.
+* **Verificaciones:**
+  - Líder: `pytest -q` da `450 passed`.
+  - Hub: `npm run verify:logic` da `57 ok, 0 fallas` en el script de stems.
+* **Pendientes:** integración con Music AI para proponer secciones y ChordPro (entrada aparte cuando exista).

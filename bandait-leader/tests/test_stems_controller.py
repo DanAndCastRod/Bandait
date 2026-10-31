@@ -183,7 +183,18 @@ def test_download_whole_setlist(qtbot, engine, tmp_path):
     c.message.connect(messages.append)
     c.show_song("l1", "Uno", 100)
     assert c.download_setlist([("l1", "Uno"), ("l2", "Dos"), ("local", "Sin nube")])
-    qtbot.waitUntil(lambda: any("2 canciones descargadas" in m for m in messages), timeout=8000)
+    qtbot.waitUntil(lambda: any("Stems del setlist: 2 descargadas" in m for m in messages), timeout=8000)
+    final = [m for m in messages if m.startswith("Stems del setlist:")][-1]
+    assert final == "Stems del setlist: 2 descargadas, 1 solo locales (sin id del hub)"
     qtbot.waitUntil(lambda: engine.has_stems(), timeout=5000)  # the live song reloads with its stems
     assert lib.load("l2", tmp_path / "Stems") is not None
     assert lib.load("local", tmp_path / "Stems") is None
+
+
+def test_setlist_summary_counts_every_outcome():
+    from src.ui.stems_controller import setlist_summary
+
+    assert setlist_summary({"updated": 0, "current": 1, "none": 29}) == (
+        "Stems del setlist: 0 descargadas, 1 ya al día, 29 sin stems en la nube")
+    assert setlist_summary({"updated": 2, "error": 1}, "Uno: HTTP 403") == (
+        "Stems del setlist: 2 descargadas, 1 con error (primero: Uno: HTTP 403)")
