@@ -24,10 +24,15 @@ interface Usage {
   count: number
 }
 
-export const SongsHubView: React.FC = () => {
+interface Props {
+  /** Abre el editor de esta cancion al entrar (lo pide ENSAYO cuando la cancion no tiene secciones). */
+  openSongId?: string | null
+}
+
+export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
   const { activeBand, songs, playlists, saveSong, duplicateSong, deleteSong } = useHub()
   const [query, setQuery] = useState('')
-  const [editing, setEditing] = useState<Song | 'new' | null>(null)
+  const [editing, setEditing] = useState<Song | 'new' | null>(() => (openSongId ? songs.find((s) => s.id === openSongId) ?? null : null))
   const [deleting, setDeleting] = useState<Song | null>(null)
 
   const usageBySong = useMemo(() => {

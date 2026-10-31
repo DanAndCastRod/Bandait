@@ -241,7 +241,6 @@ test.describe('Web Admin Hub 2.3 - ANALIZAR CON IA (Worker simulado)', () => {
     ];
     const editor = await openEditorWithStems(page, worker);
     const panel = editor.getByTestId('song-analysis');
-    await panel.getByTestId('analysis-open').click();
     await expect(panel).toHaveAttribute('data-phase', 'none');
     await panel.getByTestId('analysis-start').click();
     await expect(panel).toHaveAttribute('data-phase', 'running', { timeout: 15000 });
@@ -278,7 +277,6 @@ test.describe('Web Admin Hub 2.3 - ANALIZAR CON IA (Worker simulado)', () => {
     worker.getReplies = [{ status: 200, body: { status: 'SUCCEEDED', job_id: 'job-lider', created_at: '2026-10-30T20:15:00.000Z', draft: DRAFT } }];
     const editor = await openEditorWithStems(page, worker);
     const panel = editor.getByTestId('song-analysis');
-    await panel.getByTestId('analysis-open').click();
     await expect(panel.getByTestId('analysis-draft')).toBeVisible();
     await expect(panel.getByTestId('analysis-draft')).toContainText(/BORRADOR DEL .*2026/);
     await expect(panel.getByTestId('analysis-start')).toHaveText(/ANALIZAR DE NUEVO/);
@@ -294,7 +292,6 @@ test.describe('Web Admin Hub 2.3 - ANALIZAR CON IA (Worker simulado)', () => {
     worker.postReply = { status: 403, body: { error: 'not_an_editor' } };
     const editor = await openEditorWithStems(page, worker);
     const panel = editor.getByTestId('song-analysis');
-    await panel.getByTestId('analysis-open').click();
     await panel.getByTestId('analysis-start').click();
     await expect(panel.getByTestId('analysis-error')).toHaveText(
       'Solo el Owner o el Director musical de la banda pueden analizar canciones con IA.',
@@ -303,7 +300,7 @@ test.describe('Web Admin Hub 2.3 - ANALIZAR CON IA (Worker simulado)', () => {
     await expect(editor.getByTestId('section-row')).toHaveCount(0);
   });
 
-  test('sin stems en este equipo no aparece ANALIZAR CON IA', async ({ page }) => {
+  test('sin stems en este equipo ni en la nube: ANALIZAR deshabilitado con el motivo', async ({ page }) => {
     const worker = new FakeAnalysisWorker();
     const fake = new FakeSupabase();
     fake.workspaces.push({ user_id: USER.id, workspace: workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']), updated_at: fake.now() });
@@ -311,8 +308,10 @@ test.describe('Web Admin Hub 2.3 - ANALIZAR CON IA (Worker simulado)', () => {
     await signInWithFakeCloud(page, fake);
     await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
     await page.getByTestId('song-card').filter({ hasText: 'Tema A' }).getByRole('button', { name: 'EDITAR' }).click();
-    await expect(page.getByTestId('song-editor')).toBeVisible();
-    await expect(page.getByTestId('song-analysis')).toHaveCount(0);
-    expect(worker.calls).toEqual([]);
+    const panel = page.getByTestId('song-editor').getByTestId('song-analysis');
+    await expect(panel).toHaveAttribute('data-phase', 'none');
+    await expect(panel.getByTestId('analysis-no-stems')).toContainText('ni en la nube');
+    await expect(panel.getByTestId('analysis-start')).toBeDisabled();
+    expect(worker.calls.map((c) => c.method)).toEqual(['GET']);
   });
 });

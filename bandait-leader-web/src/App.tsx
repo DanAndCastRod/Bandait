@@ -52,6 +52,12 @@ const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 const HubMainContent: React.FC = () => {
   const { user, cloud, initialSyncBlocking, syncStatus, retrySync, continueOffline, logout } = useHub()
   const [activeTab, setActiveTab] = useState<HubTab>('setlists')
+  /** Cancion a abrir en el editor de CANCIONES (pedido desde ENSAYO); se olvida al cambiar de vista. */
+  const [editSongRequest, setEditSongRequest] = useState<string | null>(null)
+  const selectTab = (tab: HubTab) => {
+    setEditSongRequest(null)
+    setActiveTab(tab)
+  }
   const [showCloudModal, setShowCloudModal] = useState(false)
 
   // Cuenta de nube guardada: esperar a que Supabase confirme la sesion antes de mostrar datos.
@@ -128,7 +134,7 @@ const HubMainContent: React.FC = () => {
       }}
     >
       {/* TOP HEADER NAVIGATION & MULTI-BAND SWITCHER (INCLUDES MOBILE BOTTOM BAR) */}
-      <HubNavbar activeTab={activeTab} onSelectTab={setActiveTab} />
+      <HubNavbar activeTab={activeTab} onSelectTab={selectTab} />
 
       <SyncNoticeBanner onOpenCloud={() => setShowCloudModal(true)} />
 
@@ -148,8 +154,16 @@ const HubMainContent: React.FC = () => {
           contenido mixto). El control de transporte del director vive en la PWA servida desde la LAN.
         */}
         {activeTab === 'setlists' && <PlaylistsHubView />}
-        {activeTab === 'songs' && <SongsHubView />}
-        {activeTab === 'rehearsal' && <RehearsalHubView onOpenTracks={() => setActiveTab('tracks')} />}
+        {activeTab === 'songs' && <SongsHubView openSongId={editSongRequest} />}
+        {activeTab === 'rehearsal' && (
+          <RehearsalHubView
+            onOpenTracks={() => selectTab('tracks')}
+            onEditSong={(songId) => {
+              setEditSongRequest(songId)
+              setActiveTab('songs')
+            }}
+          />
+        )}
         {activeTab === 'tracks' && <StemsHubView />}
         {activeTab === 'band' && <BandMembersHubView />}
         {activeTab === 'settings' && <SettingsHubView />}
