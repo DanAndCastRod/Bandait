@@ -35,6 +35,7 @@ from src.ui.views.library_view import LibraryView
 from src.ui.views.stage_view import StageView
 from src.ui.widgets.dim_overlay import BRIGHTNESS_LEVELS, DimOverlay, clamp_brightness
 from src.cloud.stems_cloud import StemsCloud
+from src.ui import theme
 from src.ui.stems_controller import StemsController, import_dialog_filter, song_bpm
 from src.ui.widgets.mixer import MixerWidget
 from src.ui.widgets.stem_mixer import StemMixerWidget
@@ -497,31 +498,29 @@ class MainWindow(QMainWindow):
         return panel
 
     def _apply_styles(self):
-        """Aplicar QSS profesional OLED Noir."""
+        """Fuentes incluidas, fuente base y la plantilla QSS Grafito rellenada con los tokens
+        de theme.py. Se aplica a la aplicación entera para que los diálogos también la tengan."""
+        from PySide6.QtWidgets import QApplication
+
+        theme.load_fonts()
+        app = QApplication.instance()
+        base = QFont(theme.FONT_UI)
+        base.setPixelSize(theme.SIZE_BASE)
+        app.setFont(base)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        possible_paths = [
+        for qss_path in (
             os.path.join(script_dir, "..", "styles", "bandait_dark.qss"),
-            os.path.join(script_dir, "..", "..", "styles", "bandait_dark.qss"),
             os.path.join(os.path.dirname(sys.argv[0]), "src", "styles", "bandait_dark.qss"),
-        ]
-        for qss_path in possible_paths:
+        ):
             qss_path = os.path.abspath(qss_path)
             if os.path.exists(qss_path):
                 try:
                     with open(qss_path, "r", encoding="utf-8") as f:
-                        self.setStyleSheet(f.read())
+                        app.setStyleSheet(theme.render_qss(f.read()))
                     return
-                except Exception as e:
-                    print(f"[UI] Error leyendo QSS {qss_path}: {e}")
-        print("[UI] WARNING: No se encontró archivo QSS. Usando estilos por defecto.")
-        self.setStyleSheet("""
-            QMainWindow, QWidget { background-color: #15181C; color: #D5DAE0; }
-            QPushButton {
-                background: transparent; border: 2px solid #5CC8C2; color: #5CC8C2;
-                border-radius: 4px; padding: 8px 20px;
-            }
-            QPushButton:hover { background: #5CC8C2; color: #15181C; }
-        """)
+                except Exception as e:  # a broken style must not stop the show
+                    logger.error("No se pudo aplicar el QSS %s: %s", qss_path, e)
+        logger.warning("No se encontró bandait_dark.qss: estilos por defecto de Qt")
 
     def _setup_menu(self):
         menubar = self.menuBar()

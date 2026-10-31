@@ -75,3 +75,93 @@ def rgb(hex_color: str) -> tuple:
     """'#RRGGBB' -> (r, g, b)."""
     h = hex_color.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+# --------------------------------------------------------------------------- Bandait 2.3
+# Tonos derivados que el QSS ya usaba (antes como hex sueltos).
+RAISED_HOVER = "#2B313A"
+FAINT_STRONG = "#5A626E"
+ACTIVE_LIGHT = "#9BE0DC"
+ACTIVE_DEEP = "#3E9F9A"
+DANGER_BG = "#2A1D1D"
+DANGER_LIGHT = "#E68A80"
+SUCCESS_BG = "#1E2318"
+ON_ACCENT = BG  # texto sobre un acento claro
+ACTIVE_SOFT = "rgba(92, 200, 194, 0.12)"
+ACTIVE_GLOW = "rgba(92, 200, 194, 0.2)"
+SUCCESS_SOFT = "rgba(184, 207, 122, 0.12)"
+SPECIAL_SOFT = "rgba(180, 142, 219, 0.08)"
+
+# Tipografía: las mismas familias de la PWA y el hub, incluidas en resources/fonts (OFL).
+FONT_UI = "Space Grotesk"
+FONT_MONO = "IBM Plex Mono"
+FONT_UI_STACK = '"Space Grotesk", "Segoe UI", sans-serif'
+FONT_MONO_STACK = '"IBM Plex Mono", "Cascadia Mono", Consolas, monospace'
+# Escala en px. BASE es el tamaño por defecto de la app (QApplication.setFont), no una regla
+# QSS: `QWidget { font-size }` pisaba cualquier tamaño puesto con setFont (2026-10-30).
+SIZE_CAPTION = 11
+SIZE_SMALL = 12
+SIZE_BASE = 14
+SIZE_BODY = 15
+SIZE_TITLE = 18
+SIZE_HEADING = 24
+SIZE_DISPLAY = 32
+SIZE_HERO = 64
+SIZE_GIANT = 88
+
+# Espaciado y radios (px).
+SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6 = 4, 8, 12, 16, 24, 32
+RADIUS = 4
+RADIUS_LG = 6
+
+_FONT_FILES = (
+    "SpaceGrotesk-Variable.ttf",
+    "IBMPlexMono-Regular.ttf",
+    "IBMPlexMono-Medium.ttf",
+    "IBMPlexMono-SemiBold.ttf",
+)
+_fonts_loaded = False
+
+
+def fonts_dir():
+    """bandait-leader/resources/fonts in the repo, sys._MEIPASS/resources/fonts in the exe."""
+    import sys
+    from pathlib import Path
+
+    base = Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
+    return base / "resources" / "fonts"
+
+
+def load_fonts() -> bool:
+    """Register the bundled fonts once (needs a QGuiApplication). True if both families exist."""
+    global _fonts_loaded
+    from PySide6.QtGui import QFontDatabase
+
+    if not _fonts_loaded:
+        for name in _FONT_FILES:
+            path = fonts_dir() / name
+            if path.is_file():
+                QFontDatabase.addApplicationFont(str(path))
+        _fonts_loaded = True
+    families = set(QFontDatabase.families())
+    return FONT_UI in families and FONT_MONO in families
+
+
+def token_values() -> dict:
+    """Every UPPER_CASE str/int token of this module, for the QSS template."""
+    return {k: v for k, v in globals().items() if k.isupper() and isinstance(v, (str, int)) and not k.startswith("_")}
+
+
+def render_qss(template: str) -> str:
+    """Replace @TOKEN in a QSS template with its value (a typo raises: no silent black)."""
+    import re
+
+    values = token_values()
+
+    def sub(m):
+        name = m.group(1)
+        if name not in values:
+            raise KeyError(f"token de QSS desconocido: @{name}")
+        value = values[name]
+        return f"{value}px" if isinstance(value, int) else str(value)
+
+    return re.sub(r"@([A-Z][A-Z0-9_]*)", sub, template)

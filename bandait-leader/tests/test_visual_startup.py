@@ -121,13 +121,17 @@ class TestVisualStartup:
 
     def test_qss_loaded(self, app):
         """QSS stylesheet is applied (not empty)."""
-        window = MainWindow()
-        style = window.styleSheet()
+        import re
 
-        # Should have substantial QSS content
+        from PySide6.QtWidgets import QApplication
+
+        window = MainWindow()
+        # Applied to the whole application (dialogs included), rendered from the token template.
+        style = QApplication.instance().styleSheet()
         assert len(style) > 500
         assert "background-color" in style
         assert "#15181C" in style  # Grafito BG (src/ui/theme.py)
+        assert not re.search(r"@[A-Z][A-Z0-9_]*", style), "QSS token left unrendered"
 
         window.close()
 
