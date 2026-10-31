@@ -35,6 +35,7 @@ from src.domain.models import (
     SessionState,
     SessionStatus,
     SetlistEntry,
+    SetlistSection,
     SetlistJumpAlert,
     Song,
     TransitionMode,
@@ -120,12 +121,50 @@ def _clean_str(value: object, limit: int) -> Optional[str]:
     return value[:limit]
 
 
+def _sections(raw: object) -> Tuple[SetlistSection, ...]:
+    """Sections of a load_setlist_entries dict (CONTRACT_V3 9.1); malformed ones are skipped."""
+    out: List[SetlistSection] = []
+    for s in raw if isinstance(raw, (list, tuple)) else ():
+        if isinstance(s, SetlistSection):
+            out.append(s)
+            continue
+        if not isinstance(s, dict):
+            continue
+        bars, start = _as_int(s.get("bars")), _as_int(s.get("start_bar"))
+        sid = s.get("id")
+        if not isinstance(sid, str) or not sid or bars is None or bars < 1 or start is None or start < 1:
+            continue
+        cue = s.get("cue_text")
+        out.append(SetlistSection(
+            id=sid[:128],
+            kind=str(s.get("kind") or "custom")[:32],
+            label=str(s.get("label") or "")[:200],
+            bars=bars,
+            start_bar=start,
+            chordpro=s.get("chordpro") if isinstance(s.get("chordpro"), str) else "",
+            cue_text=cue if isinstance(cue, str) else None,
+        ))
+    return tuple(out)
+
+
+def _text(value: object, limit: int = 200) -> str:
+    return value.strip()[:limit] if isinstance(value, str) else ""
+
+
 def normalize_setlist(items: Iterable[object]) -> Tuple[SetlistEntry, ...]:
-    """Accept domain Songs, SetlistEntry or wire dicts; re-index 0..n-1."""
+    """Accept domain Songs, SetlistEntry or wire dicts; re-index 0..n-1.
+    Song content (artist, key, sections...) is kept: it is what GET /songs/<id>.json serves."""
     entries: List[SetlistEntry] = []
     for item in items or ():
+        extra: dict = {}
         if isinstance(item, SetlistEntry):
             song_id, title, bpm, mode = item.song_id, item.title, item.bpm, item.transition_mode
+            extra = {
+                "count_in_bars": item.count_in_bars, "count_in_voice": item.count_in_voice,
+                "gap_sec": item.gap_sec, "beats_per_bar": item.beats_per_bar,
+                "total_bars": item.total_bars, "sections": item.sections,
+                "artist": item.artist, "key": item.key, "show_key": item.show_key,
+            }
         elif isinstance(item, Song):
             song_id, title, bpm, mode = item.id, item.title, item.bpm, TransitionMode.MANUAL_CUE.value
         elif isinstance(item, dict):
@@ -133,6 +172,16 @@ def normalize_setlist(items: Iterable[object]) -> Tuple[SetlistEntry, ...]:
             title = item.get("title", "")
             bpm = item.get("bpm", 120)
             mode = item.get("transition_mode", TransitionMode.MANUAL_CUE.value)
+            bpb = _as_int(item.get("beats_per_bar"))
+            total = _as_int(item.get("total_bars"))
+            extra = {
+                "beats_per_bar": bpb if bpb is not None and 1 <= bpb <= 12 else 4,
+                "total_bars": total if total is not None and total >= 1 else None,
+                "sections": _sections(item.get("sections")),
+                "artist": _text(item.get("artist")),
+                "key": _text(item.get("key"), 16),
+                "show_key": _text(item.get("show_key"), 16),
+            }
         else:
             continue
         song_id = _clean_str(song_id, 128) if isinstance(song_id, str) else (
@@ -150,6 +199,7 @@ def normalize_setlist(items: Iterable[object]) -> Tuple[SetlistEntry, ...]:
                 bpm=sanitize_bpm(bpm),
                 order_index=len(entries),
                 transition_mode=mode,
+                **extra,
             )
         )
     return tuple(entries)

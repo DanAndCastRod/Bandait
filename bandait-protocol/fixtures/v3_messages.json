@@ -53,6 +53,22 @@
     "sender_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
     "payload": { "delta_bpm": 1 }
   },
+  "song_content": {
+    "song_id": "song_01",
+    "title": "Intro",
+    "artist": "Banda de Prueba",
+    "bpm": 120,
+    "beats_per_bar": 4,
+    "key": "Am",
+    "show_key": "Am",
+    "total_bars": 16,
+    "sections": [
+      { "id": "s-01", "kind": "intro", "label": "Intro", "bars": 4, "start_bar": 1, "chordpro": "[Am]  [F]  [C]  [G]", "cue_text": "Intro" },
+      { "id": "s-02", "kind": "verse", "label": "Estrofa 1", "bars": 8, "start_bar": 5, "chordpro": "[Am]Hoy vuelvo a [F]casa\n[C]con la noche en [G]calma", "cue_text": "Estrofa" },
+      { "id": "s-04", "kind": "outro", "label": "Final", "bars": 4, "start_bar": 13, "chordpro": "", "cue_text": null }
+    ],
+    "content_etag": "3f9a2c71d04e8b65"
+  },
   "link_report": {
     "session_id": "default",
     "client_id": "6f1c2a9e-3b7d-4c11-9a52-0d8e4f7b1c23",
@@ -78,9 +94,9 @@
     "paused_bar": null,
     "leader_time_ns": 241953609000000,
     "setlist": [
-      { "song_id": "song_01", "title": "Intro", "bpm": 120, "order_index": 0, "transition_mode": "manual_cue" },
-      { "song_id": "song_02", "title": "Segunda", "bpm": 96, "order_index": 1, "transition_mode": "auto_count_in" },
-      { "song_id": "song_07", "title": "Septima", "bpm": 140, "order_index": 2, "transition_mode": "gapless" }
+      { "song_id": "song_01", "title": "Intro", "bpm": 120, "order_index": 0, "transition_mode": "manual_cue", "content_etag": "3f9a2c71d04e8b65" },
+      { "song_id": "song_02", "title": "Segunda", "bpm": 96, "order_index": 1, "transition_mode": "auto_count_in", "content_etag": "a07c19e2b5d64f38" },
+      { "song_id": "song_07", "title": "Septima", "bpm": 140, "order_index": 2, "transition_mode": "gapless", "content_etag": "51d8e0a4c3b29f76" }
     ],
     "last_command": { "command_id": "2b9f0c4e-8d1a-4f6b-b3c7-5e2a9d0f1a44", "type": "PLAY", "origin": "director_mobile" }
   },
@@ -116,7 +132,7 @@
     "paused_bar": 9,
     "leader_time_ns": 241970000000000,
     "setlist": [
-      { "song_id": "song_01", "title": "Intro", "bpm": 120, "order_index": 0, "transition_mode": "manual_cue" }
+      { "song_id": "song_01", "title": "Intro", "bpm": 120, "order_index": 0, "transition_mode": "manual_cue", "content_etag": "3f9a2c71d04e8b65" }
     ],
     "last_command": { "command_id": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e99", "type": "PAUSE", "origin": "laptop_foh" }
   },

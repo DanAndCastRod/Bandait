@@ -462,6 +462,105 @@
         }
       },
       "additionalProperties": false
+    },
+    "song_content": {
+      "type": "object",
+      "description": "HTTP GET /songs/<song_id>.json from the leader (CONTRACT_V3 9.1): what the prompter shows.",
+      "required": [
+        "song_id",
+        "title",
+        "artist",
+        "bpm",
+        "beats_per_bar",
+        "key",
+        "show_key",
+        "total_bars",
+        "sections",
+        "content_etag"
+      ],
+      "properties": {
+        "song_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "artist": {
+          "type": "string"
+        },
+        "bpm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "beats_per_bar": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "key": {
+          "type": "string"
+        },
+        "show_key": {
+          "type": "string"
+        },
+        "total_bars": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "label",
+              "bars",
+              "start_bar",
+              "chordpro",
+              "cue_text"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "bars": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "start_bar": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "chordpro": {
+                "type": "string"
+              },
+              "cue_text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "content_etag": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

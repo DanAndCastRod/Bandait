@@ -190,7 +190,7 @@ follower lo sirve el propio líder por HTTP en la LAN**, en el mismo puerto que 
 
 Fuente de los datos: el workspace v2 sincronizado desde el hub (`WORKSPACE_V2.md`).
 
-### 9.1 Contenido de canción por HTTP del líder
+### 9.1 Contenido de canción por HTTP del líder (implementado en v3.2, 2026-10-30)
 
 `GET /songs/<song_id>.json` (mismo puerto, `Cache-Control: no-cache`, con `ETag`):
 
@@ -201,8 +201,15 @@ Fuente de los datos: el workspace v2 sincronizado desde el hub (`WORKSPACE_V2.md
 ```
 
 - `start_bar` empieza en 1 y es acumulativo.
-- `setlist[]` del SessionState agrega `content_etag` por ítem.
+- `setlist[]` del SessionState agrega `content_etag` por ítem (opcional en el esquema: un líder
+  anterior no lo envía).
+- `content_etag`: los primeros 16 hex de SHA-1 sobre el JSON canónico del contenido sin el propio
+  `content_etag` (claves ordenadas, separadores `,` y `:` sin espacios, UTF-8). El `ETag` HTTP es
+  el mismo valor entre comillas; `If-None-Match` igual responde `304`.
+- Solo se sirven canciones del setlist cargado: otra `song_id` responde `404`.
+- `Access-Control-Allow-Origin: *`, como `/leader-info.json`.
 - El follower descarga todo el setlist al unirse y vuelve a pedir un ítem cuando cambia su `content_etag`. Así el prompter sigue funcionando en Flywheel, sin red.
+- Fixture: `song_content`. Esquema: `message_types.json#/definitions/song_content`.
 
 ### 9.2 Conteo (COUNTING)
 

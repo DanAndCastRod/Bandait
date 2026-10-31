@@ -262,6 +262,10 @@ class MainWindow(QMainWindow):
         mixer_layout.addWidget(self.mixer)
         splitter.addWidget(mixer_container)
         splitter.setStretchFactor(1, 1)
+        # The mixer routes the interface inputs (the click does not go through it). Until a
+        # song brings stems it stays hidden so Escenario gets the room; Ver > Mezclador shows it.
+        self.mixer_container = mixer_container
+        mixer_container.setVisible(False)
 
         main_layout.addWidget(splitter, 1)
 
@@ -572,6 +576,10 @@ class MainWindow(QMainWindow):
         fullscreen_action.setShortcut("F11")
         fullscreen_action.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
+        self.action_show_mixer = QAction("&Mezclador", self, checkable=True)
+        self.action_show_mixer.setToolTip("Mezclador de entradas de la interfaz (el clic no pasa por aquí)")
+        self.action_show_mixer.toggled.connect(self.set_mixer_visible)
+        view_menu.addAction(self.action_show_mixer)
         brightness_menu = view_menu.addMenu("&Brillo")
         self.brightness_group = QActionGroup(self)
         self.brightness_actions = {}
@@ -595,6 +603,12 @@ class MainWindow(QMainWindow):
         self.action_about = QAction("&Acerca de Bandait", self)
         self.action_about.triggered.connect(self._show_about)
         help_menu.addAction(self.action_about)
+
+    def set_mixer_visible(self, visible: bool):
+        """Ver > Mezclador. Hidden by default while no song has stems."""
+        self.mixer_container.setVisible(bool(visible))
+        if self.action_show_mixer.isChecked() != bool(visible):
+            self.action_show_mixer.setChecked(bool(visible))
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
@@ -784,6 +798,7 @@ class MainWindow(QMainWindow):
         if song_id != self._live_song_id:
             self._live_song_id = song_id
             self._show_live_song(song_id, state)
+            self.stage_view.set_current_song_id(song_id)
         last = state.get("last_command") or {}
         if last.get("type") == "PANIC":
             self.status_bar.showMessage(f"PANIC desde {last.get('origin')}: transporte detenido", 8000)
@@ -806,9 +821,11 @@ class MainWindow(QMainWindow):
             self._current_song = data
             self._load_song_to_timeline(data)
             self._load_song_to_stage(data)
-            return
-        title = next((e.get("title") for e in state.get("setlist", []) if e.get("song_id") == song_id), song_id)
-        self.stage_view.set_song(title=title)
+        else:
+            title = next((e.get("title") for e in state.get("setlist", []) if e.get("song_id") == song_id), song_id)
+            self.stage_view.set_song(title=title)
+        # Lyrics and chords by section, the same content phones get (CONTRACT_V3 9.1).
+        self.stage_view.set_song_content(entry)
 
     def _on_clock_beat(self, bar: int, beat: int, bpm: float):
         self.transport.set_beat(beat)
@@ -956,6 +973,10 @@ class MainWindow(QMainWindow):
         self._live_setlist_id = setlist_id
         self._pending_live_setlist = None
         self.server.set_setlist(entries)
+        self.stage_view.set_setlist(entries, self._live_song_id)
+        if self._live_song_id:
+            # Same live song, new content (a hub sync while stopped): refresh the prompter.
+            self.stage_view.set_song_content(self._live_entry(self._live_song_id))
         self.library_view.mark_active_setlist(setlist_id)
         name = self.library_view.setlist_name(setlist_id)
         count = songs_label(len(entries))
@@ -972,6 +993,7 @@ class MainWindow(QMainWindow):
         self._live_setlist_id = None
         self._pending_live_setlist = None
         self.server.set_setlist([])
+        self.stage_view.set_setlist([])
         self.library_view.mark_active_setlist(None)
         self.mini_label.setText("Setlist en vivo: ninguno")
         self._update_setlist_notice()

@@ -36,7 +36,7 @@ def bundle(tmp_path):
     return root
 
 
-def asgi(app, path, method="GET", raw_path=None, decoded=None):
+def asgi(app, path, method="GET", raw_path=None, decoded=None, headers=None):
     """Call the ASGI app directly. ``decoded`` = what uvicorn would put in scope['path']."""
     sent = []
 
@@ -52,7 +52,7 @@ def asgi(app, path, method="GET", raw_path=None, decoded=None):
         "path": decoded if decoded is not None else path,
         "raw_path": (raw_path if raw_path is not None else path).encode("latin-1"),
         "query_string": b"",
-        "headers": [],
+        "headers": headers or [],
     }
     asyncio.run(app(scope, receive, send))
     start = sent[0]
@@ -225,3 +225,59 @@ def test_leader_info_matches_schema():
     server = BandaitServer(ClockService(), host="127.0.0.1", port=4040)
     errors = [e.message for e in validator.iter_errors(server.leader_info())]
     assert errors == []
+
+
+SONG = {"song_id": "song_01", "title": "Intro", "sections": [], "content_etag": "3f9a2c71d04e8b65"}
+
+
+def song_app():
+    return LeaderHttpApp(lambda: INFO, lambda: None, lambda sid: SONG if sid == "song_01" else None)
+
+
+def test_song_content_with_etag_and_cors():
+    status, headers, body = asgi(song_app(), "/songs/song_01.json")
+    assert status == 200
+    assert headers["content-type"] == "application/json"
+    assert headers["etag"] == '"3f9a2c71d04e8b65"'
+    assert headers["cache-control"] == "no-cache"
+    assert headers["access-control-allow-origin"] == "*"
+    assert json.loads(body) == SONG
+
+
+def test_song_content_if_none_match_is_304():
+    for value in (b'"3f9a2c71d04e8b65"', b'"otro", "3f9a2c71d04e8b65"'):
+        status, headers, body = asgi(song_app(), "/songs/song_01.json", headers=[(b"if-none-match", value)])
+        assert status == 304
+        assert body == b""
+        assert headers["etag"] == '"3f9a2c71d04e8b65"'
+    status, _, _ = asgi(song_app(), "/songs/song_01.json", headers=[(b"if-none-match", b'"viejo"')])
+    assert status == 200
+
+
+def test_song_content_head_has_no_body():
+    status, headers, body = asgi(song_app(), "/songs/song_01.json", method="HEAD")
+    assert status == 200
+    assert body == b""
+    assert int(headers["content-length"]) > 0
+
+
+def test_song_outside_setlist_is_404():
+    for path in ("/songs/song_99.json", "/songs/.json", "/songs/a/../song_01.json"):
+        status, headers, _ = asgi(song_app(), path)
+        assert status == 404, path
+        assert headers["access-control-allow-origin"] == "*"
+    # Without a provider (older wiring) every song is 404.
+    status, _, _ = asgi(make_app(None), "/songs/song_01.json")
+    assert status == 404
+
+
+def test_server_serves_songs_of_the_loaded_setlist():
+    server = BandaitServer(ClockService())
+    server.set_setlist([{"song_id": "song_01", "title": "Intro", "bpm": 120, "artist": "B&O's",
+                         "sections": [{"id": "s-01", "kind": "verse", "label": "Estrofa", "bars": 4,
+                                       "start_bar": 1, "chordpro": "[G]Hola", "cue_text": None}]}])
+    content = server.song_content("song_01")
+    assert content["artist"] == "B&O's"
+    assert content["sections"][0]["chordpro"] == "[G]Hola"
+    assert content["content_etag"] == server.get_state()["setlist"][0]["content_etag"]
+    assert server.song_content("song_02") is None

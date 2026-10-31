@@ -172,3 +172,18 @@ def test_brightness_menu_dims_the_window_and_is_saved(window):
     assert load_settings().brightness == 70
     window.brightness_actions[100].trigger()
     assert window.dim_overlay.isHidden()
+
+
+def test_stage_rail_follows_live_song_and_mixer_starts_hidden(window, qtbot):
+    assert window.stage_view.rail_song_ids() == [e["song_id"] for e in window.server.get_state()["setlist"]]
+    # Mixer: hidden until a song has stems; Ver > Mezclador shows it.
+    assert window.mixer_container.isHidden()
+    window.action_show_mixer.setChecked(True)
+    assert not window.mixer_container.isHidden()
+    window.set_mixer_visible(False)
+    assert window.mixer_container.isHidden() and not window.action_show_mixer.isChecked()
+    # Demo songs have no hub sections: the prompter stays on the plain-lyrics path.
+    window.stage_view.next_btn.click()
+    qtbot.waitUntil(lambda: window.clock_service.session_state["current_song_id"] == "song-002", timeout=3000)
+    assert not window._live_entry("song-002").get("sections")
+    assert window.stage_view.current_section_index() == -1

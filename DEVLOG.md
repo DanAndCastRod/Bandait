@@ -880,3 +880,57 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Fase 2: Escenario con letra y acordes; el mezclador del líder solo cuando hay stems.
   2. Ver en un ensayo si 70 % de brillo es un buen punto de partida.
+
+### [2026-10-30] - Fase 2: letra y acordes en Escenario (líder y PWA); mezclador oculto sin stems
+* **Sprint / Módulo:** `bandait-protocol` (contrato §9.1), `bandait-leader`, `bandait-follower`, `e2e`
+* **Acción técnica realizada:**
+  - **Protocolo (§9.1, antes solo propuesto):**
+    - cada ítem del setlist lleva `content_etag` (opcional en el esquema: un líder anterior no lo envía);
+    - `GET /songs/<song_id>.json` devuelve título, artista, tonalidad, compases y secciones con `start_bar` y ChordPro;
+    - `content_etag` son los primeros 16 hex de SHA-1 del JSON canónico del contenido;
+    - fixture `song_content` y esquema `message_types.json#/definitions/song_content`.
+  - **Líder:**
+    - `normalize_setlist` conservaba solo cinco campos y botaba las secciones que ya traía `load_setlist_entries`. Ahora `SetlistEntry` guarda secciones, artista y tonalidad, y expone `content()`, `content_etag` y `content_wire()`;
+    - `LeaderHttpApp` sirve la ruta con `ETag`, responde `304` a `If-None-Match`, `404` a canciones fuera del setlist cargado, `Cache-Control: no-cache` y CORS `*`;
+    - **Escenario** nuevo:
+      - a la izquierda, el riel del setlist en vivo;
+      - en el centro, la sección actual según el compás, con acordes sobre las sílabas (vista ACORDES) o solo la letra en grande (vista LETRA), y la siguiente sección debajo;
+      - a la derecha, BPM, pulso, compás y próxima sección;
+      - maquetado puro en `src/ui/chordpro_layout.py`;
+    - el mezclador queda oculto por defecto y se muestra con **Ver > Mezclador**. No lleva el clic (el clic se escribe directo en la salida): enruta las entradas de la interfaz. La fase 3 lo mostrará sola cuando una canción traiga stems.
+  - **PWA:**
+    - `wire.ts` decodifica `content_etag` y `song_content`;
+    - `services/songContent.ts` descarga por etag, primero la canción actual y de a dos;
+      - reintenta tras 3 s, hasta 4 intentos, y no insiste ante un `404`;
+      - guarda en memoria, así que el prompter sigue en Flywheel sin red;
+    - `ChordProPrompter` arma cada línea en bloques {acorde, palabra}, así el acorde sigue sobre su sílaba aunque la línea se parta en un teléfono angosto;
+    - la sección sale del compás del scheduler por rAF y React solo vuelve a pintar cuando cambia la sección;
+    - botón ACORDES/LETRA, que se recuerda en `localStorage`.
+* **Impacto en Audio / Red / UI:**
+  - Audio: ninguno.
+  - Red: una petición HTTP por canción cuando cambia su etag, fuera del camino caliente del metrónomo.
+  - UI: Escenario nuevo en el líder y prompter real en la PWA (antes decía "SIN LETRA // LA DISTRIBUCION DE LETRAS DESDE EL LIDER ESTA PENDIENTE").
+* **Verificación y Pruebas (resultado literal):**
+  - Líder: `ruff check src tests` da `All checks passed!` y `pytest -q` da `388 passed`. Pruebas nuevas:
+    - `test_song_content.py`: etag, secciones conservadas y secciones mal formadas;
+    - `test_stage_prompter.py`: maquetado, escape de HTML, sección por compás y modos;
+    - casos `/songs` en `test_http_follower.py`: 200, 304, HEAD, 404 y servidor real;
+    - esquema `song_content` y contenido del líder contra el esquema;
+    - riel y mezclador oculto en `test_leader_ui_path.py`;
+    - pintado con letra a tres tamaños en `test_paint_smoke.py`.
+  - PWA: `npx vitest run` da `138 passed` (12 nuevas en `songContent.test.ts`); `lint`, `tsc` y `build`, sin errores. Playwright follower da `28 passed`; la prueba de escenario ahora sirve el fixture y comprueba INTRO, `Am` y "SIGUE: ESTROFA 1".
+  - **Prueba real de punta a punta:** líder headless en 127.0.0.1:4041 con un setlist de prueba de 4 secciones, que sirve la PWA compilada.
+    - `curl` dio `200` con `etag: "43347fec55f62144"`, `304` con `If-None-Match` y `404` para una canción ajena.
+    - En Playwright a 412x860, tras PLAY el prompter pasó de INTRO a ESTROFA 1 (C 3-6), CORO (C 7-10) y FINAL, y se quedó en FINAL pasado el compás 16. Se probaron las dos vistas.
+  - Capturas del Escenario del líder fuera de pantalla a 1280x720, en las vistas ACORDES y LETRA.
+* **Errores propios y hallazgos:**
+  - Un `\n` dentro de un heredoc quedó como salto de línea real en `http_app.py` (error de sintaxis); lo detectó ruff.
+  - La primera versión del almacén reintentaba al instante tras un error de red, sin esperar. Lo detectó la prueba de reintentos; ahora espera el temporizador.
+  - En la verificación con Playwright el service worker sirvió el bundle anterior hasta borrar su caché. Un teléfono que ya tiene la PWA puede necesitar una recarga para tomar la versión nueva.
+  - **Hallazgo, anterior a este cambio:** `bandait_dark.qss` fija `QWidget { font-size: 13px }`, que pisa todo `setFont()`. El BPM de "72 pt" del Escenario salía en 13 px. En Escenario los tamaños pasaron a la hoja de estilo de cada etiqueta. Otras vistas del líder pueden tener el mismo problema; no lo revisé.
+  - En el teléfono, con el mando del director visible, la caja de letra queda chica (unos 100 px a 412x860). Se agranda ocultando el mando, y un músico no lo tiene. No moví el deslizador de PANIC para hacer espacio.
+* **Pendientes:**
+  1. Ensayo real con B&O's: cargar letra y acordes de al menos una canción desde el hub y confirmar en dos teléfonos y en el líder que la sección cambia en el compás correcto.
+  2. Revisar el resto de vistas del líder por el mismo `font-size: 13px` del QSS.
+  3. Fase 3: stems en MP3 desde el ZIP de Moises (hub), reproducción en el líder y vista multipista; mostrar el mezclador solo cuando la canción tenga stems.
+  4. Crear el tag de la versión del líder que incluya esta fase (los tags los crea Daniel Castaneda).
