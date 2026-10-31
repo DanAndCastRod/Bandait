@@ -43,7 +43,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.2.0"
 # Ancho maximo del texto "Audio: ..." en la barra de estado (el completo va en el tooltip).
 AUDIO_STATUS_MAX_PX = 420
 
