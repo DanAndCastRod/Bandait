@@ -157,6 +157,22 @@ def test_cloud_offline_falls_back_to_local(qtbot, engine, tmp_path):
     assert any("Se usan los del portátil" in m for m in messages)
 
 
+def test_setlist_errors_say_why(qtbot, engine, tmp_path):
+    import io
+    import urllib.error
+
+    def blocked(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b"error code: 1010"))
+
+    c, _mixer, _ = cloud_ctl(qtbot, engine, tmp_path, blocked, {"l1": ("b", "hub-1"), "l2": ("b", "hub-2")})
+    messages = []
+    c.message.connect(messages.append)
+    assert c.download_setlist([("l1", "Uno"), ("l2", "Dos")])
+    qtbot.waitUntil(lambda: any("con error" in m for m in messages), timeout=5000)
+    final = [m for m in messages if "con error" in m][-1]
+    assert "2 con error" in final and "Uno" in final and "error code: 1010" in final
+
+
 def test_download_whole_setlist(qtbot, engine, tmp_path):
     from tests.test_stems_cloud import BAND, FakeWorker
 

@@ -160,6 +160,7 @@ class StemsController(QObject):
 
     def _worker_setlist(self, token: int, live_song: Optional[str], client: StemsCloud, songs) -> None:
         done = errors = 0
+        first_error = ""
         for i, (song_id, title) in enumerate(songs):
             ref = self._cloud_ref(song_id)
             if ref is None:
@@ -170,9 +171,11 @@ class StemsController(QObject):
                     done += 1
             except (CloudError, lib.StemImportError) as exc:
                 errors += 1
+                first_error = first_error or f"{title}: {exc}"
                 logger.warning("Stems de %s: %s", title, exc)
         self.message.emit(
-            f"Stems del setlist: {done} canciones descargadas" + (f", {errors} con error" if errors else "")
+            f"Stems del setlist: {done} canciones descargadas"
+            + (f", {errors} con error (primero: {first_error})" if errors else "")
         )
         if live_song:
             self._worker_load(token, live_song)

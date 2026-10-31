@@ -43,7 +43,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 # Ancho maximo del texto "Audio: ..." en la barra de estado (el completo va en el tooltip).
 AUDIO_STATUS_MAX_PX = 420
 
@@ -647,7 +647,7 @@ class MainWindow(QMainWindow):
     def _stems_cloud_client(self):
         if not self.cloud.is_signed_in():
             return None
-        return StemsCloud(self.cloud.auth.access_token)
+        return StemsCloud(self.cloud.auth.access_token, user_agent=f"Bandait-Leader/{APP_VERSION}")
 
     def _download_setlist_stems(self):
         if self._status != "IDLE":
