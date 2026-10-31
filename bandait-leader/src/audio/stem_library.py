@@ -58,14 +58,20 @@ class StemSet:
     song_id: str
     stems: List[StemInfo] = field(default_factory=list)
     offset_ms: float = 0.0
+    # Where the stems came from when downloaded from bandait-stems (R2):
+    # {"scope": band uuid or "me", "song": hub song id, "updated_at": manifest updated_at}.
+    cloud: Optional[dict] = None
 
     def to_json(self) -> dict:
-        return {
+        data = {
             "version": 1,
             "song_id": self.song_id,
             "offset_ms": self.offset_ms,
             "stems": [s.__dict__ for s in self.stems],
         }
+        if self.cloud:
+            data["cloud"] = dict(self.cloud)
+        return data
 
 
 def stems_root() -> Path:
@@ -98,10 +104,11 @@ def load(song_id: str, root: Optional[Path] = None) -> Optional[StemSet]:
             if (path.parent / basename(str(s.get("file", "")))).is_file()
         ]
         offset = float(data.get("offset_ms", 0.0))
+        cloud = data.get("cloud") if isinstance(data.get("cloud"), dict) else None
     except (OSError, ValueError, KeyError, TypeError) as exc:
         logger.warning("Manifiesto de stems ilegible en %s: %s", path, exc)
         return None
-    return StemSet(song_id=str(song_id), stems=stems, offset_ms=offset) if stems else None
+    return StemSet(song_id=str(song_id), stems=stems, offset_ms=offset, cloud=cloud) if stems else None
 
 
 def has_stems(song_id: str, root: Optional[Path] = None) -> bool:

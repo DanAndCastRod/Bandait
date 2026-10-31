@@ -25,9 +25,9 @@ export interface LoopRegion {
   end: number
 }
 
-/** Rango aceptado para el offset de alineacion (ms). */
-export const OFFSET_MIN_MS = -60000
-export const OFFSET_MAX_MS = 60000
+/** Rango aceptado para el offset de alineacion (ms): el mismo que acepta el Worker de stems. */
+export const OFFSET_MIN_MS = -10000
+export const OFFSET_MAX_MS = 10000
 
 /** Segundos desde el compas 1 hasta el inicio del compas `bar` (1-based), sin offset. */
 export function barStartSeconds(bar: number, bpm: number, beatsPerBar: number): number {

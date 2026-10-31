@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string
   readonly VITE_SUPABASE_ANON_KEY?: string
   readonly VITE_GOOGLE_CLIENT_ID?: string
+  /** Worker bandait-stems (stems en Cloudflare R2). Sin valor, los stems quedan solo en el navegador. */
+  readonly VITE_BANDAIT_STEMS_URL?: string
 }
 
 /** API minima de Google Identity Services que usa el Hub (perfil local con Google). */

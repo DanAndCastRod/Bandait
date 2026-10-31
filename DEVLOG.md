@@ -1020,3 +1020,54 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   3. Decidir si al SALIR del hub en equipos compartidos se borran los stems de IndexedDB.
   4. Retirar en un cambio aparte `stemsMap`, `SongStems`, `updateStemTrackVolume` y los datos demo de 6 canales, que ya no usa ninguna vista.
   5. Nube: los mismos pendientes que el líder (dónde guardar y si los metadatos van al workspace).
+
+### [2026-10-31] - Fase 3: stems en la nube (Cloudflare R2) compartidos entre el hub y el líder
+* **Sprint / Módulo:** `bandait-stems-worker` (nuevo), `bandait-leader-web` (PR #30, hecho por un subagente), `bandait-leader`, CI
+* **Acción técnica realizada:**
+  - **Decisión de Daniel Castaneda:** guardar los stems en R2 con la credencial de Cloudflare de ClipVault (`releven-deploy-cloudflare-api-key`). La calidad del remuestreo actual queda como está para ensayos.
+  - **Worker `bandait-stems`** en `https://bandait-stems.oooglue.workers.dev`, bucket privado `bandait-stems`, desplegado con `wrangler deploy` a través de ClipVault.
+    - Valida la sesión de Supabase de quien llama con su propio JWT y la clave publicable, mediante la RPC `bandait_band_role` ya existente. No hay `service_role` ni secretos en el Worker.
+    - Escriben Owner y MusicDirector; leen todos los integrantes. `me` es el workspace personal.
+    - Primero se suben los archivos y después el manifiesto, que es el commit: valida que cada archivo exista con su tamaño y borra los huérfanos.
+    - Contrato en `bandait-stems-worker/README.md`.
+    - **Alternativa descartada:** `urit-media` de URiT, porque necesita un consumidor con backend que firme permisos. Ese consumidor sería otro Worker, y con R2 enlazado ya alcanza para guardar y servir.
+  - **Hub** (PR #30):
+    - `stemCloud.ts` y la barra de estado por canción: SOLO EN ESTE EQUIPO, SUBIENDO n/m, EN LA NUBE, LA NUBE TIENE OTRA VERSIÓN, o ERROR con REINTENTAR;
+    - los editores suben al guardar; cualquier integrante puede DESCARGAR DE LA NUBE;
+    - borrar pregunta si es solo de este equipo o también de la nube;
+    - aviso de que el líder no lee M4A;
+    - `VITE_BANDAIT_STEMS_URL` en `.env.production` (valor público; tabla de DEPLOY.md, sección 3.6).
+  - **Líder:**
+    - `src/cloud/stems_cloud.py`: manifiesto de la banda compartida, con respaldo a `me`; descarga por bloques con verificación de tamaño;
+    - aplica roles, etiquetas y alineación del manifiesto;
+    - con la banda detenida, cambiar de canción revisa la nube; sin red usa lo del portátil;
+    - Audio > "Descargar stems del setlist (nube)" reemplaza también los stems importados a mano, cosa que la revisión automática no hace.
+  - **CI:** nuevo job "Stems Worker (R2)" con pruebas, tipos, build y un control de que no aparezcan `service_role` ni `sb_secret_` en `wrangler.jsonc`.
+* **Impacto en Audio / Red / UI:**
+  - Red: el líder usa la red solo con la banda detenida o en la descarga explícita del setlist; nunca durante la canción.
+  - Audio: sin cambios.
+  - UI: barra de nube en el estudio del hub y una acción nueva en el menú Audio del líder.
+* **Verificación y Pruebas (resultado literal):**
+  - Worker: `npm test` da `# pass 9`, `tsc` OK y `wrangler deploy --dry-run` OK.
+  - En producción:
+    - `GET /v1/health` da `{"ok":true,"version":"1.0.0"}`;
+    - sin token: 401; con un JWT falso, `{"error":"invalid_token"}` 401, rechazado por Supabase;
+    - preflight desde `https://bandait.releven.cc` devuelve `Access-Control-Allow-Origin` con ese origen; desde un origen ajeno, 403.
+  - Líder: `ruff check src tests` da `All checks passed!` y `pytest -q` da `440 passed`. Pruebas nuevas en `test_stems_cloud.py` y `test_stems_controller.py`:
+    - descarga, "current" sin volver a bajar, respaldo a `me`;
+    - los stems manuales no se pisan sin `force`;
+    - una descarga incompleta deja intactos los stems anteriores;
+    - sin red se usan los locales;
+    - descarga del setlist completo.
+  - Hub (corrido por la sesión principal tras integrar): `lint` OK; `verify:logic` da `23/34/14/50 ok, 0 fallas`; `build` OK; `CI=1 npx playwright test --project=leader-web --retries=0` da `31 passed`.
+* **No verificado:**
+  - Subida y descarga reales con cuentas de Supabase reales (Owner y Musician de B&O's), y el CORS real desde el hub publicado.
+  - Archivos cerca de 200 MB y redes lentas.
+* **Errores propios:**
+  - Integré la rama del hub con un merge local mientras Daniel Castaneda fusionaba el mismo PR #30 en GitHub. El contenido era idéntico (diff vacío).
+  - Un `reset --hard` para alinear fue bloqueado por el clasificador de permisos; seguí en una rama nueva desde la remota (`stems-nube-integracion`) y la rama local anterior quedó sin tocar.
+* **Pendientes:**
+  1. Primera prueba real: Daniel Castaneda (Owner de B&O's) sube los stems de una canción en MP3 desde el hub; otro integrante los descarga; el líder los baja con Audio > Descargar stems del setlist.
+  2. Opcional: un `GET` del Worker que devuelva el rol, para que el hub sepa si puede escribir sin intentar un PUT (nota del subagente).
+  3. Opcional: progreso por bytes (XHR) para archivos grandes en el hub.
+  4. Borrar la rama local vieja `feat/stems-nube` cuando ya no haga falta (`git branch -D feat/stems-nube`, lo corre Daniel Castaneda).

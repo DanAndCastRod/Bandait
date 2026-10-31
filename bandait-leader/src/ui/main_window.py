@@ -34,6 +34,7 @@ from src.ui.dialogs.account_select import songs_label
 from src.ui.views.library_view import LibraryView
 from src.ui.views.stage_view import StageView
 from src.ui.widgets.dim_overlay import BRIGHTNESS_LEVELS, DimOverlay, clamp_brightness
+from src.cloud.stems_cloud import StemsCloud
 from src.ui.stems_controller import StemsController, import_dialog_filter, song_bpm
 from src.ui.widgets.mixer import MixerWidget
 from src.ui.widgets.stem_mixer import StemMixerWidget
@@ -42,7 +43,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.2.0"
 # Ancho maximo del texto "Audio: ..." en la barra de estado (el completo va en el tooltip).
 AUDIO_STATUS_MAX_PX = 420
 
@@ -562,6 +563,10 @@ class MainWindow(QMainWindow):
         self.action_import_stems.setToolTip("ZIP de Moises (MP3) o archivos sueltos; reemplaza los stems de la canción")
         self.action_import_stems.triggered.connect(self._import_stems_dialog)
         audio_menu.addAction(self.action_import_stems)
+        self.action_download_stems = QAction("&Descargar stems del setlist (nube)", self)
+        self.action_download_stems.setToolTip("Baja de la nube los stems que la banda subió desde el hub")
+        self.action_download_stems.triggered.connect(self._download_setlist_stems)
+        audio_menu.addAction(self.action_download_stems)
 
         net_menu = menubar.addMenu("&Red")
         self.action_retry_server = QAction("&Reintentar servidor", self)
@@ -625,14 +630,38 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ stems (fase 3)
     def _setup_stems(self):
-        self.stems = StemsController(self.audio_engine, self.stem_mixer, self.stems_container, parent=self)
+        self.stems = StemsController(
+            self.audio_engine, self.stem_mixer, self.stems_container, parent=self,
+            cloud=self._stems_cloud_client, cloud_ref=self.library_view.song_cloud_ref,
+        )
         self.stems.message.connect(lambda text: self.status_bar.showMessage(text, 8000))
         self.stem_mixer.import_requested.connect(self._import_stems_dialog)
         self.stem_mixer.remove_requested.connect(self._remove_live_stems)
 
     def _show_live_stems(self, song_id, state: dict):
         title = next((e.get("title") for e in (state or {}).get("setlist", []) if e.get("song_id") == song_id), "")
-        self.stems.show_song(song_id, title, song_bpm(self._live_entry(song_id), self._bpm))
+        # Network only with the band stopped: during the show the laptop's stems are used as they are.
+        idle = (state or {}).get("status", "IDLE") == "IDLE"
+        self.stems.show_song(song_id, title, song_bpm(self._live_entry(song_id), self._bpm), allow_network=idle)
+
+    def _stems_cloud_client(self):
+        if not self.cloud.is_signed_in():
+            return None
+        return StemsCloud(self.cloud.auth.access_token)
+
+    def _download_setlist_stems(self):
+        if self._status != "IDLE":
+            QMessageBox.information(self, "Stems", "Detén la banda para descargar stems.")
+            return
+        if not self.cloud.is_signed_in():
+            QMessageBox.information(self, "Stems", "Inicia sesión en la nube (menú Cuenta) para descargar stems.")
+            return
+        songs = [(str(e.get("song_id")), str(e.get("title") or "")) for e in self._live_entries if e.get("song_id")]
+        if not songs:
+            QMessageBox.information(self, "Stems", "El setlist en vivo está vacío.")
+            return
+        if not self.stems.download_setlist(songs):
+            self.status_bar.showMessage("Ya hay una operación de stems en curso", 6000)
 
     def _import_stems_dialog(self):
         from PySide6.QtWidgets import QFileDialog

@@ -1,0 +1,20 @@
+{
+  // Bandait stems (fase 3): R2 + verificacion de sesion de Supabase. Ver README.md.
+  // SUPABASE_URL y SUPABASE_ANON_KEY son PUBLICOS (los mismos de bandait-leader-web/.env.production):
+  // el Worker llama a Supabase con el JWT de quien pide, nunca con la clave de servicio.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bandait-stems",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  "workers_dev": true,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "r2_buckets": [
+    { "binding": "STEMS", "bucket_name": "bandait-stems" }
+  ],
+  "vars": {
+    "SUPABASE_URL": "https://xftzxzwopwzjmttrwtga.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_kuAR_g2Z5RNbssRcuZ2IEA_qhu5iFv8",
+    "ALLOWED_ORIGINS": "https://bandait.releven.cc,https://bandait.pages.dev,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
+    "MAX_FILE_MB": "200"
+  }
+}

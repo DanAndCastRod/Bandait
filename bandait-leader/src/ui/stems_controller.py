@@ -10,11 +10,16 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from src.audio import stem_library as lib
+from src.cloud.http import CloudError
+from src.cloud.stems_cloud import StemsCloud, sync_song
+
+# song_id -> (band_cloud_id, song_cloud_id) of the hub song, or None for a local-only song.
+CloudRef = Callable[[str], Optional[Tuple[Optional[str], str]]]
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +31,11 @@ class StemsController(QObject):
     stems_shown = Signal(bool)  # the live song has playable stems
     message = Signal(str)
 
-    def __init__(self, engine, mixer, container, root: Optional[Path] = None, parent=None):
+    def __init__(self, engine, mixer, container, root: Optional[Path] = None, parent=None,
+                 cloud: Callable[[], Optional[StemsCloud]] = lambda: None, cloud_ref: CloudRef = lambda _s: None):
         super().__init__(parent)
+        self._cloud = cloud
+        self._cloud_ref = cloud_ref
         self._engine = engine
         self._mixer = mixer
         self._container = container
@@ -59,8 +67,10 @@ class StemsController(QObject):
     def busy(self) -> bool:
         return self._busy
 
-    def show_song(self, song_id: Optional[str], title: str = "", ref_bpm: float = 120.0) -> None:
-        """Live song changed: drop the old stems at once, load the new ones in the background."""
+    def show_song(self, song_id: Optional[str], title: str = "", ref_bpm: float = 120.0,
+                  allow_network: bool = False) -> None:
+        """Live song changed: drop the old stems at once, load the new ones in the background.
+        ``allow_network`` (band stopped): first bring newer stems from the cloud, if any."""
         self._flush()
         self._token += 1
         self._song_id = str(song_id) if song_id else None
@@ -70,9 +80,26 @@ class StemsController(QObject):
         self._index = []
         self._engine.clear_stems()
         self._show(False)
-        if not self._song_id or not lib.has_stems(self._song_id, self._root):
+        if not self._song_id:
             return
-        self._start(self._worker_load, self._token, self._song_id)
+        ref = self._cloud_ref(self._song_id) if allow_network else None
+        client = self._cloud() if ref else None
+        if client is not None and not self._busy:
+            self._start(self._worker_sync_load, self._token, self._song_id, client, ref)
+            return
+        if lib.has_stems(self._song_id, self._root):
+            self._start(self._worker_load, self._token, self._song_id)
+
+    def download_setlist(self, songs: List[Tuple[str, str]]) -> bool:
+        """Download (replacing hand-imported ones) the cloud stems of every (song_id, title).
+        False when there is no cloud session or a job is running."""
+        client = self._cloud()
+        if client is None or self._busy:
+            return False
+        self._flush()
+        self._token += 1
+        self._start(self._worker_setlist, self._token, self._song_id, client, list(songs))
+        return True
 
     def import_paths(self, paths: List[str]) -> bool:
         """Replace the live song's stems with ``paths``. False when it cannot start now."""
@@ -113,6 +140,44 @@ class StemsController(QObject):
         stem_set = lib.load(song_id, self._root)
         decoded = lib.decode(stem_set, self._engine.sample_rate, self._root) if stem_set else []
         self._loaded.emit((token, song_id, stem_set, decoded, ""))
+
+    def _sync(self, client: StemsCloud, song_id: str, ref, title: str, force: bool) -> str:
+        band, song = ref
+        return sync_song(
+            client, song_id, band, song, self._root, force=force,
+            progress=lambda i, n: self.message.emit(f"Descargando stems de {title}: {i}/{n}") if i < n else None,
+        )
+
+    def _worker_sync_load(self, token: int, song_id: str, client: StemsCloud, ref) -> None:
+        try:
+            if self._sync(client, song_id, ref, self._title, force=False) == "updated":
+                self.message.emit(f"Stems actualizados desde la nube: {self._title}")
+        except CloudError as exc:
+            self.message.emit(f"Nube de stems: {exc}. Se usan los del portátil.")
+        except lib.StemImportError as exc:
+            self.message.emit(f"Nube de stems: {exc}")
+        self._worker_load(token, song_id)
+
+    def _worker_setlist(self, token: int, live_song: Optional[str], client: StemsCloud, songs) -> None:
+        done = errors = 0
+        for i, (song_id, title) in enumerate(songs):
+            ref = self._cloud_ref(song_id)
+            if ref is None:
+                continue
+            self.message.emit(f"Stems del setlist {i + 1}/{len(songs)}: {title}")
+            try:
+                if self._sync(client, song_id, ref, title, force=True) == "updated":
+                    done += 1
+            except (CloudError, lib.StemImportError) as exc:
+                errors += 1
+                logger.warning("Stems de %s: %s", title, exc)
+        self.message.emit(
+            f"Stems del setlist: {done} canciones descargadas" + (f", {errors} con error" if errors else "")
+        )
+        if live_song:
+            self._worker_load(token, live_song)
+        else:
+            self._loaded.emit((token, None, None, None, ""))
 
     def _worker_import(self, token: int, song_id: str, paths: List[str]) -> None:
         try:
