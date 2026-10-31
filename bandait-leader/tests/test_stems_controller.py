@@ -111,3 +111,63 @@ def test_undecodable_stems_show_the_reason(qtbot, ctl, engine):
     qtbot.waitUntil(lambda: not container.isHidden(), timeout=5000)
     assert not engine.has_stems()
     assert "exporta los stems en MP3" in mixer.status.text()
+
+
+def cloud_ctl(qtbot, engine, tmp_path, worker, refs):
+    from src.cloud.stems_cloud import StemsCloud
+
+    mixer = StemMixerWidget()
+    container = QWidget()
+    qtbot.addWidget(mixer)
+    qtbot.addWidget(container)
+    c = StemsController(engine, mixer, container, root=tmp_path / "Stems",
+                        cloud=lambda: StemsCloud(lambda: "tok", "https://stems.test", worker),
+                        cloud_ref=lambda sid: refs.get(sid))
+    return c, mixer, container
+
+
+def test_cloud_stems_download_on_song_change_when_stopped(qtbot, engine, tmp_path):
+    from tests.test_stems_cloud import BAND, FakeWorker
+
+    worker = FakeWorker()
+    c, mixer, container = cloud_ctl(qtbot, engine, tmp_path, worker, {"l1": (BAND, "hub-song-1")})
+    c.show_song("l1", "Hoy vuelvo a casa", 92, allow_network=False)  # playing: no network
+    c.wait_idle()
+    assert worker.requests == [] and container.isHidden()
+    c.show_song("l1", "Hoy vuelvo a casa", 92, allow_network=True)
+    qtbot.waitUntil(lambda: engine.has_stems(), timeout=5000)
+    assert [s.name_label.text() for s in mixer.strips] == ["VOZ PRINCIPAL", "BATERIA"]
+    assert engine._stem_offset_frames == pytest.approx(35 * SR / 1000)
+
+
+def test_cloud_offline_falls_back_to_local(qtbot, engine, tmp_path):
+    import urllib.error
+
+    lib.import_stems("l1", [wav(tmp_path / "Bass.wav")], root=tmp_path / "Stems")
+
+    def down(req, timeout):
+        raise urllib.error.URLError("sin red")
+
+    messages = []
+    c, mixer, _ = cloud_ctl(qtbot, engine, tmp_path, down, {"l1": ("b", "hub-1")})
+    c.message.connect(messages.append)
+    c.show_song("l1", "Otra", 100, allow_network=True)
+    qtbot.waitUntil(lambda: engine.has_stems(), timeout=5000)
+    assert [s.name_label.text() for s in mixer.strips] == ["BAJO"]
+    assert any("Se usan los del portátil" in m for m in messages)
+
+
+def test_download_whole_setlist(qtbot, engine, tmp_path):
+    from tests.test_stems_cloud import BAND, FakeWorker
+
+    worker = FakeWorker()
+    refs = {"l1": (BAND, "hub-song-1"), "l2": (BAND, "hub-song-1"), "local": None}
+    c, mixer, _ = cloud_ctl(qtbot, engine, tmp_path, worker, refs)
+    messages = []
+    c.message.connect(messages.append)
+    c.show_song("l1", "Uno", 100)
+    assert c.download_setlist([("l1", "Uno"), ("l2", "Dos"), ("local", "Sin nube")])
+    qtbot.waitUntil(lambda: any("2 canciones descargadas" in m for m in messages), timeout=8000)
+    qtbot.waitUntil(lambda: engine.has_stems(), timeout=5000)  # the live song reloads with its stems
+    assert lib.load("l2", tmp_path / "Stems") is not None
+    assert lib.load("local", tmp_path / "Stems") is None

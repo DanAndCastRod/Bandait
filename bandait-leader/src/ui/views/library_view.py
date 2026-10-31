@@ -970,6 +970,18 @@ class LibraryView(QWidget):
             return {}
         return self._song_to_dict(song)
 
+    def song_cloud_ref(self, song_id: str):
+        """(band_cloud_id, song cloud_id) of a hub song, or None for a local-only song."""
+        if not self._db_session or not song_id:
+            return None
+        try:
+            song = self._db_session.get(Song, song_id)
+        except Exception:
+            return None
+        if not song or not song.cloud_id:
+            return None
+        return (song.band_cloud_id or None, str(song.cloud_id))
+
     def _song_to_dict(self, song) -> dict:
         return {
             "id": song.id,
