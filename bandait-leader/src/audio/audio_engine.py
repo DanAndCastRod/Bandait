@@ -31,7 +31,8 @@ Stems: the live song's stems (int16 stereo, preloaded off the audio thread) play
 Salidas 1-2. Their position comes from the same schedule as the click: the musical
 position since bar 1 at the song's own BPM, plus a per-song offset. A read pointer
 advances one frame per frame and is realigned to the schedule only when the
-schedule changes (PLAY, resume, jump, TEMPO_NUDGE) or new stems/offset arrive, and
+schedule or the segment in force changes (PLAY, resume, jump, TEMPO_NUDGE, the
+rehearsal loop going back to its first bar) or new stems/offset arrive, and
 only if it is off by more than STEM_RESYNC_MS. In between it runs free: if the
 song's BPM does not exactly match the recording, stems drift smoothly instead of
 jumping every few seconds (stems are not time-stretched).
@@ -161,6 +162,7 @@ class AudioEngine(QObject):
         self._stem_epoch = 0  # bumped by the Qt thread on new stems / offset
         self._stem_epoch_seen = -1  # callback-owned
         self._stem_sched_seen = None  # callback-owned
+        self._stem_seg_seen = None  # callback-owned: segment in force on the last block
         self._stem_resync_frames = STEM_RESYNC_MS * sample_rate / 1000.0
         # Channel-major: 1-D contiguous rows. A 2-D strided out= view makes numpy
         # allocate a ~17 KB buffer per call; 1-D column views do not.
@@ -562,9 +564,13 @@ class AudioEngine(QObject):
         target = beats * (60.0 / ref_bpm) * self.sample_rate + offset_frames
         pos = self._stem_pos
         epoch = self._stem_epoch
-        if sched is not self._stem_sched_seen or epoch != self._stem_epoch_seen:
+        # Realign on a new schedule, new stems, or when the segment in force changes: a
+        # pending anchor (TEMPO_NUDGE, rehearsal loop) is published bars ahead, so the
+        # loop's jump back to its first bar only shows up when its segment takes over.
+        if sched is not self._stem_sched_seen or epoch != self._stem_epoch_seen or seg is not self._stem_seg_seen:
             self._stem_sched_seen = sched
             self._stem_epoch_seen = epoch
+            self._stem_seg_seen = seg
             if abs(target - pos) > self._stem_resync_frames:
                 pos = int(round(target))
         self._stem_pos = pos + frames

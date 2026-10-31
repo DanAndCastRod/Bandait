@@ -62,11 +62,6 @@ class TestImports:
         from src.ui.views.library_view import LibraryView
         assert LibraryView is not None
 
-    def test_import_ai_view(self):
-        from src.ui.views.ai_view import AIView, AIWorker
-        assert AIView is not None
-        assert AIWorker is not None
-
     def test_import_audio_engine(self):
         from src.audio.audio_engine import AudioEngine
         assert AudioEngine is not None

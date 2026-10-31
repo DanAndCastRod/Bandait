@@ -2,6 +2,7 @@
   // Bandait stems (fase 3): R2 + verificacion de sesion de Supabase. Ver README.md.
   // SUPABASE_URL y SUPABASE_ANON_KEY son PUBLICOS (los mismos de bandait-leader-web/.env.production):
   // el Worker llama a Supabase con el JWT de quien pide, nunca con la clave de servicio.
+  // MUSICAI_API_KEY es secreto: `wrangler secret put MUSICAI_API_KEY` (ClipVault: bandait-musicai-api-key).
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bandait-stems",
   "main": "src/index.ts",
@@ -15,6 +16,7 @@
     "SUPABASE_URL": "https://xftzxzwopwzjmttrwtga.supabase.co",
     "SUPABASE_ANON_KEY": "sb_publishable_kuAR_g2Z5RNbssRcuZ2IEA_qhu5iFv8",
     "ALLOWED_ORIGINS": "https://bandait.releven.cc,https://bandait.pages.dev,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
-    "MAX_FILE_MB": "200"
+    "MAX_FILE_MB": "200",
+    "MUSICAI_WORKFLOW": "stems-workflow-releven-bandait"
   }
 }

@@ -17,23 +17,6 @@ from src.cloud.auth import redirect_urls
 
 HINT_AFTER_MS = 20000
 
-DIALOG_QSS = """
-QDialog { background: #15181C; color: #D5DAE0; }
-QLabel { color: #D5DAE0; background: transparent; }
-QLabel#detail { color: #A3ABB6; }
-QLabel#hint { color: #D9A24E; border: 1px solid #363D47; border-radius: 4px; padding: 8px; }
-QLabel#error { color: #D96459; }
-QPushButton { background: transparent; border: 1px solid #7C8591; color: #BAC2CC;
-              border-radius: 4px; padding: 6px 14px; }
-QPushButton:hover { border-color: #5CC8C2; color: #5CC8C2; }
-QPushButton:disabled { border-color: #363D47; color: #4A525D; }
-QProgressBar { background: #1B1F24; border: 1px solid #262C34; height: 6px; border-radius: 3px; }
-QProgressBar::chunk { background: #5CC8C2; }
-QListWidget { background: #1B1F24; color: #D5DAE0; border: 1px solid #262C34; }
-QListWidget::item:selected { background: #5CC8C2; color: #15181C; }
-"""
-
-
 def redirect_hint() -> str:
     urls = "\n".join(redirect_urls())
     return (
@@ -54,7 +37,6 @@ class LoginDialog(QDialog):
         self.result = None
         self.setWindowTitle("Iniciar sesión con Google")
         self.setMinimumWidth(520)
-        self.setStyleSheet(DIALOG_QSS)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -62,7 +44,7 @@ class LoginDialog(QDialog):
 
         title = QLabel("CUENTA DEL HUB")
         title.setFont(QFont("Inter", 13, QFont.Bold))
-        title.setStyleSheet("color: #5CC8C2;")
+        _tone(title, "active")
         layout.addWidget(title)
 
         self.status_label = QLabel("Preparando...")
@@ -149,7 +131,7 @@ class LoginDialog(QDialog):
         self.progress.setValue(0)
         self.status_label.setText("No se pudo iniciar sesión")
         self.status_label.setObjectName("error")
-        self.status_label.setStyleSheet("color: #D96459;")
+        _tone(self.status_label, "danger")
         self.detail_label.setText(message)
         self.reopen_btn.setEnabled(False)
         self.cancel_btn.setText("Cerrar")
@@ -172,3 +154,9 @@ class LoginDialog(QDialog):
             self.cancel_btn.setEnabled(False)
             return
         super().reject()
+
+def _tone(widget, tone: str) -> None:
+    """Text color from the QSS template (QLabel[tone=...]); no inline styles."""
+    from src.ui.components import set_prop
+
+    set_prop(widget, "tone", tone)

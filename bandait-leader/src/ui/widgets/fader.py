@@ -26,7 +26,7 @@ class FaderWidget(QWidget):
         # Label
         self.label = QLabel(label)
         self.label.setFont(QFont("Inter", 9, QFont.Bold))
-        self.label.setStyleSheet("color: #7C8591;")
+        _tone(self.label, "muted")
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
 
@@ -42,7 +42,7 @@ class FaderWidget(QWidget):
         # Display de dB
         self.display = QLabel("0.0dB")
         self.display.setFont(QFont("JetBrains Mono", 9, QFont.Bold))
-        self.display.setStyleSheet("color: #5CC8C2;")
+        _tone(self.display, "active")
         self.display.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.display)
 
@@ -65,16 +65,16 @@ class FaderWidget(QWidget):
     def _update_display(self):
         if self._value_db <= self.min_db + 1:
             self.display.setText("-∞")
-            self.display.setStyleSheet("color: #363D47;")
+            _tone(self.display, "faint")
         elif self._value_db < -12:
             self.display.setText(f"{self._value_db:.1f}dB")
-            self.display.setStyleSheet("color: #5CC8C2;")
+            _tone(self.display, "active")
         elif self._value_db < 0:
             self.display.setText(f"{self._value_db:.1f}dB")
-            self.display.setStyleSheet("color: #B8CF7A;")
+            _tone(self.display, "success")
         else:
             self.display.setText(f"+{self._value_db:.1f}dB")
-            self.display.setStyleSheet("color: #D9A24E;")
+            _tone(self.display, "warning")
 
     def get_db(self) -> float:
         return self._value_db
@@ -90,3 +90,9 @@ class FaderWidget(QWidget):
             normalized = 0.75 + (self._value_db / self.max_db) * 0.25
             self.slider.setValue(int(normalized * 1000))
         self._update_display()
+
+def _tone(widget, tone: str) -> None:
+    """Text color from the QSS template (QLabel[tone=...]); no inline styles."""
+    from src.ui.components import set_prop
+
+    set_prop(widget, "tone", tone)

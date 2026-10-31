@@ -192,6 +192,52 @@ describe('FlywheelClock: anchor switch is never retroactive (rule 2)', () => {
   })
 })
 
+describe('FlywheelClock: rehearsal loop re-anchor with a lower bar_offset (rule 11)', () => {
+  // 120 BPM, 4/4: a bar lasts 2000 ms. PLAY anchors bar 1 at 1250, so bar n starts at
+  // 1250 + (n - 1) * 2000. The leader loops bars 2-3: at the start of bar 4 (7250) it
+  // re-anchors with bar_offset 2, published two bars early, like a TEMPO_NUDGE.
+  beforeEach(async () => {
+    await armedClock()
+    clock.applyTransport(playing(START + 250))
+  })
+
+  function bars(): string[] {
+    return clock.getRecentBeats().map((b) => `${b.bar}:${b.beat}`)
+  }
+
+  it('keeps clicking up to the boundary, then numbers from start_bar with no gap or double', () => {
+    advance(3300) // bar 2
+    clock.applyTransport(playing(7250, 120, { barOffset: 2, stateVersion: 2 }))
+    // Beacons sent at the downbeats before the boundary carry the same future anchor.
+    advance(5260)
+    clock.applyTransport(playing(7250, 120, { barOffset: 2, stateVersion: 2 }))
+    advance(9500)
+    const t = clicks()
+    expect(t[0]).toBeCloseTo(1250, 6)
+    intervals(t).forEach((d) => expect(d).toBeCloseTo(500, 6))
+    expect(t).toHaveLength(Math.floor((9500 + SCHEDULE_AHEAD_MS - 1250) / 500) + 1)
+    const beats = bars()
+    expect(beats.slice(0, 12)).toEqual([
+      '1:1', '1:2', '1:3', '1:4', '2:1', '2:2', '2:3', '2:4', '3:1', '3:2', '3:3', '3:4',
+    ])
+    expect(beats.slice(12, 16)).toEqual(['2:1', '2:2', '2:3', '2:4']) // 7250: back to bar 2
+    expect(clock.getVisualBeat(7300)).toMatchObject({ bar: 2, beat: 1, accent: true })
+    expect(clock.getVisualBeat(9300)).toMatchObject({ bar: 3, beat: 1, accent: true })
+    const live = (ctx as FakeAudioContext).oscillators.filter((o) => !o.cancelled)
+    expect(live[12].frequency.value).toBe(1600) // the loop downbeat is accented
+  })
+
+  it('a second return on top of the first one loops again', () => {
+    advance(3300)
+    clock.applyTransport(playing(7250, 120, { barOffset: 2, stateVersion: 2 }))
+    advance(9300) // second pass, bar 3
+    clock.applyTransport(playing(11_250, 120, { barOffset: 2, stateVersion: 3 }))
+    advance(12_000)
+    expect(clock.getVisualBeat(11_300)).toMatchObject({ bar: 2, beat: 1 })
+    intervals(clicks()).forEach((d) => expect(d).toBeCloseTo(500, 6))
+  })
+})
+
 describe('FlywheelClock: flywheel and soft phase correction (section 7)', () => {
   beforeEach(async () => {
     await armedClock()

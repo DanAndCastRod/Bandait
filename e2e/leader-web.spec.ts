@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 /**
  * E2E del Web Admin Hub (bandait-leader-web), la app publicada en /hub/.
  * Interfaz actual: pantalla de acceso (nube Supabase / Google perfil local / perfil local /
- * MODO DEMO) y 6 pestanas (PLAYLISTS, CANCIONES, VOZ Y CONTEOS, PISTAS & STEMS, INTEGRANTES,
- * EQUIPAMIENTO). El workspace es v2 (bandait-protocol/WORKSPACE_V2.md).
+ * MODO DEMO) y 6 vistas con los nombres y el orden del lider 2.3 (SETLISTS, CANCIONES, ENSAYO,
+ * PISTAS, BANDA, AJUSTES; AJUSTES agrupa VOZ Y CONTEOS y EQUIPAMIENTO). El workspace es v2
+ * (bandait-protocol/WORKSPACE_V2.md).
  *
  * No toca ningun proyecto Supabase ni Google real: cualquier peticion a *.supabase.co o a
  * accounts.google.com se registra y hace fallar la prueba que no la espera.
@@ -132,7 +133,7 @@ test.describe('Web Admin Hub - acceso', () => {
 });
 
 test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
-  test('muestra datos demo y navega por las 6 pestañas actuales', async ({ page }) => {
+  test('muestra datos demo y navega por las 6 vistas del lider 2.3', async ({ page }) => {
     await enterDemo(page, /Carlos Mendoza/);
     await expect(page.getByText('Medianoche en Pereira').first()).toBeVisible();
     await expect(page.getByTestId('sync-status')).toHaveAttribute('data-sync-state', 'local_only');
@@ -140,25 +141,27 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Librería de Canciones' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'VOZ Y CONTEOS', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
+    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Ensayo' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'PISTAS & STEMS' }).click();
+    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Integrantes & Matriz de Roles' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'EQUIPAMIENTO' }).click();
+    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
+    await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
     await expect(page.getByRole('heading', { name: 'Rider Técnico & Ruteo de Equipos' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'PLAYLISTS' }).click();
+    await page.getByRole('button', { name: 'SETLISTS', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Programación de Setlists & Transiciones' })).toBeVisible();
   });
 
   test('roles: el Owner cambia el rol de otro integrante pero no el suyo', async ({ page }) => {
     await enterDemo(page, /Carlos Mendoza/);
-    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
     await expect(page.getByTestId('role-guard-note')).toBeVisible();
 
     const own = page.getByLabel('Rol de Carlos Mendoza');
@@ -174,7 +177,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
 
   test('roles: quien no es Owner no puede cambiar ningun rol', async ({ page }) => {
     await enterDemo(page, /Alejandro Vélez/);
-    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
     const selects = page.locator('select[aria-label^="Rol de "]');
     await expect(selects).toHaveCount(5);
     for (const s of await selects.all()) {
@@ -221,7 +224,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
 
     await page.getByTestId('band-switcher').click();
     await page.getByRole('button', { name: /Sinfónica Pop Bogotá/ }).click();
-    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
     page.once('dialog', (d) => void d.accept());
     await page.getByTestId('delete-band').click();
     await expect(page.getByTestId('delete-band-result')).toContainText('Sinfónica Pop Bogotá se borró');
@@ -232,10 +235,10 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await expect(page.getByRole('button', { name: /Sinfónica Pop Bogotá/ })).toHaveCount(0);
   });
 
-  test('INTEGRANTES: sin cuenta de nube explica cómo compartir y no promete invitaciones reales', async ({ page }) => {
+  test('BANDA: sin cuenta de nube explica cómo compartir y no promete invitaciones reales', async ({ page }) => {
     const external = trackExternal(page);
     await enterDemo(page, /Carlos Mendoza/);
-    await page.getByRole('button', { name: 'INTEGRANTES' }).click();
+    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
     const panel = page.getByTestId('sharing-panel');
     await expect(panel).toContainText('BANDA SOLO EN TU CUENTA');
     await expect(panel).toContainText('Continuar con Google (nube)');
@@ -285,7 +288,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await enterDemo(page, /Carlos Mendoza/);
     const bottom = page.locator('nav.hub-mobile-nav');
     await expect(bottom).toBeVisible();
-    await bottom.getByRole('button', { name: 'BANDA' }).click();
+    await bottom.getByRole('button', { name: 'BANDA', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Integrantes & Matriz de Roles' })).toBeVisible();
   });
 });
@@ -341,7 +344,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     const card = page.getByTestId('song-card').filter({ hasText: 'Luz de Neón' });
     await expect(card.getByTestId('song-card-sections')).toContainText('2 secciones · 12 compases');
 
-    await page.getByRole('button', { name: 'PLAYLISTS', exact: true }).click();
+    await page.getByRole('button', { name: 'SETLISTS', exact: true }).click();
     await page.getByRole('button', { name: 'AÑADIR CANCIÓN', exact: true }).click();
     const picker = page.getByTestId('setlist-add-song');
     await picker.getByLabel('Buscar en la librería').fill('neon'); // sin tilde: la busqueda la ignora
@@ -424,7 +427,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     await page.getByTestId('song-delete-confirm').getByRole('button', { name: 'ELIMINAR Y QUITAR DE LOS SETLISTS' }).click();
     await expect(page.getByTestId('song-card').filter({ hasText: 'Ruta del Café' })).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'PLAYLISTS', exact: true }).click();
+    await page.getByRole('button', { name: 'SETLISTS', exact: true }).click();
     await expect(page.getByTestId('setlist-row')).toHaveCount(3);
     await expect(page.getByTestId('setlist-row').filter({ hasText: 'Ruta del Café' })).toHaveCount(0);
     const ws = await storedWorkspace(page);
@@ -432,10 +435,10 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     for (const it of ws.playlistsMap.band_01[0].songs) expect(ids.has(it.songId)).toBe(true);
   });
 
-  test('VOZ Y CONTEOS guarda la configuración de la banda y avisa que el audio se genera antes del show', async ({ page }) => {
+  test('AJUSTES > VOZ Y CONTEOS guarda la configuración de la banda y avisa que el audio se genera antes del show', async ({ page }) => {
     const external = trackExternal(page);
     await enterDemo(page, /Carlos Mendoza/);
-    await page.getByRole('button', { name: 'VOZ Y CONTEOS', exact: true }).click();
+    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
     await expect(page.getByTestId('voice-note')).toContainText('antes del show');
     await expect(page.getByTestId('voice-note')).toContainText('versión posterior');
 
@@ -447,7 +450,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     await page.getByLabel('Avisar cada sección').uncheck();
 
     await page.reload();
-    await page.getByRole('button', { name: 'VOZ Y CONTEOS', exact: true }).click();
+    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
     await expect(page.getByLabel('Activar voz en el show')).toBeChecked();
     await expect(page.getByLabel('VOZ (AZURE, ES-CO)')).toHaveValue('es-CO-GonzaloNeural');
     const ws = await storedWorkspace(page);
@@ -503,7 +506,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     expect(ws.playlistsMap.band_imp[0].songs[0]).toMatchObject({ id: 'it_1', songId: song.id, countInVoice: true, gapSec: 0 });
   });
 
-  test('móvil 375 px: CANCIONES, editor, VOZ y SETLISTS sin scroll horizontal', async ({ page }) => {
+  test('móvil 375 px: CANCIONES, editor, AJUSTES y SETLISTS sin scroll horizontal', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await enterDemo(page, /Carlos Mendoza/);
     const bottom = page.locator('nav.hub-mobile-nav');
@@ -527,11 +530,11 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     await editor.getByRole('button', { name: 'CANCELAR' }).first().click();
     await editor.getByRole('button', { name: 'CANCELAR' }).click();
 
-    await bottom.getByRole('button', { name: 'VOZ' }).click();
+    await bottom.getByRole('button', { name: 'AJUSTES', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
-    await bottom.getByRole('button', { name: 'SETLISTS' }).click();
+    await bottom.getByRole('button', { name: 'SETLISTS', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Programación de Setlists & Transiciones' })).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     await page.getByRole('button', { name: 'AÑADIR CANCIÓN', exact: true }).click();

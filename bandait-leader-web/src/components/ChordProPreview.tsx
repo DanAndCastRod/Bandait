@@ -6,19 +6,30 @@ interface Props {
   chordpro: string
   /** Texto cuando la seccion no tiene contenido. */
   emptyText?: string
+  /** 'chords': acordes sobre la letra (por defecto); 'lyrics': solo la letra. */
+  mode?: 'chords' | 'lyrics'
+  /** Tamano de letra en px (13 por defecto; el prompter de ENSAYO usa mas). */
+  fontSize?: number
+  testId?: string
 }
 
 /**
  * Vista previa de una seccion: acordes sobre las silabas, monoespaciado, fondo negro OLED.
  * Las lineas largas se desplazan dentro del recuadro, nunca ensanchan la pagina.
  */
-export const ChordProPreview: React.FC<Props> = ({ chordpro, emptyText = 'Sección sin letra ni acordes.' }) => {
-  const lines = useMemo(() => layoutChordPro(chordpro), [chordpro])
+export const ChordProPreview: React.FC<Props> = ({ chordpro, emptyText = 'Sección sin letra ni acordes.', mode = 'chords', fontSize = 13, testId = 'chordpro-preview' }) => {
+  const all = useMemo(() => layoutChordPro(chordpro), [chordpro])
+  // Solo letra: se quitan los acordes y las lineas que eran solo acordes (cuadros de compases).
+  const lines = useMemo(
+    () => (mode === 'lyrics' ? all.filter((l) => l.type !== 'pair' || l.lyrics.trim() !== '').map((l) => (l.type === 'pair' ? { ...l, chords: '' } : l)) : all),
+    [all, mode]
+  )
   const hasContent = lines.some((l) => l.type !== 'blank')
 
   return (
     <div
-      data-testid="chordpro-preview"
+      data-testid={testId}
+      data-mode={mode}
       className="touch-scroll-x"
       style={{
         background: colors.oled,
@@ -26,7 +37,7 @@ export const ChordProPreview: React.FC<Props> = ({ chordpro, emptyText = 'Secci�
         borderRadius: '4px',
         padding: '10px 12px',
         fontFamily: mono,
-        fontSize: '13px',
+        fontSize: `${fontSize}px`,
         lineHeight: 1.35,
         overflowX: 'auto',
         maxWidth: '100%',

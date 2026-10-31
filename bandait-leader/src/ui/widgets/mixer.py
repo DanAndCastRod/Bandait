@@ -44,7 +44,7 @@ class ChannelStrip(QWidget):
         # === NOMBRE DEL CANAL ===
         self.name_label = QLabel(self._name)
         self.name_label.setFont(QFont("Inter", 9, QFont.Bold))
-        self.name_label.setStyleSheet("color: #D5DAE0;")
+        _tone(self.name_label, "fg")
         self.name_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.name_label)
 
@@ -63,24 +63,6 @@ class ChannelStrip(QWidget):
         self.mute_btn.setObjectName("toggle")
         self.mute_btn.setProperty("id", "mute")
         self.mute_btn.setToolTip("Silenciar canal")
-        self.mute_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 28px; min-height: 24px;
-                border: 1px solid #7C8591;
-                color: #7C8591;
-                border-radius: 2px;
-                font-size: 10px; font-weight: bold;
-                padding: 2px;
-            }
-            QPushButton:checked {
-                background: #D96459;
-                border-color: #D96459;
-                color: #15181C;
-            }
-            QPushButton:hover {
-                border-color: #D96459;
-            }
-        """)
         self.mute_btn.clicked.connect(self._on_mute)
         buttons_layout.addWidget(self.mute_btn)
 
@@ -89,24 +71,6 @@ class ChannelStrip(QWidget):
         self.solo_btn.setObjectName("toggle")
         self.solo_btn.setProperty("id", "solo")
         self.solo_btn.setToolTip("Solo canal")
-        self.solo_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 28px; min-height: 24px;
-                border: 1px solid #7C8591;
-                color: #7C8591;
-                border-radius: 2px;
-                font-size: 10px; font-weight: bold;
-                padding: 2px;
-            }
-            QPushButton:checked {
-                background: #B8CF7A;
-                border-color: #B8CF7A;
-                color: #15181C;
-            }
-            QPushButton:hover {
-                border-color: #B8CF7A;
-            }
-        """)
         self.solo_btn.clicked.connect(self._on_solo)
         buttons_layout.addWidget(self.solo_btn)
 
@@ -115,7 +79,7 @@ class ChannelStrip(QWidget):
         # === PAN ===
         pan_label = QLabel("PAN")
         pan_label.setFont(QFont("Inter", 7))
-        pan_label.setStyleSheet("color: #7C8591;")
+        _tone(pan_label, "muted")
         pan_label.setAlignment(Qt.AlignCenter)
         pan_label.setVisible(False)  # pan is hidden until the mixer applies it
         layout.addWidget(pan_label)
@@ -126,24 +90,6 @@ class ChannelStrip(QWidget):
         self.pan_slider.setMaximum(50)
         self.pan_slider.setValue(0)
         self.pan_slider.setMaximumWidth(60)
-        self.pan_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #262C34;
-                height: 4px;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #5CC8C2;
-                width: 12px;
-                height: 12px;
-                margin: -4px 0;
-                border-radius: 2px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #5CC8C2;
-                border-radius: 2px;
-            }
-        """)
         self.pan_slider.valueChanged.connect(self._on_pan)
         # El mezclador no aplica paneo todavía: oculto hasta que exista.
         self.pan_slider.setEnabled(False)
@@ -152,7 +98,7 @@ class ChannelStrip(QWidget):
 
         self.pan_display = QLabel("C")
         self.pan_display.setFont(QFont("JetBrains Mono", 8))
-        self.pan_display.setStyleSheet("color: #7C8591;")
+        _tone(self.pan_display, "muted")
         self.pan_display.setAlignment(Qt.AlignCenter)
         self.pan_display.setVisible(False)  # goes with the hidden pan slider
         layout.addWidget(self.pan_display)
@@ -166,7 +112,7 @@ class ChannelStrip(QWidget):
         # === ROUTING ===
         routing_label = QLabel("SALIDA")
         routing_label.setFont(QFont("Inter", 7))
-        routing_label.setStyleSheet("color: #7C8591;")
+        _tone(routing_label, "muted")
         routing_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(routing_label)
         routing_label.setVisible(not self._stem)
@@ -181,22 +127,6 @@ class ChannelStrip(QWidget):
             "Salida 4"
         ])
         self.routing_combo.setMaximumWidth(80)
-        self.routing_combo.setStyleSheet("""
-            QComboBox {
-                background: #1B1F24;
-                border: 1px solid #262C34;
-                color: #D5DAE0;
-                font-size: 10px;
-                padding: 2px 4px;
-                min-height: 20px;
-            }
-            QComboBox::drop-down { width: 16px; }
-            QComboBox QAbstractItemView {
-                background: #1B1F24;
-                color: #D5DAE0;
-                selection-background-color: #5CC8C2;
-            }
-        """)
         self.routing_combo.currentTextChanged.connect(self._on_routing)
         layout.addWidget(self.routing_combo)
         self.routing_combo.setVisible(not self._stem)
@@ -218,13 +148,13 @@ class ChannelStrip(QWidget):
         pan = value / 50.0  # -1.0 a 1.0
         if pan == 0:
             self.pan_display.setText("C")
-            self.pan_display.setStyleSheet("color: #7C8591;")
+            _tone(self.pan_display, "muted")
         elif pan < 0:
             self.pan_display.setText(f"L{abs(int(pan * 100))}")
-            self.pan_display.setStyleSheet("color: #5CC8C2;")
+            _tone(self.pan_display, "active")
         else:
             self.pan_display.setText(f"R{int(pan * 100)}")
-            self.pan_display.setStyleSheet("color: #5CC8C2;")
+            _tone(self.pan_display, "active")
         self.pan_changed.emit(self.channel_id, pan)
 
     def _on_routing(self, text: str):
@@ -274,13 +204,13 @@ class MixerWidget(QWidget):
             if i < 3:
                 sep = QFrame()
                 sep.setObjectName("separator_v")
-                sep.setStyleSheet("background: #262C34; max-width: 1px; min-width: 1px;")
+                sep.setProperty("role", "divider")
                 layout.addWidget(sep)
 
         # Separador antes del master
         sep_master = QFrame()
         sep_master.setObjectName("separator_v")
-        sep_master.setStyleSheet("background: #262C34; max-width: 2px; min-width: 2px;")
+        sep_master.setProperty("role", "divider")
         layout.addWidget(sep_master)
 
         # Master
@@ -293,7 +223,7 @@ class MixerWidget(QWidget):
 
         master_label = QLabel("MASTER")
         master_label.setFont(QFont("Inter", 10, QFont.Bold))
-        master_label.setStyleSheet("color: #5CC8C2;")
+        _tone(master_label, "active")
         master_label.setAlignment(Qt.AlignCenter)
         master_layout.addWidget(master_label)
 
@@ -310,7 +240,7 @@ class MixerWidget(QWidget):
         # Indicadores
         self.stereo_label = QLabel("STEREO")
         self.stereo_label.setFont(QFont("Inter", 8))
-        self.stereo_label.setStyleSheet("color: #7C8591;")
+        _tone(self.stereo_label, "muted")
         self.stereo_label.setAlignment(Qt.AlignCenter)
         master_layout.addWidget(self.stereo_label)
 
@@ -327,3 +257,9 @@ class MixerWidget(QWidget):
 
     def set_master_level(self, level: float):
         self.master_vu.set_level(level)
+
+def _tone(widget, tone: str) -> None:
+    """Text color from the QSS template (QLabel[tone=...]); no inline styles."""
+    from src.ui.components import set_prop
+
+    set_prop(widget, "tone", tone)

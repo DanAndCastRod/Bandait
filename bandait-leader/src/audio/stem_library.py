@@ -258,6 +258,18 @@ def decode_file(path: Path, sample_rate: int) -> np.ndarray:
     return np.ascontiguousarray((data * 32767.0).astype(np.int16))
 
 
+def envelope(data: np.ndarray, points: int = 1600) -> np.ndarray:
+    """Peak envelope 0..1 of an int16 (n, 2) stem, ``points`` long (for drawing, off the audio thread)."""
+    if data is None or data.shape[0] == 0:
+        return np.zeros(0, dtype=np.float32)
+    mono = np.abs(data[:, 0].astype(np.int32)) if data.ndim == 2 else np.abs(data.astype(np.int32))
+    step = max(1, mono.shape[0] // points)
+    usable = (mono.shape[0] // step) * step
+    peaks = mono[:usable].reshape(-1, step).max(axis=1).astype(np.float32) / 32767.0
+    top = float(peaks.max()) if peaks.size else 0.0
+    return peaks / top if top > 0 else peaks
+
+
 def decode(stem_set: StemSet, sample_rate: int, root: Optional[Path] = None) -> List[Tuple[StemInfo, Optional[np.ndarray], str]]:
     """[(info, int16 data or None, error)] for every stem. A bad file does not stop the rest."""
     folder = song_dir(stem_set.song_id, root)

@@ -1096,6 +1096,72 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   1. Instalar la 2.2.1 y repetir Audio > "Descargar stems del setlist (nube)".
   2. Si otro cliente en Python (por ejemplo el de Supabase en `src/cloud/http.py`) pasa algún día por un dominio con esa protección, necesitará el mismo User-Agent. Hoy Supabase responde bien.
 
+### [2026-10-31] - Bandait 2.3: rediseño del líder, paridad con el hub y Music AI
+* **Sprint / Módulo:** `bandait-leader` (2.3.0), `bandait-leader-web` (PR #34), `bandait-stems-worker`, `bandait-protocol`. La maqueta aprobada por Daniel Castaneda está en https://claude.ai/artifact/LcgsE5Mv2B9NFwp3hVo2Up. Plan: riel lateral, siete vistas con los mismos nombres en el líder y el hub, y entrega en un solo cambio.
+* **Estado encontrado (líder):**
+  - 142 `setStyleSheet` inline y unos 274 hex sueltos fuera de `theme.py`.
+  - `QWidget { font-size: 13px }` pisaba todo `setFont`.
+  - **"Inter" no existe en Windows y Qt la cambiaba por Agency FB**, una letra condensada: así se veía el líder en el equipo de Daniel Castaneda. Esa es la causa principal de que se viera "flojo".
+  - La pestaña IA daba respuestas fijas; BUCLE y el pan no estaban conectados; "+ Agregar Sección" era solo visual.
+  - Los diálogos no heredaban el QSS de la ventana: por eso cada uno tenía su propio estilo.
+* **Acción técnica realizada:**
+  - **Base de estilos:**
+    - `theme.py` tiene escala tipográfica, espaciado, radios y `render_qss`;
+    - `bandait_dark.qss` es una plantilla con `@TOKEN`, sin hex, aplicada a toda la aplicación;
+    - la fuente base va en `QApplication.setFont` y se aplica antes de construir la interfaz;
+    - Space Grotesk e IBM Plex Mono estáticas (OFL) en `resources/fonts` (las mismas de la PWA y el hub), con sustitución de Inter y JetBrains Mono;
+    - `components.py` estila por propiedades (`role`, `kind`, `variant`, `tag`, `tone`, `health`);
+    - `test_no_inline_styles.py` impide volver a los estilos inline: hoy queda 1 `setStyleSheet`, el de la plantilla.
+  - **Estructura:**
+    - riel lateral (`shell.py`, íconos dibujados con QPainter porque el instalador no trae QtSvg);
+    - barra superior con banda, transporte compacto, canción en vivo y siguiente, músicos y PANIC;
+    - barra de estado con chips que se ocultan mientras hay un mensaje temporal.
+  - **Vistas:**
+    - **Escenario:** tres columnas. Setlist; prompter con avance por secciones; pulso, músicos con latencia y estado de stems.
+    - **Ensayo:** bucle de sección real en el transporte, hecho por el subagente (PR #35).
+      - `set_loop`/`tick`: re-ancla en el límite de compás con un `bar_offset` menor, igual que TEMPO_NUDGE.
+      - CONTRACT_V3 sección 6, regla 11.
+      - Una prueba vitest muestra que la PWA lo sigue sin cambios.
+    - **Setlists/Canciones:** la biblioteca sin título duplicado. Canciones con inspector (datos, stems, secciones) y Analizar con IA.
+    - **Pistas:** regla de secciones y un carril por stem con su envolvente, calculada en el hilo de carga; mezclador de stems; mezclador de entradas plegado.
+    - **Banda:** integrantes desde Supabase (`members.py`, RLS), conectados con latencia y salida de audio, y QR.
+    - **Ajustes:** reúne audio, clic y ruteo, red, cuenta y nube, pantalla y voz.
+    - Se borra `ai_view.py`.
+  - **Music AI:**
+    - el Worker recibe la mezcla, la sube a Music AI (workflow `stems-workflow-releven-bandait`, clave como secreto del Worker) y ensambla una sola vez el borrador (`analysis.ts`): secciones con compases, acordes por compás en ChordPro, BPM y tono;
+    - el líder mezcla los stems (mono, 22 050 Hz, sin clic ni guía), lo lanza y consulta;
+    - el hub lo acepta en el editor de la canción.
+  - **Hub (PR #34, subagente):**
+    - navegación SETLISTS, CANCIONES, ENSAYO, PISTAS, BANDA, AJUSTES;
+    - ENSAYO con el prompter siguiendo la reproducción de los stems;
+    - Analizar con IA;
+    - editar equipos;
+    - borrado del código en vivo que no se usaba.
+* **Hallazgos de Music AI (análisis real de "Dame tu aire"):**
+  - el workflow devuelve `Bpm`, `Root Key`, `Sections` (`{start,end,label}`), `ChordsMap` (con `start_bar`/`start_beat`) y `Lyrics`;
+  - **`Lyrics` no trae tiempos**: la letra queda como "letra sin ubicar". Si se agrega al workflow el módulo de letra alineada, el ensamblador ya la ubica por sección;
+  - detectó 124 BPM; en el hub la canción estaba en 92.
+* **Verificación y Pruebas (resultado literal):**
+  - Líder: `ruff check src tests` da `All checks passed!` y la última corrida completa local dio `1 failed, 490 passed` (falla de `test_no_control_without_a_function`, ya corregida; ese archivo da `16 passed`, y `test_no_inline_styles.py` da `2 passed`). La corrida completa posterior la detuvo Claude Code por falta de memoria en el equipo: la suite completa queda para el CI del PR.
+  - Worker: `npm test` da `# pass 13`. Desplegado (versión `08dd9de5`) y con el secreto `MUSICAI_API_KEY` cargado.
+  - Hub (según el informe del subagente, PR #34): `verify:logic` da `61 ok, 0 fallas` y Playwright leader-web da `39 passed`.
+  - PWA (PR #35): `vitest` da `140 passed`.
+  - Capturas fuera de pantalla de las siete vistas a 1440x900, comparadas con la maqueta.
+* **No verificado:**
+  - un análisis completo de punta a punta desde el hub o el líder con sesión real (el Worker y Music AI se probaron por separado);
+  - el bucle con audio ASIO y teléfonos reales;
+  - el líder en una pantalla real de Windows (solo capturas fuera de pantalla).
+* **Errores propios:**
+  - en un script usé `setProperty("text", ...)` sobre QLabel, que reemplaza el texto; lo detecté antes de usarlo y la propiedad pasó a `kind`;
+  - Space Grotesk variable no se veía fuera de pantalla: se cambió por las estáticas;
+  - quité `DIALOG_QSS` de un archivo antes que de su importador y el script se cortó a la mitad; se corrigió a mano.
+* **Pendientes:**
+  1. Tempo de práctica: hoy solo avisa. Necesita estirar el audio sin cambiar el tono (time-stretch), tanto en el líder como en el hub.
+  2. Agregar al workflow de Music AI la letra con tiempos.
+  3. Primera prueba real: analizar una canción de B&O's desde el hub o el líder, y aceptarla en el hub.
+  4. Al aceptar un borrador en el hub cambian los ids de las secciones; el líder las ve como secciones nuevas.
+
+
 ### [2026-10-31] - Líder 2.2.2: el resumen de "Descargar stems del setlist" cuenta todos los resultados
 * **Sprint / Módulo:** `bandait-leader` (`stems_controller.py`), `bandait-protocol/fixtures/stem_names.json`
 * **Estado encontrado:** con la 2.2.1, Daniel Castaneda vio "0 canciones descargadas" y lo leyó como un fallo. En realidad la descarga funcionó:

@@ -10,6 +10,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
 from PySide6.QtCore import Qt, QRect, QTimer, Signal, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QMouseEvent, QPolygon, QWheelEvent, QKeyEvent
 
+from src.ui import theme
+
 from ._paint import safe_paint
 
 # Bounds that keep every coordinate inside Qt's 32-bit int (QRect, QPoint):
@@ -25,6 +27,8 @@ def _finite(value, default: float) -> float:
         return default
     return number if math.isfinite(number) else default
 
+
+LANE_H = 52  # alto de cada carril de stem (px)
 
 class SectionItem:
     """Sección de canción (Intro, Verso, Coro, etc.)."""
@@ -73,6 +77,8 @@ class TimelineWidget(QWidget):
         self._drag_start_x = 0
         self._drag_start_beat = 0
 
+        self._lanes = []
+        self._lane_duration = 0.001
         self.setMinimumHeight(200)
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -86,6 +92,15 @@ class TimelineWidget(QWidget):
 
     def set_bpm(self, bpm: int):
         self._bpm = max(40.0, min(300.0, _finite(bpm, self._bpm)))
+        self.update()
+
+    def set_lanes(self, lanes, duration: float):
+        """Stem lanes: [(label, envelope 0..1, gain)] over ``duration`` seconds."""
+        self._lanes = list(lanes or [])
+        self._lane_duration = max(0.001, float(duration or 0.0))
+        if duration and duration > self._duration:
+            self.set_duration(duration)
+        self.setMinimumHeight(200 + len(self._lanes) * (LANE_H + 4))
         self.update()
 
     def set_duration(self, seconds: float):
@@ -214,6 +229,29 @@ class TimelineWidget(QWidget):
             painter.setPen(QColor(186, 194, 204))
             dur_rect = QRect(x1 + 4, track_y + 28, width - 8, 16)
             painter.drawText(dur_rect, Qt.AlignLeft, f"{bars} compas{'es' if bars != 1 else ''}")
+
+        # === CARRILES DE STEMS (envolvente por pista; gris si está en silencio) ===
+        lane_y = track_y + self._track_height + 6
+        for label, env, gain in self._lanes:
+            lane_rect = QRect(0, lane_y, w, LANE_H)
+            painter.fillRect(lane_rect, QColor(theme.SURFACE))
+            if env is not None and len(env):
+                painter.setPen(QPen(QColor(theme.ACTIVE if gain > 0 else theme.FAINT), 1))
+                mid = lane_y + LANE_H // 2
+                half = LANE_H // 2 - 4
+                n = len(env)
+                for x in range(0, w, 2):
+                    t = self._x_to_seconds(x)
+                    if t < 0 or t >= self._lane_duration:
+                        continue
+                    a = float(env[min(n - 1, int(t / self._lane_duration * n))]) * half
+                    painter.drawLine(x, int(mid - a), x, int(mid + a))
+            painter.setFont(QFont(theme.FONT_UI, 9, QFont.Bold))
+            text_w = painter.fontMetrics().horizontalAdvance(label) + 12
+            painter.fillRect(QRect(4, lane_y + 4, text_w, 18), QColor(theme.ELEVATED))
+            painter.setPen(QColor(theme.FG))
+            painter.drawText(QRect(10, lane_y + 5, text_w, 16), Qt.AlignLeft, label)
+            lane_y += LANE_H + 4
 
         # === PLAYHEAD ===
         playhead_x = self._seconds_to_x(self._position)

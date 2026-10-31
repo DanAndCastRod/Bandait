@@ -58,14 +58,19 @@ def test_load_mix_persist_and_drop_on_song_change(qtbot, ctl, engine):
     root = tmp / "Stems"
     lib.import_stems("s1", [wav(tmp / "Vocals.wav"), wav(tmp / "Drums.wav")], root=root)
     shown = []
+    lanes = []
     c.stems_shown.connect(shown.append)
+    c.lanes_changed.connect(lambda lane_list, duration: lanes.append((lane_list, duration)))
     c.show_song("s1", "Hoy vuelvo a casa", 92)
     qtbot.waitUntil(lambda: engine.has_stems(), timeout=5000)
+    labels = [lane[0] for lane in lanes[-1][0]]
+    assert labels == ["Voz", "Bateria"] and lanes[-1][1] == pytest.approx(0.2, abs=0.01)
     assert not container.isHidden() and shown[-1] is True
     assert [s.name_label.text() for s in mixer.strips] == ["VOZ", "BATERIA"]
     assert engine._stem_ref_bpm == 92.0
 
     mixer.strips[0].mute_btn.click()
+    assert lanes[-1][0][0][2] == 0.0  # the muted lane is drawn grey
     voices = engine._stems_cfg[0]
     assert voices[0][1] == 0.0 and voices[1][1] > 0
     mixer.offset_spin.setValue(40)

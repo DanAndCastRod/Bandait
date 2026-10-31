@@ -59,7 +59,7 @@ class _EditorDialog(QDialog):
         self._layout.setContentsMargins(20, 20, 20, 20)
         head = QLabel(heading)
         head.setFont(QFont("Inter", 13, QFont.Bold))
-        head.setStyleSheet("color: #5CC8C2; background: transparent;")
+        head.setProperty("tone", "active")
         self._layout.addWidget(head)
         self.form = QFormLayout()
         self.form.setSpacing(10)
@@ -67,7 +67,7 @@ class _EditorDialog(QDialog):
         self._layout.addLayout(self.form)
         self.error_label = QLabel("")
         self.error_label.setObjectName("error")
-        self.error_label.setStyleSheet("color: #E07A70; background: transparent;")
+        self.error_label.setProperty("tone", "danger")
         self.error_label.setWordWrap(True)
         self.error_label.setVisible(False)
         self._buttons = QHBoxLayout()
@@ -107,7 +107,7 @@ class _EditorDialog(QDialog):
 def _hint(text: str) -> QLabel:
     label = QLabel(text)
     label.setWordWrap(True)
-    label.setStyleSheet("color: #8E97A3; background: transparent; font-size: 12px;")
+    label.setProperty("kind", "muted")
     return label
 
 

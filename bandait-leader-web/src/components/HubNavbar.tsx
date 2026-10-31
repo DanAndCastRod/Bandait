@@ -6,7 +6,8 @@ import {
   ListMusic,
   Sliders,
   Users,
-  Radio,
+  Music,
+  Settings,
   Download,
   Plus,
   LogOut,
@@ -16,13 +17,35 @@ import {
   BookOpen,
   Cloud,
   Library,
-  Mic,
   Upload,
 } from 'lucide-react'
 import { UserManualModal } from './UserManualModal'
 import { SupabaseConfigModal } from './SupabaseConfigModal'
+import { colors, mono } from './hubStyles'
 
-export type HubTab = 'playlists' | 'songs' | 'voice' | 'stems' | 'members' | 'equipment'
+/**
+ * Vistas del hub, con los mismos nombres y el mismo orden que el lider 2.3. El hub no tiene
+ * Escenario: una pagina HTTPS no puede abrir ws:// hacia el lider en la LAN (contenido mixto).
+ */
+export type HubTab = 'setlists' | 'songs' | 'rehearsal' | 'tracks' | 'band' | 'settings'
+
+interface TabDef {
+  id: HubTab
+  label: string
+  /** Etiqueta corta de la barra inferior en movil. */
+  short: string
+  icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>
+  accent: string
+}
+
+const HUB_TABS: readonly TabDef[] = [
+  { id: 'setlists', label: 'SETLISTS', short: 'SETLISTS', icon: ListMusic, accent: colors.orange },
+  { id: 'songs', label: 'CANCIONES', short: 'CANCIONES', icon: Library, accent: colors.violet },
+  { id: 'rehearsal', label: 'ENSAYO', short: 'ENSAYO', icon: Music, accent: colors.cyan },
+  { id: 'tracks', label: 'PISTAS', short: 'PISTAS', icon: Sliders, accent: colors.cobalt },
+  { id: 'band', label: 'BANDA', short: 'BANDA', icon: Users, accent: colors.success },
+  { id: 'settings', label: 'AJUSTES', short: 'AJUSTES', icon: Settings, accent: colors.warning },
+]
 
 interface Props {
   activeTab: HubTab
@@ -30,10 +53,10 @@ interface Props {
 }
 
 const SYNC_LABEL: Record<HubSyncStatus['state'], { text: string; color: string }> = {
-  local_only: { text: 'SOLO LOCAL', color: '#8E97A3' },
-  syncing: { text: 'SINCRONIZANDO', color: '#7AC4D6' },
-  synced: { text: 'SINCRONIZADO', color: '#B8CF7A' },
-  error: { text: 'ERROR NUBE', color: '#D96459' },
+  local_only: { text: 'SOLO LOCAL', color: colors.muted },
+  syncing: { text: 'SINCRONIZANDO', color: colors.cyan },
+  synced: { text: 'SINCRONIZADO', color: colors.success },
+  error: { text: 'ERROR NUBE', color: colors.danger },
 }
 
 function syncTitle(status: HubSyncStatus): string {
@@ -99,8 +122,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
       <header
         className="hub-header"
         style={{
-          background: '#1A1E23',
-          borderBottom: '1px solid #2E343D',
+          background: colors.cardAlt,
+          borderBottom: `1px solid ${colors.border}`,
           padding: '8px clamp(8px, 2vw, 16px)',
           display: 'flex',
           alignItems: 'center',
@@ -120,15 +143,15 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             style={{
               width: '26px',
               height: '26px',
-              background: 'linear-gradient(135deg, #5CC8C2, #7AA5D6)',
+              background: `linear-gradient(135deg, ${colors.orange}, ${colors.cobalt})`,
               borderRadius: '4px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 800,
               fontSize: '13px',
-              color: '#D5DAE0',
-              fontFamily: "'IBM Plex Mono', monospace",
+              color: colors.text,
+              fontFamily: mono,
               flexShrink: 0,
             }}
           >
@@ -137,11 +160,11 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div
               style={{
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontWeight: 800,
                 fontSize: '13px',
                 letterSpacing: '1px',
-                color: '#D5DAE0',
+                color: colors.text,
                 lineHeight: 1.1,
               }}
             >
@@ -150,9 +173,9 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             <div
               className="hub-desktop-only"
               style={{
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '9px',
-                color: '#8E97A3',
+                color: colors.muted,
                 letterSpacing: '1.5px',
               }}
             >
@@ -167,22 +190,22 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             data-testid="band-switcher"
             onClick={() => setShowBandMenu(!showBandMenu)}
             style={{
-              background: '#232830',
-              border: '1px solid #2E343D',
+              background: colors.elevated,
+              border: `1px solid ${colors.border}`,
               borderRadius: '4px',
               padding: '5px 8px',
-              color: '#D5DAE0',
+              color: colors.text,
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
               cursor: 'pointer',
               fontSize: '11px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: mono,
               maxWidth: 'clamp(100px, 28vw, 220px)',
               whiteSpace: 'nowrap',
             }}
           >
-            <Layers size={13} style={{ color: '#7AA5D6', flexShrink: 0 }} />
+            <Layers size={13} style={{ color: colors.cobalt, flexShrink: 0 }} />
             <span
               style={{
                 fontWeight: 700,
@@ -197,8 +220,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               className="hub-desktop-only"
               style={{
                 fontSize: '9px',
-                background: '#5CC8C2',
-                color: '#15181C',
+                background: colors.orange,
+                color: colors.onAccent,
                 padding: '1px 5px',
                 borderRadius: '2px',
                 fontWeight: 700,
@@ -217,8 +240,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 top: '100%',
                 left: 0,
                 marginTop: '6px',
-                background: '#20252B',
-                border: '1px solid #2E343D',
+                background: colors.modal,
+                border: `1px solid ${colors.border}`,
                 borderRadius: '6px',
                 width: '260px',
                 boxShadow: '0 10px 25px rgba(0, 0, 0, 0.6)',
@@ -229,10 +252,10 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               <div
                 style={{
                   padding: '8px 12px',
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: mono,
                   fontSize: '10px',
-                  color: '#8E97A3',
-                  borderBottom: '1px solid #2E343D',
+                  color: colors.muted,
+                  borderBottom: `1px solid ${colors.border}`,
                 }}
               >
                 TUS AGRUPACIONES //
@@ -251,10 +274,10 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    background: b.id === activeBand?.id ? '#2B313A' : 'transparent',
+                    background: b.id === activeBand?.id ? colors.borderSoft : 'transparent',
                     border: 'none',
-                    borderBottom: '1px solid #2B313A',
-                    color: '#D5DAE0',
+                    borderBottom: `1px solid ${colors.borderSoft}`,
+                    color: colors.text,
                     cursor: 'pointer',
                     textAlign: 'left',
                     fontSize: '12px',
@@ -262,13 +285,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 >
                   <div>
                     <div style={{ fontWeight: b.id === activeBand?.id ? 700 : 400 }}>{b.name}</div>
-                    <div style={{ fontSize: '10px', color: '#8E97A3' }}>{b.genre}</div>
+                    <div style={{ fontSize: '10px', color: colors.muted }}>{b.genre}</div>
                   </div>
                   <span
                     style={{
-                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontFamily: mono,
                       fontSize: '9px',
-                      color: b.id === activeBand?.id ? '#5CC8C2' : '#8E97A3',
+                      color: b.id === activeBand?.id ? colors.orange : colors.muted,
                     }}
                   >
                     {sharing.sharedBandIds.includes(b.id) ? 'COMPARTIDA ' : ''}[{b.currentUserRole}]
@@ -289,10 +312,10 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                   gap: '8px',
                   background: 'transparent',
                   border: 'none',
-                  color: '#7AA5D6',
+                  color: colors.cobalt,
                   cursor: 'pointer',
                   fontSize: '12px',
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: mono,
                   fontWeight: 700,
                 }}
               >
@@ -304,133 +327,39 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         </div>
       </div>
 
-      {/* 4 MAIN NAVIGATION TABS (DESKTOP) */}
-      <nav className="hub-desktop-nav" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-        <button
-          onClick={() => onSelectTab('playlists')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px 14px',
-            background: activeTab === 'playlists' ? '#232830' : 'transparent',
-            border: activeTab === 'playlists' ? '1px solid #5CC8C2' : '1px solid transparent',
-            borderRadius: '4px',
-            color: activeTab === 'playlists' ? '#D5DAE0' : '#8E97A3',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontWeight: activeTab === 'playlists' ? 700 : 400,
-          }}
-        >
-          <ListMusic size={15} style={{ color: activeTab === 'playlists' ? '#5CC8C2' : 'inherit' }} />
-          <span>PLAYLISTS</span>
-        </button>
-
-        <button
-          onClick={() => onSelectTab('songs')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px 14px',
-            background: activeTab === 'songs' ? '#232830' : 'transparent',
-            border: activeTab === 'songs' ? '1px solid #B48EDB' : '1px solid transparent',
-            borderRadius: '4px',
-            color: activeTab === 'songs' ? '#D5DAE0' : '#8E97A3',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontWeight: activeTab === 'songs' ? 700 : 400,
-          }}
-        >
-          <Library size={15} style={{ color: activeTab === 'songs' ? '#B48EDB' : 'inherit' }} />
-          <span>CANCIONES</span>
-        </button>
-
-        <button
-          onClick={() => onSelectTab('voice')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px 14px',
-            background: activeTab === 'voice' ? '#232830' : 'transparent',
-            border: activeTab === 'voice' ? '1px solid #7AC4D6' : '1px solid transparent',
-            borderRadius: '4px',
-            color: activeTab === 'voice' ? '#D5DAE0' : '#8E97A3',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontWeight: activeTab === 'voice' ? 700 : 400,
-          }}
-        >
-          <Mic size={15} style={{ color: activeTab === 'voice' ? '#7AC4D6' : 'inherit' }} />
-          <span>VOZ Y CONTEOS</span>
-        </button>
-
-        <button
-          onClick={() => onSelectTab('stems')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px 14px',
-            background: activeTab === 'stems' ? '#232830' : 'transparent',
-            border: activeTab === 'stems' ? '1px solid #7AA5D6' : '1px solid transparent',
-            borderRadius: '4px',
-            color: activeTab === 'stems' ? '#D5DAE0' : '#8E97A3',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontWeight: activeTab === 'stems' ? 700 : 400,
-          }}
-        >
-          <Sliders size={15} style={{ color: activeTab === 'stems' ? '#7AA5D6' : 'inherit' }} />
-          <span>PISTAS & STEMS</span>
-        </button>
-
-        <button
-          onClick={() => onSelectTab('members')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px 14px',
-            background: activeTab === 'members' ? '#232830' : 'transparent',
-            border: activeTab === 'members' ? '1px solid #B8CF7A' : '1px solid transparent',
-            borderRadius: '4px',
-            color: activeTab === 'members' ? '#D5DAE0' : '#8E97A3',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontWeight: activeTab === 'members' ? 700 : 400,
-          }}
-        >
-          <Users size={15} style={{ color: activeTab === 'members' ? '#B8CF7A' : 'inherit' }} />
-          <span>INTEGRANTES</span>
-        </button>
-
-        <button
-          onClick={() => onSelectTab('equipment')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px 14px',
-            background: activeTab === 'equipment' ? '#232830' : 'transparent',
-            border: activeTab === 'equipment' ? '1px solid #D9A24E' : '1px solid transparent',
-            borderRadius: '4px',
-            color: activeTab === 'equipment' ? '#D5DAE0' : '#8E97A3',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontWeight: activeTab === 'equipment' ? 700 : 400,
-          }}
-        >
-          <Radio size={15} style={{ color: activeTab === 'equipment' ? '#D9A24E' : 'inherit' }} />
-          <span>EQUIPAMIENTO</span>
-        </button>
+      {/* NAVEGACION PRINCIPAL (ESCRITORIO) */}
+      <nav className="hub-desktop-nav" aria-label="Vistas del hub" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+        {HUB_TABS.map((tab) => {
+          const active = activeTab === tab.id
+          const Icon = tab.icon
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className="stx-btn"
+              data-testid={`tab-${tab.id}`}
+              aria-current={active ? 'page' : undefined}
+              onClick={() => onSelectTab(tab.id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                background: active ? colors.elevated : 'transparent',
+                border: active ? `1px solid ${tab.accent}` : '1px solid transparent',
+                borderRadius: '4px',
+                color: active ? colors.text : colors.muted,
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontFamily: mono,
+                fontWeight: active ? 700 : 400,
+              }}
+            >
+              <Icon size={15} style={{ color: active ? tab.accent : 'inherit' }} />
+              <span>{tab.label}</span>
+            </button>
+          )
+        })}
       </nav>
 
       {/* ACTIONS & USER PROFILE */}
@@ -444,16 +373,16 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             alignItems: 'center',
             gap: '5px',
             background: 'transparent',
-            border: '1px solid #2E343D',
+            border: `1px solid ${colors.border}`,
             borderRadius: '4px',
             padding: '5px 8px',
-            color: '#8E97A3',
+            color: colors.muted,
             cursor: 'pointer',
             fontSize: '11px',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: mono,
           }}
         >
-          <BookOpen size={13} style={{ color: '#7AA5D6' }} />
+          <BookOpen size={13} style={{ color: colors.cobalt }} />
           <span className="hub-desktop-only">MANUAL</span>
         </button>
 
@@ -469,13 +398,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             alignItems: 'center',
             gap: '5px',
             background: syncStatus.state === 'local_only' ? 'transparent' : `${syncLabel.color}1a`,
-            border: `1px solid ${syncStatus.state === 'local_only' ? '#2E343D' : syncLabel.color}`,
+            border: `1px solid ${syncStatus.state === 'local_only' ? colors.border : syncLabel.color}`,
             borderRadius: '4px',
             padding: '5px 8px',
             color: syncLabel.color,
             cursor: 'pointer',
             fontSize: '11px',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: mono,
           }}
         >
           <Cloud size={13} />
@@ -491,13 +420,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             alignItems: 'center',
             gap: '6px',
             background: 'transparent',
-            border: '1px solid #2E343D',
+            border: `1px solid ${colors.border}`,
             borderRadius: '4px',
             padding: '6px 10px',
-            color: '#8E97A3',
+            color: colors.muted,
             cursor: 'pointer',
             fontSize: '11px',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: mono,
           }}
         >
           <Download size={13} />
@@ -514,12 +443,12 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                background: '#232830',
-                border: '1px solid #2E343D',
+                background: colors.elevated,
+                border: `1px solid ${colors.border}`,
                 padding: '3px 8px 3px 3px',
                 borderRadius: '20px',
                 cursor: 'pointer',
-                color: '#D5DAE0',
+                color: colors.text,
                 maxWidth: '180px',
               }}
             >
@@ -535,13 +464,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                     width: '24px',
                     height: '24px',
                     borderRadius: '50%',
-                    background: '#7AA5D6',
+                    background: colors.cobalt,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '11px',
                     fontWeight: 700,
-                    color: '#15181C',
+                    color: colors.onAccent,
                     flexShrink: 0,
                   }}
                 >
@@ -556,7 +485,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                   </span>
                   {hasGoogleIdentity && <GoogleIcon size={12} />}
                 </div>
-                <span style={{ fontSize: '9px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: '9px', color: colors.muted, fontFamily: mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {user.email}
                 </span>
               </div>
@@ -568,15 +497,15 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               title="Cerrar sesión"
               style={{
                 background: 'rgba(217, 100, 89, 0.15)',
-                border: '1px solid #D96459',
-                color: '#D96459',
+                border: `1px solid ${colors.danger}`,
+                color: colors.danger,
                 borderRadius: '4px',
                 padding: '5px 8px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px',
                 cursor: 'pointer',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '10px',
                 fontWeight: 700,
                 flexShrink: 0,
@@ -607,8 +536,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         >
           <div
             style={{
-              background: '#20252B',
-              border: '1px solid #2E343D',
+              background: colors.modal,
+              border: `1px solid ${colors.border}`,
               borderRadius: '8px',
               padding: '24px',
               width: '100%',
@@ -619,7 +548,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             <h3
               style={{
                 margin: '0 0 16px 0',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '16px',
                 letterSpacing: '1px',
               }}
@@ -628,7 +557,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
             </h3>
             <form onSubmit={handleCreateBand} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: colors.muted, fontFamily: mono }}>
                   NOMBRE DE LA BANDA O PROYECTO
                 </label>
                 <input
@@ -639,11 +568,11 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                   required
                   style={{
                     width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
+                    background: colors.input,
+                    border: `1px solid ${colors.border}`,
                     borderRadius: '4px',
                     padding: '10px',
-                    color: '#D5DAE0',
+                    color: colors.text,
                     marginTop: '4px',
                     outline: 'none',
                     boxSizing: 'border-box',
@@ -652,7 +581,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: colors.muted, fontFamily: mono }}>
                   GÉNERO / ESTILO
                 </label>
                 <input
@@ -662,11 +591,11 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                   placeholder="Ej: Jazz Fusión / Rock / Sinfónico"
                   style={{
                     width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
+                    background: colors.input,
+                    border: `1px solid ${colors.border}`,
                     borderRadius: '4px',
                     padding: '10px',
-                    color: '#D5DAE0',
+                    color: colors.text,
                     marginTop: '4px',
                     outline: 'none',
                     boxSizing: 'border-box',
@@ -680,8 +609,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                   onClick={() => setShowNewBandModal(false)}
                   style={{
                     background: 'transparent',
-                    border: '1px solid #2E343D',
-                    color: '#8E97A3',
+                    border: `1px solid ${colors.border}`,
+                    color: colors.muted,
                     padding: '8px 16px',
                     borderRadius: '4px',
                     cursor: 'pointer',
@@ -692,9 +621,9 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 <button
                   type="submit"
                   style={{
-                    background: '#7AA5D6',
+                    background: colors.cobalt,
                     border: 'none',
-                    color: '#15181C',
+                    color: colors.onAccent,
                     padding: '8px 20px',
                     borderRadius: '4px',
                     fontWeight: 700,
@@ -729,8 +658,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         >
           <div
             style={{
-              background: '#20252B',
-              border: '1px solid #2E343D',
+              background: colors.modal,
+              border: `1px solid ${colors.border}`,
               borderRadius: '8px',
               padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
@@ -748,16 +677,16 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                borderBottom: '1px solid #2E343D',
+                borderBottom: `1px solid ${colors.border}`,
                 paddingBottom: '12px',
               }}
             >
               <div
                 style={{
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: mono,
                   fontSize: '13px',
                   fontWeight: 700,
-                  color: '#D5DAE0',
+                  color: colors.text,
                   letterSpacing: '1px',
                 }}
               >
@@ -769,7 +698,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: '#8E97A3',
+                  color: colors.muted,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -785,10 +714,10 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '14px',
-                background: '#181B20',
+                background: colors.input,
                 padding: '14px',
                 borderRadius: '6px',
-                border: '1px solid #2E343D',
+                border: `1px solid ${colors.border}`,
               }}
             >
               {user.avatarUrl ? (
@@ -803,13 +732,13 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                     width: '48px',
                     height: '48px',
                     borderRadius: '50%',
-                    background: '#7AA5D6',
+                    background: colors.cobalt,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '20px',
                     fontWeight: 700,
-                    color: '#15181C',
+                    color: colors.onAccent,
                     flexShrink: 0,
                   }}
                 >
@@ -817,12 +746,12 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 </div>
               )}
               <div style={{ overflow: 'hidden' }}>
-                <div style={{ fontWeight: 800, fontSize: '15px', color: '#D5DAE0' }}>{user.name}</div>
+                <div style={{ fontWeight: 800, fontSize: '15px', color: colors.text }}>{user.name}</div>
                 <div
                   style={{
                     fontSize: '12px',
-                    color: '#8E97A3',
-                    fontFamily: "'IBM Plex Mono', monospace",
+                    color: colors.muted,
+                    fontFamily: mono,
                     wordBreak: 'break-all',
                   }}
                 >
@@ -834,8 +763,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                     data-testid="profile-provider"
                     style={{
                       fontSize: '10px',
-                      color: user.authProvider === 'supabase' ? '#B8CF7A' : '#D9A24E',
-                      fontFamily: "'IBM Plex Mono', monospace",
+                      color: user.authProvider === 'supabase' ? colors.success : colors.warning,
+                      fontFamily: mono,
                       fontWeight: 700,
                     }}
                   >
@@ -847,29 +776,29 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
 
             <div
               style={{
-                background: '#1A1E23',
-                border: '1px solid #2E343D',
+                background: colors.cardAlt,
+                border: `1px solid ${colors.border}`,
                 borderRadius: '6px',
                 padding: '12px',
                 fontSize: '11px',
-                color: '#8E97A3',
-                fontFamily: "'IBM Plex Mono', monospace",
+                color: colors.muted,
+                fontFamily: mono,
                 lineHeight: 1.6,
               }}
             >
               <div>COPIA LOCAL (LOCALSTORAGE):</div>
-              <div style={{ color: '#D5DAE0', fontWeight: 700, wordBreak: 'break-all' }}>
+              <div style={{ color: colors.text, fontWeight: 700, wordBreak: 'break-all' }}>
                 bandait_workspace_{user.id}
               </div>
               <div style={{ marginTop: '4px' }}>
                 NUBE:{' '}
-                <span style={{ color: user.authProvider === 'supabase' ? '#B8CF7A' : '#8E97A3', fontWeight: 700 }}>
+                <span style={{ color: user.authProvider === 'supabase' ? colors.success : colors.muted, fontWeight: 700 }}>
                   {user.authProvider === 'supabase' ? `fila user_id = ${user.id}` : 'sin nube (perfil local)'}
                 </span>
               </div>
               <div style={{ marginTop: '4px' }}>
                 BANDA ACTIVA:{' '}
-                <span style={{ color: '#5CC8C2', fontWeight: 700 }}>{activeBand?.name}</span>{' '}
+                <span style={{ color: colors.orange, fontWeight: 700 }}>{activeBand?.name}</span>{' '}
                 [{(activeBandRole ?? '').toUpperCase()}]
               </div>
             </div>
@@ -881,11 +810,11 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               }}
               style={{
                 background: 'transparent',
-                border: '1px solid #2E343D',
-                color: '#8E97A3',
+                border: `1px solid ${colors.border}`,
+                color: colors.muted,
                 borderRadius: '4px',
                 padding: '10px',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
@@ -904,11 +833,11 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
               data-testid="import-workspace"
               style={{
                 background: 'transparent',
-                border: '1px solid #2E343D',
-                color: '#8E97A3',
+                border: `1px solid ${colors.border}`,
+                color: colors.muted,
                 borderRadius: '4px',
                 padding: '10px',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
@@ -939,8 +868,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 data-testid="import-workspace-message"
                 style={{
                   fontSize: '11px',
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  color: importMessage.ok ? '#B8CF7A' : '#D96459',
+                  fontFamily: mono,
+                  color: importMessage.ok ? colors.success : colors.danger,
                   lineHeight: 1.5,
                 }}
               >
@@ -954,12 +883,12 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 void logout()
               }}
               style={{
-                background: '#D96459',
+                background: colors.danger,
                 border: 'none',
-                color: '#15181C',
+                color: colors.onAccent,
                 borderRadius: '4px',
                 padding: '12px',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '12px',
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -984,7 +913,7 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
       {showSupabaseModal && <SupabaseConfigModal onClose={() => setShowSupabaseModal(false)} />}
     </header>
 
-    {/* MOBILE BOTTOM NAVIGATION BAR */}
+    {/* BARRA INFERIOR EN MOVIL */}
     <nav
       className="hub-mobile-nav"
       style={{
@@ -993,8 +922,8 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         left: 0,
         right: 0,
         height: '56px',
-        background: '#1A1E23',
-        borderTop: '1px solid #2E343D',
+        background: colors.cardAlt,
+        borderTop: `1px solid ${colors.border}`,
         alignItems: 'center',
         justifyContent: 'space-around',
         zIndex: 999,
@@ -1002,149 +931,40 @@ export const HubNavbar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
         boxSizing: 'border-box',
       }}
     >
-      <button
-        onClick={() => onSelectTab('playlists')}
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '3px',
-          height: '100%',
-          background: 'transparent',
-          border: 'none',
-          color: activeTab === 'playlists' ? '#5CC8C2' : '#8E97A3',
-          fontSize: '10px',
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontWeight: activeTab === 'playlists' ? 700 : 400,
-          cursor: 'pointer',
-          borderTop: activeTab === 'playlists' ? '2px solid #5CC8C2' : '2px solid transparent',
-        }}
-      >
-        <ListMusic size={18} />
-        <span>SETLISTS</span>
-      </button>
-
-      <button
-        onClick={() => onSelectTab('songs')}
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '3px',
-          height: '100%',
-          background: 'transparent',
-          border: 'none',
-          color: activeTab === 'songs' ? '#B48EDB' : '#8E97A3',
-          fontSize: '10px',
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontWeight: activeTab === 'songs' ? 700 : 400,
-          cursor: 'pointer',
-          borderTop: activeTab === 'songs' ? '2px solid #B48EDB' : '2px solid transparent',
-        }}
-      >
-        <Library size={18} />
-        <span>CANCIONES</span>
-      </button>
-
-      <button
-        onClick={() => onSelectTab('voice')}
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '3px',
-          height: '100%',
-          background: 'transparent',
-          border: 'none',
-          color: activeTab === 'voice' ? '#7AC4D6' : '#8E97A3',
-          fontSize: '10px',
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontWeight: activeTab === 'voice' ? 700 : 400,
-          cursor: 'pointer',
-          borderTop: activeTab === 'voice' ? '2px solid #7AC4D6' : '2px solid transparent',
-        }}
-      >
-        <Mic size={18} />
-        <span>VOZ</span>
-      </button>
-
-      <button
-        onClick={() => onSelectTab('stems')}
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '3px',
-          height: '100%',
-          background: 'transparent',
-          border: 'none',
-          color: activeTab === 'stems' ? '#7AA5D6' : '#8E97A3',
-          fontSize: '10px',
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontWeight: activeTab === 'stems' ? 700 : 400,
-          cursor: 'pointer',
-          borderTop: activeTab === 'stems' ? '2px solid #7AA5D6' : '2px solid transparent',
-        }}
-      >
-        <Sliders size={18} />
-        <span>STEMS</span>
-      </button>
-
-      <button
-        onClick={() => onSelectTab('members')}
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '3px',
-          height: '100%',
-          background: 'transparent',
-          border: 'none',
-          color: activeTab === 'members' ? '#B8CF7A' : '#8E97A3',
-          fontSize: '10px',
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontWeight: activeTab === 'members' ? 700 : 400,
-          cursor: 'pointer',
-          borderTop: activeTab === 'members' ? '2px solid #B8CF7A' : '2px solid transparent',
-        }}
-      >
-        <Users size={18} />
-        <span>BANDA</span>
-      </button>
-
-      <button
-        onClick={() => onSelectTab('equipment')}
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '3px',
-          height: '100%',
-          background: 'transparent',
-          border: 'none',
-          color: activeTab === 'equipment' ? '#D9A24E' : '#8E97A3',
-          fontSize: '10px',
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontWeight: activeTab === 'equipment' ? 700 : 400,
-          cursor: 'pointer',
-          borderTop: activeTab === 'equipment' ? '2px solid #D9A24E' : '2px solid transparent',
-        }}
-      >
-        <Radio size={18} />
-        <span>RACKS RF</span>
-      </button>
+      {HUB_TABS.map((tab) => {
+        const active = activeTab === tab.id
+        const Icon = tab.icon
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            className="stx-btn"
+            aria-current={active ? 'page' : undefined}
+            onClick={() => onSelectTab(tab.id)}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '3px',
+              height: '100%',
+              minWidth: 0,
+              background: 'transparent',
+              border: 'none',
+              color: active ? tab.accent : colors.muted,
+              fontSize: '10px',
+              fontFamily: mono,
+              fontWeight: active ? 700 : 400,
+              cursor: 'pointer',
+              borderTop: active ? `2px solid ${tab.accent}` : '2px solid transparent',
+            }}
+          >
+            <Icon size={18} />
+            <span>{tab.short}</span>
+          </button>
+        )
+      })}
     </nav>
   </>
   )

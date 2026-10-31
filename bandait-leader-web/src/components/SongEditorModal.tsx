@@ -15,6 +15,7 @@ import { DEFAULT_SECTION_BARS, parseChordProSong, type ParsedSection } from '../
 import { uuidv4 } from '../services/uuid'
 import { HubModal } from './HubModal'
 import { ChordProPreview } from './ChordProPreview'
+import { SongAnalysisPanel, type AcceptedDraft } from './SongAnalysisPanel'
 import {
   cardStyle,
   colors,
@@ -184,6 +185,14 @@ export const SongEditorModal: React.FC<Props> = ({ initial, defaultArtist, onSav
     )
   }
 
+  /** ACEPTAR del analisis con IA: reemplaza las secciones del formulario (no guarda la cancion). */
+  const applyAnalysis = (accepted: AcceptedDraft) => {
+    setSections(accepted.sections.map(draftFromSection))
+    if (accepted.bpm !== undefined) setBpmText(String(accepted.bpm))
+    if (accepted.key !== undefined) setKey(accepted.key)
+    setPasteNote(null)
+  }
+
   const handleSave = () => {
     const errs: string[] = []
     if (!title.trim()) errs.push('El título es obligatorio.')
@@ -345,6 +354,9 @@ export const SongEditorModal: React.FC<Props> = ({ initial, defaultArtist, onSav
             </span>
           )}
         </div>
+
+        {/* ANALIZAR CON IA (solo editores, con stems en este equipo) */}
+        {initial && <SongAnalysisPanel song={initial} beatsPerBar={bpbValid ? beatsPerBar : initial.beatsPerBar} onAccept={applyAnalysis} />}
 
         {/* PEGAR CHORDPRO COMPLETO */}
         {!pasteOpen ? (

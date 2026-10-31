@@ -16,7 +16,7 @@ import time
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QSplitter, QStatusBar, QTabWidget, QMessageBox,
+    QPushButton, QFrame, QSizePolicy, QStackedWidget, QStatusBar, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QFont, QKeyEvent
@@ -29,12 +29,19 @@ from src.db.seed import count_demo_rows, load_demo_data, remove_demo_data
 from src.network.server import BandaitServer
 from src.sync.clock_service import ClockService
 from src.sync.leader_clock import CLOCK_NAME, leader_clock_resolution_ns, leader_now_ns
-from src.ui.views.ai_view import AIView
 from src.ui.dialogs.account_select import songs_label
 from src.ui.views.library_view import LibraryView
 from src.ui.views.stage_view import StageView
 from src.ui.widgets.dim_overlay import BRIGHTNESS_LEVELS, DimOverlay, clamp_brightness
 from src.cloud.stems_cloud import StemsCloud
+from src.ui import components as ui
+from src.ui import theme
+from src.ui.analysis_controller import AnalysisController
+from src.ui.shell import NavRail
+from src.ui.views.band_view import BandView
+from src.ui.views.rehearsal_view import RehearsalView
+from src.ui.views.settings_view import SettingsView
+from src.ui.views.song_inspector import SongInspector
 from src.ui.stems_controller import StemsController, import_dialog_filter, song_bpm
 from src.ui.widgets.mixer import MixerWidget
 from src.ui.widgets.stem_mixer import StemMixerWidget
@@ -43,7 +50,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.2.2"
+APP_VERSION = "2.3.0"
 # Ancho maximo del texto "Audio: ..." en la barra de estado (el completo va en el tooltip).
 AUDIO_STATUS_MAX_PX = 420
 
@@ -154,9 +161,10 @@ class MainWindow(QMainWindow):
         self._ui_timer.timeout.connect(self._update_ui)
         self._ui_timer.start(33)
 
+        # Styles first: widgets built before QApplication.setFont keep the default family.
+        self._apply_styles()
         self._setup_ui()
         self._setup_stems()
-        self._apply_styles()
         self._setup_menu()
         self._update_setlist_notice()
 
@@ -178,9 +186,9 @@ class MainWindow(QMainWindow):
         try:
             self.audio_engine.start()
         except AudioUnavailable as e:
-            self._set_audio_status(f"Audio: no disponible ({e}). Los seguidores siguen sincronizados.", "#D9A24E")
+            self._set_audio_status(f"Audio: no disponible ({e}). Los seguidores siguen sincronizados.", theme.WARNING)
         except Exception as e:  # defensive: PortAudio raises many types
-            self._set_audio_status(f"Audio: error al abrir el dispositivo ({e})", "#D96459")
+            self._set_audio_status(f"Audio: error al abrir el dispositivo ({e})", theme.DANGER)
         else:
             self._on_audio_started()
 
@@ -220,14 +228,45 @@ class MainWindow(QMainWindow):
         self.dim_overlay = DimOverlay(self)
         self.dim_overlay.set_brightness(self._settings.brightness)
 
-        main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(0)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        root = QVBoxLayout(central)
+        root.setSpacing(0)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self._create_title_bar())
+        root.addWidget(self._create_top_bar())
 
-        title_bar = self._create_title_bar()
-        main_layout.addWidget(title_bar)
+        body = QHBoxLayout()
+        body.setSpacing(0)
+        body.setContentsMargins(0, 0, 0, 0)
+        self.nav = NavRail()
+        self.nav.view_requested.connect(self.show_view)
+        body.addWidget(self.nav)
+        self.views = QStackedWidget()
+        body.addWidget(self.views, 1)
+        root.addLayout(body, 1)
 
-        # === TRANSPORTE ===
+        self._view_widgets = {}
+        self._build_views()
+        self._create_status_bar()
+        self.show_view("escenario")
+
+    def _create_top_bar(self) -> QFrame:
+        """Banda, transporte, canción en vivo, músicos y PANIC: siempre a la vista."""
+        bar = ui.frame("topbar")
+        bar.setFixedHeight(76)
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, theme.SPACE_4, 0)
+        row.setSpacing(theme.SPACE_5)
+
+        brand = ui.frame("brand")
+        brand.setFixedWidth(200)
+        bl = QVBoxLayout(brand)
+        bl.setContentsMargins(theme.SPACE_4, theme.SPACE_2, theme.SPACE_4, theme.SPACE_2)
+        bl.setSpacing(2)
+        bl.addWidget(ui.label("Banda", "label"))
+        self.band_label = ui.label("Sin banda", "title")
+        bl.addWidget(self.band_label)
+        row.addWidget(brand)
+
         self.transport = TransportWidget()
         self.transport.play_clicked.connect(self._on_play)
         self.transport.pause_clicked.connect(self._on_pause)
@@ -235,235 +274,124 @@ class MainWindow(QMainWindow):
         self.transport.rec_clicked.connect(self._on_rec)
         self.transport.bpm_changed.connect(self._on_bpm_changed)
         self.transport.tempo_nudge_clicked.connect(self._on_tempo_nudge)
-        main_layout.addWidget(self.transport)
+        self.transport.setMinimumWidth(self.transport.sizeHint().width())
+        row.addWidget(self.transport)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setHandleWidth(2)
+        now = QVBoxLayout()
+        now.setSpacing(2)
+        self.now_caption = ui.label("En vivo", "label")
+        self.now_song = ui.label("Sin canción", "title")
+        self.now_next = ui.label("", "muted")
+        for w in (self.now_caption, self.now_song, self.now_next):
+            # Long titles shrink instead of squeezing the transport.
+            w.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            w.setMinimumWidth(160)
+            now.addWidget(w)
+        row.addLayout(now, 1)
 
-        left_panel = self._create_left_panel()
-        splitter.addWidget(left_panel)
-        splitter.setStretchFactor(0, 3)
+        # Clic: panel "Músicos conectados" (link_report de cada teléfono).
+        self.status_followers = ui.button("Músicos: 0", "chip", "Músicos conectados y su latencia")
+        self.status_followers.setCheckable(False)
+        self.status_followers.setProperty("health", "")
+        self.status_followers.clicked.connect(self._open_musicians_panel)
+        self._followers = []
+        self._musicians_panel = None
+        row.addWidget(self.status_followers)
 
-        # --- PANEL DERECHO: Mixer ---
-        self.mixer = MixerWidget()
-        self.mixer.channel_mute.connect(self._on_channel_mute)
-        self.mixer.channel_solo.connect(self._on_channel_solo)
-        self.mixer.channel_fader.connect(self._on_channel_fader)
-        self.mixer.channel_routing.connect(self._on_channel_routing)
-        self.mixer.master_fader.connect(self._on_master_fader)
+        self.panic_btn = ui.button("PANIC", "panic", "Detiene a toda la banda al instante")
+        self.panic_btn.clicked.connect(self._on_panic)
+        row.addWidget(self.panic_btn)
+        return bar
 
-        mixer_container = QFrame()
-        mixer_container.setObjectName("panel")
-        mixer_layout = QVBoxLayout(mixer_container)
-        mixer_layout.setSpacing(0)
-        mixer_layout.setContentsMargins(0, 0, 0, 0)
-
-        mixer_title = QLabel("MEZCLADOR")
-        mixer_title.setFont(QFont("Inter", 10, QFont.Bold))
-        mixer_title.setStyleSheet("color: #7C8591; padding: 8px 12px;")
-        mixer_layout.addWidget(mixer_title)
-
-        mixer_layout.addWidget(self.mixer)
-        splitter.addWidget(mixer_container)
-        splitter.setStretchFactor(1, 1)
-        # The mixer routes the interface inputs (the click does not go through it). Until a
-        # song brings stems it stays hidden so Escenario gets the room; Ver > Mezclador shows it.
-        self.mixer_container = mixer_container
-        mixer_container.setVisible(False)
-
-        # --- Stems de la canción en vivo (fase 3): solo visible cuando la canción los tiene ---
-        self.stem_mixer = StemMixerWidget()
-        stems_container = QFrame()
-        stems_container.setObjectName("panel")
-        stems_layout = QVBoxLayout(stems_container)
-        stems_layout.setContentsMargins(0, 0, 0, 0)
-        stems_layout.addWidget(self.stem_mixer)
-        splitter.addWidget(stems_container)
-        splitter.setStretchFactor(2, 1)
-        self.stems_container = stems_container
-
-        main_layout.addWidget(splitter, 1)
-
-        # === BARRA DE ESTADO ===
+    def _create_status_bar(self):
         self.status_bar = QStatusBar()
-        self.status_bar.setFont(QFont("Inter", 9))
-
-        self.status_net = QLabel("Red: iniciando...")
-        self.status_net.setStyleSheet("color: #7C8591;")
+        self.status_net = ui.label("Red: iniciando...", "muted")
         self.status_bar.addWidget(self.status_net)
-
-        self.status_audio = QLabel("Audio: iniciando...")
-        self.status_audio.setStyleSheet("color: #7C8591;")
-        self.status_bar.addWidget(self.status_audio)
-
-        # El reloj es un dato tecnico: va en el tooltip de "Red" para no desbordar la barra.
+        # El reloj es un dato técnico: va en el tooltip de "Red" para no desbordar la barra.
         res_us = leader_clock_resolution_ns() / 1e3
         self._clock_tooltip = f"Reloj del líder: {CLOCK_NAME} ({res_us:.3g} us), base de anchor_ns y sync_request"
         self.status_net.setToolTip(self._clock_tooltip)
-
-        # Clic: panel "Músicos conectados" (link_report de cada teléfono).
-        self.status_followers = QPushButton("Músicos: 0")
-        self.status_followers.setFlat(True)
-        self.status_followers.setCursor(Qt.PointingHandCursor)
-        self.status_followers.setStyleSheet("QPushButton { color: #8E97A3; border: 0; padding: 0 6px; }")
-        self.status_followers.clicked.connect(self._open_musicians_panel)
-        self.status_bar.addWidget(self.status_followers)
-        self._followers = []
-        self._musicians_panel = None
-
-        self.status_cloud = QLabel("NUBE: sin sesión")
-        self.status_cloud.setStyleSheet("color: #7C8591;")
+        self.status_audio = ui.label("Audio: iniciando...", "muted")
+        self.status_bar.addWidget(self.status_audio)
+        self.status_cloud = ui.label("NUBE: sin sesión", "muted")
+        self.status_cloud.setProperty("health", "")
         self.status_bar.addWidget(self.status_cloud)
+        self.mini_label = ui.label("Setlist en vivo: ninguno", "muted")
+        self.status_bar.addWidget(self.mini_label)
 
         # Persistent: QStatusBar.showMessage() hides normal widgets, not permanent ones.
-        self.status_setlist = QLabel("")
-        self.status_setlist.setStyleSheet(
-            "color: #15181C; background: #D9A24E; font-weight: bold; padding: 1px 8px; border-radius: 3px;"
-        )
+        self.status_setlist = ui.tag("", "warn")
         self.status_setlist.hide()
         self.status_bar.addPermanentWidget(self.status_setlist)
-
-        self.connect_btn = QPushButton("Conectar músicos")
-        self.connect_btn.setToolTip("QR para que los teléfonos abran la app desde este líder")
-        self.connect_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #5CC8C2; color: #5CC8C2; border-radius: 4px;"
-            " padding: 2px 10px; font-size: 11px; }"
-            "QPushButton:hover { background: #5CC8C2; color: #15181C; }"
-        )
+        self.connect_btn = ui.button("Conectar músicos", "secondary",
+                                     "QR para que los teléfonos abran la app desde este líder")
         self.connect_btn.clicked.connect(self._open_connect_musicians)
         self.status_bar.addPermanentWidget(self.connect_btn)
-
-        self.test_click_btn = QPushButton("Probar click")
-        self.test_click_btn.setToolTip("Un compás de click por las salidas configuradas, sin arrancar la canción")
-        self.test_click_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #B8CF7A; color: #B8CF7A; border-radius: 4px;"
-            " padding: 2px 10px; font-size: 11px; }"
-            "QPushButton:hover { background: #B8CF7A; color: #15181C; }"
-        )
+        self.test_click_btn = ui.button("Probar click", "secondary",
+                                        "Un compás de click por las salidas configuradas, sin arrancar la canción")
         self.test_click_btn.clicked.connect(self._test_click)
         self.status_bar.addPermanentWidget(self.test_click_btn)
-
         self.setStatusBar(self.status_bar)
+        # A temporary message is painted by the bar under its normal widgets: hide them meanwhile.
+        self._status_normal = [self.status_net, self.status_audio, self.status_cloud, self.mini_label]
+        self.status_bar.messageChanged.connect(
+            lambda text: [w.setVisible(not text) for w in self._status_normal]
+        )
 
     def _create_title_bar(self) -> QFrame:
         bar = QFrame()
         bar.setObjectName("titleBar")
-        bar.setFixedHeight(40)
-
+        bar.setFixedHeight(36)
         layout = QHBoxLayout(bar)
-        layout.setSpacing(12)
-        layout.setContentsMargins(16, 0, 16, 0)
-
-        logo = QLabel("◈")
-        logo.setFont(QFont("JetBrains Mono", 16, QFont.Bold))
-        logo.setStyleSheet("color: #5CC8C2;")
+        layout.setSpacing(theme.SPACE_3)
+        layout.setContentsMargins(theme.SPACE_3, 0, theme.SPACE_3, 0)
+        logo = ui.label("◈", "title")
+        logo.setObjectName("titleLogo")
         layout.addWidget(logo)
-
-        title = QLabel("BANDAIT DAW")
-        title.setFont(QFont("Inter", 13, QFont.Bold))
-        title.setStyleSheet("color: #D5DAE0;")
-        layout.addWidget(title)
-
-        subtitle = QLabel("— Líder de Sesión")
-        subtitle.setObjectName("titleBarSubtitle")
-        layout.addWidget(subtitle)
-
-        layout.addStretch()
-
-        self.session_info = QLabel(f"Sesión: {self.server.session_id}")
-        self.session_info.setFont(QFont("Inter", 10))
-        self.session_info.setStyleSheet("color: #7C8591;")
+        layout.addWidget(ui.label("BANDAIT", "title"))
+        layout.addWidget(ui.label("Líder", "muted"))
+        self.session_info = ui.pill(f"Sesión {self.server.session_id}")
         layout.addWidget(self.session_info)
-
+        layout.addStretch()
         min_btn = QPushButton("−")
-        min_btn.setFixedSize(28, 28)
-        min_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #363D47; color: #7C8591; border-radius: 4px; font-size: 14px;
-                          padding: 0; min-height: 0; background: transparent; }
-            QPushButton:hover { border-color: #5CC8C2; color: #5CC8C2; }
-        """)
+        min_btn.setObjectName("winbtn")
+        min_btn.setFixedSize(28, 24)
+        min_btn.setToolTip("Minimizar")
         min_btn.clicked.connect(self.showMinimized)
         layout.addWidget(min_btn)
-
         close_btn = QPushButton("×")
-        close_btn.setFixedSize(28, 28)
-        close_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #363D47; color: #7C8591; border-radius: 4px; font-size: 14px;
-                          padding: 0; min-height: 0; background: transparent; }
-            QPushButton:hover { background: #D96459; border-color: #D96459; color: #15181C; }
-        """)
+        close_btn.setObjectName("winclose")
+        close_btn.setFixedSize(28, 24)
+        close_btn.setToolTip("Cerrar")
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn)
-
         return bar
 
-    def _create_left_panel(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        self.tabs = QTabWidget()
-        self.tabs.setFont(QFont("Inter", 11))
-        self.tabs.setTabPosition(QTabWidget.North)
-
-        # Tab 1: Escenario
+    def _build_views(self):
+        """One page per rail entry. Setlists and Canciones share the library (two of its pages)."""
+        # Escenario
         self.stage_view = StageView()
         self.stage_view.panic_clicked.connect(self._on_panic)
         self.stage_view.next_song_clicked.connect(self._on_next_song)
         self.stage_view.prev_song_clicked.connect(self._on_prev_song)
         self.stage_view.fullscreen_requested.connect(self._toggle_fullscreen)
-        self.tabs.addTab(self.stage_view, "Escenario")
+        self.stage_view.open_tracks.connect(lambda: self.show_view("pistas"))
+        self._add_view("escenario", self.stage_view)
 
-        # Tab 2: Mezcla (Timeline + controles)
-        mix_widget = QWidget()
-        mix_layout = QVBoxLayout(mix_widget)
-        mix_layout.setSpacing(8)
-        mix_layout.setContentsMargins(8, 8, 8, 8)
+        # Ensayo: bucle de sección en el transporte (los teléfonos lo siguen como un re-anclaje).
+        self.rehearsal_view = RehearsalView()
+        manager = self.server.get_control_manager()
+        self.rehearsal_view.loop_requested.connect(self._on_loop_requested)
+        self.rehearsal_view.loop_cancelled.connect(manager.clear_loop)
+        self.rehearsal_view.back_to_show.connect(lambda: self.show_view("escenario"))
+        self.rehearsal_view.practice_tempo_changed.connect(self._on_practice_tempo)
+        self._loop_timer = QTimer(self)
+        self._loop_timer.setInterval(100)
+        self._loop_timer.timeout.connect(self._tick_loop)
+        self._loop_timer.start()
+        self._add_view("ensayo", self.rehearsal_view)
 
-        self.timeline = TimelineWidget()
-        self.timeline.setMinimumHeight(200)
-        mix_layout.addWidget(self.timeline)
-
-        small_btn = """
-            QPushButton {
-                border: 1px solid #7C8591; color: #7C8591; border-radius: 4px;
-                padding: 4px 12px; font-size: 11px;
-            }
-            QPushButton:hover { border-color: #5CC8C2; color: #5CC8C2; }
-        """
-        zoom_layout = QHBoxLayout()
-        zoom_out = QPushButton("− Zoom")
-        zoom_out.setStyleSheet(small_btn)
-        zoom_out.clicked.connect(self.timeline.zoom_out)
-        zoom_layout.addWidget(zoom_out)
-
-        zoom_in = QPushButton("Zoom +")
-        zoom_in.setStyleSheet(small_btn)
-        zoom_in.clicked.connect(self.timeline.zoom_in)
-        zoom_layout.addWidget(zoom_in)
-
-        zoom_layout.addStretch()
-
-        add_section_btn = QPushButton("+ Agregar Sección")
-        add_section_btn.setObjectName("primary")
-        # background explicito: el QSS global pinta #primary de color de acento, y con el texto
-        # tambien de acento el boton quedaba como un rectangulo sin texto (captura 2026-10-30).
-        add_section_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #5CC8C2; color: #5CC8C2; border-radius: 4px;
-                padding: 4px 16px; font-size: 11px;
-            }
-            QPushButton:hover { background: #5CC8C2; color: #15181C; }
-        """)
-        add_section_btn.clicked.connect(self._on_add_section)
-        zoom_layout.addWidget(add_section_btn)
-
-        mix_layout.addLayout(zoom_layout)
-        self.tabs.addTab(mix_widget, "Mezcla")
-
-        # Tab 3: Biblioteca
+        # Setlists y Canciones: la biblioteca, sin su barra de pestañas propia.
         self.library_view = LibraryView()
         self.library_view.set_transport_busy(lambda: not self._transport_idle())
         self.library_view.song_selected.connect(self._on_song_selected)
@@ -474,63 +402,234 @@ class MainWindow(QMainWindow):
         self.library_view.song_saved.connect(self._on_library_song_changed)
         self.library_view.song_removed.connect(self._on_library_song_changed)
         self.library_view.status_message.connect(lambda text: self.status_bar.showMessage(text, 8000))
-        self.tabs.addTab(self.library_view, "Biblioteca")
+        library_page = QWidget()
+        lcol = QVBoxLayout(library_page)
+        lcol.setContentsMargins(0, 0, 0, 0)
+        lcol.setSpacing(0)
+        header, actions = ui.view_header("Setlists", "")
+        self.library_title = header.findChild(QLabel)
+        self.library_lede = header.findChild(QLabel, "viewLede")
+        self.events_btn = ui.button("Eventos", "ghost", "Fechas de presentación y su setlist")
+        self.events_btn.clicked.connect(lambda: self._show_library_page("eventos"))
+        actions.addWidget(self.events_btn)
+        lcol.addWidget(header)
+        lrow = QHBoxLayout()
+        lrow.setContentsMargins(0, 0, theme.SPACE_5, theme.SPACE_4)
+        lrow.setSpacing(0)
+        lrow.addWidget(self.library_view, 1)
+        self.song_inspector = SongInspector()
+        lrow.addWidget(self.song_inspector)
+        lcol.addLayout(lrow, 1)
+        self.analysis = AnalysisController(self._stems_cloud_client, parent=self)
+        self.analysis.state.connect(self.song_inspector.set_analysis)
+        self.song_inspector.analyze_requested.connect(self.analysis.analyze)
+        self.song_inspector.refresh_requested.connect(self.analysis.refresh)
+        self.library_view.tabs.tabBar().hide()
+        self._library_page = library_page
+        self._add_view("setlists", library_page)
+        self._view_widgets["canciones"] = library_page
 
-        # Tab 4: IA
-        self.ai_view = AIView()
-        self.tabs.addTab(self.ai_view, "IA")
+        # Pistas: secciones, stems de la canción en vivo y el mezclador de entradas plegado.
+        self._add_view("pistas", self._create_tracks_view())
 
-        layout.addWidget(self.tabs)
+        self.band_view = BandView()
+        self.band_view.open_hub.connect(self._open_hub)
+        self._add_view("banda", self.band_view)
 
-        mini_timeline = QFrame()
-        mini_timeline.setObjectName("panel")
-        mini_timeline.setMaximumHeight(60)
-        mini_layout = QHBoxLayout(mini_timeline)
-        mini_layout.setContentsMargins(12, 8, 12, 8)
+        self.settings_view = SettingsView()
+        sv = self.settings_view
+        sv.open_audio_devices.connect(self._open_audio_devices)
+        sv.test_click.connect(self._test_click)
+        sv.drummer_click_changed.connect(lambda on: self._set_click_routing(drummer=on))
+        sv.pa_click_changed.connect(lambda on: self._set_click_routing(pa=on))
+        sv.brightness_changed.connect(self._set_brightness)
+        sv.open_account_login.connect(self._cloud_login)
+        sv.cloud_sync.connect(self._cloud_sync_now)
+        sv.choose_band.connect(self._cloud_choose_band)
+        sv.sign_out.connect(self._cloud_logout)
+        sv.retry_server.connect(self._restart_server)
+        sv.set_click_routing(self._settings.drummer_click_enabled, self._settings.pa_click_enabled)
+        sv.set_brightness(clamp_brightness(self._settings.brightness))
+        self._add_view("ajustes", sv)
 
-        self.mini_label = QLabel("Setlist en vivo: ninguno")
-        self.mini_label.setFont(QFont("Inter", 11))
-        self.mini_label.setStyleSheet("color: #7C8591;")
-        mini_layout.addWidget(self.mini_label)
+    # ------------------------------------------------------------------ Ensayo, Banda, Ajustes
+    def _on_loop_requested(self, start_bar: int, end_bar: int, repeats: int):
+        try:
+            self.server.get_control_manager().set_loop(start_bar, end_bar, repeats)
+        except ValueError as e:
+            self.status_bar.showMessage(f"No se pudo repetir la sección: {e}", 8000)
+            return
+        self.status_bar.showMessage(
+            f"Repitiendo compases {start_bar}-{end_bar}" + (f" ({repeats} veces)" if repeats else " sin fin"), 6000)
 
-        layout.addWidget(mini_timeline)
-        return panel
+    def _tick_loop(self):
+        manager = self.server.get_control_manager()
+        manager.tick()
+        info = manager.loop_info()
+        self.rehearsal_view.set_loop_status(info.active, info.current_repeat, info.repeats)
+
+    def _on_practice_tempo(self, percent: int):
+        # Stems are not time-stretched: practice tempo is announced, not applied (pending).
+        if percent != 100:
+            self.status_bar.showMessage(
+                f"Tempo de práctica {percent} %: todavía no cambia el transporte (los stems no se estiran)", 8000)
+
+    def _set_click_routing(self, drummer=None, pa=None):
+        if drummer is not None:
+            self.audio_engine.enable_drummer_click = bool(drummer)
+            self._settings.drummer_click_enabled = bool(drummer)
+        if pa is not None:
+            self.audio_engine.enable_pa_click = bool(pa)
+            self._settings.pa_click_enabled = bool(pa)
+        self._save_settings()
+
+    def _open_hub(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        band = self._settings.cloud_band_id
+        url = "https://bandait.releven.cc/hub/" + (f"?banda={band}" if band else "")
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _refresh_band_members(self):
+        """Integrantes de la banda compartida (en segundo plano; RLS filtra)."""
+        import threading
+
+        band_id = self._settings.cloud_band_id
+        if not band_id or not self.cloud.is_signed_in():
+            self.band_view.set_members([])
+            return
+        from src.cloud.members import fetch_band_members
+
+        def work():
+            try:
+                members = fetch_band_members(self.cloud.config, self.cloud.auth.access_token(), band_id)
+            except Exception as e:  # sin red o sesión vencida: la vista queda con lo que tenía
+                logger.info("No se pudieron leer los integrantes: %s", e)
+                return
+            QTimer.singleShot(0, self, lambda: self.band_view.set_members(members))
+
+        threading.Thread(target=work, name="bandait-members", daemon=True).start()
+
+    def _add_view(self, key: str, widget: QWidget):
+        self.views.addWidget(widget)
+        self._view_widgets[key] = widget
+
+    def _create_tracks_view(self) -> QWidget:
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, theme.SPACE_4)
+        col.setSpacing(theme.SPACE_3)
+        header, actions = ui.view_header("Pistas", "Secciones y stems de la canción en vivo")
+        self.tracks_lede = header.findChild(QLabel, "viewLede")
+        zoom_out = ui.button("− Zoom", "ghost")
+        zoom_in = ui.button("Zoom +", "ghost")
+        actions.addWidget(zoom_out)
+        actions.addWidget(zoom_in)
+        self.inputs_btn = ui.button("Mezclador de entradas", "ghost",
+                                    "Entradas de la interfaz (el clic no pasa por aquí)")
+        actions.addWidget(self.inputs_btn)
+        col.addWidget(header)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(theme.SPACE_5, 0, theme.SPACE_5, 0)
+        body.setSpacing(theme.SPACE_3)
+        left = QVBoxLayout()
+        left.setSpacing(theme.SPACE_3)
+        tl_panel, tl_body, _ = ui.panel("Secciones")
+        self.timeline = TimelineWidget()
+        self.timeline.setMinimumHeight(180)
+        tl_body.addWidget(self.timeline)
+        zoom_out.clicked.connect(self.timeline.zoom_out)
+        zoom_in.clicked.connect(self.timeline.zoom_in)
+        left.addWidget(tl_panel, 1)
+
+        # Mezclador de entradas: oculto por defecto (Ver > Mezclador o el botón de arriba).
+        self.mixer = MixerWidget()
+        self.mixer.channel_mute.connect(self._on_channel_mute)
+        self.mixer.channel_solo.connect(self._on_channel_solo)
+        self.mixer.channel_fader.connect(self._on_channel_fader)
+        self.mixer.channel_routing.connect(self._on_channel_routing)
+        self.mixer.master_fader.connect(self._on_master_fader)
+        mixer_container, mixer_body, _ = ui.panel("Mezclador de entradas")
+        mixer_body.addWidget(self.mixer)
+        self.mixer_container = mixer_container
+        mixer_container.setVisible(False)
+        self.inputs_btn.clicked.connect(lambda: self.set_mixer_visible(self.mixer_container.isHidden()))
+        left.addWidget(mixer_container, 1)
+        body.addLayout(left, 3)
+
+        # Stems de la canción en vivo: solo visible cuando la canción los tiene.
+        self.stem_mixer = StemMixerWidget()
+        stems_container, stems_body, _ = ui.panel("")
+        stems_body.setContentsMargins(0, 0, 0, 0)
+        stems_body.addWidget(self.stem_mixer)
+        self.stems_container = stems_container
+        body.addWidget(stems_container, 2)
+        col.addLayout(body, 1)
+        return page
+
+    def show_view(self, key: str):
+        """Rail navigation. Setlists and Canciones are two pages of the library."""
+        if key not in self._view_widgets:
+            key = "escenario"
+        self.views.setCurrentWidget(self._view_widgets[key])
+        self.nav.select(key)
+        if key in ("setlists", "canciones"):
+            self._show_library_page(key)
+        if key == "banda":
+            self.band_view.set_urls(self.server.follower_url(), self.server.director_url())
+            self._refresh_band_members()
+        self._current_view = key
+
+    def current_view(self) -> str:
+        return getattr(self, "_current_view", "escenario")
+
+    def _show_library_page(self, page: str):
+        index = {"canciones": 0, "setlists": 1, "eventos": 2}[page]
+        self.library_view.tabs.setCurrentIndex(index)
+        titles = {
+            "canciones": ("Canciones", "Biblioteca de la banda"),
+            "setlists": ("Setlists", "Orden, transiciones y conteo de cada show"),
+            "eventos": ("Eventos", "Fechas de presentación y su setlist"),
+        }
+        title, lede = titles[page]
+        if self.library_title is not None:
+            self.library_title.setText(title)
+        if self.library_lede is not None:
+            self.library_lede.setText(lede)
+        self.events_btn.setVisible(page != "canciones")
+        self.song_inspector.setVisible(page == "canciones")
+        if page != "eventos":
+            self.nav.select(page)
 
     def _apply_styles(self):
-        """Aplicar QSS profesional OLED Noir."""
+        """Fuentes incluidas, fuente base y la plantilla QSS Grafito rellenada con los tokens
+        de theme.py. Se aplica a la aplicación entera para que los diálogos también la tengan."""
+        from PySide6.QtWidgets import QApplication
+
+        theme.load_fonts()
+        app = QApplication.instance()
+        base = QFont(theme.FONT_UI)
+        base.setPixelSize(theme.SIZE_BASE)
+        app.setFont(base)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        possible_paths = [
+        for qss_path in (
             os.path.join(script_dir, "..", "styles", "bandait_dark.qss"),
-            os.path.join(script_dir, "..", "..", "styles", "bandait_dark.qss"),
             os.path.join(os.path.dirname(sys.argv[0]), "src", "styles", "bandait_dark.qss"),
-        ]
-        for qss_path in possible_paths:
+        ):
             qss_path = os.path.abspath(qss_path)
             if os.path.exists(qss_path):
                 try:
                     with open(qss_path, "r", encoding="utf-8") as f:
-                        self.setStyleSheet(f.read())
+                        app.setStyleSheet(theme.render_qss(f.read()))
                     return
-                except Exception as e:
-                    print(f"[UI] Error leyendo QSS {qss_path}: {e}")
-        print("[UI] WARNING: No se encontró archivo QSS. Usando estilos por defecto.")
-        self.setStyleSheet("""
-            QMainWindow, QWidget { background-color: #15181C; color: #D5DAE0; }
-            QPushButton {
-                background: transparent; border: 2px solid #5CC8C2; color: #5CC8C2;
-                border-radius: 4px; padding: 8px 20px;
-            }
-            QPushButton:hover { background: #5CC8C2; color: #15181C; }
-        """)
+                except Exception as e:  # a broken style must not stop the show
+                    logger.error("No se pudo aplicar el QSS %s: %s", qss_path, e)
+        logger.warning("No se encontró bandait_dark.qss: estilos por defecto de Qt")
 
     def _setup_menu(self):
         menubar = self.menuBar()
-        menubar.setStyleSheet("""
-            QMenuBar { background: #1B1F24; color: #D5DAE0; border-bottom: 1px solid #262C34; }
-            QMenuBar::item:selected { background: #232830; color: #5CC8C2; }
-            QMenu::item:disabled { color: #5A626E; }
-        """)
-
         # Every action does something. The library saves on its own (SQLite), so
         # there is no "Guardar" and no session file to open.
         def library_action(text, tab, run):
@@ -635,8 +734,40 @@ class MainWindow(QMainWindow):
             cloud=self._stems_cloud_client, cloud_ref=self.library_view.song_cloud_ref,
         )
         self.stems.message.connect(lambda text: self.status_bar.showMessage(text, 8000))
+        self.stems.stems_shown.connect(self._on_stems_shown)
+        self.stems.lanes_changed.connect(self.timeline.set_lanes)
         self.stem_mixer.import_requested.connect(self._import_stems_dialog)
         self.stem_mixer.remove_requested.connect(self._remove_live_stems)
+
+    def _on_stems_shown(self, visible: bool):
+        labels = [strip.name_label.text().title() for strip in self.stem_mixer.strips] if visible else []
+        self.stage_view.set_stems_status(labels)
+
+    def _update_now_playing(self, state: dict):
+        """Top bar: live song, its position in the setlist and what comes next."""
+        setlist = sorted((state or {}).get("setlist") or [], key=lambda e: e.get("order_index", 0))
+        song_id = (state or {}).get("current_song_id")
+        idx = next((i for i, e in enumerate(setlist) if e.get("song_id") == song_id), -1)
+        if idx < 0:
+            self.now_caption.setText("EN VIVO")
+            self.now_song.setText("Sin canción")
+            self.now_next.setText("")
+            return
+        entry = setlist[idx]
+        live = self._live_entry(song_id) or {}
+        artist = live.get("artist") or ""
+        self.now_caption.setText(f"EN VIVO · TEMA {idx + 1} DE {len(setlist)}")
+        self.now_song.setText(entry.get("title", "") + (f" — {artist}" if artist else ""))
+        if idx + 1 < len(setlist):
+            nxt = setlist[idx + 1]
+            mode = {"auto_count_in": "conteo", "gapless": "sin pausa"}.get(nxt.get("transition_mode"), "manual")
+            self.now_next.setText(f"Sigue: {nxt.get('title', '')} · {nxt.get('bpm', '')} BPM · entrada {mode}")
+        else:
+            self.now_next.setText("Última canción del setlist")
+
+    def _show_live_in_rehearsal(self, song_id):
+        entry = self._live_entry(song_id) if song_id else None
+        self.rehearsal_view.set_song(entry if entry and entry.get("sections") else None)
 
     def _show_live_stems(self, song_id, state: dict):
         title = next((e.get("title") for e in (state or {}).get("setlist", []) if e.get("song_id") == song_id), "")
@@ -726,7 +857,7 @@ class MainWindow(QMainWindow):
             try:
                 self.audio_engine.set_device(choice.device_id)
             except Exception as e:
-                self._set_audio_status(f"Audio: no se pudo abrir el dispositivo ({e})", "#D96459")
+                self._set_audio_status(f"Audio: no se pudo abrir el dispositivo ({e})", theme.DANGER)
             else:
                 if not was_running:
                     self._start_audio()
@@ -774,6 +905,7 @@ class MainWindow(QMainWindow):
         action = self.brightness_actions.get(self._settings.brightness)
         if action is not None:
             action.setChecked(True)
+        self.settings_view.set_brightness(self._settings.brightness)
         self._save_settings()
 
     def _save_settings(self):
@@ -788,7 +920,10 @@ class MainWindow(QMainWindow):
         metrics = self.status_audio.fontMetrics()
         self.status_audio.setText(metrics.elidedText(text, Qt.ElideRight, AUDIO_STATUS_MAX_PX))
         self.status_audio.setToolTip(text)
-        self.status_audio.setStyleSheet(f"color: {color};")
+        if hasattr(self, "settings_view"):
+            self.settings_view.set_audio_status(text)
+        ui.set_prop(self.status_audio, "health", {theme.SUCCESS: "ok", theme.DANGER: "bad", theme.WARNING: "warn"}
+                    .get(color.upper(), ""))
 
     def _test_click(self):
         """Audio > Probar click: says where it should sound, or why it cannot."""
@@ -817,15 +952,16 @@ class MainWindow(QMainWindow):
         text = f"Audio: {eng.device_name} ({eng.output_channels} salidas; {routing})"
         if self._saved_device_missing:
             text += " - el dispositivo guardado no está conectado"
-        self._set_audio_status(text, "#B8CF7A")
+        self._set_audio_status(text, theme.SUCCESS)
 
     def _on_audio_stopped(self):
-        self._set_audio_status("Audio: detenido", "#7C8591")
+        self._set_audio_status("Audio: detenido", theme.MUTED)
 
     def _on_server_status(self, status: str, message: str):
-        colors = {"running": "#B8CF7A", "error": "#D96459", "starting": "#D9A24E", "stopped": "#7C8591"}
         self.status_net.setText(f"Red: {message}")
-        self.status_net.setStyleSheet(f"color: {colors.get(status, '#7C8591')};")
+        if hasattr(self, "settings_view"):
+            self.settings_view.set_network_status(message, self.server.follower_url() if status == "running" else "")
+        ui.set_prop(self.status_net, "health", {"running": "ok", "error": "bad", "starting": "warn"}.get(status, ""))
         ok = status == "running"
         self.stage_view.set_network_status(ok)
         self.transport.set_network_status(ok, "Red OK" if ok else "Red caída")
@@ -838,13 +974,14 @@ class MainWindow(QMainWindow):
         now = leader_now_ns()
         self.status_followers.setText(summary_text(followers, now))
         worst = worst_health(followers, now)
-        color = HEALTH_COLORS.get(worst, "#8E97A3") if worst else "#8E97A3"
-        self.status_followers.setStyleSheet(f"QPushButton {{ color: {color}; border: 0; padding: 0 6px; }}")
+        ui.set_prop(self.status_followers, "health", worst if worst in HEALTH_COLORS else "")
         self.status_followers.setToolTip(
             "\n".join(f"{f.get('alias')} ({f.get('role')})" for f in followers) or "Nadie conectado"
         )
         if self._musicians_panel is not None:
             self._musicians_panel.set_followers(followers)
+        self.stage_view.set_followers(_stage_follower_rows(followers, now))
+        self.band_view.set_followers(followers)
 
     def _open_musicians_panel(self):
         from src.ui.dialogs.musicians_panel import MusiciansPanel
@@ -884,6 +1021,7 @@ class MainWindow(QMainWindow):
             self._live_song_id = song_id
             self._show_live_song(song_id, state)
             self.stage_view.set_current_song_id(song_id)
+        self._update_now_playing(state)
         last = state.get("last_command") or {}
         if last.get("type") == "PANIC":
             self.status_bar.showMessage(f"PANIC desde {last.get('origin')}: transporte detenido", 8000)
@@ -912,10 +1050,12 @@ class MainWindow(QMainWindow):
             self.stage_view.set_song(title=title)
         # Lyrics and chords by section, the same content phones get (CONTRACT_V3 9.1).
         self.stage_view.set_song_content(entry)
+        self._show_live_in_rehearsal(song_id)
         self._show_live_stems(song_id, state)
 
     def _on_clock_beat(self, bar: int, beat: int, bpm: float):
         self.transport.set_beat(beat)
+        self.transport.set_bar(bar, beat)
         self.stage_view.set_beat(beat)
         self.stage_view.set_bar(bar)
 
@@ -990,11 +1130,11 @@ class MainWindow(QMainWindow):
                 os.makedirs(base_dir, exist_ok=True)
                 folder = self.audio_engine.start_recording(session_name, base_dir=base_dir)
                 self._last_recording_folder = folder
-                self._set_audio_status(f"GRABANDO — {session_name}", "#D96459")
+                self._set_audio_status(f"GRABANDO — {session_name}", theme.DANGER)
                 self.status_bar.showMessage(f"Grabación iniciada: {os.path.basename(folder)}", 5000)
             except Exception as e:
                 self.transport.set_recording_state(False)
-                self._set_audio_status(f"Audio: no se pudo grabar ({e})", "#D9A24E")
+                self._set_audio_status(f"Audio: no se pudo grabar ({e})", theme.WARNING)
         else:
             try:
                 self.audio_engine.stop_recording()
@@ -1111,10 +1251,30 @@ class MainWindow(QMainWindow):
         return next((e for e in self._live_entries if e.get("song_id") == song_id), None)
 
     def _on_song_selected(self, song_id: int):
-        """Vista previa en el timeline. No mueve el transporte de la banda."""
+        """Vista previa en el timeline e inspector de Canciones. No mueve el transporte."""
         song_data = self.library_view.get_song_data(song_id)
         if song_data:
             self._load_song_to_timeline(song_data)
+        local_id = self.library_view.song_id_at(song_id)
+        self._show_in_inspector(local_id, song_data)
+
+    def _show_in_inspector(self, local_id, song_data):
+        from src.audio import stem_library
+
+        ref = self.library_view.song_cloud_ref(local_id) if local_id else None
+        stem_set = stem_library.load(local_id) if local_id else None
+        stems = ", ".join(s.label for s in stem_set.stems) if stem_set else ""
+        if not self.cloud.is_signed_in():
+            can, reason = False, "Inicia sesión en la nube (Cuenta) para analizar"
+        elif ref is None:
+            can, reason = False, "Solo canciones del hub se pueden analizar"
+        elif stem_set is None:
+            can, reason = False, "Esta canción no tiene stems en el portátil"
+        else:
+            can, reason = True, ""
+        self.song_inspector.set_song(song_data or None, self.library_view.song_sections(local_id) if local_id else [],
+                                     stems, can, reason)
+        self.analysis.select(local_id, ref)
 
     def _load_song_to_timeline(self, song_data: dict):
         self.timeline.clear_sections()
@@ -1153,12 +1313,6 @@ class MainWindow(QMainWindow):
         )
         self.stage_view.set_lyrics(lyrics)
 
-    def _on_add_section(self):
-        from PySide6.QtWidgets import QInputDialog
-        label, ok = QInputDialog.getText(self, "Agregar Sección", "Nombre de la sección:")
-        if ok and label:
-            self.timeline.add_section(label, 0, 16)
-
     # ------------------------------------------------------------------ live setlist changes
     def _transport_idle(self) -> bool:
         return self._live_state().get("status", "IDLE") == "IDLE"
@@ -1178,8 +1332,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ library edits
     def _run_library_action(self, tab: int, run):
         """Archivo > Nueva canción / setlist / evento: show the library, then run it."""
-        self.tabs.setCurrentWidget(self.library_view)
-        self.library_view.tabs.setCurrentIndex(tab)
+        self.show_view({0: "canciones", 1: "setlists"}.get(tab, "setlists"))
+        if tab == 2:
+            self._show_library_page("eventos")
         run()
 
     def _on_library_setlist_chosen(self, setlist_id: str):
@@ -1263,8 +1418,25 @@ class MainWindow(QMainWindow):
     def _refresh_cloud_status(self):
         text, color, tooltip = self.cloud.status()
         self.status_cloud.setText(text)
-        self.status_cloud.setStyleSheet(f"color: {color};")
+        ui.set_prop(self.status_cloud, "health", _cloud_health(color))
         self.status_cloud.setToolTip(tooltip)
+        self._refresh_identity()
+
+    def _refresh_identity(self):
+        """Band name in the top bar and the account at the bottom of the rail."""
+        snapshot = self.cloud.last_snapshot
+        band_id = self._settings.cloud_band_id
+        band = snapshot.workspace.band(band_id) if (snapshot and band_id) else None
+        band_name = band.band.name if band else ""
+        self.band_label.setText(band_name or "Sin banda")
+        self.band_view.set_band(band_name or "Sin banda")
+        user_label = (self.cloud.user.email or self.cloud.user.name) if self.cloud.user else ""
+        self.settings_view.set_cloud_status(self.cloud.is_signed_in(), user_label, band_name)
+        user = self.cloud.user
+        if user is None:
+            self.nav.set_account("Sin sesión", "Menú Cuenta")
+        else:
+            self.nav.set_account(user.name or user.email or "Cuenta", band_name or (user.email or ""))
 
     def _require_cloud_session(self) -> bool:
         if self.cloud.is_signed_in():
@@ -1537,3 +1709,38 @@ class MainWindow(QMainWindow):
             self._toggle_fullscreen()
         else:
             super().keyPressEvent(event)
+
+
+def _cloud_health(color: str) -> str:
+    """Status color of format_cloud_status -> QSS property (no inline colors)."""
+    from src.cloud import controller
+
+    return {
+        getattr(controller, "COLOR_ERROR", None): "bad",
+        getattr(controller, "COLOR_WARN", None): "warn",
+        getattr(controller, "COLOR_OK", None): "ok",
+    }.get(color, "")
+
+
+def _stage_follower_rows(followers, now_ns):
+    """Connected phones as rows for the Escenario panel: alias, role, latency and health."""
+    from src.network.link_report import link_health
+    from src.ui.dialogs.musicians_panel import HEALTH_ORDER, ROLE_LABELS
+
+    rows = []
+    for f in followers or []:
+        link = f.get("link") or {}
+        level, _reason = link_health(f.get("link"), now_ns)
+        out = link.get("output_latency_ms")
+        detail = ROLE_LABELS.get(f.get("role"), str(f.get("role", "")))
+        if out is not None:
+            detail += f" · salida {out:.0f} ms"
+        rtt = link.get("rtt_ms")
+        rows.append({
+            "alias": f.get("alias", ""),
+            "detail": detail,
+            "latency": "—" if rtt is None else f"{rtt:.0f} ms",
+            "health": level,
+            "_order": HEALTH_ORDER.get(level, 9),
+        })
+    return sorted(rows, key=lambda r: (r["_order"], str(r["alias"]).lower()))

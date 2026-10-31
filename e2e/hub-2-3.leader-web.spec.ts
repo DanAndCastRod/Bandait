@@ -1,0 +1,318 @@
+import { test, expect, type Page, type Route } from '@playwright/test';
+import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+
+/**
+ * E2E del hub 2.3: navegacion con los nombres y el orden del lider, ENSAYO (prompter que sigue la
+ * posicion del reproductor), editar equipos en AJUSTES y ANALIZAR CON IA contra el Worker
+ * bandait-stems SIMULADO con page.route (https://stems.e2e.invalid, ver playwright.config.ts).
+ * Los WAV se generan en la prueba.
+ */
+
+const STEMS = 'https://stems.e2e.invalid';
+const TABS = ['SETLISTS', 'CANCIONES', 'ENSAYO', 'PISTAS', 'BANDA', 'AJUSTES'];
+
+function wav(seconds: number, freq: number, rate = 8000): Buffer {
+  const samples = Math.round(seconds * rate);
+  const data = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i++) data.writeInt16LE(Math.round(Math.sin((2 * Math.PI * freq * i) / rate) * 8000), i * 2);
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0);
+  h.writeUInt32LE(36 + data.length, 4);
+  h.write('WAVE', 8);
+  h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20);
+  h.writeUInt16LE(1, 22);
+  h.writeUInt32LE(rate, 24);
+  h.writeUInt32LE(rate * 2, 28);
+  h.writeUInt16LE(2, 32);
+  h.writeUInt16LE(16, 34);
+  h.write('data', 36);
+  h.writeUInt32LE(data.length, 40);
+  return Buffer.concat([h, data]);
+}
+
+async function enterDemo(page: Page) {
+  await page.goto('/');
+  await page.getByTestId('demo-toggle').click();
+  await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
+  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+}
+
+async function horizontalOverflow(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}
+
+test.describe('Web Admin Hub 2.3 - navegacion', () => {
+  test('escritorio: las 6 vistas del lider en orden, sin Escenario, y AJUSTES agrupa voz y equipos', async ({ page }) => {
+    await enterDemo(page);
+    const nav = page.locator('nav.hub-desktop-nav');
+    await expect(nav.getByRole('button')).toHaveText(TABS);
+    await expect(page.getByRole('button', { name: /ESCENARIO|PLAYLISTS|INTEGRANTES|EQUIPAMIENTO/ })).toHaveCount(0);
+    await expect(nav.getByRole('button', { name: 'SETLISTS' })).toHaveAttribute('aria-current', 'page');
+
+    await nav.getByRole('button', { name: 'AJUSTES' }).click();
+    await expect(nav.getByRole('button', { name: 'AJUSTES' })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO']);
+    await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
+    await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
+    await expect(page.getByRole('tab', { name: 'EQUIPAMIENTO' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('heading', { name: 'Rider Técnico & Ruteo de Equipos' })).toBeVisible();
+  });
+
+  test('movil 390 px: la barra inferior trae las mismas 6 vistas sin scroll horizontal', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await enterDemo(page);
+    const bottom = page.locator('nav.hub-mobile-nav');
+    await expect(bottom.getByRole('button')).toHaveText(TABS);
+    for (const name of TABS) {
+      await bottom.getByRole('button', { name, exact: true }).click();
+      await expect(bottom.getByRole('button', { name, exact: true })).toHaveAttribute('aria-current', 'page');
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    }
+  });
+
+  test('AJUSTES > EQUIPAMIENTO: editar un equipo conserva su id y se guarda', async ({ page }) => {
+    await enterDemo(page);
+    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
+    await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
+    const card = page.getByTestId('equipment-card').filter({ hasText: 'Interfaz ASIO FOH Master' });
+    await card.getByRole('button', { name: 'Editar Interfaz ASIO FOH Master' }).click();
+    const editor = page.getByTestId('equipment-editor');
+    await expect(editor.getByLabel('NOMBRE DEL EQUIPO')).toHaveValue('Interfaz ASIO FOH Master');
+    await editor.getByLabel('NOMBRE DEL EQUIPO').fill('Interfaz FOH Principal');
+    await editor.getByLabel('FRECUENCIA RF (SI APLICA)').fill('600.000 MHz');
+    await editor.getByTestId('equipment-save').click();
+    await expect(page.getByTestId('equipment-card').filter({ hasText: 'Interfaz FOH Principal' })).toContainText('600.000 MHz');
+    await expect(page.getByTestId('equipment-card')).toHaveCount(4);
+    const stored = await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((k) => k.startsWith('bandait_workspace_'));
+      return key ? JSON.parse(localStorage.getItem(key) as string).equipmentMap.band_01 : null;
+    });
+    expect(stored.find((e: any) => e.id === 'eq_01')).toMatchObject({ name: 'Interfaz FOH Principal', rfFrequency: '600.000 MHz', bandId: 'band_01' });
+  });
+});
+
+test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
+  test('el prompter sigue la posicion: seccion actual con su ChordPro, la siguiente, y ACORDES / LETRA', async ({ page }) => {
+    await enterDemo(page);
+    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await expect(page.getByTestId('rehearsal-empty')).toBeVisible();
+    await page.getByTestId('rehearsal-empty').getByRole('button', { name: 'IR A PISTAS' }).click();
+    await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
+
+    // Medianoche en Pereira: 124 BPM 4/4, Intro 4 compases (7.74 s) y Estrofa 1 de 8.
+    await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
+    await page.getByTestId('stem-file-input').setInputFiles([
+      { name: 'Medianoche - Drums.wav', mimeType: 'audio/wav', buffer: wav(20, 110) },
+      { name: 'Medianoche - Bass.wav', mimeType: 'audio/wav', buffer: wav(20, 82) },
+    ]);
+    await page.getByTestId('stem-save').click();
+    await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
+
+    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await expect(page.getByTestId('rehearsal-song-select')).toHaveValue(/.+/);
+    await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
+    const current = page.getByTestId('rehearsal-current');
+    await expect(current).toHaveAttribute('data-label', 'Intro');
+    await expect(page.getByTestId('rehearsal-next')).toHaveAttribute('data-label', 'Estrofa 1');
+    await expect(page.getByTestId('rehearsal-bar')).toHaveText('COMPÁS 1');
+
+    // 9 s a 124 BPM = compas 5.65: Estrofa 1, con el Coro como siguiente.
+    await page.getByLabel('Posición').fill('9');
+    await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+    await expect(page.getByTestId('rehearsal-bar')).toHaveText('COMPÁS 5');
+    await expect(page.getByTestId('rehearsal-next')).toHaveAttribute('data-label', 'Coro');
+    const chordpro = page.getByTestId('rehearsal-current-chordpro');
+    await expect(chordpro).toHaveAttribute('data-mode', 'chords');
+    await expect(chordpro.getByTestId('chordpro-chords').first()).toContainText('Am');
+    await expect(chordpro).toContainText('Medianoche en');
+
+    await page.getByRole('button', { name: 'LETRA', exact: true }).click();
+    await expect(chordpro).toHaveAttribute('data-mode', 'lyrics');
+    await expect(chordpro.getByTestId('chordpro-chords')).toHaveCount(0);
+    await expect(chordpro).toContainText('Medianoche en Pereira,');
+
+    // Reproduciendo, la seccion avanza sola (de Estrofa 1 a Coro en el compas 13 = 23.2 s: se salta con la posicion).
+    await page.getByLabel('Posición').fill('7.2');
+    await expect(current).toHaveAttribute('data-label', 'Intro');
+    await page.getByTestId('stem-play').click();
+    await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'playing');
+    await expect(current).toHaveAttribute('data-label', 'Estrofa 1', { timeout: 5000 });
+    await page.getByTestId('stem-stop').click();
+    await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'stopped');
+    await expect(current).toHaveAttribute('data-label', 'Intro');
+  });
+});
+
+// ------------------------------------------------------------------ Analizar con IA
+
+const DRAFT = {
+  source: 'music.ai',
+  bpm: 128,
+  key: 'C#m',
+  beats_per_bar: 4,
+  sections: [
+    { kind: 'intro', label: 'Intro', bars: 4, start_bar: 1, chordpro: '[C#m]    [A]    [E]    [B]', cue_text: null },
+    { kind: 'verse', label: 'Estrofa 1', bars: 8, start_bar: 5, chordpro: '[C#m]    [A]\n[E]    [B]', cue_text: null },
+    { kind: 'chorus', label: 'Coro', bars: 8, start_bar: 13, chordpro: '[A]    [B]    [C#m]', cue_text: null },
+  ],
+  lyrics_unplaced: ['Primera linea sin tiempo', 'Segunda linea sin tiempo'],
+  notes: ['La letra llegó sin tiempos: quedó sin ubicar.'],
+};
+
+interface AnalysisCall {
+  method: string;
+  type: string | undefined;
+  size: number;
+  head: string;
+}
+
+/** Worker con lo minimo: manifiestos de stems (subida al guardar) y la ruta de analisis. */
+class FakeAnalysisWorker {
+  calls: AnalysisCall[] = [];
+  /** Respuestas sucesivas del GET .../analysis (la ultima se repite). */
+  getReplies: Array<{ status: number; body: unknown }> = [{ status: 404, body: { error: 'no_analysis' } }];
+  postReply: { status: number; body: unknown } = { status: 202, body: { status: 'STARTED', job_id: 'job-e2e' } };
+
+  async install(page: Page) {
+    await page.route(`${STEMS}/**`, (route) => this.handle(route));
+  }
+
+  private async handle(route: Route) {
+    const req = route.request();
+    const origin = (await req.headerValue('origin')) ?? 'http://localhost:5173';
+    const cors = {
+      'access-control-allow-origin': origin,
+      'access-control-allow-methods': 'GET, PUT, POST, DELETE, OPTIONS',
+      'access-control-allow-headers': 'Authorization, Content-Type',
+    };
+    const method = req.method();
+    if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const json = (status: number, body: unknown) =>
+      route.fulfill({ status, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const path = new URL(req.url()).pathname;
+    if (path.endsWith('/analysis')) {
+      const body = req.postDataBuffer();
+      this.calls.push({ method, type: await req.headerValue('content-type') ?? undefined, size: body?.length ?? 0, head: body ? body.subarray(0, 4).toString('latin1') : '' });
+      if (method === 'POST') return json(this.postReply.status, this.postReply.body);
+      const reply = this.getReplies.length > 1 ? this.getReplies.shift()! : this.getReplies[0];
+      return json(reply.status, reply.body);
+    }
+    if (path.endsWith('/manifest')) {
+      if (method === 'GET') return json(404, { error: 'no_stems' });
+      return json(200, { ...req.postDataJSON(), updated_at: '2026-10-31T12:00:00.000Z' });
+    }
+    if (method === 'PUT') return json(200, { file: 'x', size: req.postDataBuffer()?.length ?? 0 });
+    return json(404, { error: 'not_found' });
+  }
+}
+
+/** Cuenta de nube (Owner de su workspace personal) con stems de "Tema A" en este equipo; abre su editor. */
+async function openEditorWithStems(page: Page, worker: FakeAnalysisWorker) {
+  const fake = new FakeSupabase();
+  fake.workspaces.push({ user_id: USER.id, workspace: workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']), updated_at: fake.now() });
+  await worker.install(page);
+  await signInWithFakeCloud(page, fake);
+  await expect(page.getByTestId('band-switcher')).toContainText('Banda de Daniel');
+  await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  await page.getByTestId('stem-file-input').setInputFiles([
+    { name: 'Tema A - Vocals.wav', mimeType: 'audio/wav', buffer: wav(3, 440) },
+    { name: 'Tema A - Bass.wav', mimeType: 'audio/wav', buffer: wav(3, 110) },
+    { name: 'click.wav', mimeType: 'audio/wav', buffer: wav(3, 1000) },
+  ]);
+  await page.getByTestId('stem-save').click();
+  await expect(page.getByTestId('stem-cloud-status')).toHaveText(/EN LA NUBE/, { timeout: 15000 });
+  await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+  await page.getByTestId('song-card').filter({ hasText: 'Tema A' }).getByRole('button', { name: 'EDITAR' }).click();
+  const editor = page.getByTestId('song-editor');
+  await expect(editor.getByTestId('song-analysis')).toBeVisible();
+  return editor;
+}
+
+test.describe('Web Admin Hub 2.3 - ANALIZAR CON IA (Worker simulado)', () => {
+  test('sin analisis previo: mezcla WAV, POST, STARTED, SUCCEEDED y ACEPTAR reemplaza las secciones', async ({ page }) => {
+    test.setTimeout(60_000);
+    const worker = new FakeAnalysisWorker();
+    worker.getReplies = [
+      { status: 404, body: { error: 'no_analysis' } },
+      { status: 200, body: { status: 'STARTED', job_id: 'job-e2e' } },
+      { status: 200, body: { status: 'SUCCEEDED', job_id: 'job-e2e', created_at: '2026-10-31T15:00:00.000Z', draft: DRAFT } },
+    ];
+    const editor = await openEditorWithStems(page, worker);
+    const panel = editor.getByTestId('song-analysis');
+    await panel.getByTestId('analysis-open').click();
+    await expect(panel).toHaveAttribute('data-phase', 'none');
+    await panel.getByTestId('analysis-start').click();
+    await expect(panel).toHaveAttribute('data-phase', 'running', { timeout: 15000 });
+    await expect(panel.getByTestId('analysis-draft')).toBeVisible({ timeout: 15000 });
+
+    // GET (no_analysis), POST con la mezcla, GET (STARTED) y GET (SUCCEEDED) a los 5 s.
+    expect(worker.calls.map((c) => c.method)).toEqual(['GET', 'POST', 'GET', 'GET']);
+    const post = worker.calls[1];
+    expect(post.type).toBe('audio/wav');
+    expect(post.head).toBe('RIFF');
+    // Mono 16 bits a 22 050 Hz: 3 s = 44 + 2 * 66 150 bytes.
+    expect(post.size).toBe(44 + 2 * 3 * 22050);
+
+    await expect(panel.getByTestId('analysis-section')).toHaveCount(3);
+    await expect(panel.getByTestId('analysis-draft')).toContainText('Primera linea sin tiempo');
+    await expect(panel.getByTestId('analysis-apply-bpm')).not.toBeChecked();
+    await expect(panel.getByTestId('analysis-apply-key')).not.toBeChecked();
+    await panel.getByTestId('analysis-apply-bpm').check();
+    await panel.getByTestId('analysis-accept').click();
+    await expect(panel.getByTestId('analysis-accepted')).toContainText('3 secciones');
+
+    await expect(editor.getByTestId('section-row')).toHaveCount(3);
+    await expect(editor.getByLabel('Etiqueta de la sección 3')).toHaveValue('Coro');
+    await expect(editor.getByLabel('BPM (40-260)')).toHaveValue('128');
+    await expect(editor.getByLabel('TONO ORIGINAL')).toHaveValue('Am');
+    await expect(editor.getByTestId('song-total-bars')).toHaveText('20');
+
+    await editor.getByTestId('song-save').click();
+    await expect(page.getByTestId('song-card').filter({ hasText: 'Tema A' }).getByTestId('song-card-sections')).toContainText('3 secciones · 20 compases');
+  });
+
+  test('con un borrador guardado (lanzado desde el lider) lo muestra con su fecha y no sube nada', async ({ page }) => {
+    const worker = new FakeAnalysisWorker();
+    worker.getReplies = [{ status: 200, body: { status: 'SUCCEEDED', job_id: 'job-lider', created_at: '2026-10-30T20:15:00.000Z', draft: DRAFT } }];
+    const editor = await openEditorWithStems(page, worker);
+    const panel = editor.getByTestId('song-analysis');
+    await panel.getByTestId('analysis-open').click();
+    await expect(panel.getByTestId('analysis-draft')).toBeVisible();
+    await expect(panel.getByTestId('analysis-draft')).toContainText(/BORRADOR DEL .*2026/);
+    await expect(panel.getByTestId('analysis-start')).toHaveText(/ANALIZAR DE NUEVO/);
+    expect(worker.calls.map((c) => c.method)).toEqual(['GET']);
+    await panel.getByTestId('analysis-dismiss').click();
+    await expect(editor.getByTestId('section-row')).toHaveCount(0);
+    expect(worker.calls.filter((c) => c.method === 'POST')).toEqual([]);
+  });
+
+  test('un 403 del analisis muestra que solo Owner o Director pueden analizar', async ({ page }) => {
+    const worker = new FakeAnalysisWorker();
+    worker.getReplies = [{ status: 404, body: { error: 'no_analysis' } }];
+    worker.postReply = { status: 403, body: { error: 'not_an_editor' } };
+    const editor = await openEditorWithStems(page, worker);
+    const panel = editor.getByTestId('song-analysis');
+    await panel.getByTestId('analysis-open').click();
+    await panel.getByTestId('analysis-start').click();
+    await expect(panel.getByTestId('analysis-error')).toHaveText(
+      'Solo el Owner o el Director musical de la banda pueden analizar canciones con IA.',
+      { timeout: 15000 }
+    );
+    await expect(editor.getByTestId('section-row')).toHaveCount(0);
+  });
+
+  test('sin stems en este equipo no aparece ANALIZAR CON IA', async ({ page }) => {
+    const worker = new FakeAnalysisWorker();
+    const fake = new FakeSupabase();
+    fake.workspaces.push({ user_id: USER.id, workspace: workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']), updated_at: fake.now() });
+    await worker.install(page);
+    await signInWithFakeCloud(page, fake);
+    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await page.getByTestId('song-card').filter({ hasText: 'Tema A' }).getByRole('button', { name: 'EDITAR' }).click();
+    await expect(page.getByTestId('song-editor')).toBeVisible();
+    await expect(page.getByTestId('song-analysis')).toHaveCount(0);
+    expect(worker.calls).toEqual([]);
+  });
+});

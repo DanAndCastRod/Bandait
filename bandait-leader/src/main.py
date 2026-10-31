@@ -157,13 +157,11 @@ def _set_app_user_model_id() -> None:
 
 
 def load_fonts():
-    """Cargar fuentes personalizadas si están disponibles."""
-    from PySide6.QtGui import QFontDatabase
+    """Fuentes incluidas en resources/fonts (Space Grotesk e IBM Plex Mono, OFL)."""
+    from src.ui import theme
 
-    for name in ("JetBrainsMono-Regular.ttf", "Inter-Regular.ttf"):
-        path = resource_path("fonts", name)
-        if os.path.exists(path):
-            QFontDatabase.addApplicationFont(path)
+    if not theme.load_fonts():
+        logger.warning("Fuentes de la interfaz no encontradas en %s", theme.fonts_dir())
 
 
 # ---------------------------------------------------------------------- GUI

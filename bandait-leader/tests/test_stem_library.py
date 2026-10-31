@@ -81,3 +81,12 @@ def test_decode_resamples_and_reports_bad_files(tmp_path):
     assert abs(vdata.shape[0] - 48000) < 2400  # MP3 adds encoder padding
     assert berr == "" and bdata.shape == (48000, 2) and np.array_equal(bdata[:, 0], bdata[:, 1])
     assert ddata is None and "exporta los stems en MP3" in derr
+
+
+def test_envelope_is_normalized_and_short():
+    data = np.zeros((48000 * 10, 2), dtype=np.int16)
+    data[100000:110000, 0] = 8000
+    env = lib.envelope(data, points=400)
+    assert 390 <= env.shape[0] <= 400 and env.dtype == np.float32
+    assert env.max() == pytest.approx(1.0) and env.min() == 0.0
+    assert lib.envelope(np.zeros((0, 2), dtype=np.int16)).shape == (0,)
