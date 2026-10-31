@@ -648,3 +648,71 @@ QPushButton[variant="chip"] {
 }
 QPushButton[variant="chip"]:hover { color: @FG; border-color: @ACTIVE; }
 QPushButton[variant="chip"]:checked { background-color: @ACTIVE; color: @ON_ACCENT; border-color: @ACTIVE; }
+
+/* ======================================================================
+   Vistas 2.3: Ensayo, Banda y Ajustes (src/ui/views/rehearsal_view.py,
+   band_view.py, settings_view.py). Solo reglas por propiedad.
+   ====================================================================== */
+
+/* Dentro de un panel las etiquetas y los contenedores no pintan el fondo de la ventana. */
+QFrame[role="panel"] QLabel { background-color: transparent; }
+QWidget[role="bare"], QScrollArea[role="bare"], QStackedWidget[role="bare"] {
+    background-color: transparent;
+    border: none;
+}
+
+QLabel[kind="readout-strong"] { font-family: @FONT_MONO_STACK; font-size: @SIZE_READOUT; font-weight: 600; color: @FG_STRONG; }
+QLabel[kind="strong"] { font-size: @SIZE_BODY; font-weight: 600; color: @FG_STRONG; }
+QLabel[kind="warn"] { font-size: @SIZE_SMALL; color: @WARNING; }
+QLabel[kind="prompt"] { font-size: @SIZE_PROMPT; color: @FG_STRONG; }
+
+/* Interruptor: un botón chequeable con el estado escrito (se lee sin distinguir colores). */
+QPushButton[variant="switch"] {
+    background-color: @RAISED; border: 1px solid @LINE_STRONG; color: @SECONDARY;
+    border-radius: @RADIUS_PILL; padding: @SPACE_1 @SPACE_3;
+    font-family: @FONT_MONO_STACK; font-size: @SIZE_CAPTION; letter-spacing: 1px;
+}
+QPushButton[variant="switch"]:hover { border-color: @ACTIVE; color: @FG; }
+QPushButton[variant="switch"]:checked { background-color: @ACTIVE_SOFT; border-color: @ACTIVE; color: @ACTIVE; }
+QPushButton[variant="switch"]:checked:hover { border-color: @ACTIVE_HOVER; color: @ACTIVE_HOVER; }
+QPushButton[variant="switch"]:pressed { background-color: @ELEVATED; }
+QPushButton[variant="switch"]:disabled { color: @FAINT; border-color: @LINE; }
+
+/* Foco por teclado visible en chips, interruptores y botones secundarios. */
+QPushButton[variant="chip"]:focus,
+QPushButton[variant="switch"]:focus,
+QPushButton[variant="secondary"]:focus,
+QPushButton[variant="ghost"]:focus { border-color: @ACTIVE; }
+QPushButton[variant="chip"]:pressed { background-color: @ELEVATED; }
+QPushButton[variant="chip"]:disabled { color: @FAINT; border-color: @LINE; }
+QPushButton[variant="ghost"]:pressed { background-color: @ELEVATED; }
+QPushButton[variant="ghost"]:disabled { color: @FAINT; }
+
+/* Tabla de integrantes: filas separadas por una línea, sin rejilla. */
+QTableWidget[role="table"] {
+    background-color: transparent;
+    border: none;
+    gridline-color: transparent;
+    font-size: @SIZE_BASE;
+}
+QTableWidget[role="table"]::item {
+    padding: 0 @SPACE_2;
+    border-bottom: 1px solid @LINE;
+}
+QTableWidget[role="table"] QHeaderView::section {
+    background-color: @SURFACE;
+    color: @MUTED;
+    font-family: @FONT_MONO_STACK;
+    font-size: @SIZE_CAPTION;
+    font-weight: 500;
+    letter-spacing: 0.6px;
+    padding: @SPACE_2 @SPACE_2;
+    border: none;
+    border-bottom: 1px solid @LINE;
+}
+
+/* QR de Banda: el código lleva su propio margen blanco (lo lee la cámara). */
+QLabel[role="qr"] {
+    font-family: @FONT_MONO_STACK; font-size: @SIZE_SMALL; color: @MUTED;
+    border: 1px solid @LINE; border-radius: @RADIUS;
+}
