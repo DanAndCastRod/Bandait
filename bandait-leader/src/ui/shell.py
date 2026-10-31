@@ -136,7 +136,7 @@ class NavRail(QWidget):
         col = QVBoxLayout()
         col.setSpacing(0)
         self.account_name = ui.label("Sin sesión", "body")
-        self.account_meta = ui.label("Inicia sesión en Cuenta", "muted")
+        self.account_meta = ui.label("Menú Cuenta", "muted")
         col.addWidget(self.account_name)
         col.addWidget(self.account_meta)
         acc.addLayout(col, 1)

@@ -694,3 +694,12 @@ QFrame[role="dot"][health="warn"] { background-color: @WARNING; }
 QFrame[role="dot"][health="bad"] { background-color: @DANGER; }
 QListWidget#setlistRail { background-color: transparent; border: none; font-size: @SIZE_BODY; }
 QListWidget#setlistRail::item { padding: @SPACE_2 @SPACE_3; border-bottom: 1px solid @LINE; }
+
+/* Biblioteca (2.3) */
+QCheckBox#demoCheck { color: @WARNING; }
+QLabel[kind="accent"] { color: @ACTIVE; font-weight: 600; }
+
+/* Tablas: encabezado vertical y esquina sin el gris claro de Qt */
+QHeaderView { background-color: @SURFACE; border: none; }
+QHeaderView::section:vertical { background-color: @SURFACE; color: @FAINT; border: none; padding: 0 @SPACE_1; }
+QTableView QTableCornerButton::section, QTableWidget QTableCornerButton::section { background-color: @SURFACE; border: none; }

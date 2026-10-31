@@ -36,7 +36,9 @@ from src.ui.widgets.dim_overlay import BRIGHTNESS_LEVELS, DimOverlay, clamp_brig
 from src.cloud.stems_cloud import StemsCloud
 from src.ui import components as ui
 from src.ui import theme
+from src.ui.analysis_controller import AnalysisController
 from src.ui.shell import NavRail
+from src.ui.views.song_inspector import SongInspector
 from src.ui.stems_controller import StemsController, import_dialog_filter, song_bpm
 from src.ui.widgets.mixer import MixerWidget
 from src.ui.widgets.stem_mixer import StemMixerWidget
@@ -406,7 +408,17 @@ class MainWindow(QMainWindow):
         self.events_btn.clicked.connect(lambda: self._show_library_page("eventos"))
         actions.addWidget(self.events_btn)
         lcol.addWidget(header)
-        lcol.addWidget(self.library_view, 1)
+        lrow = QHBoxLayout()
+        lrow.setContentsMargins(0, 0, theme.SPACE_5, theme.SPACE_4)
+        lrow.setSpacing(0)
+        lrow.addWidget(self.library_view, 1)
+        self.song_inspector = SongInspector()
+        lrow.addWidget(self.song_inspector)
+        lcol.addLayout(lrow, 1)
+        self.analysis = AnalysisController(self._stems_cloud_client, parent=self)
+        self.analysis.state.connect(self.song_inspector.set_analysis)
+        self.song_inspector.analyze_requested.connect(self.analysis.analyze)
+        self.song_inspector.refresh_requested.connect(self.analysis.refresh)
         self.library_view.tabs.tabBar().hide()
         self._library_page = library_page
         self._add_view("setlists", library_page)
@@ -503,6 +515,7 @@ class MainWindow(QMainWindow):
         if self.library_lede is not None:
             self.library_lede.setText(lede)
         self.events_btn.setVisible(page != "canciones")
+        self.song_inspector.setVisible(page == "canciones")
         if page != "eventos":
             self.nav.select(page)
 
@@ -1143,10 +1156,30 @@ class MainWindow(QMainWindow):
         return next((e for e in self._live_entries if e.get("song_id") == song_id), None)
 
     def _on_song_selected(self, song_id: int):
-        """Vista previa en el timeline. No mueve el transporte de la banda."""
+        """Vista previa en el timeline e inspector de Canciones. No mueve el transporte."""
         song_data = self.library_view.get_song_data(song_id)
         if song_data:
             self._load_song_to_timeline(song_data)
+        local_id = self.library_view.song_id_at(song_id)
+        self._show_in_inspector(local_id, song_data)
+
+    def _show_in_inspector(self, local_id, song_data):
+        from src.audio import stem_library
+
+        ref = self.library_view.song_cloud_ref(local_id) if local_id else None
+        stem_set = stem_library.load(local_id) if local_id else None
+        stems = ", ".join(s.label for s in stem_set.stems) if stem_set else ""
+        if not self.cloud.is_signed_in():
+            can, reason = False, "Inicia sesión en la nube (Cuenta) para analizar"
+        elif ref is None:
+            can, reason = False, "Solo canciones del hub se pueden analizar"
+        elif stem_set is None:
+            can, reason = False, "Esta canción no tiene stems en el portátil"
+        else:
+            can, reason = True, ""
+        self.song_inspector.set_song(song_data or None, self.library_view.song_sections(local_id) if local_id else [],
+                                     stems, can, reason)
+        self.analysis.select(local_id, ref)
 
     def _load_song_to_timeline(self, song_data: dict):
         self.timeline.clear_sections()
@@ -1303,7 +1336,7 @@ class MainWindow(QMainWindow):
         self.band_label.setText(band_name or "Sin banda")
         user = self.cloud.user
         if user is None:
-            self.nav.set_account("Sin sesión", "Inicia sesión en Cuenta")
+            self.nav.set_account("Sin sesión", "Menú Cuenta")
         else:
             self.nav.set_account(user.name or user.email or "Cuenta", band_name or (user.email or ""))
 

@@ -139,21 +139,17 @@ class LibraryView(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        layout.setContentsMargins(24, 8, 24, 16)
 
-        # === TÍTULO ===
+        # El título de la vista lo pone la ventana (Setlists / Canciones / Eventos).
         header = QHBoxLayout()
-        title = QLabel("BIBLIOTECA MUSICAL")
-        title.setFont(QFont("Inter", 18, QFont.Bold))
-        title.setStyleSheet("color: #D5DAE0;")
-        header.addWidget(title)
         header.addStretch()
 
         # Datos de demostración: los controles solo aparecen cuando existen.
         self.show_demo_check = QCheckBox("Mostrar demostración")
         self.show_demo_check.setToolTip("Mostrar las canciones, setlists y eventos marcados DEMO")
-        self.show_demo_check.setStyleSheet("color: #D9A24E;")
+        self.show_demo_check.setObjectName("demoCheck")
         self.show_demo_check.toggled.connect(lambda _on: self._on_demo_visibility())
         self.show_demo_check.setVisible(False)
         header.addWidget(self.show_demo_check)
@@ -169,7 +165,6 @@ class LibraryView(QWidget):
 
         # === TABS ===
         self.tabs = QTabWidget()
-        self.tabs.setFont(QFont("Inter", 12))
         self.tabs.addTab(self._create_songs_tab(), "Canciones")
         self.tabs.addTab(self._create_setlists_tab(), "Setlists")
         self.tabs.addTab(self._create_events_tab(), "Eventos")
@@ -222,8 +217,7 @@ class LibraryView(QWidget):
         layout.addWidget(self.songs_table)
 
         self.song_info = QLabel("Selecciona una canción para ver detalles")
-        self.song_info.setFont(QFont("Inter", 11))
-        self.song_info.setStyleSheet("color: #7C8591; padding: 8px;")
+        self.song_info.setProperty("kind", "muted")
         self.song_info.setWordWrap(True)
         layout.addWidget(self.song_info)
         self._update_song_actions()
@@ -263,8 +257,7 @@ class LibraryView(QWidget):
         detail_frame.setObjectName("panel")
         detail_layout = QVBoxLayout(detail_frame)
         self.setlist_detail = QLabel("Selecciona un setlist")
-        self.setlist_detail.setFont(QFont("Inter", 12))
-        self.setlist_detail.setStyleSheet("color: #D5DAE0;")
+        self.setlist_detail.setProperty("kind", "body")
         self.setlist_detail.setMinimumHeight(44)  # name + song count, never clipped
         detail_layout.addWidget(self.setlist_detail)
 
@@ -337,10 +330,10 @@ class LibraryView(QWidget):
         summary.setObjectName("panel")
         summary_layout = QHBoxLayout(summary)
         self.total_events = QLabel("Total: 0")
-        self.total_events.setStyleSheet("color: #7C8591;")
+        self.total_events.setProperty("kind", "muted")
         summary_layout.addWidget(self.total_events)
         self.upcoming_events = QLabel("Próximos: 0")
-        self.upcoming_events.setStyleSheet("color: #5CC8C2;")
+        self.upcoming_events.setProperty("kind", "accent")
         summary_layout.addWidget(self.upcoming_events)
         summary_layout.addStretch()
         layout.addWidget(summary)
@@ -969,6 +962,26 @@ class LibraryView(QWidget):
         if not song:
             return {}
         return self._song_to_dict(song)
+
+    def song_sections(self, song_id: str) -> list:
+        """Sections of a song in performance order, with their cumulative start bar."""
+        from src.db.models import SongSection
+
+        if not self._db_session or not song_id:
+            return []
+        try:
+            rows = (self._db_session.query(SongSection).filter(SongSection.song_id == song_id)
+                    .order_by(SongSection.position).all())
+        except Exception:
+            return []
+        out, start = [], 1
+        for r in rows:
+            out.append({"label": r.label, "kind": r.kind, "bars": r.bars, "start_bar": start})
+            start += max(1, int(r.bars or 1))
+        return out
+
+    def song_id_at(self, row: int):
+        return self._song_ids[row] if 0 <= row < len(self._song_ids) else None
 
     def song_cloud_ref(self, song_id: str):
         """(band_cloud_id, song cloud_id) of a hub song, or None for a local-only song."""
