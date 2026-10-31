@@ -112,6 +112,10 @@ SIZE_GIANT = 88
 SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6 = 4, 8, 12, 16, 24, 32
 RADIUS = 4
 RADIUS_LG = 6
+# Vistas 2.3 Ensayo, Banda y Ajustes.
+SIZE_READOUT = 26  # lecturas grandes en mono (compases Desde/Hasta)
+SIZE_PROMPT = 22  # ChordPro de la sección en Ensayo
+RADIUS_PILL = 12  # interruptores ENCENDIDO / APAGADO
 
 _FONT_FILES = (
     "SpaceGrotesk-Regular.ttf",

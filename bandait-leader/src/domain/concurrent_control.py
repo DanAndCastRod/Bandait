@@ -47,7 +47,10 @@ from src.sync.transport_math import (
     Segment,
     active_index,
     add_segment,
+    bar_start_time,
     clamp_bpm,
+    next_downbeat,
+    position_at,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,6 +60,14 @@ DEDUP_MAX_ENTRIES = 4096
 LOCAL_SENDER_ID = "leader-desktop"
 
 _TRANSITION_MODES = {m.value for m in TransitionMode}
+
+# Rehearsal loop (leader-local API, not a contract command): the loop anchor is
+# published this many bars before the boundary, and never closer than START_LEAD_NS.
+LOOP_PUBLISH_BARS = 2
+# Transport commands that end a rehearsal loop (they move the band somewhere else).
+_LOOP_CANCELLING = {
+    CommandType.STOP, CommandType.PANIC, CommandType.JUMP_SONG, CommandType.CUE_NEXT, CommandType.CUE_PREV,
+}
 
 
 class IClockService(Protocol):
@@ -72,6 +83,35 @@ class StateUpdate:
     wire_state: dict
     schedule: Schedule
     jump_wire: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class LoopInfo:
+    """What the rehearsal loop is doing, for the UI. ``repeats`` 0 means infinite;
+    ``current_repeat`` counts the returns to ``start_bar`` already sounding (0 while the
+    first pass plays)."""
+
+    active: bool = False
+    start_bar: int = 0
+    end_bar: int = 0
+    repeats: int = 0
+    current_repeat: int = 0
+
+    @property
+    def infinite(self) -> bool:
+        return self.active and self.repeats == 0
+
+
+@dataclass
+class _Loop:
+    start_bar: int
+    end_bar: int
+    repeats: int  # 0 = infinite
+    done: int = 0  # returns to start_bar published so far
+    entered: bool = False  # the band has played inside the section since set_loop
+    pending_ns: Optional[int] = None  # anchor of the last loop segment published
+    pending_is_repeat: bool = False
+    last_repeat_ns: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +257,7 @@ class ConcurrentControlManager:
         self._last_applied_receipt_ns = 0
         self._acks: "OrderedDict[str, Tuple[int, dict]]" = OrderedDict()
         self._listeners: List[Callable[[StateUpdate], None]] = []
+        self._loop: Optional[_Loop] = None
 
     # ------------------------------------------------------------------ queries
     @property
@@ -284,10 +325,131 @@ class ConcurrentControlManager:
                 changes["current_order_index"] = None
             new_state = replace(st, state_version=st.state_version + 1, **changes)
             self._state = new_state
+            if new_state.current_song_id != st.current_song_id:
+                self._loop = None  # the loop belonged to the previous song
             update = StateUpdate(new_state, new_state.to_wire(now), self._schedule, None)
             listeners = list(self._listeners)
         self._notify(listeners, update)
         return new_state
+
+    # ------------------------------------------------------------------ rehearsal loop
+    # Leader-local API (not a contract command): the laptop's Ensayo view repeats a
+    # section. While PLAYING, when the band approaches the bar after ``end_bar`` the
+    # leader re-anchors exactly like TEMPO_NUDGE does: a new Segment at that bar
+    # boundary with ``bar_offset = start_bar``, published as a normal state_update
+    # (anchor_ns = boundary, bar_offset = start_bar, last_command untouched). The
+    # followers, the beacon and the audio engine follow it with no special code.
+    #
+    # ``tick(now_ns)`` drives it: the UI calls it every ~100 ms. It is pure state
+    # arithmetic on the leader clock, so tests drive it with a fake clock.
+    def set_loop(self, start_bar: int, end_bar: int, repeats: int = 0) -> LoopInfo:
+        """Repeat bars ``start_bar..end_bar`` ``repeats`` more times (0 = until cleared).
+
+        Inside the section the loop returns at the end of the current pass; outside it
+        the band jumps to ``start_bar`` at the first bar boundary that respects
+        START_LEAD (an entry, not counted as a repeat). From IDLE the loop waits for PLAY
+        and enters after the first downbeat."""
+        start, end, reps = _as_int(start_bar), _as_int(end_bar), _as_int(repeats)
+        if start is None or end is None or reps is None or start < 1 or end < start or reps < 0:
+            raise ValueError(f"bucle inválido: compases {start_bar!r}-{end_bar!r}, repeticiones {repeats!r}")
+        with self._lock:
+            self._loop = _Loop(start_bar=start, end_bar=end, repeats=reps)
+        self.tick()
+        return self.loop_info()
+
+    def clear_loop(self) -> None:
+        """Stop looping. A loop anchor already published still sounds (rule 2: a
+        published anchor is never withdrawn); after it the song simply continues."""
+        with self._lock:
+            self._loop = None
+
+    def loop_info(self, now_ns: Optional[int] = None) -> LoopInfo:
+        with self._lock:
+            loop = self._loop
+            if loop is None:
+                return LoopInfo()
+            now = self._now() if now_ns is None else now_ns
+            current = loop.done
+            if loop.last_repeat_ns is not None and loop.last_repeat_ns > now:
+                current -= 1  # published, not sounding yet
+            return LoopInfo(True, loop.start_bar, loop.end_bar, loop.repeats, max(0, current))
+
+    def tick(self, now_ns: Optional[int] = None) -> bool:
+        """Advance the rehearsal loop. True when it published a new loop anchor."""
+        with self._lock:
+            loop = self._loop
+            if loop is None:
+                return False
+            now = self._now() if now_ns is None else now_ns
+            st, sched = self._state, self._schedule
+            if st.status is not SessionStatus.PLAYING or not sched:
+                return False
+            if loop.pending_ns is not None and loop.pending_ns > now:
+                return False  # already published, not reached yet
+            loop.pending_ns = None
+            pos = position_at(sched, now)
+            if pos is None:
+                return False  # inside the start lead: wait for the first downbeat
+            bar = pos[0]
+            finished = loop.repeats > 0 and loop.done >= loop.repeats
+            if loop.start_bar <= bar <= loop.end_bar:
+                loop.entered = True
+                if finished:
+                    return False  # last pass: let it play out
+                found = bar_start_time(sched, loop.end_bar + 1, now)
+                if found is None:
+                    return False
+                boundary, seg = found
+                if boundary - now > max(LOOP_PUBLISH_BARS * seg.bar_ns, START_LEAD_NS):
+                    return False  # too early: publish closer to the boundary
+                if boundary < now + START_LEAD_NS:
+                    # Too late for rule 1 (the UI timer stalled): the band plays one bar
+                    # past the section and the next tick takes the "outside" branch.
+                    return False
+                is_repeat = True
+            else:
+                if loop.entered and finished:
+                    self._loop = None  # every repeat played: the song continues
+                    return False
+                nxt = next_downbeat(sched, now + START_LEAD_NS)
+                if nxt is None:
+                    return False
+                boundary = nxt[0]
+                # Back from past the section (a late tick or a resume) counts as a repeat.
+                is_repeat = loop.entered
+            update = self._publish_loop_anchor(loop, boundary, now, is_repeat)
+            listeners = list(self._listeners)
+        self._notify(listeners, update)
+        return True
+
+    def _publish_loop_anchor(self, loop: _Loop, boundary: int, now: int, is_repeat: bool) -> StateUpdate:
+        """Re-anchor at ``boundary`` with bar_offset = start_bar (caller holds the lock).
+        bpm and beats_per_bar come from the state: it is what the followers rebuild."""
+        st = self._state
+        seg = Segment(boundary, st.bpm, st.beats_per_bar, loop.start_bar)
+        self._schedule = add_segment(self._schedule, seg, now)
+        st = replace(st, state_version=st.state_version + 1, anchor_ns=boundary, bar_offset=loop.start_bar)
+        self._state = st
+        loop.pending_ns = boundary
+        loop.pending_is_repeat = is_repeat
+        if is_repeat:
+            loop.done += 1
+            loop.last_repeat_ns = boundary
+        return StateUpdate(st, st.to_wire(now), self._schedule, None)
+
+    def _loop_after_command(self, command_type: CommandType, now: int) -> None:
+        """An accepted transport change (caller holds the lock)."""
+        loop = self._loop
+        if loop is None:
+            return
+        if command_type in _LOOP_CANCELLING:
+            self._loop = None
+        elif command_type is CommandType.PAUSE and loop.pending_ns is not None and loop.pending_ns > now:
+            # PAUSE dropped the schedule before the loop anchor sounded: undo its count.
+            if loop.pending_is_repeat:
+                loop.done -= 1
+                loop.last_repeat_ns = None
+            loop.pending_ns = None
 
     # ------------------------------------------------------------------ commands
     def process_local(
@@ -367,6 +529,7 @@ class ConcurrentControlManager:
                 if schedule is not None:
                     self._schedule = schedule
                 self._last_applied_receipt_ns = cmd.received_ns
+                self._loop_after_command(cmd.command_type, now)
             wire = st.to_wire(now)
             ack = self._make_ack(cmd.command_id, True, action, None, wire)
             self._store_ack(cmd.command_id, cmd.received_ns, ack)

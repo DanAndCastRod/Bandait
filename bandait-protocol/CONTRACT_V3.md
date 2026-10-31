@@ -146,6 +146,18 @@ Reglas:
    `setlist_jump` si el salto no es secuencial.
 10. Last-write-wins: el líder ordena por **su** instante de recepción
     (`time.perf_counter_ns()` al recibir); los timestamps del cliente no participan en el orden.
+11. **Bucle de ensayo (re-anclaje del líder, 2026-10-31).** En PLAYING el líder puede
+    re-anclar por su cuenta en un límite de compás con un `bar_offset` **menor** que el
+    compás que suena: es el bucle de la vista Ensayo del líder de escritorio (repetir los
+    compases `start_bar..end_bar`). No es un comando del contrato ni hay evento nuevo: llega
+    como un `state_update` normal con `anchor_ns` = instante del compás `end_bar + 1`
+    (futuro, cumple la regla 1), `bar_offset = start_bar`, el mismo `bpm` y
+    `beats_per_bar`, `state_version` mayor y **`last_command` sin cambios** (sigue siendo
+    el último comando real). Los followers lo tratan exactamente igual que el re-anclaje de
+    `TEMPO_NUDGE` (regla 2): siguen con el horario anterior hasta `anchor_ns` y desde ahí
+    numeran desde `start_bar`. Un follower no debe suponer que `bar_offset` solo crece.
+    `STOP`, `PANIC`, `JUMP_SONG` y `CUE_*` terminan el bucle; un ancla de bucle ya publicada
+    no se retira.
 
 ## 7. Comportamiento obligatorio del follower
 

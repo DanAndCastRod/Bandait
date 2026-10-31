@@ -142,6 +142,28 @@ def next_downbeat(schedule: Schedule, t_ns: int) -> Optional[Tuple[int, int]]:
     return None
 
 
+def bar_start_time(schedule: Schedule, bar: int, after_ns: int) -> Optional[Tuple[int, Segment]]:
+    """First instant >= after_ns where ``bar`` begins, honouring each segment's validity
+    window. Returns (time_ns, segment in force there) or None if the schedule never
+    reaches that bar (e.g. a later segment re-numbers the bars before it)."""
+    n = len(schedule)
+    for i in range(n):
+        seg = schedule[i]
+        seg_end = schedule[i + 1].anchor_ns if i + 1 < n else None
+        if seg_end is not None and seg_end <= after_ns:
+            continue
+        bars = bar - seg.bar_offset
+        if bars < 0:
+            continue
+        when = seg.anchor_ns + int(round(bars * seg.bar_ns))
+        if when < after_ns:
+            continue
+        if seg_end is not None and when >= seg_end:
+            continue
+        return when, seg
+    return None
+
+
 def add_segment(schedule: Schedule, seg: Segment, now_ns: int) -> Schedule:
     """Append a segment: drop segments it supersedes and those fully in the past."""
     kept = [s for s in schedule if s.anchor_ns < seg.anchor_ns]
