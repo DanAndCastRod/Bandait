@@ -22,7 +22,20 @@ import {
 import { barAtTime, barStartSeconds, clampLoop, dbToGain, formatClock, sectionIndexAtBar, sectionSpans } from '../src/services/stemTiming.ts'
 import { WAV_HEADER_BYTES, encodeWav16, limitPeak, wavByteLength } from '../src/services/wav.ts'
 import { DEFAULT_FONT_STEP, FONT_SCALES, PROMPTER_SHORTCUTS, barSeekTarget, barsLeftInSection, beatInBar, clampFontStep, keyTargetOf, keyToAction, sectionNavTarget, type KeyLike, type KeyTarget } from '../src/services/prompterKeys.ts'
-import { analysisErrorMessage, draftToSongSections, getAnalysis, parseDraft, startAnalysis } from '../src/services/stemAnalysis.ts'
+import {
+  SEPARATION_MAX_RETRIES,
+  analysisErrorMessage,
+  draftToSongSections,
+  getAnalysis,
+  parseDraft,
+  separationContentType,
+  separationFileProblem,
+  separationStatusText,
+  startAnalysis,
+  startSeparation,
+  watchSeparation,
+} from '../src/services/stemAnalysis.ts'
+import { cloudStemsChanged, onCloudStemsChanged } from '../src/services/stemCloudEvents.ts'
 import type { SongSection } from '../src/types/hub.ts'
 import {
   CLOUD_MAX_STEMS,
@@ -466,6 +479,106 @@ async function main() {
     await assert.rejects(startAnalysis(aTarget, 'song_1', wav), (e: unknown) => e instanceof StemCloudError && /Director musical de la banda pueden analizar/.test(e.message))
     reply = { status: 503, body: { error: 'analysis_unavailable' } }
     await assert.rejects(getAnalysis(aTarget, 'song_1'), (e: unknown) => e instanceof StemCloudError && /no está disponible/.test(e.message))
+  })
+
+  // ---------------------------------------------------------------- separar con Music AI
+  const manifestBody = {
+    version: 1,
+    song_id: 'song_1',
+    offset_ms: 0,
+    stems: [
+      { file: 'Vocals.wav', role: 'vocals', label: 'Voz', size: 10 },
+      { file: 'Drums.wav', role: 'drums', label: 'Batería', size: 10 },
+      { file: 'Bass.wav', role: 'bass', label: 'Bajo', size: 10 },
+    ],
+  }
+  /** Worker simulado con una cola de respuestas para GET .../analysis. */
+  function separationWorker(queue: Array<{ status: number; body: unknown }>) {
+    const seen: string[] = []
+    const fetchFn = async (input: string, init?: RequestInit) => {
+      const url = new URL(input)
+      const h = new Headers(init?.headers)
+      seen.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search} ${h.get('Content-Type') ?? ''} ${init?.body instanceof Blob ? init.body.size : 0}`)
+      if (init?.method === 'POST') return new Response(JSON.stringify({ status: 'STARTED', job_id: 'job-s', separate: true }), { status: 202 })
+      const r = queue.shift() ?? { status: 500, body: { error: 'cola_vacia' } }
+      return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+    }
+    const target: CloudTarget = { baseUrl: 'https://stems.test', band: 'me', getToken: async () => 'token-de-prueba-123456789', fetchFn }
+    return { target, seen }
+  }
+  const noSleep = async () => {}
+
+  await check('separar: tipo por extension, limites y POST ?separate=1 con el audio como cuerpo', async () => {
+    assert.equal(separationContentType({ name: 'tema.flac', type: '' }), 'audio/flac')
+    assert.equal(separationContentType({ name: 'tema.M4A', type: '' }), 'audio/mp4')
+    assert.equal(separationContentType({ name: 'tema.mp3', type: 'audio/mpeg' }), 'audio/mpeg')
+    assert.equal(separationContentType({ name: 'notas.txt', type: 'text/plain' }), null)
+    assert.match(separationFileProblem({ name: 'a.txt', type: 'text/plain', size: 10 }) ?? '', /WAV, FLAC, MP3 o M4A/)
+    assert.match(separationFileProblem({ name: 'a.wav', type: 'audio/wav', size: 96 * 1024 * 1024 }) ?? '', /95 MB/)
+    assert.equal(separationFileProblem({ name: 'a.wav', type: 'audio/wav', size: 1000 }), null)
+    const { target, seen } = separationWorker([])
+    const song = Object.assign(new Blob([new Uint8Array(1234)], { type: '' }), { name: 'Dame tu aire.flac' })
+    const fractions: number[] = []
+    assert.deepEqual(await startSeparation(target, 'song_1', song, (f) => fractions.push(f)), { jobId: 'job-s' })
+    assert.deepEqual(seen, ['POST /v1/bands/me/songs/song_1/analysis?separate=1 audio/flac 1234'])
+    assert.deepEqual(fractions, [1], 'con fetch inyectado no hay progreso parcial: solo el final')
+    const big = Object.assign(new Blob([new Uint8Array(10)]), { name: 'x.txt' })
+    await assert.rejects(startSeparation(target, 'song_1', big), (e: unknown) => e instanceof StemCloudError && e.code === 'bad_audio_type')
+  })
+
+  await check('separar: STARTED, IMPORTING 1/3 y 2/3, 502 stems_copy_failed se reintenta, SUCCEEDED con el manifiesto', async () => {
+    const { target, seen } = separationWorker([
+      { status: 200, body: { status: 'STARTED', job_id: 'job-s' } },
+      { status: 200, body: { status: 'IMPORTING', done: 1, total: 3 } },
+      { status: 502, body: { error: 'stems_copy_failed' } },
+      { status: 200, body: { status: 'IMPORTING', done: 2, total: 3 } },
+      { status: 200, body: { status: 'SUCCEEDED', created_at: '2026-10-31T20:00:00Z', draft: rawDraft, stems: manifestBody } },
+    ])
+    const texts: string[] = []
+    const final = await watchSeparation(target, 'song_1', { sleep: noSleep, onState: (s) => texts.push(separationStatusText(s)) })
+    assert.equal(final?.status, 'SUCCEEDED')
+    assert.equal(final?.status === 'SUCCEEDED' && final.stems?.stems.length, 3)
+    assert.deepEqual(texts, ['SEPARANDO EN MUSIC AI...', 'COPIANDO STEMS 1/3...', 'COPIANDO STEMS 2/3...', 'LISTO: 3 STEMS EN LA NUBE'])
+    assert.equal(seen.length, 5, 'el 502 se volvio a consultar')
+  })
+
+  await check('separar: FAILED termina, otros errores se lanzan y abortar deja de consultar', async () => {
+    const failed = separationWorker([{ status: 200, body: { status: 'FAILED', error: 'audio ilegible' } }])
+    assert.deepEqual(await watchSeparation(failed.target, 'song_1', { sleep: noSleep }), { status: 'FAILED', error: 'audio ilegible' })
+    const denied = separationWorker([{ status: 403, body: { error: 'not_a_member' } }])
+    await assert.rejects(watchSeparation(denied.target, 'song_1', { sleep: noSleep }), (e: unknown) => e instanceof StemCloudError && e.code === 'not_a_member')
+    const broken = separationWorker(Array.from({ length: 20 }, () => ({ status: 502, body: { error: 'stems_copy_failed' } })))
+    await assert.rejects(watchSeparation(broken.target, 'song_1', { sleep: noSleep }), (e: unknown) => e instanceof StemCloudError && e.code === 'stems_copy_failed')
+    assert.equal(broken.seen.length, SEPARATION_MAX_RETRIES + 1, 'se rinde despues de los reintentos')
+    const ctrl = new AbortController()
+    const slow = separationWorker(Array.from({ length: 20 }, () => ({ status: 200, body: { status: 'STARTED' } })))
+    const result = await watchSeparation(slow.target, 'song_1', {
+      signal: ctrl.signal,
+      sleep: async () => {
+        if (slow.seen.length >= 2) ctrl.abort()
+      },
+    })
+    assert.equal(result, null)
+    assert.equal(slow.seen.length, 2, 'abortado: no consulta mas')
+    let t = 0
+    const forever = separationWorker(Array.from({ length: 20 }, () => ({ status: 200, body: { status: 'STARTED' } })))
+    const timedOut = await watchSeparation(forever.target, 'song_1', { sleep: noSleep, now: () => (t += 1000), timeoutMs: 2500 })
+    assert.equal(timedOut?.status, 'FAILED')
+  })
+
+  await check('aviso de cambio en la nube: llega a todos los oyentes y se puede quitar', () => {
+    const got: string[] = []
+    const off1 = onCloudStemsChanged((c) => got.push(`a:${c.songId}`))
+    const off2 = onCloudStemsChanged(() => {
+      throw new Error('oyente roto')
+    })
+    const off3 = onCloudStemsChanged((c) => got.push(`b:${c.band}`))
+    cloudStemsChanged({ band: 'me', songId: 'song_1', manifest: null })
+    off1()
+    cloudStemsChanged({ band: 'me', songId: 'song_2', manifest: null })
+    off2()
+    off3()
+    assert.deepEqual(got, ['a:song_1', 'b:me', 'b:me'])
   })
 
   // ---------------------------------------------------------------- prompter de ENSAYO

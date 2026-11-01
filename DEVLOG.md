@@ -1269,3 +1269,44 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Probar el modo foco en iPhone, donde no hay Fullscreen API y queda la capa fija.
   2. Tempo de práctica (time-stretch): sigue sin hacerse.
+
+### [2026-10-31] - Hub: subir una canción y separar stems con Music AI
+* **Sprint / Módulo:** `bandait-leader-web` (subagente en worktree, Claude Opus 5.5). El Worker (`feat/split-stems`, versión b9c98a3b) y el líder los lleva la sesión coordinadora.
+* **Estado encontrado:** el Worker ya acepta `POST .../analysis?separate=1` con la canción completa (workflow `splited_stems_bandait`). El `GET` responde `STARTED`, después `IMPORTING {done,total}` (cada GET copia un stem a R2) y por último `SUCCEEDED {draft, stems}`, donde `stems` reemplaza el manifiesto de la nube. El hub no tenía cómo usarlo: `getAnalysis` trataba `IMPORTING` como un estado intermedio sin progreso e ignoraba `stems`.
+* **Corrección aplicada:**
+  - `services/stemAnalysis.ts`:
+    - estado `IMPORTING {done,total}` y `stems` (manifiesto v1 validado con `parseManifest`) en `SUCCEEDED`;
+    - `startSeparation`: Content-Type por tipo o por extensión (wav, flac, mp3, m4a), límite de 95 MB y progreso de subida con XMLHttpRequest, porque fetch no informa el envío;
+    - `watchSeparation`: consulta cada 3 s; reintenta `502 stems_copy_failed` y los errores de red (hasta 8 seguidos); deja de consultar al abortar; se rinde a los 15 min;
+    - `separationStatusText` y mensajes en español.
+  - `services/stemCloudEvents.ts`: aviso de "los stems de esta canción cambiaron en la nube".
+    - El hub no tenía un caché compartido de manifiestos: cada vista (PISTAS, ENSAYO, el panel de análisis) guarda los que ya consultó.
+    - PISTAS y ENSAYO escuchan el aviso: usan el manifiesto nuevo o lo vuelven a pedir.
+  - `components/SplitUpload.tsx`, botón SUBIR CANCIÓN Y SEPARAR:
+    - si la nube ya tiene stems, pide confirmar ("Reemplaza los N stems actuales");
+    - progreso: subiendo con porcentaje, "Separando en Music AI", "Copiando stems x/y" y "Listo", con una barra que anima solo transform;
+    - si había stems locales, avisa que los de la nube son nuevos y ofrece DESCARGAR LOS NUEVOS, sin borrar nada por su cuenta;
+    - explica que gasta créditos de Music AI y tarda unos minutos.
+  - Dónde aparece (solo editores con nube):
+    - en el panel de análisis de CANCIONES: al terminar, recarga el borrador;
+    - en PISTAS, junto al importador: como alternativa cuando no hay stems locales, o con IMPORTAR MÁS.
+  - El panel de análisis muestra "COPIANDO STEMS x/y" si su propia consulta encuentra `IMPORTING`.
+  - Modo foco del prompter (de la entrada anterior): si se sale antes de que el navegador conceda la pantalla completa, al llegar se devuelve. Antes podía quedar en pantalla completa sin modo foco.
+* **Verificación:**
+  - `npm run lint` sin errores; `npx tsc -b` limpio; `npm run build` OK.
+  - `npm run verify:logic` da `23`, `36`, `14` y `74 ok`, sin fallas. Las 4 pruebas nuevas cubren tipo y límites, `POST ?separate=1`, STARTED → IMPORTING 1/3 → 502 reintentado → IMPORTING 2/3 → SUCCEEDED, FAILED, errores que se lanzan, abortar, límite de tiempo y el aviso entre vistas.
+  - Playwright `e2e/hub-nube.leader-web.spec.ts`: `7 passed`, 2 de ellas nuevas con el Worker simulado:
+    - PISTAS: confirmación de reemplazo (CANCELAR no sube nada), la secuencia STARTED → IMPORTING 1/3 → 502 → 2/3 → SUCCEEDED, `?separate=1` con `audio/mpeg`, la nube en "otra versión" y descargar los nuevos (3 pistas);
+    - CANCIONES: sin stems no pide confirmación, deja el borrador y rechaza un `.txt`.
+  - Playwright leader-web completo: `49 passed`.
+  - En 5 corridas completas con 8 workers fallaron una vez cada una dos pruebas de otras áreas: el teclado del prompter (`hub-2-3`) y compartir bandas (`shared-bands`, código no tocado). Ninguna se reprodujo sola: 30 repeticiones de la de teclado y 3 de shared-bands en verde. Quedan anotadas como intermitentes bajo carga, sin causa determinada.
+  - Capturas de PISTAS, la confirmación, la copia en curso y el final, a 1440 y 390, en el scratchpad de la sesión.
+  - `landing/hub` regenerado. Los cambios de `landing/app` y `browser-*.js` eran solo de fin de línea y se descartaron. El bundle conserva las URL reales de Supabase y del Worker.
+  - No verificado: la separación contra el Worker real. Gasta créditos de Music AI y la decide Daniel Castaneda.
+* **Decisiones:**
+  - La copia a R2 avanza solo con GETs. Si el editor cierra la vista a mitad, la copia se detiene hasta que alguien vuelva a consultar el análisis (al abrir el panel de la canción o desde el líder). No se agregó un trabajo en segundo plano: el diseño del Worker es así.
+  - Tras descargar los stems nuevos en PISTAS se cierra el importador y se muestra el estudio con las pistas nuevas.
+* **Pendientes:**
+  1. Probar una separación real con "Dame tu aire" (unos 300 MB de WAV nuevos en R2 por canción de 4 minutos).
+  2. Si se vuelve molesto, que el Worker siga copiando sin depender de los GET (por ejemplo, con una cola de Cloudflare). Eso es del Worker, no del hub.
+  3. Investigar las dos pruebas intermitentes bajo carga (`hub-2-3` teclado y `shared-bands`).

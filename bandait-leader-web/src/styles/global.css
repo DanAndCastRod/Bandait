@@ -481,7 +481,48 @@ input, select, textarea {
   color: #d5dae0;
 }
 
+/* SUBIR CANCION Y SEPARAR (SplitUpload): barra de progreso y confirmacion de reemplazo. */
+.split-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: #2b313a;
+  overflow: hidden;
+}
+.split-progress-fill {
+  height: 100%;
+  background: #b48edb;
+  transform-origin: left center;
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.split-progress[data-indeterminate='true'] .split-progress-fill {
+  transition: none;
+  animation: split-indeterminate 1.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+@keyframes split-indeterminate {
+  from {
+    transform: translateX(-100%) scaleX(0.3);
+  }
+  to {
+    transform: translateX(340%) scaleX(0.3);
+  }
+}
+.split-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d9a24e;
+  border-radius: 4px;
+  background: #1a1e23;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .split-progress-fill {
+    transition: none;
+  }
+  .split-progress[data-indeterminate='true'] .split-progress-fill {
+    animation: none;
+  }
   .rh-chip,
   .rh-track,
   .rh-beat,

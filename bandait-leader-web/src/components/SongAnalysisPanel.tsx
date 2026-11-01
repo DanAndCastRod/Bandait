@@ -10,6 +10,7 @@ import {
   analysisErrorMessage,
   draftToSongSections,
   getAnalysis,
+  separationStatusText,
   startAnalysis,
   type AnalysisDraft,
 } from '../services/stemAnalysis'
@@ -17,6 +18,7 @@ import { BPM_MAX, BPM_MIN, SECTION_KIND_LABELS } from '../services/workspaceSche
 import { uuidv4 } from '../services/uuid'
 import { useStemCloudTarget } from '../hooks/useStemCloudTarget'
 import { ChordProPreview } from './ChordProPreview'
+import { SplitUpload } from './SplitUpload'
 import { cardStyle, colors, ghostButton, inputStyle, mono, primaryButton } from './hubStyles'
 
 export interface AcceptedDraft {
@@ -38,7 +40,8 @@ type Phase =
   | { kind: 'loading' }
   | { kind: 'none' }
   | { kind: 'working'; text: string }
-  | { kind: 'running'; since: number }
+  /** `text`: progreso de una separacion (copiando stems); null en un analisis normal. */
+  | { kind: 'running'; since: number; text: string | null }
   | { kind: 'draft'; draft: AnalysisDraft; createdAt: string | null }
   | { kind: 'failed'; message: string }
   | { kind: 'accepted'; count: number }
@@ -122,7 +125,7 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
       else if (state.status === 'none') setPhase({ kind: 'none' })
       else if (nowMs() - since > ANALYSIS_TIMEOUT_MS) setPhase({ kind: 'failed', message: analysisErrorMessage('timeout') })
       else {
-        setPhase({ kind: 'running', since })
+        setPhase({ kind: 'running', since, text: state.status === 'IMPORTING' ? separationStatusText(state) : null })
         clearTimer()
         timerRef.current = setTimeout(() => void poll(since), ANALYSIS_POLL_MS)
       }
@@ -246,7 +249,7 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
   const noStemsNote =
     canEdit && source === 'none' ? (
       <div data-testid="analysis-no-stems" style={{ fontSize: '12px', color: colors.warning }}>
-        No hay stems de esta canción en este equipo ni en la nube: cárgalos en PISTAS para poder analizarla.
+        No hay stems de esta canción en este equipo ni en la nube: cárgalos en PISTAS, o sube la canción completa abajo para que Music AI la separe y la analice.
       </div>
     ) : null
 
@@ -284,7 +287,7 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
       )}
       {phase.kind === 'running' && (
         <div data-testid="analysis-status" style={{ fontFamily: mono, fontSize: '11px', color: colors.cobalt }}>
-          ANALIZANDO EN LA NUBE... se consulta cada {ANALYSIS_POLL_MS / 1000} s. Puedes seguir editando.
+          {phase.text ?? 'ANALIZANDO EN LA NUBE...'} se consulta cada {ANALYSIS_POLL_MS / 1000} s. Puedes seguir editando.
         </div>
       )}
 
@@ -336,6 +339,20 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
         />
       )}
       {noStemsNote}
+      {canEdit && target && (
+        <SplitUpload
+          song={song}
+          target={target}
+          cloudStemCount={cloudStems}
+          hasLocal={!!hasLocal}
+          hint="Sin stems, o para rehacerlos: sube el audio completo y Music AI lo separa en voz, batería, bajo, guitarras, teclados y otros."
+          onDone={(manifest) => {
+            if (manifest) setCloudStems(manifest.stems.length)
+            reload()
+          }}
+          onLocalReplaced={() => setHasLocal(true)}
+        />
+      )}
     </div>
   )
 }
