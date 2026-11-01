@@ -50,7 +50,7 @@ from src.ui.widgets.transport import TransportWidget
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 # Ancho maximo del texto "Audio: ..." en la barra de estado (el completo va en el tooltip).
 AUDIO_STATUS_MAX_PX = 420
 
@@ -423,6 +423,8 @@ class MainWindow(QMainWindow):
         self.analysis = AnalysisController(self._stems_cloud_client, parent=self)
         self.analysis.state.connect(self.song_inspector.set_analysis)
         self.song_inspector.analyze_requested.connect(self.analysis.analyze)
+        self.song_inspector.separate_requested.connect(self._separate_song_dialog)
+        self.analysis.stems_ready.connect(self._on_separated_stems)
         self.song_inspector.refresh_requested.connect(self.analysis.refresh)
         self.library_view.tabs.tabBar().hide()
         self._library_page = library_page
@@ -808,6 +810,41 @@ class MainWindow(QMainWindow):
         )
         if paths and not self.stems.import_paths(paths):
             self.status_bar.showMessage("Ya hay una importación de stems en curso", 6000)
+
+    def _separate_song_dialog(self):
+        """Canciones > Separar desde un audio: one file of the whole song, Music AI does the rest."""
+        from PySide6.QtWidgets import QFileDialog
+
+        from src.audio import stem_library
+
+        local_id = self.analysis.song_id()
+        if not local_id:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Canción completa para separar en stems", "", "Audio (*.wav *.flac *.mp3 *.m4a *.aac *.ogg)"
+        )
+        if not path:
+            return
+        stem_set = stem_library.load(local_id)
+        detail = (f"Reemplaza los {len(stem_set.stems)} stems actuales de esta canción, en la nube y en el portátil. "
+                  if stem_set else "")
+        answer = QMessageBox.question(
+            self, "Separar con Music AI",
+            detail + "Music AI separa voz, batería, bajo, guitarras, teclados y el resto; gasta créditos y "
+            "tarda unos minutos. ¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.analysis.separate(path)
+
+    def _on_separated_stems(self, local_id: str):
+        """The Worker left the separated stems in the cloud: bring them to the laptop."""
+        if self._status != "IDLE":
+            self.status_bar.showMessage("Stems separados en la nube; se descargan al detener la banda", 8000)
+            return
+        title = (self.library_view.get_song_data_by_id(local_id) or {}).get("title", "")
+        if not self.stems.download_setlist([(local_id, title or "canción separada")]):
+            self.status_bar.showMessage("Stems separados en la nube; descárgalos desde Pistas", 8000)
 
     def _remove_live_stems(self):
         if self._status != "IDLE":
@@ -1272,8 +1309,9 @@ class MainWindow(QMainWindow):
             can, reason = False, "Esta canción no tiene stems en el portátil"
         else:
             can, reason = True, ""
+        can_sep, sep_reason = (can, reason) if ref is None or not self.cloud.is_signed_in() else (True, "")
         self.song_inspector.set_song(song_data or None, self.library_view.song_sections(local_id) if local_id else [],
-                                     stems, can, reason)
+                                     stems, can, reason, can_sep, sep_reason)
         self.analysis.select(local_id, ref)
 
     def _load_song_to_timeline(self, song_data: dict):
