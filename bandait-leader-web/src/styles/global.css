@@ -514,6 +514,13 @@ input, select, textarea {
   border: 1px solid #d9a24e;
   border-radius: 4px;
   background: #1a1e23;
+  scroll-margin-bottom: 16px;
+}
+@media (max-width: 768px) {
+  /* La barra inferior movil mide 56px y es fija. */
+  .split-confirm {
+    scroll-margin-bottom: 72px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

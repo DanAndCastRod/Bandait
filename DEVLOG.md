@@ -1301,3 +1301,22 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Bajar costo: quitar del workflow los módulos de Keys y Piano si la banda no los usa (unos USD 0.55 por canción).
   3. Espacio en R2: unos 300 MB por canción en WAV. Si Music AI permite elegir FLAC o MP3 como salida, cambiarlo en el workflow; el Worker ya respeta la extensión por `Content-Type`.
   4. Tag v2.4.0 y release del líder: los hace Daniel Castaneda.
+
+### [2026-10-31] - Hub: el borrador de IA conserva los ids de las secciones; la confirmación de SEPARAR ya no queda bajo la barra móvil
+* **Sprint / Módulo:** `bandait-leader-web` (hub). Pedido de Daniel Castaneda: corregir los dos errores que quedaron abiertos.
+* **Estado encontrado:**
+  - `draftToSongSections` (`src/services/stemAnalysis.ts`) daba un id nuevo a cada sección al ACEPTAR un borrador. El propio `workspaceSchema.ts` dice que nunca cambia un id existente. El bucle de sección de ENSAYO (`loopSectionId`) y la PWA (`key={section.id}`) dejaban de reconocer la sección, y el líder recibía secciones "nuevas" (las borra y reinserta, así que no se rompía, pero perdía la identidad). Pendiente 4 de la entrada de Bandait 2.3.
+  - En PISTAS a 390 px, la confirmación de "Reemplaza los N stems" aparece en línea. Si el panel estaba cerca del borde inferior, los botones quedaban debajo de la barra de navegación móvil fija (56 px, `z-index` 999). Se vio en la captura `split-390-confirmar.png` del PR #42.
+* **Corrección aplicada:**
+  - `draftToSongSections(draft, newId, previous)`: cada sección del borrador toma el id de la sección guardada del mismo tipo y el mismo orden (la segunda estrofa recibe el id de la segunda estrofa). Las que no tienen pareja reciben un id nuevo. `SongAnalysisPanel` le pasa `song.sections`.
+  - `SplitUpload`: al aparecer la confirmación se lleva a la vista (`scrollIntoView` con `block: 'nearest'`, sin animación si el sistema pide menos movimiento) y el foco pasa a CANCELAR, la opción segura. `.split-confirm` tiene `scroll-margin-bottom` de 16 px, o de 72 px en móvil para dejar libre la barra.
+* **Verificación:**
+  - `npm run verify:logic` da `75 ok, 0 fallas`. Hay un caso nuevo: dos estrofas y un coro conservan sus ids, y la intro y el final nuevos reciben ids nuevos sin repetidos.
+  - Hay una prueba e2e nueva en `e2e/hub-nube.leader-web.spec.ts` ("movil 390 px"): parte de la página arriba del todo, revisa que los dos botones estén enteros a la vista y que el elemento que recibe un toque en su centro sea el botón y no la barra.
+    - Con el arreglo pasa.
+    - Sin el arreglo falla, tanto en el foco como, quitando esa aserción, en `toBeInViewport`.
+  - Lint, build y la suite leader-web: ver el PR.
+* **Decisiones:**
+  - Las secciones se emparejan por tipo y orden, y no por posición: si el borrador agrega una intro, la posición movería todos los ids a otra sección. Se descartó copiar el aviso personalizado de la sección vieja: aceptar el borrador sigue reemplazando el contenido, como dice el panel.
+* **Pendientes:**
+  1. Probar la confirmación en un teléfono real (Daniel Castaneda).

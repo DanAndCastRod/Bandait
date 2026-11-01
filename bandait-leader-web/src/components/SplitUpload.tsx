@@ -67,6 +67,8 @@ export const SplitUpload: React.FC<Props> = ({ song, target, cloudStemCount, has
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const inputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const confirmRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(
     () => () => {
@@ -74,6 +76,15 @@ export const SplitUpload: React.FC<Props> = ({ song, target, cloudStemCount, has
     },
     []
   )
+
+  // La confirmacion aparece en linea, a veces debajo del borde visible (y en movil, bajo la barra
+  // inferior fija): se trae a la vista con su scroll-margin y el foco pasa a CANCELAR.
+  useEffect(() => {
+    if (phase.kind !== 'confirm') return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    confirmRef.current?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' })
+    cancelRef.current?.focus({ preventScroll: true })
+  }, [phase.kind])
 
   const run = async (file: File) => {
     abortRef.current?.abort()
@@ -183,14 +194,14 @@ export const SplitUpload: React.FC<Props> = ({ song, target, cloudStemCount, has
       </div>
 
       {phase.kind === 'confirm' && (
-        <div role="alertdialog" aria-label="Reemplazar los stems de la nube" data-testid="split-confirm" className="stx-fade-in split-confirm">
+        <div role="alertdialog" aria-label="Reemplazar los stems de la nube" data-testid="split-confirm" className="stx-fade-in split-confirm" ref={confirmRef}>
           <div style={{ fontSize: '13px', color: colors.text }}>
             Reemplaza los {cloudStemCount} stems actuales de <strong>{song.title}</strong> en la nube de la banda por los que separe Music AI de{' '}
             <span style={{ fontFamily: mono, fontSize: '12px', overflowWrap: 'anywhere' }}>{phase.file.name}</span> ({formatBytes(phase.file.size)}).
           </div>
           <div style={{ fontSize: '12px', color: colors.muted }}>Quien ya los descargó conserva su copia hasta que descargue los nuevos.</div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <button type="button" className="stx-btn" onClick={() => setPhase({ kind: 'idle' })} style={{ ...ghostButton, background: 'transparent', color: colors.muted }}>
+            <button ref={cancelRef} type="button" className="stx-btn" onClick={() => setPhase({ kind: 'idle' })} style={{ ...ghostButton, background: 'transparent', color: colors.muted }}>
               <X size={13} /> CANCELAR
             </button>
             <button
