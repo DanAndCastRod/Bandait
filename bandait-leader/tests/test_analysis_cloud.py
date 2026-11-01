@@ -115,3 +115,68 @@ def test_inspector_and_controller(qtbot, tmp_path, monkeypatch):
     qtbot.waitUntil(lambda: states[-1][0] == "Error", timeout=5000)
     assert "no tiene stems" in states[-1][1]
     QApplication.processEvents()
+
+
+def test_separate_upload_and_summary(tmp_path, monkeypatch):
+    from src.cloud import analysis_cloud as ac
+
+    w = FakeWorker()
+    scope, resp = client(w).start(BAND, "song-1", b"fLaC....", "audio/flac", separate=True)
+    assert w.calls[0][0] == "POST" and w.calls[0][1].endswith("/analysis?separate=1") and w.calls[0][2] == "audio/flac"
+
+    song = tmp_path / "cancion.flac"
+    song.write_bytes(b"x" * 10)
+    assert ac.read_song_audio(str(song)) == (b"x" * 10, "audio/flac")
+    (tmp_path / "notas.txt").write_text("x")
+    with pytest.raises(ValueError, match="Formato"):
+        ac.read_song_audio(str(tmp_path / "notas.txt"))
+    monkeypatch.setattr(ac, "SEPARATE_MAX_BYTES", 5)
+    with pytest.raises(ValueError, match="máximo"):
+        ac.read_song_audio(str(song))
+
+    assert "3/7" in draft_summary({"status": "IMPORTING", "done": 3, "total": 7})
+    done = dict(DRAFT, stems={"stems": [{"file": "Vocals.wav"}, {"file": "Drums.wav"}]})
+    assert draft_summary(done).startswith("2 stems separados")
+
+
+def test_controller_separate_polls_import_and_asks_for_stems(qtbot, tmp_path, monkeypatch):
+    from src.ui import analysis_controller as actl
+    from src.ui.views.song_inspector import SongInspector
+
+    monkeypatch.setattr(actl, "IMPORT_POLL_MS", 10)
+    monkeypatch.setattr(actl, "POLL_MS", 10)
+    steps = [{"status": "STARTED"}, {"status": "IMPORTING", "done": 1, "total": 2},
+             dict(DRAFT, stems={"stems": [{"file": "Vocals.wav"}, {"file": "Drums.wav"}]})]
+
+    class SeqWorker(FakeWorker):
+        def __call__(self, req, timeout):
+            self.calls.append((req.get_method(), urllib.parse.unquote(req.full_url), req.get_header("Content-type")))
+            if req.get_method() == "POST":
+                self.posted = True
+                return io.BytesIO(b'{"status":"STARTED","job_id":"j1","separate":true}')
+            if not getattr(self, "posted", False):
+                raise urllib.error.HTTPError(req.full_url, 404, "x", {}, io.BytesIO(b'{"error":"no_analysis"}'))
+            return io.BytesIO(json.dumps(steps.pop(0) if len(steps) > 1 else steps[0]).encode())
+
+    song = tmp_path / "cancion.wav"
+    song.write_bytes(b"RIFF" + b"\0" * 40)
+    worker = SeqWorker()
+    ctl = actl.AnalysisController(lambda: StemsCloud(lambda: "tok", "https://w.test", worker))
+    states, ready = [], []
+    ctl.state.connect(lambda s, t, busy: states.append(s))
+    ctl.stems_ready.connect(ready.append)
+    ctl.select("local-9", (BAND, "song-9"))
+    qtbot.waitUntil(lambda: bool(states), timeout=5000)  # no analysis yet: no polling
+    ctl.separate(str(song))
+    qtbot.waitUntil(lambda: ready == ["local-9"], timeout=5000)
+    assert "Copiando" in states and states[-1] == "Listo"
+    assert any(c[0] == "POST" and c[1].endswith("?separate=1") and c[2] == "audio/wav" for c in worker.calls)
+
+    insp = SongInspector()
+    qtbot.addWidget(insp)
+    insp.set_song({"title": "Sin stems"}, [], "", False, "Esta canción no tiene stems en el portátil", True, "")
+    assert not insp.analyze_btn.isEnabled() and insp.separate_btn.isEnabled()
+    insp.set_analysis("Copiando", "1/2", True)
+    assert not insp.separate_btn.isEnabled()
+    insp.set_analysis("Listo", "ok", False)
+    assert insp.separate_btn.isEnabled() and not insp.analyze_btn.isEnabled()

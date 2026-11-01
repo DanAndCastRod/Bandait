@@ -1269,3 +1269,35 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Probar el modo foco en iPhone, donde no hay Fullscreen API y queda la capa fija.
   2. Tempo de práctica (time-stretch): sigue sin hacerse.
+
+### [2026-10-31] - Separar stems desde un solo audio (Music AI): Worker y líder 2.4.0
+* **Sprint / Módulo:** `bandait-stems-worker`, `bandait-leader` (el hub va en un PR aparte, hecho por un subagente)
+* **Estado encontrado:** el análisis solo aceptaba la mezcla de stems que ya existían. Daniel Castaneda preguntó si subiendo solo el WAV se sacaban los stems. No: el workflow `stems-workflow-releven-bandait` devuelve solo `Bpm`, `Root Key`, `Sections`, `ChordsMap` y `Lyrics`, sin audio. Daniel Castaneda creó en Music AI el workflow `splited_stems_bandait`, con separación y el mismo análisis; tuvo que dejar el módulo de beats porque Sections lo requiere.
+* **Prueba de descubrimiento** (job `805b871c-...`, mezcla mono de "Dame tu aire", 4.08 min):
+  - Salidas: `Vocals`, `Drums`, `Bass`, `Guitars`, `Keys`, `Piano`, `Other` en WAV PCM de 16 bits, 44.1 kHz, estéreo, 43 126 862 bytes cada una, más el mismo análisis (letra con tiempos por palabra, 18 secciones, 117 acordes). Tardó unos 60 s.
+  - Niveles RMS: Vocals -22.0, Bass -23.5, Drums -24.2, Guitars -30.0, Other -34.6, Piano -40.0 y Keys -45.3 dBFS. En esta canción Keys y Piano quedan casi vacíos.
+  - Costo en el panel de facturación de Music AI: "Stem separation" 5 jobs / 20.4 min / USD 1.43 por un solo trabajo, es decir, cinco módulos de separación de 4.08 min cada uno. Estimado por canción de 4 min: unos USD 2.9 separando y analizando, frente a unos USD 1.5 solo analizando.
+* **Corrección aplicada:**
+  - Worker:
+    - `POST .../analysis?separate=1` usa `MUSICAI_SPLIT_WORKFLOW` (por defecto `splited_stems_bandait`) y el registro lleva `separate: true`.
+    - Al terminar, cada `GET` copia **un** stem de Music AI a `files/` con streaming (FixedLengthStream y R2) y responde `IMPORTING {done,total}`, para que ninguna petición tarde demasiado.
+    - Con todos los stems copiados, escribe `manifest.json` (roles vocals, drums, bass, guitar, keys y other; etiquetas en español), que reemplaza los stems anteriores y borra los archivos que ya no lista. Después ensambla el borrador como siempre y la respuesta `SUCCEEDED` trae `stems`.
+    - En el análisis normal, una salida de audio ya no se lee como JSON: se corta por `Content-Type` o tamaño.
+  - Líder 2.4.0:
+    - En el inspector de Canciones, el botón "Separar desde un audio…": diálogo de archivo, confirmación (avisa si reemplaza N stems) y subida.
+    - Se consulta cada 2 s mientras copia y cada 15 s mientras Music AI trabaja.
+    - Al terminar, se descargan los stems al portátil con la sincronización de siempre (`download_setlist` forzado); si la banda está tocando, se avisa y no se descarga.
+    - Corregido de paso: `analyze()` y `separate()` detienen la consulta anterior, que antes podía comerse una respuesta con el token viejo.
+* **Verificación:**
+  - Worker: `npm test` da `# pass 16, # fail 0`. La prueba nueva cubre IMPORTING 1, IMPORTING 2 y luego SUCCEEDED, cada stem descargado una sola vez, archivos viejos borrados y la caché sin volver a Music AI. `tsc --noEmit` limpio.
+  - Worker desplegado vía ClipVault: versión `b9c98a3b-a8e7-44bf-81f9-2f86228573f2`.
+  - Líder: `ruff check src tests` limpio. `pytest -q` da `503 passed in 868.44s`, con 2 pruebas nuevas en `test_analysis_cloud.py`.
+  - No verificado: la copia real de 43 MB por stem dentro del Worker en producción. Probarla requiere una sesión de usuario; la primera separación real de Daniel Castaneda es la prueba.
+* **Decisiones:**
+  - Copiar en el Worker y no en el cliente: el cliente bajaría unos 300 MB de Music AI y los volvería a subir. Copiar de a un stem por GET evita los límites de tiempo de cada petición.
+  - No se descartan en el Worker los stems casi vacíos: medirlos exige decodificar el WAV, que es caro en CPU. Se quitan en PISTAS.
+* **Pendientes:**
+  1. Daniel Castaneda prueba una separación real desde el líder o el hub con un archivo estéreo y revisa en R2 los 7 stems y el manifiesto.
+  2. Bajar costo: quitar del workflow los módulos de Keys y Piano si la banda no los usa (unos USD 0.55 por canción).
+  3. Espacio en R2: unos 300 MB por canción en WAV. Si Music AI permite elegir FLAC o MP3 como salida, cambiarlo en el workflow; el Worker ya respeta la extensión por `Content-Type`.
+  4. Tag v2.4.0 y release del líder: los hace Daniel Castaneda.

@@ -49,6 +49,8 @@ export interface Env {
   /** Secret (wrangler secret put): Music AI API key. Without it, analysis answers 503. */
   MUSICAI_API_KEY?: string;
   MUSICAI_WORKFLOW?: string;
+  /** Workflow that also separates stems (POST .../analysis?separate=1). */
+  MUSICAI_SPLIT_WORKFLOW?: string;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

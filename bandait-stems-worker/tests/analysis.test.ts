@@ -112,7 +112,9 @@ class MemR2 implements R2Bucket {
     return this.describe(key);
   }
   async delete(keys: string | string[]) { for (const k of Array.isArray(keys) ? keys : [keys]) this.objects.delete(k); }
-  async list() { return { objects: [], truncated: false }; }
+  async list(o?: { prefix?: string }) {
+    return { objects: [...this.objects.keys()].filter((k) => k.startsWith(o?.prefix ?? '')).map((k) => this.describe(k)), truncated: false };
+  }
 }
 
 function setup(withKey = true) {
@@ -192,4 +194,71 @@ test('analysis: start, poll, draft cached; editors only; no key = 503', async ()
   const noKey = setup(false);
   assert.equal((await noKey.call('POST', OWNER, mix)).status, 503);
   assert.equal((await noKey.call('GET', OWNER)).status, 404);
+});
+
+test('separation: one stem copied per GET, then manifest and draft; old files replaced', async () => {
+  const bucket = new MemR2();
+  const env: Env = {
+    STEMS: bucket, SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'anon', ALLOWED_ORIGINS: '',
+    MUSICAI_API_KEY: 'musicai-key',
+  };
+  const stemBytes = (n: number) => new Uint8Array(n).fill(7);
+  const calls: string[] = [];
+  const fetchFn = async (url: string, init?: RequestInit) => {
+    calls.push(`${init?.method || 'GET'} ${url}`);
+    if (url.includes('supabase.co')) return Response.json('Owner');
+    if (url === 'https://api.music.ai/v1/upload') return Response.json({ uploadUrl: 'https://storage.test/put', downloadUrl: 'https://storage.test/get' });
+    if (url === 'https://storage.test/put') return new Response(null, { status: 200 });
+    if (url === 'https://api.music.ai/v1/job') {
+      assert.equal(JSON.parse(String(init?.body)).workflow, 'splited_stems_bandait');
+      return Response.json({ id: 'job-s' });
+    }
+    if (url === 'https://api.music.ai/v1/job/job-s') {
+      return Response.json({ status: 'SUCCEEDED', result: {
+        Bpm: 124, 'Root Key': 'E major', Sections: 'https://r.test/s', ChordsMap: 'https://r.test/c', Lyrics: 'https://r.test/l',
+        Vocals: 'https://r.test/vocals.wav', Drums: 'https://r.test/drums.wav', Piano: 'https://r.test/piano.wav',
+      } });
+    }
+    if (url.endsWith('.wav')) {
+      const n = url.includes('vocals') ? 11 : url.includes('drums') ? 13 : 17;
+      return new Response(stemBytes(n), { headers: { 'Content-Type': 'audio/wav', 'Content-Length': String(n) } });
+    }
+    if (url === 'https://r.test/s') return Response.json(FIXTURE.result.Sections);
+    if (url === 'https://r.test/c') return Response.json(FIXTURE.result.ChordsMap);
+    if (url === 'https://r.test/l') return Response.json(FIXTURE.result.Lyrics);
+    throw new Error(`unexpected ${url}`);
+  };
+  const base = `https://w.test/v1/bands/${BAND}/songs/song_02/analysis`;
+  const call = (method: string, query = '', body?: Uint8Array) => {
+    const headers = new Headers({ Authorization: `Bearer ${OWNER}` });
+    if (body) { headers.set('Content-Type', 'audio/wav'); headers.set('Content-Length', String(body.byteLength)); }
+    return handle(new Request(`${base}${query}`, { method, headers, body }), env, fetchFn);
+  };
+  const prefix = `bands/${BAND}/songs/song_02/`;
+  bucket.objects.set(`${prefix}files/old_mix.wav`, stemBytes(5));
+
+  const start = await (await call('POST', '?separate=1', new Uint8Array([1, 2, 3]))).json();
+  assert.equal(start.separate, true);
+  const progress = [];
+  let last: Record<string, unknown> = {};
+  for (let i = 0; i < 5; i++) {
+    last = await (await call('GET')).json();
+    progress.push(`${last.status}:${last.done ?? ''}`);
+    if (last.status === 'SUCCEEDED') break;
+  }
+  assert.deepEqual(progress, ['IMPORTING:1', 'IMPORTING:2', 'SUCCEEDED:']);
+  const stems = (last.stems as { stems: { file: string; role: string; label: string; size: number }[] }).stems;
+  assert.deepEqual(stems.map((s) => [s.file, s.role, s.label, s.size]),
+    [['Vocals.wav', 'vocals', 'Voz', 11], ['Drums.wav', 'drums', 'Batería', 13], ['Piano.wav', 'keys', 'Piano', 17]]);
+  assert.ok(bucket.objects.has(`${prefix}manifest.json`));
+  assert.equal(bucket.objects.get(`${prefix}files/Drums.wav`)!.byteLength, 13);
+  assert.ok(!bucket.objects.has(`${prefix}files/old_mix.wav`), 'the old stems are replaced');
+  assert.ok((last.draft as { sections: unknown[] }).sections.length > 0);
+  assert.equal(calls.filter((c) => c.endsWith('.wav')).length, 3, 'each stem downloaded once');
+
+  // Cached afterwards: no Music AI, same stems.
+  const before = calls.length;
+  const again = await (await call('GET')).json();
+  assert.equal(again.stems.stems.length, 3);
+  assert.equal(calls.slice(before).filter((c) => c.includes('music.ai') || c.includes('r.test')).length, 0);
 });
