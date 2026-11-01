@@ -24,6 +24,7 @@ import { formatBytes } from '../services/stemImport'
 import type { StemPlayer } from '../services/stemPlayer'
 import { barAtTime, sectionIndexAtBar, sectionSpans, type SectionSpan } from '../services/stemTiming'
 import { useStemCloudTarget } from '../hooks/useStemCloudTarget'
+import { onCloudStemsChanged } from '../services/stemCloudEvents'
 import type { Song } from '../types/hub'
 import { cardStyle, colors, labelStyle, mono, primaryButton, smallInputStyle, viewStyle } from '../components/hubStyles'
 
@@ -74,6 +75,22 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
   }, [])
 
   const cloudKey = useCallback((songId: string) => `${bandKey}:${songId}`, [bandKey])
+
+  // La nube cambio por otro camino (separar con Music AI): se usa el manifiesto nuevo o se vuelve a pedir.
+  useEffect(
+    () =>
+      onCloudStemsChanged((change) => {
+        if (change.band !== bandKey) return
+        const key = cloudKey(change.songId)
+        setCloud((prev) => {
+          const next = new Map(prev)
+          if (change.manifest) next.set(key, change.manifest)
+          else next.delete(key)
+          return next
+        })
+      }),
+    [bandKey, cloudKey]
+  )
 
   // Canciones sin stems en este navegador cuyo manifiesto falta consultar.
   const pending = useMemo(
@@ -556,16 +573,26 @@ const RehearsalPrompter: React.FC<PrompterProps> = ({
   }, [cur, api])
 
   // Modo foco: pantalla completa si el navegador la da; si no, una capa fija que cubre la vista.
+  // Si se sale del foco antes de que el navegador conceda la pantalla completa (Esc rapido), al
+  // llegar se devuelve: si no, quedaria en pantalla completa sin el modo foco.
+  const wantFocusRef = useRef(false)
   const enterFocus = useCallback(() => {
+    wantFocusRef.current = true
     onFocus(true)
     const stage = stageRef.current
     if (stage && typeof stage.requestFullscreen === 'function' && !document.fullscreenElement) {
-      stage.requestFullscreen().catch(() => {
-        // Sin pantalla completa (iOS, iframe, permiso): queda la capa fija.
-      })
+      stage
+        .requestFullscreen()
+        .then(() => {
+          if (!wantFocusRef.current && document.fullscreenElement && typeof document.exitFullscreen === 'function') document.exitFullscreen().catch(() => {})
+        })
+        .catch(() => {
+          // Sin pantalla completa (iOS, iframe, permiso): queda la capa fija.
+        })
     }
   }, [onFocus, stageRef])
   const exitFocus = useCallback(() => {
+    wantFocusRef.current = false
     onFocus(false)
     if (document.fullscreenElement && typeof document.exitFullscreen === 'function') document.exitFullscreen().catch(() => {})
   }, [onFocus])
@@ -575,7 +602,10 @@ const RehearsalPrompter: React.FC<PrompterProps> = ({
     let wasFull = false
     const onChange = () => {
       const full = !!document.fullscreenElement && document.fullscreenElement === stageRef.current
-      if (wasFull && !full) onFocus(false)
+      if (wasFull && !full) {
+        wantFocusRef.current = false
+        onFocus(false)
+      }
       wasFull = full
     }
     document.addEventListener('fullscreenchange', onChange)

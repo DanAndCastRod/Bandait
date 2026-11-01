@@ -52,6 +52,8 @@ class FakeWorker {
   analysis = new Map<string, Array<{ status: number; body: unknown }>>();
   postReply: { status: number; body: unknown } = { status: 202, body: { status: 'STARTED', job_id: 'job-e2e' } };
   calls: string[] = [];
+  /** POST de analisis: URL con su query (?separate=1), Content-Type y tamano del cuerpo. */
+  posts: Array<{ search: string; type: string; size: number }> = [];
 
   seedStems(band: string, song: string, files: Array<{ file: string; role: string; label: string; data: Buffer }>) {
     for (const f of files) this.files.set(`${band}/${song}/${f.file}`, f.data);
@@ -86,9 +88,15 @@ class FakeWorker {
     const what = m[3]?.startsWith('files/') ? `files/${decodeURIComponent(m[4])}` : m[3] ?? '';
     this.calls.push(`${method} ${what}`);
     if (what === 'analysis') {
-      if (method === 'POST') return json(this.postReply.status, this.postReply.body);
+      if (method === 'POST') {
+        this.posts.push({ search: new URL(req.url()).search, type: (await req.headerValue('content-type')) ?? '', size: (req.postDataBuffer() ?? Buffer.alloc(0)).length });
+        return json(this.postReply.status, this.postReply.body);
+      }
       const replies = this.analysis.get(key) ?? [{ status: 404, body: { error: 'no_analysis' } }];
       const reply = replies.length > 1 ? replies.shift()! : replies[0];
+      // Como el Worker real: al terminar una separacion, el manifiesto nuevo ya esta en la nube.
+      const stems = (reply.body as { stems?: unknown } | null)?.stems;
+      if (reply.status === 200 && stems) this.manifests.set(key, stems);
       return json(reply.status, reply.body);
     }
     if (what === 'manifest') {
@@ -190,6 +198,101 @@ test.describe('Web Admin Hub - stems y borrador en la nube sin copia local', () 
       'GET analysis',
     ]);
     expect(await idbFileCount(page)).toBe(2);
+  });
+
+  test('PISTAS: SUBIR CANCION Y SEPARAR confirma el reemplazo, sigue STARTED, IMPORTING 1/3 y 2/3, y ofrece descargar los nuevos', async ({ page }) => {
+    test.setTimeout(90_000);
+    const worker = new FakeWorker();
+    worker.seedStems('me', SONG_A, [
+      { file: 'Tema A - Drums.wav', role: 'drums', label: 'Bateria', data: wav(2, 100) },
+      { file: 'Tema A - Bass.wav', role: 'bass', label: 'Bajo', data: wav(2, 82) },
+    ]);
+    // Lo que deja la separacion en la nube: 3 stems nuevos (los archivos ya estan en R2 al terminar).
+    const split = [
+      { file: 'Vocals.wav', role: 'vocals', label: 'Voz', data: wav(2, 440) },
+      { file: 'Drums.wav', role: 'drums', label: 'Batería', data: wav(2, 110) },
+      { file: 'Bass.wav', role: 'bass', label: 'Bajo', data: wav(2, 82) },
+    ];
+    for (const f of split) worker.files.set(`me/${SONG_A}/${f.file}`, f.data);
+    const newManifest = {
+      version: 1,
+      song_id: SONG_A,
+      offset_ms: 0,
+      stems: split.map((f) => ({ file: f.file, role: f.role, label: f.label, size: f.data.length })),
+      updated_at: '2026-10-31T23:30:00.000Z',
+    };
+    await signInOwner(page, worker);
+    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+    const cloudStatus = page.getByTestId('stem-cloud-status');
+    await expect(cloudStatus).toContainText('2 STEMS');
+    // Primero los stems viejos en este equipo: al terminar, el hub avisa que los de la nube son nuevos.
+    await page.getByTestId('stem-cloud-download').click();
+    await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
+    await page.getByRole('button', { name: 'IMPORTAR MÁS' }).click();
+
+    const panel = page.getByTestId('split-upload');
+    await expect(panel).toContainText('Gasta créditos de Music AI y tarda unos minutos');
+    worker.postReply = { status: 202, body: { status: 'STARTED', job_id: 'job-split', separate: true } };
+    worker.analysis.set(`me/${SONG_A}`, [
+      { status: 200, body: { status: 'STARTED', job_id: 'job-split' } },
+      { status: 200, body: { status: 'IMPORTING', done: 1, total: 3 } },
+      { status: 502, body: { error: 'stems_copy_failed' } },
+      { status: 200, body: { status: 'IMPORTING', done: 2, total: 3 } },
+      { status: 200, body: { status: 'SUCCEEDED', job_id: 'job-split', created_at: '2026-10-31T23:30:00.000Z', draft: DRAFT, stems: newManifest } },
+    ]);
+    await panel.getByTestId('split-file-input').setInputFiles({ name: 'Tema A.mp3', mimeType: 'audio/mpeg', buffer: Buffer.alloc(4096, 7) });
+
+    // Ya hay 2 stems en la nube: pide confirmar el reemplazo; CANCELAR no sube nada.
+    const confirm = panel.getByTestId('split-confirm');
+    await expect(confirm).toContainText('Reemplaza los 2 stems actuales');
+    await confirm.getByRole('button', { name: 'CANCELAR' }).click();
+    await expect(confirm).toHaveCount(0);
+    expect(worker.posts).toEqual([]);
+    await panel.getByTestId('split-file-input').setInputFiles({ name: 'Tema A.mp3', mimeType: 'audio/mpeg', buffer: Buffer.alloc(4096, 7) });
+    await panel.getByTestId('split-confirm-ok').click();
+
+    const status = panel.getByTestId('split-status');
+    await expect(status).toHaveText('SEPARANDO EN MUSIC AI...', { timeout: 10000 });
+    await expect(status).toHaveText('COPIANDO STEMS 1/3...', { timeout: 10000 });
+    await expect(status).toHaveText('COPIANDO STEMS 2/3...', { timeout: 15000 });
+    await expect(panel.getByTestId('split-done')).toContainText('3 stems', { timeout: 15000 });
+    expect(worker.posts).toEqual([{ search: '?separate=1', type: 'audio/mpeg', size: 4096 }]);
+
+    // La vista olvido el manifiesto viejo: la nube muestra la version nueva (distinta de la local).
+    await expect(cloudStatus).toHaveText(/LA NUBE TIENE OTRA VERSIÓN/);
+    const note = panel.getByTestId('split-local-note');
+    await expect(note).toContainText('No se borró nada');
+    await expect(page.locator('[data-testid="stem-track"]')).toHaveCount(2);
+    await note.getByTestId('split-download-new').click();
+    await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(3, { timeout: 15000 });
+    await expect(cloudStatus).toHaveText(/EN LA NUBE/);
+  });
+
+  test('CANCIONES: sin stems en ningun lado, el panel de analisis separa la cancion y deja el borrador', async ({ page }) => {
+    test.setTimeout(60_000);
+    const worker = new FakeWorker();
+    await signInOwner(page, worker);
+    const editor = await openEditor(page, 'Tema A');
+    const analysis = editor.getByTestId('song-analysis');
+    await expect(analysis.getByTestId('analysis-no-stems')).toContainText('sube la canción completa');
+    const manifest = { version: 1, song_id: SONG_A, offset_ms: 0, stems: [{ file: 'Vocals.wav', role: 'vocals', label: 'Voz', size: 10 }] };
+    worker.analysis.set(`me/${SONG_A}`, [
+      { status: 200, body: { status: 'IMPORTING', done: 0, total: 1 } },
+      { status: 200, body: { status: 'SUCCEEDED', job_id: 'job-split', created_at: '2026-10-31T23:40:00.000Z', draft: DRAFT, stems: manifest } },
+    ]);
+    const split = analysis.getByTestId('split-upload');
+    await split.getByTestId('split-file-input').setInputFiles({ name: 'Tema A.flac', mimeType: 'audio/flac', buffer: Buffer.alloc(2048, 3) });
+    // Sin stems en la nube no hay nada que reemplazar: sube directo.
+    await expect(split.getByTestId('split-confirm')).toHaveCount(0);
+    await expect(split.getByTestId('split-done')).toBeVisible({ timeout: 15000 });
+    await expect(split.getByTestId('split-local-note')).toHaveCount(0);
+    await expect(analysis.getByTestId('analysis-draft')).toBeVisible({ timeout: 10000 });
+    expect(worker.posts).toEqual([{ search: '?separate=1', type: 'audio/flac', size: 2048 }]);
+
+    // Un archivo que no es audio no se sube.
+    await split.getByTestId('split-file-input').setInputFiles({ name: 'notas.txt', mimeType: 'text/plain', buffer: Buffer.from('hola') });
+    await expect(split.getByTestId('split-error')).toContainText('WAV, FLAC, MP3 o M4A');
+    expect(worker.posts).toHaveLength(1);
   });
 
   test('ENSAYO ofrece la cancion que solo esta en la nube, la descarga y la reproduce; sin secciones lleva a CANCIONES', async ({ page }) => {

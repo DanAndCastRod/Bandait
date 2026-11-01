@@ -5,6 +5,8 @@ import { HubModal } from '../components/HubModal'
 import { StemImporter } from '../components/StemImporter'
 import { StemStudio } from '../components/StemStudio'
 import { StemCloudBar, type CloudSongState } from '../components/StemCloudBar'
+import { SplitUpload } from '../components/SplitUpload'
+import { onCloudStemsChanged } from '../services/stemCloudEvents'
 import { formatBytes } from '../services/stemImport'
 import { deleteStemSong, listStemSongs, loadStemSong, storageEstimate, StemStoreError, type StemSongRecord } from '../services/stemStore'
 import {
@@ -135,6 +137,22 @@ export const StemsHubView: React.FC = () => {
     checkedRef.current.add(key)
     checkCloud(selectedId)
   }, [target, selectedId, cloudKey, checkCloud])
+
+  // La nube cambio por otro camino (separar con Music AI): se olvida el manifiesto guardado.
+  useEffect(
+    () =>
+      onCloudStemsChanged((change) => {
+        if (change.band !== bandKey) return
+        const key = cloudKey(change.songId)
+        if (change.manifest) {
+          setCloud(key, { kind: 'present', manifest: change.manifest })
+        } else {
+          setCloud(key, null)
+          checkCloud(change.songId)
+        }
+      }),
+    [bandKey, cloudKey, setCloud, checkCloud]
+  )
 
   const uploadSong = async (songId: string, existing: CloudManifest | null) => {
     if (!target || !canEditCloud || !isCloudSongId(songId)) return
@@ -346,6 +364,21 @@ export const StemsHubView: React.FC = () => {
             if (songCloud && canEditCloud) void uploadSong(selectedSong.id, cloudManifest)
           }}
           onCancel={record ? () => setImporting(false) : undefined}
+        />
+      )}
+
+      {showImporter && selectedSong && songCloud && canEditCloud && target && (
+        <SplitUpload
+          key={`split:${selectedSong.id}`}
+          song={selectedSong}
+          target={target}
+          cloudStemCount={cloudState === undefined ? null : cloudManifest ? cloudManifest.stems.length : 0}
+          hasLocal={!!record}
+          hint="¿No tienes los stems? Sube el audio completo y Music AI lo separa en voz, batería, bajo, guitarras, teclados y otros."
+          onLocalReplaced={(next) => {
+            setRecord(selectedSong.id, next)
+            setImporting(false)
+          }}
         />
       )}
 
