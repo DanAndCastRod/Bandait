@@ -10,6 +10,10 @@
 //   GET    /v1/bands/{band}/songs/{song}/files/{name}    any member
 //   PUT    /v1/bands/{band}/songs/{song}/files/{name}    Owner / MusicDirector
 //   DELETE /v1/bands/{band}/songs/{song}                 Owner / MusicDirector
+//   POST   /v1/bands/{band}/songs/{song}/analysis        Owner / MusicDirector (Music AI)
+//          ?separate=1: the body is the whole song; the workflow also separates stems
+//   GET    /v1/bands/{band}/songs/{song}/analysis        any member: state and draft; for a
+//          separation, each call copies one stem to R2 (IMPORTING) and then writes the manifest
 //
 // {band} is a shared band uuid, or "me" for the caller's personal workspace (only the
 // caller can read or write it). Upload the files first, then the manifest: the
@@ -179,8 +183,8 @@ async function route(req: Request, env: Env, fetchFn: FetchLike): Promise<Respon
     // member can see it (read-only in the hub; only Owner / MusicDirector can accept it).
     const editorPrefix = await authorize(req, env, band, method === 'POST', fetchFn);
     return method === 'POST'
-      ? startAnalysis(req, env, `${editorPrefix}songs/${song}/`, song, fetchFn)
-      : analysisStatus(env, `${editorPrefix}songs/${song}/`, fetchFn);
+      ? startAnalysis(req, env, `${editorPrefix}songs/${song}/`, song, fetchFn, url.searchParams.get('separate') === '1')
+      : analysisStatus(env, `${editorPrefix}songs/${song}/`, song, fetchFn);
   }
   const write = method === 'PUT' || method === 'DELETE';
   if (!['GET', 'PUT', 'DELETE'].includes(method) || (what === undefined) !== (method === 'DELETE')) {
@@ -285,7 +289,9 @@ async function musicAi(env: Env, fetchFn: FetchLike, path: string, init: Request
 }
 
 /** POST .../analysis with the song mix as body: upload it to Music AI and start the workflow. */
-async function startAnalysis(req: Request, env: Env, songPrefix: string, song: string, fetchFn: FetchLike): Promise<Response> {
+async function startAnalysis(
+  req: Request, env: Env, songPrefix: string, song: string, fetchFn: FetchLike, separate = false,
+): Promise<Response> {
   musicAiKey(env);
   const length = Number(req.headers.get('Content-Length') ?? NaN);
   if (!Number.isSafeInteger(length) || length < 1) throw new ApiError(411, 'length_required');
@@ -314,36 +320,116 @@ async function startAnalysis(req: Request, env: Env, songPrefix: string, song: s
     method: 'POST',
     body: JSON.stringify({
       name: `bandait-${song}`,
-      workflow: env.MUSICAI_WORKFLOW || 'stems-workflow-releven-bandait',
+      workflow: separate
+        ? env.MUSICAI_SPLIT_WORKFLOW || 'splited_stems_bandait'
+        : env.MUSICAI_WORKFLOW || 'stems-workflow-releven-bandait',
       params: { inputUrl: upload.downloadUrl },
     }),
   }) as { id?: string };
   if (!job.id) throw new ApiError(502, 'analysis_failed');
-  await env.STEMS.put(`${songPrefix}analysis.json`, JSON.stringify({ job_id: job.id, created_at: new Date().toISOString() }),
-    { httpMetadata: { contentType: 'application/json' } });
-  return json(202, { status: 'STARTED', job_id: job.id });
+  const record = { job_id: job.id, created_at: new Date().toISOString(), ...(separate ? { separate: true } : {}) };
+  await env.STEMS.put(`${songPrefix}analysis.json`, JSON.stringify(record), { httpMetadata: { contentType: 'application/json' } });
+  return json(202, { status: 'STARTED', job_id: job.id, separate });
+}
+
+/** Stem outputs of the separation workflow: output name -> [role, label]. Anything else is analysis. */
+const STEM_OUTPUTS: Record<string, [string, string]> = {
+  vocals: ['vocals', 'Voz'], 'backing vocals': ['backing_vocals', 'Coros'], drums: ['drums', 'Batería'],
+  bass: ['bass', 'Bajo'], guitars: ['guitar', 'Guitarras'], guitar: ['guitar', 'Guitarra'],
+  keys: ['keys', 'Teclados'], piano: ['keys', 'Piano'], strings: ['strings', 'Cuerdas'],
+  wind: ['wind', 'Vientos'], other: ['other', 'Otros'],
+};
+
+function stemExt(type: string, url: string): string {
+  if (type.includes('flac')) return 'flac';
+  if (type.includes('mpeg') || type.includes('mp3')) return 'mp3';
+  if (type.includes('mp4') || type.includes('m4a') || type.includes('aac')) return 'm4a';
+  if (type.includes('ogg')) return 'ogg';
+  if (type.includes('wav')) return 'wav';
+  const m = /\.(wav|flac|mp3|m4a|ogg|aac)(?:\?|$)/i.exec(url);
+  return m ? m[1].toLowerCase() : 'wav';
+}
+
+interface AnalysisRecord {
+  job_id: string; created_at: string; draft?: unknown; status?: string; error?: string;
+  assembler?: number; result?: Record<string, unknown>;
+  /** Separation job: stems copied so far (output name -> file in R2 and size) and the manifest. */
+  separate?: boolean; copied?: Record<string, { file: string; size: number }>; manifest?: Manifest;
+}
+
+/**
+ * Copies the next stem of a separation job from Music AI to R2: one per call, so a GET never runs
+ * long (a 4 min stem is ~43 MB of WAV). Returns true while stems are left to copy.
+ */
+async function copyNextStem(
+  env: Env, songPrefix: string, record: AnalysisRecord, stems: [string, string][], fetchFn: FetchLike,
+): Promise<boolean> {
+  record.copied ??= {};
+  const next = stems.find(([name]) => !record.copied![name]);
+  if (!next) return false;
+  const [name, url] = next;
+  let res: Response;
+  try {
+    res = await fetchFn(url, {});
+  } catch {
+    throw new ApiError(502, 'stems_copy_failed');
+  }
+  const length = Number(res.headers.get('Content-Length') ?? NaN);
+  if (!res.ok || !res.body || !Number.isSafeInteger(length) || length < 1) throw new ApiError(502, 'stems_copy_failed');
+  const maxBytes = Number(env.MAX_FILE_MB || DEFAULT_MAX_FILE_MB) * 1024 * 1024;
+  if (length > maxBytes) throw new ApiError(502, 'stems_copy_failed');
+  const type = (res.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+  const ext = stemExt(type, url);
+  const file = `${name.replace(/[^A-Za-z0-9 ._()-]/g, '').trim() || 'Stem'}.${ext}`;
+  const FLS = (globalThis as unknown as { FixedLengthStream?: new (n: number) => TransformStream }).FixedLengthStream;
+  let body: ReadableStream = res.body;
+  if (FLS) {
+    const fixed = new FLS(length);
+    res.body.pipeTo(fixed.writable).catch(() => {});
+    body = fixed.readable;
+  }
+  const contentType = type.startsWith('audio/') ? type : `audio/${ext === 'mp3' ? 'mpeg' : ext}`;
+  const stored = await env.STEMS.put(`${songPrefix}files/${file}`, body, { httpMetadata: { contentType } });
+  if (!stored || stored.size !== length) throw new ApiError(502, 'stems_copy_failed');
+  record.copied[name] = { file, size: length };
+  return stems.some(([n]) => !record.copied![n]);
+}
+
+/** Manifest of the separated stems: replaces whatever the song had (files it no longer lists go). */
+async function commitSeparatedStems(env: Env, songPrefix: string, song: string, record: AnalysisRecord, stems: [string, string][]): Promise<Manifest> {
+  const entries: StemEntry[] = stems.map(([name]) => {
+    const [role, label] = STEM_OUTPUTS[name.toLowerCase()] ?? ['other', name.slice(0, 60)];
+    return { file: record.copied![name].file, role, label, size: record.copied![name].size };
+  });
+  const manifest: Manifest = { version: 1, song_id: song, offset_ms: 0, stems: entries, updated_at: new Date().toISOString() };
+  await env.STEMS.put(`${songPrefix}manifest.json`, JSON.stringify(manifest), { httpMetadata: { contentType: 'application/json' } });
+  const keep = new Set(entries.map((e) => `${songPrefix}files/${e.file}`));
+  const stale = (await listAll(env.STEMS, `${songPrefix}files/`)).filter((k) => !keep.has(k));
+  if (stale.length) await env.STEMS.delete(stale);
+  return manifest;
 }
 
 /** GET .../analysis: state of the song's last job; when it finishes, the assembled draft. */
-async function analysisStatus(env: Env, songPrefix: string, fetchFn: FetchLike): Promise<Response> {
+async function analysisStatus(env: Env, songPrefix: string, song: string, fetchFn: FetchLike): Promise<Response> {
   const key = `${songPrefix}analysis.json`;
   const stored = await env.STEMS.get(key);
   if (!stored) throw new ApiError(404, 'no_analysis');
-  const record = JSON.parse(await stored.text()) as {
-    job_id: string; created_at: string; draft?: unknown; status?: string; error?: string;
-    assembler?: number; result?: Record<string, unknown>;
-  };
+  const record = JSON.parse(await stored.text()) as AnalysisRecord;
+  const save = () => env.STEMS.put(key, JSON.stringify(record), { httpMetadata: { contentType: 'application/json' } });
+  const succeeded = (draft: unknown) => json(200, {
+    status: 'SUCCEEDED', job_id: record.job_id, created_at: record.created_at, draft,
+    ...(record.manifest ? { stems: record.manifest } : {}),
+  });
   const done = async (result: Record<string, unknown>) => {
     // The raw result is kept so a newer assembler re-reads it without calling Music AI again.
     const draft = assemble(result as MusicAiResult);
     Object.assign(record, { draft, result, assembler: ASSEMBLER_VERSION, status: 'SUCCEEDED' });
-    await env.STEMS.put(key, JSON.stringify(record), { httpMetadata: { contentType: 'application/json' } });
-    return json(200, { status: 'SUCCEEDED', job_id: record.job_id, created_at: record.created_at, draft });
+    await save();
+    return succeeded(draft);
   };
-  if (record.draft && record.assembler === ASSEMBLER_VERSION) {
-    return json(200, { status: 'SUCCEEDED', job_id: record.job_id, created_at: record.created_at, draft: record.draft });
-  }
-  if (record.result) return done(record.result);
+  const separationPending = record.separate && !record.manifest;
+  if (!separationPending && record.draft && record.assembler === ASSEMBLER_VERSION) return succeeded(record.draft);
+  if (!separationPending && record.result) return done(record.result);
   if (record.status === 'FAILED') return json(200, { status: 'FAILED', job_id: record.job_id, error: record.error });
   const job = await musicAi(env, fetchFn, `/job/${encodeURIComponent(record.job_id)}`, { method: 'GET' }) as {
     status?: string; result?: Record<string, unknown>; error?: { message?: string };
@@ -351,15 +437,43 @@ async function analysisStatus(env: Env, songPrefix: string, fetchFn: FetchLike):
   if (job.status === 'FAILED') {
     record.status = 'FAILED';
     record.error = String(job.error?.message || 'Music AI no pudo analizar la canción').slice(0, 300);
-    await env.STEMS.put(key, JSON.stringify(record), { httpMetadata: { contentType: 'application/json' } });
+    await save();
     return json(200, { status: 'FAILED', job_id: record.job_id, error: record.error });
   }
   if (job.status !== 'SUCCEEDED' || !job.result) return json(200, { status: job.status || 'STARTED', job_id: record.job_id });
-  const result: Record<string, unknown> = {};
+
+  const stems: [string, string][] = [];
+  const outputs: [string, unknown][] = [];
   for (const [name, value] of Object.entries(job.result)) {
+    if (record.separate && STEM_OUTPUTS[name.toLowerCase()] && typeof value === 'string' && value.startsWith('https://')) stems.push([name, value]);
+    else outputs.push([name, value]);
+  }
+  if (record.separate && !record.manifest) {
+    if (!stems.length) {
+      record.status = 'FAILED';
+      record.error = 'Music AI no devolvió stems: revisa que el workflow de separación los tenga como salidas.';
+      await save();
+      return json(200, { status: 'FAILED', job_id: record.job_id, error: record.error });
+    }
+    const more = await copyNextStem(env, songPrefix, record, stems, fetchFn);
+    if (more) {
+      await save();
+      return json(200, { status: 'IMPORTING', job_id: record.job_id, done: Object.keys(record.copied ?? {}).length, total: stems.length });
+    }
+    record.manifest = await commitSeparatedStems(env, songPrefix, song, record, stems);
+    await save();
+  }
+  const result: Record<string, unknown> = {};
+  for (const [name, value] of outputs) {
     if (typeof value === 'string' && value.startsWith('https://')) {
       const res = await fetchFn(value, {}).catch(() => null);
       if (!res || !res.ok) continue;
+      // An audio output in the analysis workflow is not read: only JSON results matter here.
+      const size = Number(res.headers.get('Content-Length') ?? 0);
+      if (size > RESULT_CAP || (res.headers.get('Content-Type') || '').startsWith('audio/')) {
+        await res.body?.cancel().catch(() => {});
+        continue;
+      }
       const text = await res.text();
       if (text.length > RESULT_CAP) continue;
       try {
