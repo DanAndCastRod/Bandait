@@ -1318,5 +1318,7 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - Lint, build y la suite leader-web: ver el PR.
 * **Decisiones:**
   - Las secciones se emparejan por tipo y orden, y no por posición: si el borrador agrega una intro, la posición movería todos los ids a otra sección. Se descartó copiar el aviso personalizado de la sección vieja: aceptar el borrador sigue reemplazando el contenido, como dice el panel.
+  - Workflow `splited_stems_bandait` (cambio de Daniel Castaneda en Music AI, 2026-10-31): agregó un módulo Encoder después de cada stem. Cuesta USD 0.002 por minuto por pista; con 5 pistas de 4 min son unos USD 0.04 por canción. El Encoder va después de la separación y no antes, porque antes solo convertiría la entrada y los stems seguirían saliendo en WAV. Se recomendó FLAC, sin pérdida y sin el relleno inicial de MP3, que correría los stems respecto al clic. No se corrió ninguna separación de prueba, por pedido de Daniel Castaneda: cada una consume créditos.
 * **Pendientes:**
   1. Probar la confirmación en un teléfono real (Daniel Castaneda).
+  2. En la primera separación real con el Encoder, revisar en R2 que los stems lleguen con la extensión correcta (`.flac`). El Worker la toma del `Content-Type` y, si no puede, de la URL; si ninguno la indica, guarda `.wav`. Revisar también que las salidas sigan llamándose `Vocals`, `Drums`, `Bass`, `Guitars` y `Other`: el Worker reconoce los stems por ese nombre.
