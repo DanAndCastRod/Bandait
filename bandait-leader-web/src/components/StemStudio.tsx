@@ -265,9 +265,28 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
   )
   const toggleSectionLoop = useCallback((id: string) => setLoopMode((prev) => (prev === `sec:${id}` ? 'none' : `sec:${id}`)), [])
   const loopSectionId = loopMode.startsWith('sec:') ? loopMode.slice(4) : null
+  const togglePlayApi = useCallback(() => {
+    const player = playerRef.current
+    if (!player) return
+    if (player.getState() === 'playing') player.pause()
+    else void player.play()
+  }, [])
+  const positionApi = useCallback(() => playerRef.current?.position() ?? 0, [])
+  const toggleMixer = useCallback(() => setMixerOpen((open) => !open), [])
+  const playing = playState === 'playing'
   const api = useMemo<StudioApi>(
-    () => ({ ready: anyReady, seek: seekTo, loopSectionId, toggleSectionLoop }),
-    [anyReady, seekTo, loopSectionId, toggleSectionLoop]
+    () => ({
+      ready: anyReady,
+      playing,
+      togglePlay: togglePlayApi,
+      position: positionApi,
+      seek: seekTo,
+      loopSectionId,
+      toggleSectionLoop,
+      mixerOpen,
+      toggleMixer,
+    }),
+    [anyReady, playing, togglePlayApi, positionApi, seekTo, loopSectionId, toggleSectionLoop, mixerOpen, toggleMixer]
   )
 
   const loadAlert = loadError && (

@@ -1223,3 +1223,49 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Daniel Castaneda abre el panel de análisis de "Dame tu aire" (hub o líder) para que se rehaga el borrador, y lo acepta en CANCIONES.
   2. Si un borrador ya aceptado debe cambiar, hay que volver a aceptarlo: aceptar reemplaza las secciones.
+
+### [2026-10-31] - Hub: prompter de ENSAYO con atajos de teclado, pulso, transposición y modo foco
+* **Sprint / Módulo:** `bandait-leader-web` (subagente en worktree, Claude Opus 5.5)
+* **Estado encontrado:** con los PR #38 y #39 publicados, Daniel Castaneda pidió mejorar el prompter: más funcionalidad, atajos de teclado y mejor diseño.
+  - El prompter solo se manejaba con el ratón.
+  - No mostraba el tiempo dentro del compás, ni cuánto faltaba para la sección siguiente.
+  - No transponía.
+  - No tenía una vista para leer desde el atril.
+* **Corrección aplicada:**
+  - `services/prompterKeys.ts` (puro):
+    - `keyToAction` traduce cada tecla a una acción. Se ignoran Ctrl, Alt y Meta, y los campos de texto. En un deslizador solo se ignoran sus flechas, Inicio y RePág/AvPág; Espacio sí actúa.
+    - Saltos de compás (`barSeekTarget`) y de sección (`sectionNavTarget`). "Anterior" vuelve al inicio de la sección actual si ya va más de 1 compás dentro.
+    - Pulso (`beatInBar`), aviso (`barsLeftInSection`) y escalas de letra (`FONT_SCALES`).
+    - La tabla `PROMPTER_SHORTCUTS` alimenta el panel de atajos.
+  - `services/chordpro.ts`: `transposeChord`, `transposeChordPro`, `transposeKey` y `keyPrefersFlats`.
+    - Reconocen m, 7, maj7, sus4, add9, dim, acordes con bajo y ambos accidentales.
+    - El tono destino decide la ortografía: F, Bb, Eb, Ab, Db, Gb y sus menores relativas van con bemoles.
+    - Lo que no es un acorde (`N.C.`, `%`, `x2`, una palabra entre corchetes) queda igual.
+  - `StudioApi` suma `playing`, `togglePlay`, `position()` (lee el reproductor, no es estado), `mixerOpen` y `toggleMixer`. La lógica de audio no cambió.
+  - Prompter:
+    - un solo rAF escribe el compás, el pulso (un punto por tiempo, el 1 acentuado), el progreso (`scaleX`) y "compás x de N";
+    - React solo vuelve a pintar al cambiar de sección o al entrar en los 2 últimos compases, donde SIGUIENTE se resalta con "Coro en 2" y "en 1";
+    - barra de herramientas: A- y A+ (tamaño guardado en localStorage con try/catch), transposición con el tono resultante, ACORDES/LETRA, foco y atajos.
+  - Modo foco:
+    - Fullscreen API, con una capa fija si el navegador no la da;
+    - letra más grande y transporte mínimo (anterior, reproducir, siguiente, repetir);
+    - al tocar el tercio izquierdo o derecho se cambia de sección;
+    - si el navegador sale de pantalla completa con Esc, también sale del modo foco;
+    - el panel de atajos se monta dentro del prompter para que se vea en pantalla completa.
+  - `HubModal` atrapa el foco: entra al abrir, salvo que un campo con autoFocus ya lo tenga; Tab da la vuelta dentro y al cerrar vuelve a donde estaba. Aplica a todos los modales del hub.
+  - Espacio sobre un botón reproduce o pausa, y el botón no se activa: se cancela el keyup.
+* **Verificación:**
+  - `npm run lint` sin errores; `npx tsc -b` limpio; `npm run build` OK.
+  - `npm run verify:logic` da `23`, `36`, `14` y `70 ok`, sin fallas, con pruebas nuevas de transposición, atajos y navegación.
+  - Playwright leader-web: `47 passed`. Hay 2 pruebas nuevas en `e2e/hub-2-3.leader-web.spec.ts`:
+    - teclado: Espacio, flechas, secciones, aviso, R, +, T, Shift+T, Shift+0, L/C, M, ? (foco atrapado; las teclas no actúan con el panel abierto), F/Esc, y que no actúan dentro de un campo;
+    - 390 px táctil: barra sin scroll, foco con transporte mínimo y tercios que cambian de sección.
+  - Capturas a 1440 y 390 (vista normal, panel de atajos y modo foco) en el scratchpad de la sesión, sin desborde horizontal.
+  - En Chromium headless, `requestFullscreen` entró de verdad en pantalla completa. La capa fija de respaldo no se probó en un navegador sin Fullscreen API, como iOS Safari en iPhone.
+  - `landing/hub` regenerado. Los cambios de `landing/app` y de `browser-*.js` eran solo de fin de línea y se descartaron. El bundle conserva las mismas URL de Supabase y del Worker.
+* **Decisiones:**
+  - La transposición no se guarda: es solo de pantalla y vuelve a 0 al cambiar de canción. El tamaño de letra sí se guarda.
+  - F#/Gb como tonalidad mayor se escribe Gb, porque así lo pidió la especificación.
+* **Pendientes:**
+  1. Probar el modo foco en iPhone, donde no hay Fullscreen API y queda la capa fija.
+  2. Tempo de práctica (time-stretch): sigue sin hacerse.

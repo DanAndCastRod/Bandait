@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { colors, mono } from './hubStyles'
 
@@ -13,7 +13,11 @@ interface Props {
 }
 
 /** Modal del Hub: fondo OLED, cabecera fija y cuerpo con scroll propio (sin scroll horizontal). */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+
 export const HubModal: React.FC<Props> = ({ title, onClose, maxWidth = '520px', testId, closeOnEscape = true, children }) => {
+  const dialogRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     if (!closeOnEscape) return
     const onKey = (e: KeyboardEvent) => {
@@ -23,8 +27,37 @@ export const HubModal: React.FC<Props> = ({ title, onClose, maxWidth = '520px', 
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, closeOnEscape])
 
+  // Foco atrapado: entra al abrir (si un campo con autoFocus no lo tomo ya), Tab da la vuelta
+  // dentro del modal y al cerrar vuelve a donde estaba.
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (!dialog.contains(document.activeElement)) dialog.querySelector<HTMLElement>(FOCUSABLE)?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement)
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (e.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      if (previous && previous.isConnected) previous.focus()
+    }
+  }, [])
+
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={title}

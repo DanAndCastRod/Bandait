@@ -26,7 +26,7 @@ import {
   transitionEntryNotice,
   validateWorkspace,
 } from '../src/services/workspaceSchema.ts'
-import { chordWords, classifyHeading, flowChordPro, layoutChordLine, layoutChordPro, matchPlainHeading, parseChordProSong } from '../src/services/chordpro.ts'
+import { chordWords, classifyHeading, flowChordPro, keyPrefersFlats, layoutChordLine, layoutChordPro, matchPlainHeading, parseChordProSong, transposeChord, transposeChordPro, transposeKey } from '../src/services/chordpro.ts'
 import {
   WorkspaceSyncEngine,
   stableStringify,
@@ -803,6 +803,36 @@ async function main() {
     const flow = flowChordPro('{c: Suave}\n[G]x\n\n[A]  [E]')
     assert.deepEqual(flow.map((l) => l.type), ['comment', 'words', 'blank', 'words'])
     assert.deepEqual(flow[3], { type: 'words', words: [[{ chord: 'A', text: '  ' }], [{ chord: 'E', text: '' }]], hasChords: true, hasLyrics: false })
+  })
+
+  await check('transponer: calidades, acordes con bajo, ambos accidentales y ortografia del tono destino', () => {
+    assert.equal(transposeChord('C#m7', 1), 'Dm7')
+    assert.equal(transposeChord('Amaj7', 2), 'Bmaj7')
+    assert.equal(transposeChord('Dsus4', 2), 'Esus4')
+    assert.equal(transposeChord('Gadd9', 2), 'Aadd9')
+    assert.equal(transposeChord('Bdim', 1), 'Cdim')
+    assert.equal(transposeChord('C/G', 2), 'D/A')
+    assert.equal(transposeChord('Bb', 2), 'C')
+    assert.equal(transposeChord('Eb7', 1), 'E7')
+    assert.equal(transposeChord('A', 1), 'A#', 'sin tono: sostenidos si el original no tenia bemol')
+    assert.equal(transposeChord('Bb', 1), 'B')
+    assert.equal(transposeChord('Ab', -1), 'G')
+    assert.equal(transposeChord('Db', 1, false), 'D')
+    assert.equal(transposeChord('A', 1, true), 'Bb')
+    assert.equal(transposeChord('F#m/C#', 1, true), 'Gm/D')
+    assert.equal(transposeChord('C7(b9)', 3, true), 'Eb7(b9)')
+    for (const same of ['N.C.', '%', 'x2', 'Coro', '']) assert.equal(transposeChord(same, 3), same)
+    assert.equal(transposeKey('E', 1), 'F')
+    assert.equal(transposeKey('Am', 1), 'Bbm')
+    assert.equal(transposeKey('C#m', -1), 'Cm')
+    assert.equal(transposeKey('E major', 2), 'Gb', 'F# o Gb: se usa Gb')
+    assert.equal(transposeKey('', 1), null)
+    assert.ok(keyPrefersFlats('Bb') && keyPrefersFlats('Gm') && !keyPrefersFlats('E') && !keyPrefersFlats('F#m'))
+    const body = '{c: Suave}\n[Am]Medianoche en [F]Pereira,\n[C/G]la ciudad no [G7sus4]duerme'
+    assert.equal(transposeChordPro(body, 1, 'Bbm'), '{c: Suave}\n[Bbm]Medianoche en [Gb]Pereira,\n[Db/Ab]la ciudad no [Ab7sus4]duerme')
+    assert.equal(transposeChordPro(body, 2, 'Bm'), '{c: Suave}\n[Bm]Medianoche en [G]Pereira,\n[D/A]la ciudad no [A7sus4]duerme')
+    assert.equal(transposeChordPro(body, 12, 'Am'), body)
+    assert.equal(transposeChordPro(body, 0), body)
   })
 
   console.log(`\n${passed} ok, ${failures.length} fallas`)
