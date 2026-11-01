@@ -11,8 +11,13 @@ from src.ui import components as ui
 from src.ui import theme
 
 
+SEPARATE_TIP = ("Sube la canción completa (un solo audio): Music AI separa los stems, los deja en la "
+                "nube de la banda y propone secciones y acordes. Gasta créditos y tarda unos minutos.")
+
+
 class SongInspector(QWidget):
     analyze_requested = Signal()
+    separate_requested = Signal()
     refresh_requested = Signal()
 
     def __init__(self, parent=None):
@@ -55,9 +60,12 @@ class SongInspector(QWidget):
         buttons = QHBoxLayout()
         self.analyze_btn = ui.button("Analizar con IA", "ai", "Mezcla los stems del portátil y los manda a Music AI")
         self.analyze_btn.clicked.connect(self.analyze_requested.emit)
+        self.separate_btn = ui.button("Separar desde un audio…", "secondary", SEPARATE_TIP)
+        self.separate_btn.clicked.connect(self.separate_requested.emit)
         self.refresh_btn = ui.button("Actualizar", "ghost", "Consultar el estado del análisis")
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
         buttons.addWidget(self.analyze_btn)
+        buttons.addWidget(self.separate_btn)
         buttons.addWidget(self.refresh_btn)
         buttons.addStretch()
         ai.addLayout(buttons)
@@ -72,7 +80,7 @@ class SongInspector(QWidget):
         self.set_song(None)
 
     def set_song(self, song: Optional[dict], sections: Optional[list] = None, stems: str = "",
-                 can_analyze: bool = False, reason: str = ""):
+                 can_analyze: bool = False, reason: str = "", can_separate: bool = False, separate_reason: str = ""):
         """``song``: dict con title, artist, bpm, key. ``sections``: [{label, bars, start_bar}]."""
         has = bool(song)
         self.title.setText(song.get("title", "") if has else "Elige una canción")
@@ -100,6 +108,9 @@ class SongInspector(QWidget):
         self.ai_box.setVisible(has)
         self.analyze_btn.setEnabled(can_analyze)
         self.analyze_btn.setToolTip(reason or "Mezcla los stems del portátil y los manda a Music AI")
+        self._can = (can_analyze, can_separate)
+        self.separate_btn.setEnabled(can_separate)
+        self.separate_btn.setToolTip(separate_reason or SEPARATE_TIP)
         self.set_analysis("", "")
 
     def set_analysis(self, state: str, text: str, busy: bool = False):
@@ -107,8 +118,9 @@ class SongInspector(QWidget):
         if text:
             self.ai_text.setText(text)
         self.refresh_btn.setEnabled(not busy)
-        if busy:
-            self.analyze_btn.setEnabled(False)
+        can_analyze, can_separate = getattr(self, "_can", (False, False))
+        self.analyze_btn.setEnabled(can_analyze and not busy)
+        self.separate_btn.setEnabled(can_separate and not busy)
 
     def section_count(self) -> int:
         return sum(1 for w in self._section_rows if not isinstance(w, QLabel))

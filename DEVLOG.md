@@ -1270,43 +1270,34 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   1. Probar el modo foco en iPhone, donde no hay Fullscreen API y queda la capa fija.
   2. Tempo de práctica (time-stretch): sigue sin hacerse.
 
-### [2026-10-31] - Hub: subir una canción y separar stems con Music AI
-* **Sprint / Módulo:** `bandait-leader-web` (subagente en worktree, Claude Opus 5.5). El Worker (`feat/split-stems`, versión b9c98a3b) y el líder los lleva la sesión coordinadora.
-* **Estado encontrado:** el Worker ya acepta `POST .../analysis?separate=1` con la canción completa (workflow `splited_stems_bandait`). El `GET` responde `STARTED`, después `IMPORTING {done,total}` (cada GET copia un stem a R2) y por último `SUCCEEDED {draft, stems}`, donde `stems` reemplaza el manifiesto de la nube. El hub no tenía cómo usarlo: `getAnalysis` trataba `IMPORTING` como un estado intermedio sin progreso e ignoraba `stems`.
+### [2026-10-31] - Separar stems desde un solo audio (Music AI): Worker y líder 2.4.0
+* **Sprint / Módulo:** `bandait-stems-worker`, `bandait-leader` (el hub va en un PR aparte, hecho por un subagente)
+* **Estado encontrado:** el análisis solo aceptaba la mezcla de stems que ya existían. Daniel Castaneda preguntó si subiendo solo el WAV se sacaban los stems. No: el workflow `stems-workflow-releven-bandait` devuelve solo `Bpm`, `Root Key`, `Sections`, `ChordsMap` y `Lyrics`, sin audio. Daniel Castaneda creó en Music AI el workflow `splited_stems_bandait`, con separación y el mismo análisis; tuvo que dejar el módulo de beats porque Sections lo requiere.
+* **Prueba de descubrimiento** (job `805b871c-...`, mezcla mono de "Dame tu aire", 4.08 min):
+  - Salidas: `Vocals`, `Drums`, `Bass`, `Guitars`, `Keys`, `Piano`, `Other` en WAV PCM de 16 bits, 44.1 kHz, estéreo, 43 126 862 bytes cada una, más el mismo análisis (letra con tiempos por palabra, 18 secciones, 117 acordes). Tardó unos 60 s.
+  - Niveles RMS: Vocals -22.0, Bass -23.5, Drums -24.2, Guitars -30.0, Other -34.6, Piano -40.0 y Keys -45.3 dBFS. En esta canción Keys y Piano quedan casi vacíos.
+  - Costo en el panel de facturación de Music AI: "Stem separation" 5 jobs / 20.4 min / USD 1.43 por un solo trabajo, es decir, cinco módulos de separación de 4.08 min cada uno. Estimado por canción de 4 min: unos USD 2.9 separando y analizando, frente a unos USD 1.5 solo analizando.
 * **Corrección aplicada:**
-  - `services/stemAnalysis.ts`:
-    - estado `IMPORTING {done,total}` y `stems` (manifiesto v1 validado con `parseManifest`) en `SUCCEEDED`;
-    - `startSeparation`: Content-Type por tipo o por extensión (wav, flac, mp3, m4a), límite de 95 MB y progreso de subida con XMLHttpRequest, porque fetch no informa el envío;
-    - `watchSeparation`: consulta cada 3 s; reintenta `502 stems_copy_failed` y los errores de red (hasta 8 seguidos); deja de consultar al abortar; se rinde a los 15 min;
-    - `separationStatusText` y mensajes en español.
-  - `services/stemCloudEvents.ts`: aviso de "los stems de esta canción cambiaron en la nube".
-    - El hub no tenía un caché compartido de manifiestos: cada vista (PISTAS, ENSAYO, el panel de análisis) guarda los que ya consultó.
-    - PISTAS y ENSAYO escuchan el aviso: usan el manifiesto nuevo o lo vuelven a pedir.
-  - `components/SplitUpload.tsx`, botón SUBIR CANCIÓN Y SEPARAR:
-    - si la nube ya tiene stems, pide confirmar ("Reemplaza los N stems actuales");
-    - progreso: subiendo con porcentaje, "Separando en Music AI", "Copiando stems x/y" y "Listo", con una barra que anima solo transform;
-    - si había stems locales, avisa que los de la nube son nuevos y ofrece DESCARGAR LOS NUEVOS, sin borrar nada por su cuenta;
-    - explica que gasta créditos de Music AI y tarda unos minutos.
-  - Dónde aparece (solo editores con nube):
-    - en el panel de análisis de CANCIONES: al terminar, recarga el borrador;
-    - en PISTAS, junto al importador: como alternativa cuando no hay stems locales, o con IMPORTAR MÁS.
-  - El panel de análisis muestra "COPIANDO STEMS x/y" si su propia consulta encuentra `IMPORTING`.
-  - Modo foco del prompter (de la entrada anterior): si se sale antes de que el navegador conceda la pantalla completa, al llegar se devuelve. Antes podía quedar en pantalla completa sin modo foco.
+  - Worker:
+    - `POST .../analysis?separate=1` usa `MUSICAI_SPLIT_WORKFLOW` (por defecto `splited_stems_bandait`) y el registro lleva `separate: true`.
+    - Al terminar, cada `GET` copia **un** stem de Music AI a `files/` con streaming (FixedLengthStream y R2) y responde `IMPORTING {done,total}`, para que ninguna petición tarde demasiado.
+    - Con todos los stems copiados, escribe `manifest.json` (roles vocals, drums, bass, guitar, keys y other; etiquetas en español), que reemplaza los stems anteriores y borra los archivos que ya no lista. Después ensambla el borrador como siempre y la respuesta `SUCCEEDED` trae `stems`.
+    - En el análisis normal, una salida de audio ya no se lee como JSON: se corta por `Content-Type` o tamaño.
+  - Líder 2.4.0:
+    - En el inspector de Canciones, el botón "Separar desde un audio…": diálogo de archivo, confirmación (avisa si reemplaza N stems) y subida.
+    - Se consulta cada 2 s mientras copia y cada 15 s mientras Music AI trabaja.
+    - Al terminar, se descargan los stems al portátil con la sincronización de siempre (`download_setlist` forzado); si la banda está tocando, se avisa y no se descarga.
+    - Corregido de paso: `analyze()` y `separate()` detienen la consulta anterior, que antes podía comerse una respuesta con el token viejo.
 * **Verificación:**
-  - `npm run lint` sin errores; `npx tsc -b` limpio; `npm run build` OK.
-  - `npm run verify:logic` da `23`, `36`, `14` y `74 ok`, sin fallas. Las 4 pruebas nuevas cubren tipo y límites, `POST ?separate=1`, STARTED → IMPORTING 1/3 → 502 reintentado → IMPORTING 2/3 → SUCCEEDED, FAILED, errores que se lanzan, abortar, límite de tiempo y el aviso entre vistas.
-  - Playwright `e2e/hub-nube.leader-web.spec.ts`: `7 passed`, 2 de ellas nuevas con el Worker simulado:
-    - PISTAS: confirmación de reemplazo (CANCELAR no sube nada), la secuencia STARTED → IMPORTING 1/3 → 502 → 2/3 → SUCCEEDED, `?separate=1` con `audio/mpeg`, la nube en "otra versión" y descargar los nuevos (3 pistas);
-    - CANCIONES: sin stems no pide confirmación, deja el borrador y rechaza un `.txt`.
-  - Playwright leader-web completo: `49 passed`.
-  - En 5 corridas completas con 8 workers fallaron una vez cada una dos pruebas de otras áreas: el teclado del prompter (`hub-2-3`) y compartir bandas (`shared-bands`, código no tocado). Ninguna se reprodujo sola: 30 repeticiones de la de teclado y 3 de shared-bands en verde. Quedan anotadas como intermitentes bajo carga, sin causa determinada.
-  - Capturas de PISTAS, la confirmación, la copia en curso y el final, a 1440 y 390, en el scratchpad de la sesión.
-  - `landing/hub` regenerado. Los cambios de `landing/app` y `browser-*.js` eran solo de fin de línea y se descartaron. El bundle conserva las URL reales de Supabase y del Worker.
-  - No verificado: la separación contra el Worker real. Gasta créditos de Music AI y la decide Daniel Castaneda.
+  - Worker: `npm test` da `# pass 16, # fail 0`. La prueba nueva cubre IMPORTING 1, IMPORTING 2 y luego SUCCEEDED, cada stem descargado una sola vez, archivos viejos borrados y la caché sin volver a Music AI. `tsc --noEmit` limpio.
+  - Worker desplegado vía ClipVault: versión `b9c98a3b-a8e7-44bf-81f9-2f86228573f2`.
+  - Líder: `ruff check src tests` limpio. `pytest -q` da `503 passed in 868.44s`, con 2 pruebas nuevas en `test_analysis_cloud.py`.
+  - No verificado: la copia real de 43 MB por stem dentro del Worker en producción. Probarla requiere una sesión de usuario; la primera separación real de Daniel Castaneda es la prueba.
 * **Decisiones:**
-  - La copia a R2 avanza solo con GETs. Si el editor cierra la vista a mitad, la copia se detiene hasta que alguien vuelva a consultar el análisis (al abrir el panel de la canción o desde el líder). No se agregó un trabajo en segundo plano: el diseño del Worker es así.
-  - Tras descargar los stems nuevos en PISTAS se cierra el importador y se muestra el estudio con las pistas nuevas.
+  - Copiar en el Worker y no en el cliente: el cliente bajaría unos 300 MB de Music AI y los volvería a subir. Copiar de a un stem por GET evita los límites de tiempo de cada petición.
+  - No se descartan en el Worker los stems casi vacíos: medirlos exige decodificar el WAV, que es caro en CPU. Se quitan en PISTAS.
 * **Pendientes:**
-  1. Probar una separación real con "Dame tu aire" (unos 300 MB de WAV nuevos en R2 por canción de 4 minutos).
-  2. Si se vuelve molesto, que el Worker siga copiando sin depender de los GET (por ejemplo, con una cola de Cloudflare). Eso es del Worker, no del hub.
-  3. Investigar las dos pruebas intermitentes bajo carga (`hub-2-3` teclado y `shared-bands`).
+  1. Daniel Castaneda prueba una separación real desde el líder o el hub con un archivo estéreo y revisa en R2 los 7 stems y el manifiesto.
+  2. Bajar costo: quitar del workflow los módulos de Keys y Piano si la banda no los usa (unos USD 0.55 por canción).
+  3. Espacio en R2: unos 300 MB por canción en WAV. Si Music AI permite elegir FLAC o MP3 como salida, cambiarlo en el workflow; el Worker ya respeta la extensión por `Content-Type`.
+  4. Tag v2.4.0 y release del líder: los hace Daniel Castaneda.

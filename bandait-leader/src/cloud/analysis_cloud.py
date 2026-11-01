@@ -2,6 +2,9 @@
 bandait-stems (Music AI). El borrador queda guardado por canción en R2; se revisa y se
 acepta en el hub (Canciones > editar), que es donde viven las canciones de la banda.
 
+Separar desde un audio: sube la canción completa (?separate=1); Music AI separa los stems y
+el Worker los copia a la nube de la banda (IMPORTING) antes de dejar el borrador.
+
 Contrato: bandait-stems-worker/README.md (rutas /analysis).
 """
 
@@ -21,6 +24,9 @@ from src.audio import stem_library as lib
 from src.cloud.http import CloudHTTPError, CloudOffline
 
 ANALYSIS_RATE = 22050
+SEPARATE_MAX_BYTES = 95 * 1024 * 1024  # the Worker's limit for the uploaded song
+AUDIO_TYPES = {".wav": "audio/wav", ".flac": "audio/flac", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+               ".aac": "audio/aac", ".ogg": "audio/ogg"}
 SKIP_ROLES = {"click", "guide"}  # confuse section and chord detection
 
 ERRORS = {
@@ -30,7 +36,8 @@ ERRORS = {
     "analysis_upload_failed": "No se pudo subir la mezcla a Music AI",
     "not_an_editor": "Solo el Owner o el Director musical pueden analizar canciones",
     "not_a_member": "No eres integrante de esta banda",
-    "file_too_large": "La mezcla es demasiado grande",
+    "file_too_large": "El audio es demasiado grande (máximo 95 MB)",
+    "stems_copy_failed": "No se pudieron copiar los stems a la nube; reintenta en un momento",
     "invalid_token": "La sesión de la nube venció: vuelve a iniciar sesión",
 }
 
@@ -100,15 +107,31 @@ class AnalysisCloud:
                 raise
         return "me", {}
 
-    def start(self, band_cloud_id: Optional[str], song: str, wav: bytes) -> Tuple[str, dict]:
+    def start(self, band_cloud_id: Optional[str], song: str, wav: bytes,
+              content_type: str = "audio/wav", separate: bool = False) -> Tuple[str, dict]:
+        query = "?separate=1" if separate else ""
         for scope in self._scopes(band_cloud_id):
             try:
-                return scope, self._call("POST", self._path(scope, song), wav, "audio/wav")
+                return scope, self._call("POST", self._path(scope, song) + query, wav, content_type)
             except CloudHTTPError as err:
                 if err.status in (400, 403) and scope != "me" and err.error_code == "not_a_member":
                     continue
                 raise
         raise CloudHTTPError(403, "not_a_member", ERRORS["not_a_member"])
+
+
+def read_song_audio(path: str) -> Tuple[bytes, str]:
+    """(bytes, content type) of a whole song to separate; ValueError when it cannot go."""
+    p = Path(path)
+    content_type = AUDIO_TYPES.get(p.suffix.lower())
+    if content_type is None:
+        raise ValueError("Formato no soportado: usa WAV, FLAC, MP3, M4A u OGG")
+    size = p.stat().st_size
+    if size > SEPARATE_MAX_BYTES:
+        raise ValueError(f"El audio pesa {size // (1024 * 1024)} MB; el máximo es 95 MB (usa FLAC o MP3)")
+    if size == 0:
+        raise ValueError("El archivo está vacío")
+    return p.read_bytes(), content_type
 
 
 def draft_summary(response: dict) -> str:
@@ -118,6 +141,8 @@ def draft_summary(response: dict) -> str:
         return "Sin análisis todavía."
     if status == "FAILED":
         return f"Falló: {response.get('error') or 'sin detalle'}"
+    if status == "IMPORTING":
+        return f"Copiando los stems separados a la nube: {response.get('done', 0)}/{response.get('total', '?')}…"
     if status != "SUCCEEDED":
         return "Analizando en Music AI… (unos minutos)"
     draft = response.get("draft") or {}
@@ -130,4 +155,6 @@ def draft_summary(response: dict) -> str:
         bits.append(f"tono {draft['key']}")
     if draft.get("lyrics_unplaced"):
         bits.append("letra sin ubicar")
-    return "Borrador listo: " + ", ".join(bits) + ". Revísalo y acéptalo en el hub (Canciones > editar)."
+    stems = (response.get("stems") or {}).get("stems") or []
+    lead = f"{len(stems)} stems separados en la nube. " if stems else ""
+    return lead + "Borrador listo: " + ", ".join(bits) + ". Revísalo y acéptalo en el hub (Canciones > editar)."
