@@ -16,7 +16,7 @@
 // manifest is the commit (every file it lists must exist with that size) and files
 // it no longer lists are deleted.
 
-import { assemble } from './analysis.ts';
+import { ASSEMBLER_VERSION, assemble } from './analysis.ts';
 import type { MusicAiResult } from './analysis.ts';
 import type { Env, FetchLike, R2Bucket } from './types.ts';
 
@@ -331,8 +331,19 @@ async function analysisStatus(env: Env, songPrefix: string, fetchFn: FetchLike):
   if (!stored) throw new ApiError(404, 'no_analysis');
   const record = JSON.parse(await stored.text()) as {
     job_id: string; created_at: string; draft?: unknown; status?: string; error?: string;
+    assembler?: number; result?: Record<string, unknown>;
   };
-  if (record.draft) return json(200, { status: 'SUCCEEDED', job_id: record.job_id, created_at: record.created_at, draft: record.draft });
+  const done = async (result: Record<string, unknown>) => {
+    // The raw result is kept so a newer assembler re-reads it without calling Music AI again.
+    const draft = assemble(result as MusicAiResult);
+    Object.assign(record, { draft, result, assembler: ASSEMBLER_VERSION, status: 'SUCCEEDED' });
+    await env.STEMS.put(key, JSON.stringify(record), { httpMetadata: { contentType: 'application/json' } });
+    return json(200, { status: 'SUCCEEDED', job_id: record.job_id, created_at: record.created_at, draft });
+  };
+  if (record.draft && record.assembler === ASSEMBLER_VERSION) {
+    return json(200, { status: 'SUCCEEDED', job_id: record.job_id, created_at: record.created_at, draft: record.draft });
+  }
+  if (record.result) return done(record.result);
   if (record.status === 'FAILED') return json(200, { status: 'FAILED', job_id: record.job_id, error: record.error });
   const job = await musicAi(env, fetchFn, `/job/${encodeURIComponent(record.job_id)}`, { method: 'GET' }) as {
     status?: string; result?: Record<string, unknown>; error?: { message?: string };
@@ -360,10 +371,7 @@ async function analysisStatus(env: Env, songPrefix: string, fetchFn: FetchLike):
       result[name] = value;
     }
   }
-  const draft = assemble(result as MusicAiResult);
-  record.draft = draft;
-  await env.STEMS.put(key, JSON.stringify(record), { httpMetadata: { contentType: 'application/json' } });
-  return json(200, { status: 'SUCCEEDED', job_id: record.job_id, created_at: record.created_at, draft });
+  return done(result);
 }
 
 export async function handle(req: Request, env: Env, fetchFn: FetchLike = fetch): Promise<Response> {

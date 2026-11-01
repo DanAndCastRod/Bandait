@@ -1199,32 +1199,27 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   1. Daniel Castaneda acepta el borrador de "Dame tu aire" en CANCIONES y lo guarda; con eso ENSAYO tiene secciones.
   2. Desplegar el Worker con este cambio (`wrangler deploy` vía ClipVault).
 
-### [2026-10-31] - Hub: rediseño del layout de ENSAYO y prompter con acordes en línea que ajusta renglón
-* **Sprint / Módulo:** `bandait-leader-web` (subagente en worktree, Claude Opus 5.5)
-* **Estado encontrado:** Daniel Castaneda pidió "mejorar el layout de Ensayo en el hub".
-  - ENSAYO apilaba todo en una columna: selector, prompter, transporte, repetir y las pistas con rol y borrar.
-  - En 1440 px el prompter quedaba arriba y el transporte debajo, fuera de la vista.
-  - El ChordPro se pintaba en renglones monoespaciados que se desplazan a lo ancho. Con el análisis nuevo (acordes en línea sobre la palabra, líneas largas) eso obliga a desplazar de lado en el teléfono.
+### [2026-10-31] - Worker: borrador de Music AI con acordes sobre la palabra, al estilo de Moises
+* **Sprint / Módulo:** `bandait-stems-worker` (`src/analysis.ts`, `src/index.ts`)
+* **Estado encontrado:** con la letra alineada del workflow (job `028a00f8-...`: 26 líneas, cada palabra con `start`/`end`), el ensamblador pegaba cada línea de letra completa al final de su sección, debajo de una cuadrícula de 4 compases por línea. Daniel Castaneda lo encontró "muy a groso modo". Además, el Worker devolvía el borrador en caché para siempre, sin forma de rehacerlo.
+* **Causa:** el ensamblador anterior se escribió cuando la letra llegaba sin tiempos; solo ubicaba la línea por su inicio. Las secciones con el mismo nombre se fundían sin límite: el coro de "Dame tu aire" salía con 27 compases.
 * **Corrección aplicada:**
-  - Encabezado de una fila: título y contexto a la izquierda, selector de canción a la derecha.
-  - `StemStudio` gana `layout="rehearsal"`, sin cambios en la lógica de audio:
-    - columna principal con el transporte y el prompter;
-    - panel lateral fijo (≥1100 px) con REPETIR y una mezcla compacta (M, S y volumen; roles y quitar siguen en PISTAS), en un `<details>` abierto en escritorio y plegado en el teléfono.
-    - PISTAS queda igual.
-  - El prompter recibe el transporte por un contexto (`studioApi.ts`), no por una función que lea refs al renderizar (lo prohíbe la regla `react-hooks/refs`).
-  - Prompter:
-    - riel de secciones (pasadas, actual, siguientes); tocar una lleva el audio ahí;
-    - botón REPETIR SECCIÓN, que usa el mismo bucle que el selector;
-    - sección actual con un tamaño `clamp(18px, ..., 30px)` y la siguiente atenuada;
-    - el compás se escribe fuera del bloque que se vuelve a montar al cambiar de sección.
-  - `ChordProPreview` gana `layout="flow"`: `chordWords`/`flowChordPro` en `services/chordpro.ts` parten cada línea en palabras enteras con el acorde encima de su sílaba. Las líneas ajustan renglón entre palabras y las líneas solo de acordes quedan en fila. El editor sigue con `grid`.
+  - Cada palabra se ubica en su sección por su tiempo. Una anacrusa de hasta un tiempo antes del downbeat se cuenta en la sección siguiente.
+  - Frases: se corta en cada línea de Music AI, en cada cambio de sección, en respiraciones de 2 tiempos o más y al pasar de 4 compases.
+  - Cada cambio de acorde va en línea (`[E]palabra`) sobre la palabra cuyo inicio está más cerca. El acorde vigente abre cada frase. Un acorde que llega después de la última palabra queda al final de la línea.
+  - Los compases sin canto quedan como líneas solo de acordes; un compás suelto que mantiene el acorde no se escribe.
+  - Las secciones del mismo nombre se funden hasta 16 compases; una estrofa partida conserva su número.
+  - En la cuadrícula, una relectura de la misma armonía (C#m y luego C#m7) muestra el acorde que venía.
+  - `ASSEMBLER_VERSION = 2`. El registro de `analysis.json` guarda ahora el resultado crudo y la versión. Un borrador de otra versión se rehace desde el resultado guardado, sin llamar a Music AI. Los registros viejos, sin resultado guardado, vuelven a pedir el job una vez.
 * **Verificación:**
-  - Hub: `npm run lint` sin errores; `npx tsc -b` limpio; `npm run verify:logic` da `23`, `35`, `14` y `68 ok`, sin fallas, con una prueba nueva de `chordWords`/`flowChordPro` en el esquema; `npm run build` OK.
-  - Playwright leader-web completo: `45 passed`. En `e2e/hub-2-3.leader-web.spec.ts`, una prueba nueva y una extendida:
-    - riel, REPETIR SECCIÓN y mezcla compacta;
-    - 390 px con una línea larga que ajusta renglón, sin scroll horizontal.
-  - Capturas antes/después a 1440 y 390 en el scratchpad de la sesión: sin desborde horizontal (`scrollWidth - clientWidth = 0`).
-  - `landing/hub` regenerado con `npm run build:landing`. Los cambios de `landing/app` eran solo de fin de línea y se descartaron. El bundle nuevo conserva las mismas URL de Supabase y del Worker.
+  - Worker: `npm test` da `# pass 15, # fail 0`. Las pruebas usan letra sintética (sin letra real en fixtures): acordes por palabra, anacrusa, respiración, acorde al final, letra sin tiempos y re-ensamblado sin Music AI.
+  - Se corrió el ensamblador sobre el resultado real de "Dame tu aire", con la letra enmascarada en la salida: 11 secciones, ninguna de más de 16 compases, 0 líneas sin ubicar.
+  - `tsc --noEmit` limpio. `wrangler deploy` hecho vía ClipVault: versión `0614fa1e-b83f-4645-b5b4-498febfaf57c`.
+  - El formato `[A][E]palabra` y `palabra [C#m]` se probó con `layout_chord_line` del líder y se maqueta bien.
+  - No verificado: la regeneración en producción del borrador de "Dame tu aire". Ocurre en el primer GET autenticado desde el hub o el líder.
+* **Decisiones:**
+  - El acorde va en la palabra con el inicio más cercano. Se descartó "la última palabra empezada", porque en las anacrusas corría el acorde una palabra.
+  - El resultado crudo se guarda en R2 (es pequeño). Se descartó volver a pedir el job cada vez, porque las URL de resultado de Music AI pueden vencer.
 * **Pendientes:**
-  1. Revisar en el navegador real con "Dame tu aire" cuando el Worker publique el ChordPro con acordes en línea (rama `feat/chordpro-moises`).
-  2. Tempo de práctica (time-stretch): sigue sin hacerse.
+  1. Daniel Castaneda abre el panel de análisis de "Dame tu aire" (hub o líder) para que se rehaga el borrador, y lo acepta en CANCIONES.
+  2. Si un borrador ya aceptado debe cambiar, hay que volver a aceptarlo: aceptar reemplaza las secciones.
