@@ -142,6 +142,63 @@ test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
     await page.getByTestId('stem-stop').click();
     await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'stopped');
     await expect(current).toHaveAttribute('data-label', 'Intro');
+
+    // Riel de secciones: tocar una lleva el audio ahi; la actual queda marcada.
+    const chips = page.getByTestId('rehearsal-section-chip');
+    await expect(chips).toHaveCount(5);
+    await expect(chips.nth(0)).toHaveAttribute('data-state', 'current');
+    await chips.nth(1).click();
+    await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+    await expect(chips.nth(1)).toHaveAttribute('aria-current', 'step');
+    await expect(chips.nth(0)).toHaveAttribute('data-state', 'past');
+
+    // REPETIR SECCION repite la actual (el mismo bucle que el selector REPETIR) y se apaga igual.
+    const loopBtn = page.getByTestId('rehearsal-loop-current');
+    await loopBtn.click();
+    await expect(loopBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('stem-loop-badge')).toBeVisible();
+    await expect(page.getByTestId('stem-loop-select')).toHaveValue(/^sec:/);
+    await loopBtn.click();
+    await expect(page.getByTestId('stem-loop-badge')).toHaveCount(0);
+    await expect(page.getByTestId('stem-loop-select')).toHaveValue('none');
+
+    // Mezcla compacta en el panel lateral (abierta en escritorio): sin rol ni quitar, eso vive en PISTAS.
+    const mixer = page.getByTestId('rehearsal-mixer');
+    await expect(mixer).toHaveAttribute('open', '');
+    await expect(mixer.getByRole('button', { name: 'Silenciar Bateria' })).toBeVisible();
+    await expect(mixer.getByLabel(/^Rol de /)).toHaveCount(0);
+    await expect(mixer.getByRole('button', { name: /^Quitar / })).toHaveCount(0);
+  });
+
+  test('movil 390 px: ENSAYO en una columna, la mezcla plegada y las lineas largas ajustan renglon', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await enterDemo(page);
+    // Una estrofa con una linea larga de acordes en linea, como la que arma el analisis.
+    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await page.getByTestId('song-card').filter({ hasText: 'Medianoche en Pereira' }).getByRole('button', { name: 'EDITAR' }).click();
+    const editor = page.getByTestId('song-editor');
+    const long = '[Am]Medianoche en [F]Pereira, la ciudad no duerme y la [C]noche se queda despierta hasta que [G]vuelvas';
+    await editor.getByLabel('ChordPro de la sección 2').fill(long);
+    await editor.getByTestId('song-save').click();
+    await expect(editor).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+    await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
+    await page.getByTestId('stem-file-input').setInputFiles([{ name: 'Medianoche - Drums.wav', mimeType: 'audio/wav', buffer: wav(20, 110) }]);
+    await page.getByTestId('stem-save').click();
+    await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(1, { timeout: 15000 });
+
+    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(1, { timeout: 15000 });
+    await expect(page.getByTestId('rehearsal-mixer')).not.toHaveAttribute('open', '');
+    await page.getByLabel('Posición').fill('9');
+    const chordpro = page.getByTestId('rehearsal-current-chordpro');
+    await expect(chordpro).toContainText('noche se queda despierta');
+    const box = await chordpro.boundingBox();
+    expect(box!.width).toBeLessThanOrEqual(390);
+    // La linea larga ocupa varios renglones en vez de desplazarse a lo ancho.
+    expect(box!.height).toBeGreaterThan(120);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   });
 });
 

@@ -1198,3 +1198,33 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Daniel Castaneda acepta el borrador de "Dame tu aire" en CANCIONES y lo guarda; con eso ENSAYO tiene secciones.
   2. Desplegar el Worker con este cambio (`wrangler deploy` vía ClipVault).
+
+### [2026-10-31] - Hub: rediseño del layout de ENSAYO y prompter con acordes en línea que ajusta renglón
+* **Sprint / Módulo:** `bandait-leader-web` (subagente en worktree, Claude Opus 5.5)
+* **Estado encontrado:** Daniel Castaneda pidió "mejorar el layout de Ensayo en el hub".
+  - ENSAYO apilaba todo en una columna: selector, prompter, transporte, repetir y las pistas con rol y borrar.
+  - En 1440 px el prompter quedaba arriba y el transporte debajo, fuera de la vista.
+  - El ChordPro se pintaba en renglones monoespaciados que se desplazan a lo ancho. Con el análisis nuevo (acordes en línea sobre la palabra, líneas largas) eso obliga a desplazar de lado en el teléfono.
+* **Corrección aplicada:**
+  - Encabezado de una fila: título y contexto a la izquierda, selector de canción a la derecha.
+  - `StemStudio` gana `layout="rehearsal"`, sin cambios en la lógica de audio:
+    - columna principal con el transporte y el prompter;
+    - panel lateral fijo (≥1100 px) con REPETIR y una mezcla compacta (M, S y volumen; roles y quitar siguen en PISTAS), en un `<details>` abierto en escritorio y plegado en el teléfono.
+    - PISTAS queda igual.
+  - El prompter recibe el transporte por un contexto (`studioApi.ts`), no por una función que lea refs al renderizar (lo prohíbe la regla `react-hooks/refs`).
+  - Prompter:
+    - riel de secciones (pasadas, actual, siguientes); tocar una lleva el audio ahí;
+    - botón REPETIR SECCIÓN, que usa el mismo bucle que el selector;
+    - sección actual con un tamaño `clamp(18px, ..., 30px)` y la siguiente atenuada;
+    - el compás se escribe fuera del bloque que se vuelve a montar al cambiar de sección.
+  - `ChordProPreview` gana `layout="flow"`: `chordWords`/`flowChordPro` en `services/chordpro.ts` parten cada línea en palabras enteras con el acorde encima de su sílaba. Las líneas ajustan renglón entre palabras y las líneas solo de acordes quedan en fila. El editor sigue con `grid`.
+* **Verificación:**
+  - Hub: `npm run lint` sin errores; `npx tsc -b` limpio; `npm run verify:logic` da `23`, `35`, `14` y `68 ok`, sin fallas, con una prueba nueva de `chordWords`/`flowChordPro` en el esquema; `npm run build` OK.
+  - Playwright leader-web completo: `45 passed`. En `e2e/hub-2-3.leader-web.spec.ts`, una prueba nueva y una extendida:
+    - riel, REPETIR SECCIÓN y mezcla compacta;
+    - 390 px con una línea larga que ajusta renglón, sin scroll horizontal.
+  - Capturas antes/después a 1440 y 390 en el scratchpad de la sesión: sin desborde horizontal (`scrollWidth - clientWidth = 0`).
+  - `landing/hub` regenerado con `npm run build:landing`. Los cambios de `landing/app` eran solo de fin de línea y se descartaron. El bundle nuevo conserva las mismas URL de Supabase y del Worker.
+* **Pendientes:**
+  1. Revisar en el navegador real con "Dame tu aire" cuando el Worker publique el ChordPro con acordes en línea (rama `feat/chordpro-moises`).
+  2. Tempo de práctica (time-stretch): sigue sin hacerse.
