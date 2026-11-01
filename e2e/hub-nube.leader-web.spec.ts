@@ -268,6 +268,39 @@ test.describe('Web Admin Hub - stems y borrador en la nube sin copia local', () 
     await expect(cloudStatus).toHaveText(/EN LA NUBE/);
   });
 
+  test('movil 390 px: la confirmacion de SEPARAR queda a la vista y la barra inferior no tapa sus botones', async ({ page }) => {
+    const worker = new FakeWorker();
+    worker.seedStems('me', SONG_A, [
+      { file: 'Tema A - Drums.wav', role: 'drums', label: 'Bateria', data: wav(2, 100) },
+      { file: 'Tema A - Bass.wav', role: 'bass', label: 'Bajo', data: wav(2, 82) },
+    ]);
+    await signInOwner(page, worker);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('.hub-mobile-nav').getByRole('button', { name: /PISTAS/ }).click();
+    const panel = page.getByTestId('split-upload');
+    await expect(panel).toBeVisible();
+    // La pagina arriba del todo: el panel queda bajo el borde y la confirmacion tiene que subir sola.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await panel.getByTestId('split-file-input').setInputFiles({ name: 'Tema A.mp3', mimeType: 'audio/mpeg', buffer: Buffer.alloc(4096, 7) });
+    const confirm = panel.getByTestId('split-confirm');
+    await expect(confirm).toContainText('Reemplaza los 2 stems actuales');
+    await expect(confirm.getByRole('button', { name: 'CANCELAR' })).toBeFocused();
+    for (const button of [confirm.getByRole('button', { name: 'CANCELAR' }), panel.getByTestId('split-confirm-ok')]) {
+      await expect(button).toBeInViewport({ ratio: 1 });
+      // El elemento que recibe un toque en el centro del boton es el boton, no la barra inferior.
+      await expect
+        .poll(() =>
+          button.evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !!hit && el.contains(hit);
+          })
+        )
+        .toBe(true);
+    }
+    expect(worker.posts).toEqual([]);
+  });
+
   test('CANCIONES: sin stems en ningun lado, el panel de analisis separa la cancion y deja el borrador', async ({ page }) => {
     test.setTimeout(60_000);
     const worker = new FakeWorker();

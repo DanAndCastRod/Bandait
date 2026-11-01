@@ -205,7 +205,7 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
   }
 
   const accept = (draft: AnalysisDraft) => {
-    const accepted: AcceptedDraft = { sections: draftToSongSections(draft, uuidv4) }
+    const accepted: AcceptedDraft = { sections: draftToSongSections(draft, uuidv4, song.sections) }
     if (applyBpm && draft.bpm !== null && draft.bpm >= BPM_MIN && draft.bpm <= BPM_MAX) accepted.bpm = draft.bpm
     if (applyKey && draft.key) accepted.key = draft.key
     onAccept(accepted)

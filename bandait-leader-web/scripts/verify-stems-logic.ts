@@ -439,6 +439,26 @@ async function main() {
     assert.equal(secs[2].cueText, 'Rap')
   })
 
+  await check('draftToSongSections: conserva el id de la seccion previa del mismo tipo y orden', () => {
+    const raw = { ...rawDraft, sections: [
+      { kind: 'intro', label: 'Intro', bars: 4, chordpro: '' },
+      { kind: 'verse', label: 'Estrofa 1', bars: 8, chordpro: '' },
+      { kind: 'chorus', label: 'Coro', bars: 8, chordpro: '' },
+      { kind: 'verse', label: 'Estrofa 2', bars: 8, chordpro: '' },
+      { kind: 'outro', label: 'Final', bars: 4, chordpro: '' },
+    ] }
+    const previous = [
+      { id: 'v1', kind: 'verse' as const },
+      { id: 'c1', kind: 'chorus' as const },
+      { id: 'v2', kind: 'verse' as const },
+      { id: 'b1', kind: 'bridge' as const },
+    ]
+    let n = 0
+    const secs = draftToSongSections(parseDraft(raw), () => `nuevo-${++n}`, previous)
+    assert.deepEqual(secs.map((s) => s.id), ['nuevo-1', 'v1', 'c1', 'v2', 'nuevo-2'])
+    assert.equal(new Set(secs.map((s) => s.id)).size, secs.length)
+  })
+
   await check('mensajes de error del analisis en espanol', () => {
     assert.match(analysisErrorMessage('analysis_unavailable', 503), /no está disponible/)
     assert.match(analysisErrorMessage('analysis_failed', 502), /falló/)

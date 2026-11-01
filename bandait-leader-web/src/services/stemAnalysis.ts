@@ -130,12 +130,22 @@ export function parseDraft(raw: unknown): AnalysisDraft {
 }
 
 /**
- * Secciones del formulario a partir del borrador. Ids nuevos (es otra estructura). `cue_text`
- * null en el borrador significa "sin texto propuesto": queda el aviso por defecto segun el tipo.
+ * Secciones del formulario a partir del borrador. Cada seccion conserva el id de la seccion previa
+ * del mismo tipo y orden (la segunda estrofa toma el id de la segunda estrofa): el workspace nunca
+ * cambia un id existente, y el lider, la PWA y el bucle de ENSAYO siguen reconociendo la seccion.
+ * Las que no tienen pareja reciben un id nuevo. `cue_text` null en el borrador significa "sin
+ * texto propuesto": queda el aviso por defecto segun el tipo.
  */
-export function draftToSongSections(draft: AnalysisDraft, newId: () => string): SongSection[] {
+export function draftToSongSections(
+  draft: AnalysisDraft,
+  newId: () => string,
+  previous: ReadonlyArray<Pick<SongSection, 'id' | 'kind'>> = [],
+): SongSection[] {
+  const byKind = new Map<SectionKind, string[]>()
+  for (const p of previous) byKind.set(p.kind, [...(byKind.get(p.kind) ?? []), p.id])
   return draft.sections.map((s) => {
-    const sec: SongSection = { id: newId(), kind: s.kind, label: s.label, bars: s.bars, chordpro: s.chordpro.replace(/\s+$/, '') }
+    const id = byKind.get(s.kind)?.shift() ?? newId()
+    const sec: SongSection = { id, kind: s.kind, label: s.label, bars: s.bars, chordpro: s.chordpro.replace(/\s+$/, '') }
     if (typeof s.cue_text === 'string' && s.cue_text.trim()) sec.cueText = s.cue_text.trim()
     return sec
   })
