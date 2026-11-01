@@ -191,6 +191,169 @@ input, select, textarea {
     transform: translateY(0);
   }
 }
+
+/* ENSAYO (RehearsalHubView + StemStudio layout="rehearsal"). Escritorio: columna principal
+   (transporte + prompter) y panel lateral (repetir + mezcla). Telefono: una columna y la mezcla
+   plegada. */
+.rh-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+  align-items: start;
+}
+.rh-main,
+.rh-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+@media (min-width: 1100px) {
+  .rh-grid {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+  .rh-side {
+    position: sticky;
+    top: 12px;
+  }
+}
+.rh-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 14px;
+}
+@media (min-width: 900px) {
+  .rh-head {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+  }
+}
+.rh-mixer > summary {
+  list-style: none;
+}
+.rh-mixer > summary::-webkit-details-marker {
+  display: none;
+}
+.rh-mixer-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.rh-mixer-summary:hover {
+  opacity: 0.85;
+}
+.rh-mixer-summary:focus-visible {
+  outline: 2px solid var(--accent-cobalt);
+  outline-offset: 2px;
+}
+.rh-mixer-summary .rh-chevron {
+  margin-left: auto;
+  color: var(--text-secondary);
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.rh-mixer[open] .rh-chevron {
+  transform: rotate(180deg);
+}
+.rh-track {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid;
+  border-radius: 4px;
+  background: #15181c;
+  min-width: 0;
+  transition: opacity 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Riel de secciones del prompter: pasadas tenues, la actual marcada, las que vienen normales. */
+.rh-sections {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: 4px;
+}
+.rh-chip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  background: #232830;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.rh-chip[data-state='past'] {
+  opacity: 0.5;
+}
+.rh-chip[data-state='current'] {
+  border-color: #7ac4d6;
+  background: #1f2a30;
+}
+.rh-chip:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.rh-chip[data-state='past']:hover:not(:disabled) {
+  opacity: 0.75;
+}
+.rh-chip:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.rh-chip:focus-visible {
+  outline: 2px solid var(--accent-cobalt);
+  outline-offset: 2px;
+}
+.rh-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+/* ChordProPreview layout="flow": las lineas pasan al renglon siguiente entre palabras; cada trozo
+   es una columna con el acorde encima de su silaba. */
+.cp-flow-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.cp-flow-word {
+  display: inline-flex;
+  align-items: flex-end;
+}
+.cp-flow-seg {
+  display: inline-flex;
+  flex-direction: column;
+  white-space: pre;
+}
+.cp-flow-chord {
+  font-weight: 700;
+  font-size: 0.82em;
+  line-height: 1.2;
+  padding-right: 0.5ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-chip,
+  .rh-track,
+  .rh-mixer-summary .rh-chevron {
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .stx-btn,
   .stx-drop {

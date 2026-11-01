@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Pause, Play, Repeat, Square, Trash2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Pause, Play, Repeat, Sliders, Square, Trash2 } from 'lucide-react'
 import type { Song } from '../types/hub'
 import { KNOWN_STEM_ROLES, STEM_ROLE_CODES, stemRoleLabel, type StemRole } from '../services/stemNames'
 import { defaultLabels, formatBytes } from '../services/stemImport'
@@ -7,6 +7,7 @@ import { StemPlayer, type PlayerState } from '../services/stemPlayer'
 import { clampOffset, deleteStemTrack, loadStemSong, StemStoreError, updateStemMeta, type StemSongRecord } from '../services/stemStore'
 import { formatClock, sectionSpans, type LoopRegion } from '../services/stemTiming'
 import { CommitInput } from './CommitInput'
+import { StudioApiContext, type StudioApi } from './studioApi'
 import { cardStyle, colors, ghostButton, labelStyle, mono, primaryButton, smallInputStyle } from './hubStyles'
 
 interface Props {
@@ -19,6 +20,16 @@ interface Props {
    * con rAF (el reproductor es el mismo; no se duplica).
    */
   onPlayer?: (player: StemPlayer | null) => void
+  /**
+   * 'studio' (PISTAS, por defecto): todo en una columna, con rol y quitar pista.
+   * 'rehearsal' (ENSAYO): transporte y `stage` (el prompter) en la columna principal; repetir y
+   * una mezcla compacta (M, S, volumen) en un panel lateral que en el telefono se pliega.
+   */
+  layout?: 'studio' | 'rehearsal'
+  /** Contenido principal de 'rehearsal'; lee el transporte con useStudioApi(). */
+  stage?: React.ReactNode
+  /** 'rehearsal': enlace a PISTAS para cambiar roles o quitar pistas. */
+  onManageTracks?: () => void
 }
 
 interface Mix {
@@ -56,7 +67,12 @@ function toggleStyle(active: boolean, accent: string): React.CSSProperties {
  * Se monta con key = cancion + ids de pistas: cambiar de cancion o de pistas crea un reproductor
  * nuevo y libera el anterior (AudioContext cerrado, nodos desconectados).
  */
-export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPlayer }) => {
+/** Ancho desde el que la mezcla de ENSAYO arranca abierta (panel lateral). */
+const WIDE_QUERY = '(min-width: 1100px)'
+
+export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPlayer, layout = 'studio', stage, onManageTracks }) => {
+  const rehearsal = layout === 'rehearsal'
+  const [mixerOpen, setMixerOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia || window.matchMedia(WIDE_QUERY).matches)
   const [initialTracks] = useState(() => record.tracks)
   const [status, setStatus] = useState<Record<string, TrackStatus>>(() =>
     Object.fromEntries(record.tracks.map((t) => [t.id, { kind: 'loading' } as TrackStatus]))
@@ -240,315 +256,418 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
 
   const sectionsUnavailable = spans.length === 0
 
-  return (
-    <div data-testid="stem-studio" data-state={playState} style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
-      {loadError && (
-        <div role="alert" style={{ ...cardStyle, padding: '10px 12px', color: colors.danger, fontSize: '12px', borderColor: colors.danger }}>
-          {loadError}
+  const seekTo = useCallback(
+    (sec: number) => {
+      playerRef.current?.seek(sec)
+      paint()
+    },
+    [paint]
+  )
+  const toggleSectionLoop = useCallback((id: string) => setLoopMode((prev) => (prev === `sec:${id}` ? 'none' : `sec:${id}`)), [])
+  const loopSectionId = loopMode.startsWith('sec:') ? loopMode.slice(4) : null
+  const api = useMemo<StudioApi>(
+    () => ({ ready: anyReady, seek: seekTo, loopSectionId, toggleSectionLoop }),
+    [anyReady, seekTo, loopSectionId, toggleSectionLoop]
+  )
+
+  const loadAlert = loadError && (
+    <div role="alert" style={{ ...cardStyle, padding: '10px 12px', color: colors.danger, fontSize: '12px', borderColor: colors.danger }}>
+      {loadError}
+    </div>
+  )
+
+  const masterVolume = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+      <label htmlFor="stem-master" style={{ ...labelStyle, flexShrink: 0 }}>
+        {rehearsal ? 'GENERAL' : 'VOLUMEN GENERAL'}
+      </label>
+      <input
+        id="stem-master"
+        type="range"
+        className="stx-range"
+        min={DB_MIN}
+        max={DB_MAX}
+        step={0.5}
+        value={masterDb}
+        onChange={(e) => setMasterDb(Number(e.target.value))}
+        style={{ flex: '1 1 120px', width: 'auto' }}
+      />
+      <span style={{ fontFamily: mono, fontSize: '11px', color: colors.text, minWidth: '60px', textAlign: 'right' }}>{formatDb(masterDb)}</span>
+    </div>
+  )
+
+  const transport = (
+    <div
+      data-testid="stem-transport"
+      style={{ ...cardStyle, padding: rehearsal ? '12px 14px' : '14px', display: 'flex', flexDirection: 'column', gap: rehearsal ? '10px' : '12px', minWidth: 0 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="stx-btn"
+          data-testid="stem-play"
+          onClick={togglePlay}
+          disabled={!anyReady}
+          aria-label={playState === 'playing' ? 'Pausa' : 'Reproducir'}
+          style={{ ...primaryButton(colors.cobalt), color: colors.onAccent, minWidth: '112px', ...(rehearsal ? { padding: '10px 18px' } : {}) }}
+        >
+          {playState === 'playing' ? <Pause size={14} /> : <Play size={14} />}
+          {playState === 'playing' ? 'PAUSA' : 'REPRODUCIR'}
+        </button>
+        <button type="button" className="stx-btn" data-testid="stem-stop" onClick={stop} disabled={!anyReady} aria-label="Detener" style={{ ...ghostButton, ...(rehearsal ? { padding: '10px 14px' } : {}) }}>
+          <Square size={13} /> STOP
+        </button>
+        <span
+          ref={posTextRef}
+          data-testid="stem-position"
+          style={{ fontFamily: mono, fontSize: rehearsal ? '17px' : '15px', fontWeight: 700, color: colors.text, fontVariantNumeric: 'tabular-nums' }}
+        >
+          0:00.0 / 0:00.0
+        </span>
+        {loading && <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>DECODIFICANDO PISTAS...</span>}
+        {appliedLoop && (
+          <span
+            data-testid="stem-loop-badge"
+            className="stx-fade-in"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontFamily: mono,
+              fontSize: '11px',
+              fontWeight: 700,
+              color: colors.onAccent,
+              background: colors.success,
+              padding: '2px 8px',
+              borderRadius: '3px',
+              marginLeft: rehearsal ? 'auto' : undefined,
+            }}
+          >
+            <Repeat size={11} /> REPITIENDO {formatClock(Math.max(0, regionStart ?? 0))}-{formatClock(Math.min(duration, regionEnd ?? 0))}
+          </span>
+        )}
+      </div>
+      <input
+        ref={posRangeRef}
+        type="range"
+        className="stx-range"
+        aria-label="Posición"
+        min={0}
+        max={duration > 0 ? duration : 1}
+        step={0.01}
+        defaultValue={0}
+        disabled={!anyReady}
+        onPointerDown={() => {
+          draggingRef.current = true
+        }}
+        onPointerUp={(e) => {
+          draggingRef.current = false
+          playerRef.current?.seek(Number((e.target as HTMLInputElement).value))
+          paint()
+        }}
+        onChange={(e) => {
+          if (draggingRef.current) {
+            if (posTextRef.current) posTextRef.current.textContent = `${formatClock(Number(e.target.value))} / ${formatClock(duration)}`
+            return
+          }
+          playerRef.current?.seek(Number(e.target.value))
+          paint()
+        }}
+      />
+      {!rehearsal && masterVolume}
+    </div>
+  )
+
+  const loopPanel = (
+    <div style={{ ...cardStyle, padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+          <label htmlFor="stem-loop" style={labelStyle}>
+            REPETIR
+          </label>
+          <select
+            id="stem-loop"
+            data-testid="stem-loop-select"
+            className="stx-field"
+            value={loopMode}
+            onChange={(e) => setLoopMode(e.target.value)}
+            style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '6px 8px' }}
+          >
+            <option value="none">Sin repetición</option>
+            {spans.map((s) => (
+              <option key={s.id} value={`sec:${s.id}`}>
+                {s.label} · c. {s.startBar}-{s.startBar + s.bars - 1} · {formatClock(Math.max(0, s.startSec))}
+              </option>
+            ))}
+            <option value="ab">Tramo A-B manual</option>
+          </select>
+        </div>
+        <div style={{ flex: '0 0 auto' }}>
+          <span style={labelStyle}>COMPÁS 1 EN EL AUDIO (ms)</span>
+          <div style={{ marginTop: '4px' }}>
+            <CommitInput
+              value={String(offsetMs)}
+              onCommit={commitOffset}
+              ariaLabel="Offset de alineación en milisegundos"
+              testId="stem-offset"
+              inputMode="numeric"
+              width="96px"
+              title="Milisegundos desde el inicio del audio hasta el compás 1 (silencio inicial o conteo)"
+            />
+          </div>
+        </div>
+      </div>
+      {sectionsUnavailable && (
+        <div style={{ fontSize: '12px', color: colors.muted }}>
+          {song.sections.length === 0
+            ? 'Esta canción no tiene secciones con compases: usa el tramo A-B manual, o agrega secciones en CANCIONES.'
+            : 'El tempo o los compases de la canción no son válidos: usa el tramo A-B manual.'}
         </div>
       )}
+      {!sectionsUnavailable && (
+        <div style={{ fontSize: '11px', color: colors.muted, fontFamily: mono }}>
+          Secciones a {song.bpm} BPM, {song.beatsPerBar}/{song.beatUnit}. Si la repetición no cae en el compás, ajusta el offset.
+        </div>
+      )}
+      {loopMode !== 'none' && duration > 0 && !appliedLoop && (loopMode !== 'ab' || ab.b > ab.a) && (
+        <div data-testid="stem-loop-outside" style={{ fontSize: '12px', color: colors.warning }}>
+          Ese tramo empieza después del final del audio ({formatClock(duration)}): revisa el offset o elige otra sección.
+        </div>
+      )}
+      {loopMode === 'ab' && (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {(['a', 'b'] as const).map((k) => (
+            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>{k.toUpperCase()} (s)</span>
+              <CommitInput value={ab[k].toFixed(1)} onCommit={(t) => commitAb(k, t)} ariaLabel={`Punto ${k.toUpperCase()} en segundos`} width="72px" inputMode="decimal" />
+              <button type="button" className="stx-btn" onClick={() => markAb(k)} disabled={!anyReady} style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px' }}>
+                MARCAR {k.toUpperCase()}
+              </button>
+            </div>
+          ))}
+          {ab.b <= ab.a && <span style={{ fontSize: '11px', color: colors.warning }}>B debe ser mayor que A.</span>}
+        </div>
+      )}
+    </div>
+  )
 
-      {/* TRANSPORTE */}
-      <div style={{ ...cardStyle, padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="stx-btn"
-            data-testid="stem-play"
-            onClick={togglePlay}
-            disabled={!anyReady}
-            aria-label={playState === 'playing' ? 'Pausa' : 'Reproducir'}
-            style={{ ...primaryButton(colors.cobalt), color: colors.onAccent, minWidth: '112px' }}
-          >
-            {playState === 'playing' ? <Pause size={14} /> : <Play size={14} />}
-            {playState === 'playing' ? 'PAUSA' : 'REPRODUCIR'}
-          </button>
-          <button type="button" className="stx-btn" data-testid="stem-stop" onClick={stop} disabled={!anyReady} aria-label="Detener" style={ghostButton}>
-            <Square size={13} /> STOP
-          </button>
-          <span
-            ref={posTextRef}
-            data-testid="stem-position"
-            style={{ fontFamily: mono, fontSize: '15px', fontWeight: 700, color: colors.text, fontVariantNumeric: 'tabular-nums' }}
-          >
-            0:00.0 / 0:00.0
-          </span>
-          {loading && <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>DECODIFICANDO PISTAS...</span>}
-          {appliedLoop && (
-            <span
-              data-testid="stem-loop-badge"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontFamily: mono,
-                fontSize: '11px',
-                fontWeight: 700,
-                color: colors.onAccent,
-                background: colors.success,
-                padding: '2px 8px',
-                borderRadius: '3px',
-              }}
-            >
-              <Repeat size={11} /> REPITIENDO {formatClock(Math.max(0, regionStart ?? 0))}-{formatClock(Math.min(duration, regionEnd ?? 0))}
+  const metaAlert = metaError && (
+    <div role="alert" style={{ color: colors.danger, fontSize: '12px' }}>
+      {metaError}
+    </div>
+  )
+
+  const trackRows = record.tracks.map((t) => {
+    const st = status[t.id] ?? { kind: 'error', message: 'Pista nueva: vuelve a abrir la canción.' }
+    const m = mix[t.id] ?? { db: 0, muted: false, solo: false }
+    const ok = st.kind === 'ok'
+    const codeBadge = (
+      <span
+        style={{
+          fontFamily: mono,
+          fontSize: '11px',
+          fontWeight: 700,
+          padding: '1px 6px',
+          borderRadius: '3px',
+          background: colors.borderSoft,
+          color: colors.text,
+          flexShrink: 0,
+        }}
+      >
+        {STEM_ROLE_CODES[t.role]}
+      </span>
+    )
+    const toggles = (
+      <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+        <button
+          type="button"
+          className="stx-btn"
+          aria-pressed={m.muted}
+          aria-label={`Silenciar ${t.label}`}
+          disabled={!ok}
+          onClick={() => updateMix(t.id, { muted: !m.muted })}
+          style={toggleStyle(m.muted, colors.danger)}
+        >
+          M
+        </button>
+        <button
+          type="button"
+          className="stx-btn"
+          aria-pressed={m.solo}
+          aria-label={`Solo ${t.label}`}
+          disabled={!ok}
+          onClick={() => updateMix(t.id, { solo: !m.solo })}
+          style={toggleStyle(m.solo, colors.warning)}
+        >
+          S
+        </button>
+      </div>
+    )
+    const fader = (
+      <input
+        type="range"
+        className="stx-range"
+        aria-label={`Volumen ${t.label}`}
+        min={DB_MIN}
+        max={DB_MAX}
+        step={0.5}
+        value={m.db}
+        disabled={!ok}
+        onChange={(e) => updateMix(t.id, { db: Number(e.target.value) })}
+      />
+    )
+    const statusLine = (
+      <>
+        {st.kind === 'loading' && <div style={{ fontSize: '10px', color: colors.muted, fontFamily: mono }}>DECODIFICANDO...</div>}
+        {st.kind === 'error' && (
+          <div data-testid="stem-track-error" style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: colors.danger }}>
+            <AlertTriangle size={11} /> {st.message}
+          </div>
+        )}
+      </>
+    )
+
+    // ENSAYO: fila compacta de consola (nombre, M, S y volumen). Roles y quitar viven en PISTAS.
+    if (rehearsal) {
+      return (
+        <div
+          key={t.id}
+          data-testid="stem-track"
+          data-role={t.role}
+          data-status={st.kind}
+          className="rh-track"
+          style={{ borderColor: st.kind === 'error' ? colors.danger : colors.borderSoft, opacity: m.muted ? 0.6 : 1 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            {codeBadge}
+            <span style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.label}>
+              {t.label}
             </span>
+            {toggles}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            {fader}
+            <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted, minWidth: '56px', textAlign: 'right' }}>{formatDb(m.db)}</span>
+          </div>
+          {statusLine}
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={t.id}
+        data-testid="stem-track"
+        data-role={t.role}
+        data-status={st.kind}
+        style={{
+          ...cardStyle,
+          padding: '10px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          flexWrap: 'wrap',
+          minWidth: 0,
+          borderColor: st.kind === 'error' ? colors.danger : colors.border,
+        }}
+      >
+        {codeBadge}
+        <div style={{ flex: '1 1 150px', minWidth: 0 }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: colors.text, overflowWrap: 'anywhere' }}>{t.label}</div>
+          <div style={{ fontSize: '10px', color: colors.muted, fontFamily: mono, overflowWrap: 'anywhere' }}>
+            {t.fileName} · {formatBytes(t.size)}
+          </div>
+          {statusLine}
+        </div>
+        {toggles}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 180px', minWidth: 0 }}>
+          {fader}
+          <span style={{ fontFamily: mono, fontSize: '11px', color: colors.text, minWidth: '60px', textAlign: 'right' }}>{formatDb(m.db)}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <select className="stx-field" value={t.role} aria-label={`Rol de ${t.label}`} onChange={(e) => changeRole(t.id, e.target.value as StemRole)} style={smallInputStyle}>
+            {t.role === 'unknown' && <option value="unknown">Sin asignar</option>}
+            {KNOWN_STEM_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {stemRoleLabel(role)}
+              </option>
+            ))}
+          </select>
+          {confirmDelete === t.id ? (
+            <>
+              <button
+                type="button"
+                className="stx-btn"
+                onClick={() => removeTrack(t.id)}
+                style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px', background: colors.danger, color: colors.onAccent, borderColor: colors.danger }}
+              >
+                QUITAR
+              </button>
+              <button type="button" className="stx-btn" onClick={() => setConfirmDelete(null)} style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px' }}>
+                NO
+              </button>
+            </>
+          ) : (
+            <button type="button" className="stx-btn" aria-label={`Quitar ${t.label}`} onClick={() => setConfirmDelete(t.id)} style={{ ...ghostButton, padding: '5px 7px', color: colors.danger }}>
+              <Trash2 size={13} />
+            </button>
           )}
         </div>
-        <input
-          ref={posRangeRef}
-          type="range"
-          className="stx-range"
-          aria-label="Posición"
-          min={0}
-          max={duration > 0 ? duration : 1}
-          step={0.01}
-          defaultValue={0}
-          disabled={!anyReady}
-          onPointerDown={() => {
-            draggingRef.current = true
-          }}
-          onPointerUp={(e) => {
-            draggingRef.current = false
-            playerRef.current?.seek(Number((e.target as HTMLInputElement).value))
-            paint()
-          }}
-          onChange={(e) => {
-            if (draggingRef.current) {
-              if (posTextRef.current) posTextRef.current.textContent = `${formatClock(Number(e.target.value))} / ${formatClock(duration)}`
-              return
-            }
-            playerRef.current?.seek(Number(e.target.value))
-            paint()
-          }}
-        />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <label htmlFor="stem-master" style={{ ...labelStyle, flexShrink: 0 }}>
-            VOLUMEN GENERAL
-          </label>
-          <input
-            id="stem-master"
-            type="range"
-            className="stx-range"
-            min={DB_MIN}
-            max={DB_MAX}
-            step={0.5}
-            value={masterDb}
-            onChange={(e) => setMasterDb(Number(e.target.value))}
-            style={{ flex: '1 1 160px', width: 'auto' }}
-          />
-          <span style={{ fontFamily: mono, fontSize: '11px', color: colors.text, minWidth: '64px' }}>{formatDb(masterDb)}</span>
-        </div>
       </div>
+    )
+  })
 
-      {/* REPETIR SECCION */}
-      <div style={{ ...cardStyle, padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-            <label htmlFor="stem-loop" style={labelStyle}>
-              REPETIR
-            </label>
-            <select
-              id="stem-loop"
-              data-testid="stem-loop-select"
-              className="stx-field"
-              value={loopMode}
-              onChange={(e) => setLoopMode(e.target.value)}
-              style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '6px 8px' }}
-            >
-              <option value="none">Sin repetición</option>
-              {spans.map((s) => (
-                <option key={s.id} value={`sec:${s.id}`}>
-                  {s.label} · c. {s.startBar}-{s.startBar + s.bars - 1} · {formatClock(Math.max(0, s.startSec))}
-                </option>
-              ))}
-              <option value="ab">Tramo A-B manual</option>
-            </select>
-          </div>
-          <div style={{ flex: '0 0 auto' }}>
-            <span style={labelStyle}>COMPÁS 1 EN EL AUDIO (ms)</span>
-            <div style={{ marginTop: '4px' }}>
-              <CommitInput
-                value={String(offsetMs)}
-                onCommit={commitOffset}
-                ariaLabel="Offset de alineación en milisegundos"
-                testId="stem-offset"
-                inputMode="numeric"
-                width="96px"
-                title="Milisegundos desde el inicio del audio hasta el compás 1 (silencio inicial o conteo)"
-              />
-            </div>
-          </div>
+  if (rehearsal) {
+    const readyCount = Object.values(status).filter((s) => s.kind === 'ok').length
+    return (
+      <div data-testid="stem-studio" data-state={playState} data-layout="rehearsal" className="rh-grid">
+        <div className="rh-main">
+          {loadAlert}
+          {transport}
+          <StudioApiContext.Provider value={api}>{stage}</StudioApiContext.Provider>
         </div>
-        {sectionsUnavailable && (
-          <div style={{ fontSize: '12px', color: colors.muted }}>
-            {song.sections.length === 0
-              ? 'Esta canción no tiene secciones con compases: usa el tramo A-B manual, o agrega secciones en CANCIONES.'
-              : 'El tempo o los compases de la canción no son válidos: usa el tramo A-B manual.'}
-          </div>
-        )}
-        {!sectionsUnavailable && (
-          <div style={{ fontSize: '11px', color: colors.muted, fontFamily: mono }}>
-            Secciones a {song.bpm} BPM, {song.beatsPerBar}/{song.beatUnit}. Si la repetición no cae en el compás, ajusta el offset.
-          </div>
-        )}
-        {loopMode !== 'none' && duration > 0 && !appliedLoop && (loopMode !== 'ab' || ab.b > ab.a) && (
-          <div data-testid="stem-loop-outside" style={{ fontSize: '12px', color: colors.warning }}>
-            Ese tramo empieza después del final del audio ({formatClock(duration)}): revisa el offset o elige otra sección.
-          </div>
-        )}
-        {loopMode === 'ab' && (
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-            {(['a', 'b'] as const).map((k) => (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>{k.toUpperCase()} (s)</span>
-                <CommitInput value={ab[k].toFixed(1)} onCommit={(t) => commitAb(k, t)} ariaLabel={`Punto ${k.toUpperCase()} en segundos`} width="72px" inputMode="decimal" />
-                <button type="button" className="stx-btn" onClick={() => markAb(k)} disabled={!anyReady} style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px' }}>
-                  MARCAR {k.toUpperCase()}
-                </button>
-              </div>
-            ))}
-            {ab.b <= ab.a && <span style={{ fontSize: '11px', color: colors.warning }}>B debe ser mayor que A.</span>}
-          </div>
-        )}
-      </div>
-
-      {metaError && (
-        <div role="alert" style={{ color: colors.danger, fontSize: '12px' }}>
-          {metaError}
-        </div>
-      )}
-
-      {/* PISTAS */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        {record.tracks.map((t) => {
-          const st = status[t.id] ?? { kind: 'error', message: 'Pista nueva: vuelve a abrir la canción.' }
-          const m = mix[t.id] ?? { db: 0, muted: false, solo: false }
-          const ok = st.kind === 'ok'
-          return (
-            <div
-              key={t.id}
-              data-testid="stem-track"
-              data-role={t.role}
-              data-status={st.kind}
-              style={{
-                ...cardStyle,
-                padding: '10px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                flexWrap: 'wrap',
-                minWidth: 0,
-                borderColor: st.kind === 'error' ? colors.danger : colors.border,
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: mono,
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  padding: '1px 6px',
-                  borderRadius: '3px',
-                  background: colors.borderSoft,
-                  color: colors.text,
-                }}
-              >
-                {STEM_ROLE_CODES[t.role]}
+        <aside className="rh-side" aria-label="Repetir y mezcla">
+          {loopPanel}
+          {metaAlert}
+          <details
+            className="rh-mixer"
+            data-testid="rehearsal-mixer"
+            open={mixerOpen}
+            onToggle={(e) => setMixerOpen((e.currentTarget as HTMLDetailsElement).open)}
+            style={{ ...cardStyle, minWidth: 0 }}
+          >
+            <summary className="rh-mixer-summary">
+              <span style={{ ...labelStyle, color: colors.text, fontWeight: 700 }}>MEZCLA</span>
+              <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>
+                {readyCount}/{record.tracks.length} pistas
               </span>
-              <div style={{ flex: '1 1 150px', minWidth: 0 }}>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: colors.text, overflowWrap: 'anywhere' }}>{t.label}</div>
-                <div style={{ fontSize: '10px', color: colors.muted, fontFamily: mono, overflowWrap: 'anywhere' }}>
-                  {t.fileName} · {formatBytes(t.size)}
-                </div>
-                {st.kind === 'loading' && <div style={{ fontSize: '10px', color: colors.muted, fontFamily: mono }}>DECODIFICANDO...</div>}
-                {st.kind === 'error' && (
-                  <div data-testid="stem-track-error" style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: colors.danger }}>
-                    <AlertTriangle size={11} /> {st.message}
-                  </div>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: '4px' }}>
-                <button
-                  type="button"
-                  className="stx-btn"
-                  aria-pressed={m.muted}
-                  aria-label={`Silenciar ${t.label}`}
-                  disabled={!ok}
-                  onClick={() => updateMix(t.id, { muted: !m.muted })}
-                  style={toggleStyle(m.muted, colors.danger)}
-                >
-                  M
+              <ChevronDown size={14} className="rh-chevron" aria-hidden="true" />
+            </summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '0 12px 12px' }}>
+              {masterVolume}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>{trackRows}</div>
+              {onManageTracks && (
+                <button type="button" className="stx-btn" onClick={onManageTracks} style={{ ...ghostButton, padding: '6px 10px', fontSize: '11px', alignSelf: 'flex-start' }}>
+                  <Sliders size={12} /> ROLES Y PISTAS EN PISTAS
                 </button>
-                <button
-                  type="button"
-                  className="stx-btn"
-                  aria-pressed={m.solo}
-                  aria-label={`Solo ${t.label}`}
-                  disabled={!ok}
-                  onClick={() => updateMix(t.id, { solo: !m.solo })}
-                  style={toggleStyle(m.solo, colors.warning)}
-                >
-                  S
-                </button>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 180px', minWidth: 0 }}>
-                <input
-                  type="range"
-                  className="stx-range"
-                  aria-label={`Volumen ${t.label}`}
-                  min={DB_MIN}
-                  max={DB_MAX}
-                  step={0.5}
-                  value={m.db}
-                  disabled={!ok}
-                  onChange={(e) => updateMix(t.id, { db: Number(e.target.value) })}
-                />
-                <span style={{ fontFamily: mono, fontSize: '11px', color: colors.text, minWidth: '60px', textAlign: 'right' }}>{formatDb(m.db)}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <select
-                  className="stx-field"
-                  value={t.role}
-                  aria-label={`Rol de ${t.label}`}
-                  onChange={(e) => changeRole(t.id, e.target.value as StemRole)}
-                  style={smallInputStyle}
-                >
-                  {t.role === 'unknown' && <option value="unknown">Sin asignar</option>}
-                  {KNOWN_STEM_ROLES.map((role) => (
-                    <option key={role} value={role}>
-                      {stemRoleLabel(role)}
-                    </option>
-                  ))}
-                </select>
-                {confirmDelete === t.id ? (
-                  <>
-                    <button
-                      type="button"
-                      className="stx-btn"
-                      onClick={() => removeTrack(t.id)}
-                      style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px', background: colors.danger, color: colors.onAccent, borderColor: colors.danger }}
-                    >
-                      QUITAR
-                    </button>
-                    <button type="button" className="stx-btn" onClick={() => setConfirmDelete(null)} style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px' }}>
-                      NO
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className="stx-btn"
-                    aria-label={`Quitar ${t.label}`}
-                    onClick={() => setConfirmDelete(t.id)}
-                    style={{ ...ghostButton, padding: '5px 7px', color: colors.danger }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
-              </div>
+              )}
             </div>
-          )
-        })}
+          </details>
+        </aside>
       </div>
+    )
+  }
+
+  return (
+    <div data-testid="stem-studio" data-state={playState} style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
+      {loadAlert}
+      {/* TRANSPORTE */}
+      {transport}
+      {/* REPETIR SECCION */}
+      {loopPanel}
+      {metaAlert}
+      {/* PISTAS */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>{trackRows}</div>
     </div>
   )
 }

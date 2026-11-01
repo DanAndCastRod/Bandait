@@ -418,3 +418,89 @@ export function layoutChordPro(body: string): PreviewLine[] {
   }
   return out
 }
+
+/** Un trozo de una palabra: el acorde que cae encima (o '') y su texto. */
+export interface ChordSegment {
+  chord: string
+  text: string
+}
+
+export type FlowLine =
+  | { type: 'words'; words: ChordSegment[][]; hasChords: boolean; hasLyrics: boolean }
+  | { type: 'comment'; text: string }
+  | { type: 'blank' }
+
+/**
+ * Una linea "[Am]Ho[F#m7]y vuel[F]vo" en palabras que no se parten ("Ho"+"y" es una sola): asi
+ * la vista que ajusta renglones (prompter de ENSAYO) corta entre palabras y el acorde sigue
+ * encima de su silaba. El espacio despues de una palabra queda al final de su ultimo trozo, para
+ * que el texto siga siendo la letra. Una linea solo de acordes da una palabra por acorde.
+ */
+export function chordWords(line: string): ChordSegment[][] {
+  const words: ChordSegment[][] = []
+  let word: ChordSegment[] = []
+  let chord = ''
+  const addText = (text: string) => {
+    for (const piece of text.match(/\S+\s*|\s+/g) ?? []) {
+      if (!chord && /^\s+$/.test(piece)) {
+        // Espacio sin acorde: se pega a la palabra anterior (o se ignora al inicio de la linea).
+        const prev = word.length > 0 ? word : words[words.length - 1]
+        if (prev) prev[prev.length - 1].text += piece
+        if (word.length > 0) {
+          words.push(word)
+          word = []
+        }
+        continue
+      }
+      word.push({ chord, text: piece })
+      chord = ''
+      if (/\s$/.test(piece)) {
+        words.push(word)
+        word = []
+      }
+    }
+  }
+  const re = /\[([^\]]*)\]/g
+  let last = 0
+  for (let m = re.exec(line); m; m = re.exec(line)) {
+    addText(line.slice(last, m.index))
+    last = m.index + m[0].length
+    // Dos acordes seguidos sin texto: el primero queda solo, como palabra propia.
+    if (chord) {
+      word.push({ chord, text: ' ' })
+      words.push(word)
+      word = []
+    }
+    chord = m[1].trim()
+  }
+  addText(line.slice(last))
+  if (chord) word.push({ chord, text: '' })
+  if (word.length > 0) words.push(word)
+  return words
+}
+
+/** Seccion ChordPro para la vista que ajusta renglones: palabras, comentarios y separaciones. */
+export function flowChordPro(body: string): FlowLine[] {
+  const out: FlowLine[] = []
+  for (const raw of body.replace(/\r\n?/g, '\n').split('\n')) {
+    const trimmed = raw.trim()
+    if (trimmed === '') {
+      out.push({ type: 'blank' })
+      continue
+    }
+    const d = parseDirective(trimmed)
+    if (d) {
+      if (COMMENT_DIRECTIVES.has(d.name) && d.value) out.push({ type: 'comment', text: d.value })
+      continue
+    }
+    const words = chordWords(trimmed)
+    const segments = words.flat()
+    out.push({
+      type: 'words',
+      words,
+      hasChords: segments.some((s) => s.chord !== ''),
+      hasLyrics: segments.some((s) => s.text.trim() !== ''),
+    })
+  }
+  return out
+}

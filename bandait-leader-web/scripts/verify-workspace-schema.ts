@@ -26,7 +26,7 @@ import {
   transitionEntryNotice,
   validateWorkspace,
 } from '../src/services/workspaceSchema.ts'
-import { classifyHeading, layoutChordLine, layoutChordPro, matchPlainHeading, parseChordProSong } from '../src/services/chordpro.ts'
+import { chordWords, classifyHeading, flowChordPro, layoutChordLine, layoutChordPro, matchPlainHeading, parseChordProSong } from '../src/services/chordpro.ts'
 import {
   WorkspaceSyncEngine,
   stableStringify,
@@ -787,6 +787,22 @@ async function main() {
       layoutChordPro('{c: Repetir}\n\n[G]x').map((l) => l.type),
       ['comment', 'blank', 'pair']
     )
+  })
+
+  await check('prompter que ajusta renglones: palabras enteras con su acorde encima', () => {
+    const text = (words: ReturnType<typeof chordWords>) => words.map((w) => w.map((s) => s.text).join('')).join('')
+    const a = chordWords('[Am]Medianoche en [F]Pereira,')
+    assert.deepEqual(a, [[{ chord: 'Am', text: 'Medianoche ' }], [{ chord: '', text: 'en ' }], [{ chord: 'F', text: 'Pereira,' }]])
+    const b = chordWords('[Am]Ho[F#m7]y vuelvo')
+    assert.deepEqual(b[0], [{ chord: 'Am', text: 'Ho' }, { chord: 'F#m7', text: 'y ' }], 'una palabra con dos acordes no se parte')
+    assert.equal(text(b), 'Hoy vuelvo')
+    const c = chordWords('[Am]  [F]  [C] [G]')
+    assert.deepEqual(c.map((w) => w.map((s) => s.chord)), [['Am'], ['F'], ['C'], ['G']], 'linea de compases: un acorde por palabra')
+    assert.deepEqual(chordWords('[A][E]canta').map((w) => w.map((s) => s.chord)), [['A'], ['E']])
+    assert.equal(text(chordWords('cae la [D]noche')), 'cae la noche')
+    const flow = flowChordPro('{c: Suave}\n[G]x\n\n[A]  [E]')
+    assert.deepEqual(flow.map((l) => l.type), ['comment', 'words', 'blank', 'words'])
+    assert.deepEqual(flow[3], { type: 'words', words: [[{ chord: 'A', text: '  ' }], [{ chord: 'E', text: '' }]], hasChords: true, hasLyrics: false })
   })
 
   console.log(`\n${passed} ok, ${failures.length} fallas`)
