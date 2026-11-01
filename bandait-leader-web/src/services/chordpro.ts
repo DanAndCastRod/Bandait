@@ -504,3 +504,85 @@ export function flowChordPro(body: string): FlowLine[] {
   }
   return out
 }
+
+// ---------------------------------------------------------------------------
+// Transposicion (solo en pantalla: el ChordPro guardado no cambia)
+// ---------------------------------------------------------------------------
+
+const NOTE_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }
+const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+/** Nombre de cada tonalidad por clase de altura, con la ortografia usual. */
+const MAJOR_KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+const MINOR_KEYS = ['Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm']
+/** Tonalidades que se escriben con bemoles (y sus relativas menores). */
+const FLAT_KEYS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm'])
+/** Lo que puede seguir a la fundamental: m, 7, maj7, sus4, add9, dim, aug, (b9)... */
+const CHORD_QUALITY = /^(?:maj|min|mi|ma|m|M|dim|aug|sus|add|alt|no|omit|[0-9]|[#b+\-°ø()º,])*$/
+
+function pitchClass(root: string): number | null {
+  const m = /^([A-G])([#b]?)$/.exec(root)
+  if (!m) return null
+  return (NOTE_PC[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + 12) % 12
+}
+
+function spell(pc: number, flats: boolean): string {
+  const i = ((pc % 12) + 12) % 12
+  return flats ? FLAT_NAMES[i] : SHARP_NAMES[i]
+}
+
+/** Tonalidad "E", "C#m", "Bb major"... -> { pc, minor } o null. */
+function parseKey(key: string | null | undefined): { pc: number; minor: boolean } | null {
+  const m = /^\s*([A-Ga-g][#b]?)\s*(m(?!aj)|min|minor)?/.exec(key ?? '')
+  if (!m) return null
+  const pc = pitchClass(m[1].charAt(0).toUpperCase() + m[1].slice(1))
+  return pc === null ? null : { pc, minor: !!m[2] }
+}
+
+/** Tonalidad transpuesta con su nombre usual ("E" +1 -> "F", "Am" +1 -> "Bbm"). Null si no se reconoce. */
+export function transposeKey(key: string | null | undefined, semitones: number): string | null {
+  const k = parseKey(key)
+  if (!k) return null
+  const pc = (((k.pc + Math.round(semitones)) % 12) + 12) % 12
+  return k.minor ? MINOR_KEYS[pc] : MAJOR_KEYS[pc]
+}
+
+/** La tonalidad se escribe con bemoles: F, Bb, Eb, Ab, Db, Gb y sus menores relativas. */
+export function keyPrefersFlats(key: string | null | undefined): boolean {
+  return key ? FLAT_KEYS.has(key) : false
+}
+
+/**
+ * Transpone un acorde: "C#m7" +1 -> "Dm7", "C/G" +2 -> "D/A". `flats` decide la ortografia; sin
+ * el se conserva la del acorde original (un bemol sigue en bemoles). Lo que no es un acorde
+ * ("N.C.", "%", "x2", una palabra entre corchetes) vuelve igual.
+ */
+export function transposeChord(chord: string, semitones: number, flats?: boolean): string {
+  const m = /^(\s*)([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?(\s*)$/.exec(chord)
+  if (!m || !CHORD_QUALITY.test(m[3])) return chord
+  const rootPc = pitchClass(m[2])
+  if (rootPc === null) return chord
+  const n = Math.round(semitones)
+  let out = m[1] + spell(rootPc + n, flats ?? m[2].endsWith('b')) + m[3]
+  if (m[4]) {
+    const bassPc = pitchClass(m[4])
+    if (bassPc === null) return chord
+    out += '/' + spell(bassPc + n, flats ?? m[4].endsWith('b'))
+  }
+  return out + m[5]
+}
+
+/**
+ * Transpone los acordes [..] de un ChordPro. `targetKey` (la tonalidad ya transpuesta) decide
+ * sostenidos o bemoles; sin ella se conserva la ortografia de cada acorde. Las directivas {..} no
+ * se tocan. 0 semitonos (o 12) devuelve el texto igual.
+ */
+export function transposeChordPro(body: string, semitones: number, targetKey?: string | null): string {
+  const n = ((Math.round(semitones) % 12) + 12) % 12
+  if (n === 0 || !body) return body
+  const flats = targetKey ? keyPrefersFlats(targetKey) : undefined
+  return body
+    .split('\n')
+    .map((line) => (/^\s*\{.*\}\s*$/.test(line) ? line : line.replace(/\[([^\]]*)\]/g, (_, c: string) => `[${transposeChord(c, n, flats)}]`)))
+    .join('\n')
+}

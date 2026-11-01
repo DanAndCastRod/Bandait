@@ -202,6 +202,185 @@ test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
   });
 });
 
+/** Medianoche en Pereira (124 BPM 4/4, Am) con 40 s de stems, abierta en ENSAYO. */
+async function rehearseMedianoche(page: Page) {
+  await enterDemo(page);
+  await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
+  await page.getByTestId('stem-file-input').setInputFiles([
+    { name: 'Medianoche - Drums.wav', mimeType: 'audio/wav', buffer: wav(40, 110) },
+    { name: 'Medianoche - Bass.wav', mimeType: 'audio/wav', buffer: wav(40, 82) },
+  ]);
+  await page.getByTestId('stem-save').click();
+  await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
+  await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+  await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
+}
+
+/** Quita el foco de cualquier control (los atajos actuan sobre la pagina). */
+async function blur(page: Page) {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+}
+
+test.describe('Web Admin Hub 2.3 - ENSAYO: atajos y prompter', () => {
+  test('teclado: espacio, compases, secciones, repetir, tamano, transponer, vista, mezcla, atajos y foco', async ({ page }) => {
+    await rehearseMedianoche(page);
+    const current = page.getByTestId('rehearsal-current');
+    const bar = page.getByTestId('rehearsal-bar');
+    const prompter = page.getByTestId('rehearsal-prompter');
+
+    // 9 s = compas 5.65: Estrofa 1, tercer tiempo encendido, compas 1 de 8 de la seccion.
+    await page.getByLabel('Posición').fill('9');
+    await blur(page);
+    await expect(bar).toHaveText('COMPÁS 5');
+    await expect(page.getByTestId('rehearsal-pulse').locator('.rh-beat')).toHaveCount(4);
+    await expect(page.getByTestId('rehearsal-pulse').locator('.rh-beat').nth(2)).toHaveAttribute('data-on', '1');
+    await expect(page.getByTestId('rehearsal-progress-text')).toHaveText('compás 1 de 8');
+
+    // Flechas: un compas; Shift, cuatro.
+    await page.keyboard.press('ArrowRight');
+    await expect(bar).toHaveText('COMPÁS 6');
+    await page.keyboard.press('Shift+ArrowLeft');
+    await expect(bar).toHaveText('COMPÁS 2');
+    await expect(current).toHaveAttribute('data-label', 'Intro');
+
+    // Secciones: abajo = siguiente; arriba al empezar una = la anterior; numeros = la seccion n.
+    await page.keyboard.press('ArrowDown');
+    await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+    await page.keyboard.press('ArrowDown');
+    await expect(current).toHaveAttribute('data-label', 'Coro');
+    await page.keyboard.press('ArrowUp');
+    await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+    await page.keyboard.press('3');
+    await expect(current).toHaveAttribute('data-label', 'Coro');
+    await page.keyboard.press('Home');
+    await expect(current).toHaveAttribute('data-label', 'Intro');
+
+    // Aviso de cambio en los 2 ultimos compases de la Estrofa (compases 11 y 12).
+    await page.keyboard.press('2');
+    await page.keyboard.press('Shift+ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(bar).toHaveText('COMPÁS 11');
+    await expect(page.getByTestId('rehearsal-next-countdown')).toHaveText('Coro en 2');
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('rehearsal-next-countdown')).toHaveText('en 1');
+    await expect(page.getByTestId('rehearsal-next')).toHaveAttribute('data-warn', '1');
+    await page.keyboard.press('2');
+    await expect(page.getByTestId('rehearsal-next-countdown')).toHaveCount(0);
+
+    // Espacio: reproduce y pausa (tambien con el foco en un boton, sin activarlo).
+    await page.getByRole('button', { name: 'LETRA', exact: true }).focus();
+    await page.keyboard.press('Space');
+    await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'playing');
+    await expect(page.getByTestId('rehearsal-current-chordpro')).toHaveAttribute('data-mode', 'chords');
+    await page.keyboard.press('Space');
+    await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'paused');
+    await blur(page);
+
+    // R: repetir y soltar la seccion actual.
+    await page.keyboard.press('r');
+    await expect(page.getByTestId('stem-loop-badge')).toBeVisible();
+    await expect(page.getByTestId('rehearsal-loop-current')).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('r');
+    await expect(page.getByTestId('stem-loop-badge')).toHaveCount(0);
+
+    // + y -: tamano guardado en localStorage.
+    await expect(prompter).toHaveAttribute('data-font-step', '3');
+    await page.keyboard.press('+');
+    await expect(prompter).toHaveAttribute('data-font-step', '4');
+    expect(await page.evaluate(() => localStorage.getItem('bandait_rehearsal_font_step'))).toBe('4');
+
+    // T: medio tono arriba (Am -> Bbm, con bemoles); Shift+0 vuelve al original.
+    const chords = page.getByTestId('rehearsal-current-chordpro').getByTestId('chordpro-chords');
+    await expect(chords.first()).toHaveText('Am');
+    await page.keyboard.press('t');
+    await expect(chords.first()).toHaveText('Bbm');
+    await expect(page.getByTestId('rehearsal-key')).toContainText('Bbm');
+    await page.keyboard.press('Shift+T');
+    await expect(chords.first()).toHaveText('Am');
+    await page.keyboard.press('t');
+    await page.keyboard.press('t');
+    await expect(chords.first()).toHaveText('Bm');
+    await page.keyboard.press('Shift+Digit0');
+    await expect(chords.first()).toHaveText('Am');
+
+    // L y C: vista de letra y de acordes.
+    await page.keyboard.press('l');
+    await expect(page.getByTestId('rehearsal-current-chordpro')).toHaveAttribute('data-mode', 'lyrics');
+    await page.keyboard.press('c');
+    await expect(page.getByTestId('rehearsal-current-chordpro')).toHaveAttribute('data-mode', 'chords');
+
+    // M: plegar y abrir la mezcla.
+    const mixer = page.getByTestId('rehearsal-mixer');
+    await expect(mixer).toHaveAttribute('open', '');
+    await page.keyboard.press('m');
+    await expect(mixer).not.toHaveAttribute('open', '');
+    await page.keyboard.press('m');
+    await expect(mixer).toHaveAttribute('open', '');
+
+    // ?: panel de atajos accesible; mientras esta abierto, las teclas no actuan; Esc lo cierra.
+    await page.keyboard.press('?');
+    const dialog = page.getByRole('dialog', { name: 'ATAJOS DE TECLADO' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Reproducir o pausar');
+    await expect(dialog.getByRole('button', { name: 'Cerrar' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByRole('button', { name: 'Cerrar' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+
+    // F: modo foco; Esc sale.
+    await blur(page);
+    await page.keyboard.press('f');
+    await expect(prompter).toHaveAttribute('data-focus', 'true');
+    await expect(page.getByTestId('rehearsal-focus-play')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(prompter).toHaveAttribute('data-focus', 'false');
+
+    // Escribiendo en un campo, las letras no son atajos.
+    await page.getByTestId('stem-offset').focus();
+    await page.keyboard.press('f');
+    await expect(prompter).toHaveAttribute('data-focus', 'false');
+  });
+
+  test.describe('telefono tactil', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+    test('390 px: barra de herramientas sin scroll, foco con transporte minimo y tercios que cambian de seccion', async ({ page }) => {
+      await rehearseMedianoche(page);
+      const current = page.getByTestId('rehearsal-current');
+      await expect(page.getByRole('toolbar', { name: 'Herramientas del prompter' })).toBeVisible();
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+      await page.getByTestId('rehearsal-focus').tap();
+      const prompter = page.getByTestId('rehearsal-prompter');
+      await expect(prompter).toHaveAttribute('data-focus', 'true');
+      const box = (await prompter.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(389);
+      await expect(page.getByRole('group', { name: 'Transporte' })).toBeVisible();
+
+      await expect(current).toHaveAttribute('data-label', 'Intro');
+      const body = page.locator('.rh-stage-body');
+      const area = (await body.boundingBox())!;
+      await body.tap({ position: { x: area.width * 0.9, y: 30 } });
+      await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+      await body.tap({ position: { x: area.width * 0.9, y: 30 } });
+      await expect(current).toHaveAttribute('data-label', 'Coro');
+      await body.tap({ position: { x: area.width * 0.1, y: 30 } });
+      await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+      // El centro no cambia de seccion.
+      await body.tap({ position: { x: area.width * 0.5, y: 30 } });
+      await expect(current).toHaveAttribute('data-label', 'Estrofa 1');
+
+      await page.getByRole('button', { name: 'Salir del modo foco' }).tap();
+      await expect(prompter).toHaveAttribute('data-focus', 'false');
+    });
+  });
+});
+
 // ------------------------------------------------------------------ Analizar con IA
 
 const DRAFT = {

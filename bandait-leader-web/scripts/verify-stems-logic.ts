@@ -21,6 +21,7 @@ import {
 } from '../src/services/stemNames.ts'
 import { barAtTime, barStartSeconds, clampLoop, dbToGain, formatClock, sectionIndexAtBar, sectionSpans } from '../src/services/stemTiming.ts'
 import { WAV_HEADER_BYTES, encodeWav16, limitPeak, wavByteLength } from '../src/services/wav.ts'
+import { DEFAULT_FONT_STEP, FONT_SCALES, PROMPTER_SHORTCUTS, barSeekTarget, barsLeftInSection, beatInBar, clampFontStep, keyTargetOf, keyToAction, sectionNavTarget, type KeyLike, type KeyTarget } from '../src/services/prompterKeys.ts'
 import { analysisErrorMessage, draftToSongSections, getAnalysis, parseDraft, startAnalysis } from '../src/services/stemAnalysis.ts'
 import type { SongSection } from '../src/types/hub.ts'
 import {
@@ -465,6 +466,73 @@ async function main() {
     await assert.rejects(startAnalysis(aTarget, 'song_1', wav), (e: unknown) => e instanceof StemCloudError && /Director musical de la banda pueden analizar/.test(e.message))
     reply = { status: 503, body: { error: 'analysis_unavailable' } }
     await assert.rejects(getAnalysis(aTarget, 'song_1'), (e: unknown) => e instanceof StemCloudError && /no está disponible/.test(e.message))
+  })
+
+  // ---------------------------------------------------------------- prompter de ENSAYO
+  await check('atajos: cada tecla a su accion; Ctrl/Alt/Meta y campos de texto no son atajos', () => {
+    const k = (key: string, extra: Partial<KeyLike> = {}, target: KeyTarget = 'other') => keyToAction({ key, ...extra }, target)
+    assert.deepEqual(k(' '), { type: 'togglePlay' })
+    assert.deepEqual(k('ArrowRight'), { type: 'bars', delta: 1 })
+    assert.deepEqual(k('ArrowLeft', { shiftKey: true }), { type: 'bars', delta: -4 })
+    assert.deepEqual(k('ArrowDown'), { type: 'section', dir: 1 })
+    assert.deepEqual(k('PageUp'), { type: 'section', dir: -1 })
+    assert.deepEqual(k('3', { code: 'Digit3' }), { type: 'gotoSection', index: 2 })
+    assert.deepEqual(k('0', { code: 'Digit0' }), { type: 'start' })
+    assert.deepEqual(k('Home'), { type: 'start' })
+    assert.deepEqual(k('r'), { type: 'toggleLoop' })
+    assert.deepEqual(k('R', { shiftKey: true }), { type: 'toggleLoop' })
+    assert.deepEqual(k('c'), { type: 'mode', mode: 'chords' })
+    assert.deepEqual(k('l'), { type: 'mode', mode: 'lyrics' })
+    assert.deepEqual(k('+'), { type: 'fontSize', delta: 1 })
+    assert.deepEqual(k('-'), { type: 'fontSize', delta: -1 })
+    assert.deepEqual(k('t'), { type: 'transpose', delta: 1 })
+    assert.deepEqual(k('T', { shiftKey: true }), { type: 'transpose', delta: -1 })
+    // Shift+0 por codigo: "=" en un teclado espanol, ")" en uno ingles.
+    assert.deepEqual(k('=', { code: 'Digit0', shiftKey: true }), { type: 'transposeReset' })
+    assert.deepEqual(k(')', { code: 'Digit0', shiftKey: true }), { type: 'transposeReset' })
+    assert.deepEqual(k('f'), { type: 'focus' })
+    assert.deepEqual(k('Escape'), { type: 'exit' })
+    assert.deepEqual(k('m'), { type: 'mixer' })
+    assert.deepEqual(k('?', { shiftKey: true }), { type: 'help' })
+    assert.equal(k('x'), null)
+    assert.equal(k('r', { ctrlKey: true }), null, 'Ctrl+R recarga: no es un atajo')
+    assert.equal(k(' ', { metaKey: true }), null)
+    assert.equal(k('ArrowRight', { altKey: true }), null)
+    assert.equal(k(' ', {}, 'text'), null, 'escribiendo en un campo')
+    assert.equal(k('ArrowRight', {}, 'range'), null, 'el deslizador usa sus flechas')
+    assert.deepEqual(k(' ', {}, 'range'), { type: 'togglePlay' })
+    assert.equal(keyTargetOf({ tagName: 'INPUT', type: 'text' }), 'text')
+    assert.equal(keyTargetOf({ tagName: 'INPUT', type: 'range' }), 'range')
+    assert.equal(keyTargetOf({ tagName: 'SELECT' }), 'text')
+    assert.equal(keyTargetOf({ tagName: 'DIV', isContentEditable: true }), 'text')
+    assert.equal(keyTargetOf({ tagName: 'BUTTON' }), 'other')
+    assert.equal(keyTargetOf(null), 'other')
+    assert.ok(PROMPTER_SHORTCUTS.length >= 12)
+  })
+
+  await check('prompter: saltos de compas y de seccion (anterior como en un reproductor)', () => {
+    // 120 BPM 4/4: 2 s por compas. Secciones de 4 y 8 compases desde el compas 1.
+    const t = { bpm: 120, beatsPerBar: 4, offsetMs: 0 }
+    const spans = sectionSpans({ bpm: 120, beatsPerBar: 4, sections: [{ id: 'a', label: 'Intro', bars: 4 }, { id: 'b', label: 'Coro', bars: 8 }] as SongSection[] }, 0)
+    assert.equal(barSeekTarget(9, 1, t), 10, 'compas 5.5 -> inicio del 6')
+    assert.equal(barSeekTarget(9, -1, t), 6, 'compas 5.5 -> inicio del 4')
+    assert.equal(barSeekTarget(1, -4, t), 0, 'nunca antes del segundo 0')
+    assert.equal(barSeekTarget(3, 4, { ...t, offsetMs: 500 }), 10.5, 'con offset: compas 2.25 -> inicio del 6 = 10 s + 0.5 s')
+    assert.equal(sectionNavTarget(spans, 3, 1, t), 8, 'de Intro al Coro')
+    assert.equal(sectionNavTarget(spans, 9, 1, t), null, 'despues de la ultima no hay siguiente')
+    assert.equal(sectionNavTarget(spans, 12, -1, t), 8, 'mas de 1 compas dentro: al inicio de la actual')
+    assert.equal(sectionNavTarget(spans, 9, -1, t), 0, 'al empezar el Coro: a la Intro')
+    assert.equal(sectionNavTarget(spans, 1, -1, t), 0, 'desde la primera: al principio')
+    assert.equal(sectionNavTarget([], 1, 1, t), null)
+    assert.equal(beatInBar(5.0, 4), 0)
+    assert.equal(beatInBar(5.76, 4), 3)
+    assert.equal(beatInBar(0.5, 4), -1, 'antes del compas 1')
+    assert.equal(barsLeftInSection({ startBar: 5, bars: 8 }, 11.2), 2)
+    assert.equal(barsLeftInSection({ startBar: 5, bars: 8 }, 12.9), 1)
+    assert.equal(barsLeftInSection({ startBar: 5, bars: 8 }, 13), 0)
+    assert.equal(clampFontStep('9'), FONT_SCALES.length - 1)
+    assert.equal(clampFontStep(-2), 0)
+    assert.equal(clampFontStep(null), DEFAULT_FONT_STEP)
   })
 
   console.log(`\n${passed} ok, ${failures.length} fallas`)
