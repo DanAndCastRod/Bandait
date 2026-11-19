@@ -1,0 +1,632 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronUp, Download, Power, RotateCcw, Sparkles } from 'lucide-react'
+import { STEM_ROLE_CODES, stemRoleLabel } from '../../services/stemNames'
+import {
+  defaultFx,
+  STUDIO_MASTER_ID,
+  STUDIO_REVERB_DECAY_S_MAX,
+  STUDIO_REVERB_DECAY_S_MIN,
+  STUDIO_REVERB_RETURN_DB_MAX,
+  STUDIO_REVERB_RETURN_DB_MIN,
+  STUDIO_REVERB_SEND_DB_MAX,
+  STUDIO_REVERB_SEND_DB_MIN,
+  STUDIO_VOLUME_DB_MAX,
+  STUDIO_VOLUME_DB_MIN,
+  type StudioFx,
+  type StudioFxType,
+  type StudioSession,
+  type StudioTrack,
+} from '../../services/studio/session'
+import { updateMaster } from '../../services/studio/sessionOps'
+import { StudioEqCurve } from './StudioInspector'
+import { errorText, formatDb, formatPan, trackColor, useStudio, withFx, type StudioController, type StudioFxSelection, type StudioPanelProps } from './studioState'
+
+interface Props extends StudioPanelProps {
+  /** Abre el inspector en el efecto recien elegido (la vista muestra la pestana INSPECTOR). */
+  onEditFx: () => void
+  /** Abre el dialogo de exportar. */
+  onExport: () => void
+}
+
+// ---------------------------------------------------------------------------
+// Escala del fader
+// ---------------------------------------------------------------------------
+
+/**
+ * Recorrido del fader (0 abajo, 1 arriba) contra dB. No es lineal: como en una consola, la zona
+ * de trabajo (de -12 a +6 dB) ocupa casi la mitad del recorrido y 0 dB queda a tres cuartos.
+ * El medidor usa la misma escala, asi el nivel y el fader se leen contra las mismas marcas.
+ */
+const FADER_POINTS: readonly (readonly [number, number])[] = [
+  [0, -60],
+  [0.1, -40],
+  [0.25, -24],
+  [0.45, -12],
+  [0.6, -6],
+  [0.75, 0],
+  [0.875, 6],
+  [1, 12],
+]
+const FADER_MARKS: readonly number[] = [12, 6, 0, -6, -12, -24, -40]
+const FADER_STEPS = 1000
+const FADER_STEP = 5
+
+function dbToFader(db: number): number {
+  if (!Number.isFinite(db) || db <= STUDIO_VOLUME_DB_MIN) return 0
+  if (db >= STUDIO_VOLUME_DB_MAX) return 1
+  for (let i = 1; i < FADER_POINTS.length; i++) {
+    const [p1, d1] = FADER_POINTS[i]
+    if (db <= d1) {
+      const [p0, d0] = FADER_POINTS[i - 1]
+      return p0 + ((db - d0) / (d1 - d0)) * (p1 - p0)
+    }
+  }
+  return 1
+}
+
+function faderToDb(position: number): number {
+  const p = Math.min(1, Math.max(0, position))
+  for (let i = 1; i < FADER_POINTS.length; i++) {
+    const [p1, d1] = FADER_POINTS[i]
+    if (p <= p1) {
+      const [p0, d0] = FADER_POINTS[i - 1]
+      return Math.round((d0 + ((p - p0) / (p1 - p0)) * (d1 - d0)) * 100) / 100
+    }
+  }
+  return STUDIO_VOLUME_DB_MAX
+}
+
+const faderValue = (db: number) => Math.round((dbToFader(db) * FADER_STEPS) / FADER_STEP) * FADER_STEP
+
+// ---------------------------------------------------------------------------
+// Medidores (un solo requestAnimationFrame para todo el mezclador)
+// ---------------------------------------------------------------------------
+
+interface MeterState {
+  hold: number
+  holdUntil: number
+  lastPeak: number
+  lastRms: number
+  lastHold: number
+}
+
+function paintMeter(canvas: HTMLCanvasElement, state: MeterState, peakDb: number, rmsDb: number, now: number): void {
+  const dpr = window.devicePixelRatio || 1
+  const w = Math.round(canvas.clientWidth * dpr)
+  const h = Math.round(canvas.clientHeight * dpr)
+  if (w === 0 || h === 0) return
+  let resized = false
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w
+    canvas.height = h
+    resized = true
+  }
+  const peak = dbToFader(peakDb)
+  const rms = dbToFader(rmsDb)
+  if (peak >= state.hold) {
+    state.hold = peak
+    state.holdUntil = now + 900
+  } else if (now > state.holdUntil) {
+    state.hold = Math.max(peak, state.hold - 0.02)
+  }
+  // Sin cambios no se repinta: una pista en silencio no gasta nada.
+  if (!resized && Math.abs(peak - state.lastPeak) < 0.004 && Math.abs(rms - state.lastRms) < 0.004 && Math.abs(state.hold - state.lastHold) < 0.004) return
+  state.lastPeak = peak
+  state.lastRms = rms
+  state.lastHold = state.hold
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const over = peakDb > 0
+  const zero = dbToFader(0)
+  ctx.clearRect(0, 0, w, h)
+  ctx.fillStyle = over ? '#D96459' : '#3C6E6B'
+  ctx.fillRect(0, h - peak * h, w, peak * h)
+  ctx.fillStyle = over ? '#D96459' : '#5CC8C2'
+  ctx.fillRect(0, h - rms * h, w, rms * h)
+  if (state.hold > 0.01) {
+    ctx.fillStyle = state.hold > zero ? '#D96459' : '#D5DAE0'
+    ctx.fillRect(0, Math.max(0, h - state.hold * h - dpr), w, Math.max(1, dpr))
+  }
+  ctx.fillStyle = '#2E343D'
+  ctx.fillRect(0, h - zero * h, w, Math.max(1, dpr))
+}
+
+function loudnessText(value: number): string {
+  return Number.isFinite(value) && value > -70 ? value.toFixed(1) : '--.-'
+}
+
+type RegisterMeter = (id: string, canvas: HTMLCanvasElement | null) => void
+
+// ---------------------------------------------------------------------------
+// Piezas de un canal
+// ---------------------------------------------------------------------------
+
+/** Cambio en caliente con una operacion que puede lanzar: el error se muestra, no se propaga. */
+function live(controller: StudioController, operation: (session: StudioSession) => StudioSession): void {
+  try {
+    controller.applyLive(operation(controller.snapshot().session))
+  } catch (err) {
+    controller.notify('error', errorText(err))
+  }
+}
+
+const FX_SHORT: Readonly<Record<StudioFxType, string>> = { eq: 'EQ', compressor: 'COMP', limiter: 'LIM' }
+const FX_NAMES: Readonly<Record<StudioFxType, string>> = { eq: 'EQ', compressor: 'compresor', limiter: 'limitador' }
+
+interface InsertProps {
+  controller: StudioController
+  targetId: string
+  targetName: string
+  type: StudioFxType
+  chain: readonly StudioFx[]
+  selected: boolean
+  onEditFx: () => void
+}
+
+/** Ranura de insert: el nombre abre (o crea) el efecto en el inspector; el boton lateral es el bypass. */
+const InsertSlot: React.FC<InsertProps> = ({ controller, targetId, targetName, type, chain, selected, onEditFx }) => {
+  const fx = chain.find((item) => item.type === type) ?? null
+  const state = !fx ? 'empty' : fx.bypass ? 'bypass' : 'on'
+  const open = () => {
+    if (!fx && !controller.run(`Agregar ${FX_NAMES[type]}`, (session) => withFx(session, targetId, defaultFx(type)))) return
+    controller.selectFx({ targetId, type })
+    onEditFx()
+  }
+  return (
+    <div className="stu-insert" data-state={state} data-selected={selected}>
+      <button
+        type="button"
+        className="stu-insert-name"
+        onClick={open}
+        aria-label={fx ? `Editar ${FX_NAMES[type]} de ${targetName}${fx.bypass ? ' (en bypass)' : ''}` : `Agregar ${FX_NAMES[type]} a ${targetName}`}
+        title={fx ? 'Editar en el inspector' : `Agregar ${FX_NAMES[type]}`}
+        data-testid={`studio-insert-${targetId}-${type}`}
+      >
+        {fx ? FX_SHORT[type] : `+ ${FX_SHORT[type]}`}
+      </button>
+      {fx && (
+        <button
+          type="button"
+          className="stu-insert-power"
+          aria-pressed={!fx.bypass}
+          aria-label={`${fx.bypass ? 'Activar' : 'Poner en bypass'} ${FX_NAMES[type]} de ${targetName}`}
+          title={fx.bypass ? 'En bypass: activar' : 'Activo: poner en bypass'}
+          onClick={() => controller.run(fx.bypass ? `Activar ${FX_NAMES[type]}` : `Bypass de ${FX_NAMES[type]}`, (session) => withFx(session, targetId, { ...fx, bypass: !fx.bypass } as StudioFx))}
+        >
+          <Power size={11} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+interface FaderProps {
+  label: string
+  valueDb: number
+  meterId: string
+  registerMeter: RegisterMeter
+  onLive: (db: number) => void
+  onCommit: () => void
+  onReset: () => void
+}
+
+/** Fader vertical con su escala en dB y el medidor al lado, los tres sobre la misma escala. */
+const FaderColumn: React.FC<FaderProps> = ({ label, valueDb, meterId, registerMeter, onLive, onCommit, onReset }) => (
+  <div className="stu-strip-fader">
+    <div className="stu-scale" aria-hidden="true">
+      {FADER_MARKS.map((db) => (
+        <span key={db} data-zero={db === 0} style={{ bottom: `${dbToFader(db) * 100}%` }}>
+          {db > 0 ? `+${db}` : db}
+        </span>
+      ))}
+    </div>
+    <input
+      type="range"
+      className="stu-fader"
+      min={0}
+      max={FADER_STEPS}
+      step={FADER_STEP}
+      value={faderValue(valueDb)}
+      onChange={(event) => onLive(faderToDb(Number(event.target.value) / FADER_STEPS))}
+      onPointerUp={onCommit}
+      onKeyUp={onCommit}
+      onBlur={onCommit}
+      onDoubleClick={onReset}
+      aria-label={label}
+      aria-valuetext={`${formatDb(valueDb)} dB`}
+      title="Doble clic: 0 dB"
+    />
+    <canvas className="stu-strip-meter" aria-hidden="true" ref={(canvas) => registerMeter(meterId, canvas)} />
+  </div>
+)
+
+interface MiniProps {
+  label: string
+  short: string
+  value: number
+  min: number
+  max: number
+  step: number
+  text: string
+  resetTo: number
+  onLive: (value: number) => void
+  onCommit: () => void
+}
+
+/** Control horizontal pequeno de un canal (paneo, envio a reverb). */
+const MiniSlider: React.FC<MiniProps> = ({ label, short, value, min, max, step, text, resetTo, onLive, onCommit }) => (
+  <label className="stu-mini" title={`${label}. Doble clic: valor por defecto`}>
+    <span className="stu-mini-head">
+      <span>{short}</span>
+      <span>{text}</span>
+    </span>
+    <input
+      type="range"
+      className="stu-range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(event) => onLive(Number(event.target.value))}
+      onPointerUp={onCommit}
+      onKeyUp={onCommit}
+      onBlur={onCommit}
+      onDoubleClick={() => {
+        onLive(resetTo)
+        onCommit()
+      }}
+      aria-label={label}
+      aria-valuetext={text}
+    />
+  </label>
+)
+
+function sendText(db: number): string {
+  return db <= STUDIO_REVERB_SEND_DB_MIN ? 'no' : formatDb(db)
+}
+
+// ---------------------------------------------------------------------------
+// Canal de pista
+// ---------------------------------------------------------------------------
+
+interface StripProps {
+  controller: StudioController
+  track: StudioTrack
+  index: number
+  sampleRate: number
+  selectedFx: StudioFxSelection | null
+  /** Algun clip de la pista usa audio generado por IA. */
+  generated: boolean
+  registerMeter: RegisterMeter
+  onEditFx: () => void
+}
+
+const TrackStrip: React.FC<StripProps> = React.memo(({ controller, track, index, sampleRate, selectedFx, generated, registerMeter, onEditFx }) => {
+  const eq = track.fx.find((item) => item.type === 'eq')
+  const picked = selectedFx?.targetId === track.id ? selectedFx.type : null
+  return (
+    <div className="stu-strip" role="group" aria-label={`Canal ${index + 1}: ${track.name}`} style={{ ['--stu-track' as string]: trackColor(index) }} data-testid={`studio-strip-${track.id}`}>
+      <div className="stu-strip-head">
+        <span className="stu-strip-name" title={track.name}>
+          {track.name}
+        </span>
+        <span className="stu-strip-tags">
+          <span className="stu-strip-role" title={`Rol: ${stemRoleLabel(track.role)}`}>
+            {STEM_ROLE_CODES[track.role]}
+          </span>
+          {generated && (
+            <span className="stu-badge" data-tone="warn" title="Esta pista tiene audio generado por IA" data-testid={`studio-strip-ai-${track.id}`}>
+              <Sparkles size={10} aria-hidden="true" />
+              IA
+            </span>
+          )}
+        </span>
+      </div>
+
+      <div className="stu-strip-inserts">
+        <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="eq" chain={track.fx} selected={picked === 'eq'} onEditFx={onEditFx} />
+        {eq && eq.type === 'eq' ? <StudioEqCurve params={eq.params} sampleRate={sampleRate} bypass={eq.bypass} className="stu-eq-mini" /> : <span className="stu-eq-mini" data-empty="true" aria-hidden="true" />}
+        <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="compressor" chain={track.fx} selected={picked === 'compressor'} onEditFx={onEditFx} />
+      </div>
+
+      <MiniSlider
+        label="Envío a reverb"
+        short="REV"
+        value={track.reverbSendDb}
+        min={STUDIO_REVERB_SEND_DB_MIN}
+        max={STUDIO_REVERB_SEND_DB_MAX}
+        step={1}
+        text={sendText(track.reverbSendDb)}
+        resetTo={STUDIO_REVERB_SEND_DB_MIN}
+        onLive={(reverbSendDb) => controller.updateTrackLive(track.id, { reverbSendDb })}
+        onCommit={() => controller.commitLive('Envío a reverb')}
+      />
+      <MiniSlider
+        label="Paneo"
+        short="PAN"
+        value={track.pan}
+        min={-1}
+        max={1}
+        step={0.02}
+        text={formatPan(track.pan)}
+        resetTo={0}
+        onLive={(pan) => controller.updateTrackLive(track.id, { pan })}
+        onCommit={() => controller.commitLive('Paneo de pista')}
+      />
+
+      <FaderColumn
+        label={`Volumen de ${track.name} en dB`}
+        valueDb={track.volumeDb}
+        meterId={track.id}
+        registerMeter={registerMeter}
+        onLive={(volumeDb) => controller.updateTrackLive(track.id, { volumeDb })}
+        onCommit={() => controller.commitLive('Volumen de pista')}
+        onReset={() => controller.updateTrack(track.id, { volumeDb: 0 }, 'Volumen de pista')}
+      />
+      <span className="stu-strip-db">{formatDb(track.volumeDb)}</span>
+
+      <div className="stu-strip-keys">
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="mini"
+          data-on={track.mute}
+          data-accent="warn"
+          aria-pressed={track.mute}
+          onClick={() => controller.updateTrack(track.id, { mute: !track.mute }, track.mute ? 'Quitar mute' : 'Mute')}
+          aria-label={`Mute de ${track.name}`}
+          title="Mute"
+        >
+          M
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="mini"
+          data-on={track.solo}
+          data-accent="play"
+          aria-pressed={track.solo}
+          onClick={() => controller.updateTrack(track.id, { solo: !track.solo }, track.solo ? 'Quitar solo' : 'Solo')}
+          aria-label={`Solo de ${track.name}`}
+          title="Solo"
+        >
+          S
+        </button>
+      </div>
+    </div>
+  )
+})
+TrackStrip.displayName = 'TrackStrip'
+
+// ---------------------------------------------------------------------------
+// Master
+// ---------------------------------------------------------------------------
+
+interface MasterProps {
+  controller: StudioController
+  session: StudioSession
+  selectedFx: StudioFxSelection | null
+  registerMeter: RegisterMeter
+  registerReadout: (key: 'integrated' | 'momentary' | 'peak', element: HTMLElement | null) => void
+  onEditFx: () => void
+}
+
+const MasterStrip: React.FC<MasterProps> = ({ controller, session, selectedFx, registerMeter, registerReadout, onEditFx }) => {
+  const master = session.master
+  const eq = master.fx.find((item) => item.type === 'eq')
+  const picked = selectedFx?.targetId === STUDIO_MASTER_ID ? selectedFx.type : null
+  const hasLimiter = master.fx.some((item) => item.type === 'limiter' && !item.bypass)
+  const setReverb = (patch: Partial<StudioSession['master']['reverb']>) => live(controller, (current) => updateMaster(current, { patch: { reverb: { ...current.master.reverb, ...patch } } }))
+
+  return (
+    <div className="stu-strip" data-master="true" role="group" aria-label="Canal master" data-testid="studio-strip-master">
+      <div className="stu-strip-head">
+        <span className="stu-strip-name">MASTER</span>
+        <span className="stu-strip-tags">
+          {!hasLimiter && (
+            <span className="stu-badge" data-tone="warn" title="Sin limitador activo, la mezcla puede pasar de 0 dB">
+              SIN LIM
+            </span>
+          )}
+        </span>
+      </div>
+
+      <div className="stu-master-cols">
+        <div className="stu-master-col">
+          <div className="stu-strip-inserts">
+            <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="eq" chain={master.fx} selected={picked === 'eq'} onEditFx={onEditFx} />
+            {eq && eq.type === 'eq' ? <StudioEqCurve params={eq.params} sampleRate={session.sampleRate} bypass={eq.bypass} className="stu-eq-mini" /> : <span className="stu-eq-mini" data-empty="true" aria-hidden="true" />}
+            <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="compressor" chain={master.fx} selected={picked === 'compressor'} onEditFx={onEditFx} />
+            <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="limiter" chain={master.fx} selected={picked === 'limiter'} onEditFx={onEditFx} />
+          </div>
+          <MiniSlider
+            label="Reverb compartida: decaimiento"
+            short="REV S"
+            value={master.reverb.decayS}
+            min={STUDIO_REVERB_DECAY_S_MIN}
+            max={STUDIO_REVERB_DECAY_S_MAX}
+            step={0.1}
+            text={`${master.reverb.decayS.toFixed(1)} s`}
+            resetTo={1.8}
+            onLive={(decayS) => setReverb({ decayS })}
+            onCommit={() => controller.commitLive('Decaimiento de la reverb')}
+          />
+          <MiniSlider
+            label="Reverb compartida: retorno"
+            short="RET"
+            value={master.reverb.returnDb}
+            min={STUDIO_REVERB_RETURN_DB_MIN}
+            max={STUDIO_REVERB_RETURN_DB_MAX}
+            step={0.5}
+            text={sendText(master.reverb.returnDb)}
+            resetTo={0}
+            onLive={(returnDb) => setReverb({ returnDb })}
+            onCommit={() => controller.commitLive('Retorno de la reverb')}
+          />
+          <dl className="stu-loud" aria-label="Sonoridad del master">
+            <dt title="LUFS integrado desde el último arranque o reinicio. Es una estimación: la medida exacta es la del archivo exportado.">LUFS INT</dt>
+            <dd ref={(element) => registerReadout('integrated', element)} data-testid="studio-lufs-integrated">
+              --.-
+            </dd>
+            <dt title="LUFS momentáneo (400 ms)">LUFS MOM</dt>
+            <dd ref={(element) => registerReadout('momentary', element)}>--.-</dd>
+            <dt title="Pico real máximo desde el último reinicio, en dBTP">PICO REAL</dt>
+            <dd ref={(element) => registerReadout('peak', element)} data-testid="studio-true-peak">
+              --.-
+            </dd>
+          </dl>
+          <button type="button" className="stu-btn" data-size="small" onClick={() => controller.engine.resetMasterLoudness()} title="Reinicia el LUFS integrado y el pico real">
+            <RotateCcw size={11} />
+            REINICIAR
+          </button>
+        </div>
+
+        <div className="stu-master-col" data-fader="true">
+          <FaderColumn
+            label="Volumen del master en dB"
+            valueDb={master.volumeDb}
+            meterId={STUDIO_MASTER_ID}
+            registerMeter={registerMeter}
+            onLive={(volumeDb) => live(controller, (current) => updateMaster(current, { patch: { volumeDb } }))}
+            onCommit={() => controller.commitLive('Volumen del master')}
+            onReset={() => controller.run('Volumen del master', (current) => updateMaster(current, { patch: { volumeDb: 0 } }))}
+          />
+          <span className="stu-strip-db">{formatDb(master.volumeDb)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Mezclador
+// ---------------------------------------------------------------------------
+
+const COLLAPSE_KEY = 'bandait_studio_mixer'
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === '0'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Mezclador del Estudio: un canal por pista (inserts, envio a reverb, paneo, fader con escala en
+ * dB, medidor, mute y solo) y el master (EQ, compresor, limitador, reverb compartida, LUFS
+ * integrado y pico real). Medidores y lecturas de sonoridad se pintan desde un solo
+ * requestAnimationFrame, sin estado de React.
+ */
+export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport }) => {
+  const snap = useStudio(controller)
+  const { session } = snap
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const meters = useRef(new Map<string, HTMLCanvasElement>())
+  const readouts = useRef(new Map<string, HTMLElement>())
+
+  const registerMeter = useCallback<RegisterMeter>((id, canvas) => {
+    if (canvas) meters.current.set(id, canvas)
+    else meters.current.delete(id)
+  }, [])
+  const registerReadout = useCallback((key: 'integrated' | 'momentary' | 'peak', element: HTMLElement | null) => {
+    if (element) readouts.current.set(key, element)
+    else readouts.current.delete(key)
+  }, [])
+
+  useEffect(() => {
+    const states = new Map<string, MeterState>()
+    const texts = new Map<string, string>()
+    const write = (key: string, text: string, alert: boolean) => {
+      const element = readouts.current.get(key)
+      const signature = `${text}|${alert}`
+      if (!element || texts.get(key) === signature) return
+      texts.set(key, signature)
+      element.textContent = text
+      element.dataset.alert = alert ? 'true' : 'false'
+    }
+    return controller.onFrame(() => {
+      if (meters.current.size === 0) return
+      const now = performance.now()
+      for (const [id, canvas] of meters.current) {
+        let state = states.get(id)
+        if (!state) {
+          state = { hold: 0, holdUntil: 0, lastPeak: -1, lastRms: -1, lastHold: -1 }
+          states.set(id, state)
+        }
+        if (id === STUDIO_MASTER_ID) {
+          const reading = controller.engine.readMasterMeter()
+          paintMeter(canvas, state, reading.peakDb, reading.rmsDb, now)
+          write('integrated', loudnessText(reading.integratedLufs), false)
+          write('momentary', loudnessText(reading.momentaryLufs), false)
+          write('peak', loudnessText(reading.truePeakDb), reading.truePeakDb > -1)
+        } else {
+          const reading = controller.engine.readTrackMeter(id)
+          paintMeter(canvas, state, reading.peakDb, reading.rmsDb, now)
+        }
+      }
+    })
+  }, [controller])
+
+  const generatedTracks = useMemo(() => {
+    const generated = new Set(session.assets.filter((asset) => asset.kind === 'generated').map((asset) => asset.id))
+    const ids = new Set<string>()
+    if (generated.size === 0) return ids
+    for (const track of session.tracks) if (track.clips.some((clip) => generated.has(clip.assetId))) ids.add(track.id)
+    return ids
+  }, [session.assets, session.tracks])
+
+  const toggle = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    try {
+      // '0' = plegado; cualquier otra cosa, abierto.
+      localStorage.setItem(COLLAPSE_KEY, next ? '0' : '1')
+    } catch {
+      // Sin almacenamiento solo se pierde la preferencia.
+    }
+  }
+
+  return (
+    <section className="stu-mixer" aria-label="Mezclador" data-testid="studio-mixer" data-collapsed={collapsed}>
+      <header className="stu-mixer-bar">
+        <button type="button" className="stu-btn" data-tone="ghost" onClick={toggle} aria-expanded={!collapsed} aria-controls="studio-mixer-body" data-testid="studio-mixer-toggle">
+          {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          MEZCLADOR
+        </button>
+        <span className="stu-label">
+          {session.tracks.length} {session.tracks.length === 1 ? 'pista' : 'pistas'}
+        </span>
+        <span className="stu-bar-spacer" />
+        <button type="button" className="stu-btn" onClick={onExport} disabled={snap.recording || !snap.ready} title="Exportar la mezcla o las pistas a WAV" data-testid="studio-export-open">
+          <Download size={13} />
+          EXPORTAR
+        </button>
+      </header>
+      {!collapsed && (
+        <div className="stu-mixer-body" id="studio-mixer-body">
+          <div className="stu-strips">
+            {session.tracks.length === 0 ? (
+              <p className="stu-help stu-strips-empty">Sin pistas todavía. Importa audio o agrega una pista en la línea de tiempo.</p>
+            ) : (
+              session.tracks.map((track, index) => (
+                <TrackStrip
+                  key={track.id}
+                  controller={controller}
+                  track={track}
+                  index={index}
+                  sampleRate={session.sampleRate}
+                  selectedFx={snap.selectedFx?.targetId === track.id ? snap.selectedFx : null}
+                  generated={generatedTracks.has(track.id)}
+                  registerMeter={registerMeter}
+                  onEditFx={onEditFx}
+                />
+              ))
+            )}
+          </div>
+          <MasterStrip controller={controller} session={session} selectedFx={snap.selectedFx} registerMeter={registerMeter} registerReadout={registerReadout} onEditFx={onEditFx} />
+        </div>
+      )}
+    </section>
+  )
+}

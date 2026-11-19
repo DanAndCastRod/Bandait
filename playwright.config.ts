@@ -60,6 +60,10 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://localhost:5173',
+        // Microfono simulado de Chrome para e2e/studio.leader-web.spec.ts (grabacion del Estudio):
+        // getUserMedia entrega un dispositivo falso y no muestra el dialogo de permiso. No afecta
+        // a las pruebas que no piden microfono.
+        launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
       },
     },
     {

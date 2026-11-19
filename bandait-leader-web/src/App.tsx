@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { lazy, Suspense, useState } from 'react'
 import { HubProvider } from './context/HubContext'
 import { useHub } from './context/hubContextCore'
 import { AuthScreen } from './components/AuthScreen'
@@ -11,8 +11,13 @@ import { BandMembersHubView } from './views/BandMembersHubView'
 import { SongsHubView } from './views/SongsHubView'
 import { RehearsalHubView } from './views/RehearsalHubView'
 import { SettingsHubView } from './views/SettingsHubView'
+import { studioEnabled } from './services/studio/flag'
 import { colors, mono } from './components/hubStyles'
 import './styles/global.css'
+
+const STUDIO_ENABLED = studioEnabled()
+/** El Estudio se carga aparte: sin el interruptor, su codigo no entra en el arranque del Hub. */
+const StudioHubView = lazy(() => import('./views/StudioHubView').then((module) => ({ default: module.StudioHubView })))
 
 const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div
@@ -165,6 +170,12 @@ const HubMainContent: React.FC = () => {
           />
         )}
         {activeTab === 'tracks' && <StemsHubView />}
+        {/* Estudio Bandait: solo con el interruptor (services/studio/flag.ts). */}
+        {activeTab === 'studio' && STUDIO_ENABLED && (
+          <Suspense fallback={<p style={{ padding: '24px', fontFamily: mono, fontSize: '12px', color: colors.muted }}>Cargando el Estudio...</p>}>
+            <StudioHubView />
+          </Suspense>
+        )}
         {activeTab === 'band' && <BandMembersHubView />}
         {activeTab === 'settings' && <SettingsHubView />}
       </main>
