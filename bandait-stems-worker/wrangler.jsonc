@@ -2,7 +2,14 @@
   // Bandait stems (fase 3): R2 + verificacion de sesion de Supabase. Ver README.md.
   // SUPABASE_URL y SUPABASE_ANON_KEY son PUBLICOS (los mismos de bandait-leader-web/.env.production):
   // el Worker llama a Supabase con el JWT de quien pide, nunca con la clave de servicio.
-  // MUSICAI_API_KEY es secreto: `wrangler secret put MUSICAI_API_KEY` (ClipVault: bandait-musicai-api-key).
+  //
+  // SECRETOS (nunca en este archivo; se cargan con `wrangler secret put <NOMBRE>`):
+  //   MUSICAI_API_KEY   Music AI: analisis, y los trabajos `master` y `separate` del Estudio.
+  //                     ClipVault: bandait-musicai-api-key. Ya esta cargado en produccion.
+  //   GEMINI_API_KEY    Gemini API (no Vertex): trabajo `generate` con Lyria. Sin el, 503.
+  //   ASSIST_API_KEY    Modelo de lenguaje del asistente de mezcla (trabajo `assist`); con
+  //                     ASSIST_PROVIDER "anthropic" es una clave de la API de Anthropic. Sin el, 503.
+  //   SUNO_API_KEY      Futuro. Hoy `generate` con `suno` responde 501 aunque exista.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bandait-stems",
   "main": "src/index.ts",
@@ -18,6 +25,30 @@
     "ALLOWED_ORIGINS": "https://bandait.releven.cc,https://bandait.pages.dev,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
     "MAX_FILE_MB": "200",
     "MUSICAI_WORKFLOW": "stems-workflow-releven-bandait",
-    "MUSICAI_SPLIT_WORKFLOW": "splited_stems_bandait"
+    "MUSICAI_SPLIT_WORKFLOW": "splited_stems_bandait",
+
+    // ---- Estudio (bandait-protocol/STUDIO_V1.md, seccion 8) ----
+    // Workflow de mastering creado en el panel de Music AI. Vacio: el trabajo `master` responde 503.
+    "MUSICAI_MASTER_WORKFLOW": "",
+    // Nombre del parametro de ese workflow que recibe el volumen objetivo en LUFS. Vacio: no se envia.
+    "MUSICAI_MASTER_LUFS_PARAM": "",
+    // Asistente de mezcla: proveedor y modelo.
+    "ASSIST_PROVIDER": "anthropic",
+    "ASSIST_MODEL": "claude-sonnet-5-5",
+    // Tope mensual de gasto de IA por banda, en USD. Vacio: sin tope. El valor de arranque es
+    // prudente y lo decide Daniel Castaneda (plan del Estudio, seccion 12, punto 6).
+    "STUDIO_MONTHLY_BUDGET_USD": "20",
+    // Tope mensual de TODO el Worker (todas las bandas y workspaces personales), en USD. Existe
+    // porque el tope por banda no limita el total: cada cuenta tiene su workspace "me" y puede
+    // crear bandas, cada una con su tope. Valor de arranque prudente; lo decide Daniel Castaneda.
+    "STUDIO_GLOBAL_MONTHLY_BUDGET_USD": "30",
+    // uuid de Supabase (separados por coma) de quienes pueden lanzar trabajos de IA y analisis.
+    // Vacio: cualquier editor. RECOMENDADO llenarlo con el uuid de Daniel Castaneda (y de quien
+    // el autorice) antes de cargar los secretos de Lyria y del asistente.
+    "STUDIO_SPENDER_UIDS": ""
+    // Opcionales, con valor por defecto en el codigo:
+    //   LYRIA_CLIP_MODEL (lyria-3-clip-preview), LYRIA_SONG_MODEL (lyria-3.5)
+    //   STUDIO_RATE_MASTER_USD_PER_MIN (0.20), STUDIO_RATE_SEPARATE_USD_PER_MIN (0.50),
+    //   STUDIO_RATE_LYRIA_USD_PER_30S (0.06), STUDIO_RATE_ASSIST_USD (0.05)
   }
 }

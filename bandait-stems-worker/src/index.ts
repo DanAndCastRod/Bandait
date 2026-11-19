@@ -14,6 +14,7 @@
 //          ?separate=1: the body is the whole song; the workflow also separates stems
 //   GET    /v1/bands/{band}/songs/{song}/analysis        any member: state and draft; for a
 //          separation, each call copies one stem to R2 (IMPORTING) and then writes the manifest
+//   *      /v1/bands/{band}/studio/...                   Estudio: see src/studio.ts
 //
 // {band} is a shared band uuid, or "me" for the caller's personal workspace (only the
 // caller can read or write it). Upload the files first, then the manifest: the
@@ -22,7 +23,8 @@
 
 import { ASSEMBLER_VERSION, assemble } from './analysis.ts';
 import type { MusicAiResult } from './analysis.ts';
-import type { Env, FetchLike, R2Bucket } from './types.ts';
+import { assertSpender, defaultStudioDeps, studioRoute, tokenSubject } from './studio.ts';
+import type { Env, ExecutionContextLike, FetchLike, R2Bucket, StudioDeps } from './types.ts';
 
 export const VERSION = '1.0.0';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -35,7 +37,7 @@ const MANIFEST_LIMIT = 64 * 1024;
 const MAX_STEMS = 16;
 const DEFAULT_MAX_FILE_MB = 200;
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
   constructor(status: number, code: string) {
     super(code);
@@ -58,7 +60,7 @@ export interface Manifest {
   updated_at?: string;
 }
 
-function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+export function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers },
@@ -72,8 +74,8 @@ function corsHeaders(req: Request, env: Env): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Expose-Headers': 'Content-Length, ETag',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, If-None-Match, Range',
+    'Access-Control-Expose-Headers': 'Content-Length, ETag, Content-Range, Accept-Ranges',
     'Access-Control-Max-Age': '600',
     Vary: 'Origin',
   };
@@ -146,7 +148,7 @@ function validFile(name: string): boolean {
   return FILE.test(name) && AUDIO_EXT.test(name) && !name.startsWith('.') && !name.includes('..');
 }
 
-async function listAll(bucket: R2Bucket, prefix: string): Promise<string[]> {
+export async function listAll(bucket: R2Bucket, prefix: string): Promise<string[]> {
   const keys: string[] = [];
   let cursor: string | undefined;
   do {
@@ -157,10 +159,12 @@ async function listAll(bucket: R2Bucket, prefix: string): Promise<string[]> {
   return keys;
 }
 
-async function route(req: Request, env: Env, fetchFn: FetchLike): Promise<Response> {
+async function route(req: Request, env: Env, fetchFn: FetchLike, deps: StudioDeps): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname === '/v1/health' && req.method === 'GET') return json(200, { ok: true, version: VERSION });
-  const m = /^\/v1\/bands\/([^/]+)\/songs\/([^/]+)(?:\/(manifest|analysis|files\/([^/]+)))?$/.exec(url.pathname);
+  // Estudio (bandait-protocol/STUDIO_V1.md): sessions, audio and AI jobs live in src/studio.ts.
+  if (/^\/v1\/bands\/[^/]+\/studio(?:\/|$)/.test(url.pathname)) return studioRoute(req, env, url, fetchFn, deps);
+  const m =/^\/v1\/bands\/([^/]+)\/songs\/([^/]+)(?:\/(manifest|analysis|files\/([^/]+)))?$/.exec(url.pathname);
   if (!m) throw new ApiError(404, 'not_found');
   const band = m[1];
   const song = m[2];
@@ -182,6 +186,8 @@ async function route(req: Request, env: Env, fetchFn: FetchLike): Promise<Respon
     // Starting an analysis spends Music AI credits: editors only. Reading the draft is free: any
     // member can see it (read-only in the hub; only Owner / MusicDirector can accept it).
     const editorPrefix = await authorize(req, env, band, method === 'POST', fetchFn);
+    // Same allowlist as the Estudio jobs: with STUDIO_SPENDER_UIDS set, only those users spend credits.
+    if (method === 'POST') assertSpender(env, tokenSubject(req));
     return method === 'POST'
       ? startAnalysis(req, env, `${editorPrefix}songs/${song}/`, song, fetchFn, url.searchParams.get('separate') === '1')
       : analysisStatus(env, `${editorPrefix}songs/${song}/`, song, fetchFn);
@@ -273,7 +279,7 @@ function musicAiKey(env: Env): string {
   return key;
 }
 
-async function musicAi(env: Env, fetchFn: FetchLike, path: string, init: RequestInit = {}): Promise<unknown> {
+export async function musicAi(env: Env, fetchFn: FetchLike, path: string, init: RequestInit = {}): Promise<unknown> {
   let res: Response;
   try {
     res = await fetchFn(`${MUSICAI}${path}`, {
@@ -333,7 +339,7 @@ async function startAnalysis(
 }
 
 /** Stem outputs of the separation workflow: output name -> [role, label]. Anything else is analysis. */
-const STEM_OUTPUTS: Record<string, [string, string]> = {
+export const STEM_OUTPUTS: Record<string, [string, string]> = {
   vocals: ['vocals', 'Voz'], 'backing vocals': ['backing_vocals', 'Coros'], drums: ['drums', 'Batería'],
   bass: ['bass', 'Bajo'], guitars: ['guitar', 'Guitarras'], guitar: ['guitar', 'Guitarra'],
   keys: ['keys', 'Teclados'], piano: ['keys', 'Piano'], strings: ['strings', 'Cuerdas'],
@@ -488,12 +494,15 @@ async function analysisStatus(env: Env, songPrefix: string, song: string, fetchF
   return done(result);
 }
 
-export async function handle(req: Request, env: Env, fetchFn: FetchLike = fetch): Promise<Response> {
+/** `deps` (clock and ids of the Estudio routes) is only passed by tests. */
+export async function handle(
+  req: Request, env: Env, fetchFn: FetchLike = fetch, deps: Partial<StudioDeps> = {},
+): Promise<Response> {
   const cors = corsHeaders(req, env);
   if (req.method === 'OPTIONS') return new Response(null, { status: cors['Access-Control-Allow-Origin'] ? 204 : 403, headers: cors });
   let res: Response;
   try {
-    res = await route(req, env, fetchFn);
+    res = await route(req, env, fetchFn, { ...defaultStudioDeps(), ...deps });
   } catch (err) {
     res = err instanceof ApiError ? json(err.status, { error: err.message }) : json(500, { error: 'internal' });
   }
@@ -502,7 +511,9 @@ export async function handle(req: Request, env: Env, fetchFn: FetchLike = fetch)
 }
 
 export default {
-  fetch(req: Request, env: Env): Promise<Response> {
-    return handle(req, env, (input, init) => fetch(input, init));
+  fetch(req: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+    // waitUntil: un trabajo de IA sincrono (generate, assist) termina y deja su registro aunque el
+    // cliente corte la conexion a mitad de la espera.
+    return handle(req, env, (input, init) => fetch(input, init), ctx ? { waitUntil: (p) => ctx.waitUntil(p) } : {});
   },
 };

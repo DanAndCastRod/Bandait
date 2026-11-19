@@ -18,16 +18,18 @@ import {
   Cloud,
   Library,
   Upload,
+  AudioLines,
 } from 'lucide-react'
 import { UserManualModal } from './UserManualModal'
 import { SupabaseConfigModal } from './SupabaseConfigModal'
 import { colors, mono } from './hubStyles'
+import { studioEnabled } from '../services/studio/flag'
 
 /**
  * Vistas del hub, con los mismos nombres y el mismo orden que el lider 2.3. El hub no tiene
  * Escenario: una pagina HTTPS no puede abrir ws:// hacia el lider en la LAN (contenido mixto).
  */
-export type HubTab = 'setlists' | 'songs' | 'rehearsal' | 'tracks' | 'band' | 'settings'
+export type HubTab = 'setlists' | 'songs' | 'rehearsal' | 'tracks' | 'studio' | 'band' | 'settings'
 
 interface TabDef {
   id: HubTab
@@ -38,14 +40,18 @@ interface TabDef {
   accent: string
 }
 
-const HUB_TABS: readonly TabDef[] = [
+const ALL_TABS: readonly TabDef[] = [
   { id: 'setlists', label: 'SETLISTS', short: 'SETLISTS', icon: ListMusic, accent: colors.orange },
   { id: 'songs', label: 'CANCIONES', short: 'CANCIONES', icon: Library, accent: colors.violet },
   { id: 'rehearsal', label: 'ENSAYO', short: 'ENSAYO', icon: Music, accent: colors.cyan },
   { id: 'tracks', label: 'PISTAS', short: 'PISTAS', icon: Sliders, accent: colors.cobalt },
+  { id: 'studio', label: 'ESTUDIO', short: 'ESTUDIO', icon: AudioLines, accent: colors.danger },
   { id: 'band', label: 'BANDA', short: 'BANDA', icon: Users, accent: colors.success },
   { id: 'settings', label: 'AJUSTES', short: 'AJUSTES', icon: Settings, accent: colors.warning },
 ]
+
+/** El Estudio va detras de un interruptor (services/studio/flag.ts): sin el, su pestana no existe. */
+const HUB_TABS: readonly TabDef[] = ALL_TABS.filter((tab) => tab.id !== 'studio' || studioEnabled())
 
 interface Props {
   activeTab: HubTab

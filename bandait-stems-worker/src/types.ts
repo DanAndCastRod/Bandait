@@ -25,19 +25,44 @@ export interface R2Objects {
   objects: R2Object[];
   truncated: boolean;
   cursor?: string;
+  /** With `delimiter`: the "folders" directly under the prefix (each ends with the delimiter). */
+  delimitedPrefixes?: string[];
+}
+
+/** Conditional write: `put` returns null when the condition fails (nothing is stored). */
+export interface R2Conditional {
+  /** Store only if the current object has this etag (R2Object.etag, without quotes). */
+  etagMatches?: string;
+  /** Store only if the current object does not have this etag. */
+  etagDoesNotMatch?: string;
 }
 
 export interface R2PutOptions {
   httpMetadata?: R2HTTPMetadata;
   customMetadata?: Record<string, string>;
+  onlyIf?: R2Conditional | Headers;
+}
+
+export interface R2Range {
+  offset: number;
+  length: number;
+}
+
+export interface R2GetOptions {
+  range?: R2Range;
 }
 
 export interface R2Bucket {
   head(key: string): Promise<R2Object | null>;
-  get(key: string): Promise<R2ObjectBody | null>;
+  get(key: string, options?: R2GetOptions): Promise<R2ObjectBody | null>;
   put(key: string, value: R2Body, options?: R2PutOptions): Promise<R2Object | null>;
   delete(keys: string | string[]): Promise<void>;
-  list(options?: { prefix?: string; cursor?: string; limit?: number }): Promise<R2Objects>;
+  list(options?: { prefix?: string; cursor?: string; limit?: number; delimiter?: string }): Promise<R2Objects>;
+}
+
+/** Lo que el Worker usa del ExecutionContext de Cloudflare. */
+export interface ExecutionContextLike {
+  waitUntil(promise: Promise<unknown>): void;
 }
 
 export interface Env {
@@ -51,6 +76,58 @@ export interface Env {
   MUSICAI_WORKFLOW?: string;
   /** Workflow that also separates stems (POST .../analysis?separate=1). */
   MUSICAI_SPLIT_WORKFLOW?: string;
+
+  // ---- Estudio (bandait-protocol/STUDIO_V1.md, seccion 8) ----
+  /** Workflow de mastering de Music AI (trabajo `master`). Sin el, 503 provider_unavailable. */
+  MUSICAI_MASTER_WORKFLOW?: string;
+  /**
+   * Nombre del parametro del workflow de mastering que recibe el volumen objetivo en LUFS. Depende
+   * de como se arme el workflow en el panel de Music AI; sin el, `target_lufs` no se envia.
+   */
+  MUSICAI_MASTER_LUFS_PARAM?: string;
+  /** Secreto: clave de la Gemini API (trabajo `generate` con Lyria). Sin ella, 503. */
+  GEMINI_API_KEY?: string;
+  /** Modelo de Lyria para pedidos de hasta 30 s. Por defecto `lyria-3-clip-preview`. */
+  LYRIA_CLIP_MODEL?: string;
+  /** Modelo de Lyria para pedidos de mas de 30 s. Por defecto `lyria-3.5`. */
+  LYRIA_SONG_MODEL?: string;
+  /** Secreto (futuro): clave de Suno. Hoy `generate` con `suno` responde 501 aunque exista. */
+  SUNO_API_KEY?: string;
+  /** Secreto: clave del modelo de lenguaje del asistente de mezcla (trabajo `assist`). Sin ella, 503. */
+  ASSIST_API_KEY?: string;
+  /** Proveedor del asistente. Por defecto `anthropic` (el unico implementado). */
+  ASSIST_PROVIDER?: string;
+  /** Modelo del asistente. Por defecto `claude-sonnet-5-5`. */
+  ASSIST_MODEL?: string;
+  /** Tope mensual de gasto de IA por banda, en USD. Vacio o ausente: sin tope. */
+  STUDIO_MONTHLY_BUDGET_USD?: string;
+  /**
+   * Tope mensual de gasto de IA de TODO el Worker (todas las bandas y workspaces personales), en
+   * USD. Vacio o ausente: sin tope global. El contador vive en `studio/_usage/AAAA-MM.json`.
+   */
+  STUDIO_GLOBAL_MONTHLY_BUDGET_USD?: string;
+  /**
+   * Lista de uuid de usuario (separados por coma) que pueden lanzar trabajos de IA. Vacia o
+   * ausente: cualquier editor. Con valor, el resto recibe 403 `not_a_spender`.
+   */
+  STUDIO_SPENDER_UIDS?: string;
+  /** Tarifas para estimar el costo (USD). Ver DEFAULT_RATES en src/studioJobs.ts. */
+  STUDIO_RATE_MASTER_USD_PER_MIN?: string;
+  STUDIO_RATE_SEPARATE_USD_PER_MIN?: string;
+  STUDIO_RATE_LYRIA_USD_PER_30S?: string;
+  STUDIO_RATE_ASSIST_USD?: string;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+/** Dependencias inyectables para las pruebas del Estudio: reloj e ids. */
+export interface StudioDeps {
+  now: () => Date;
+  /** Id nuevo con prefijo ("job", "ast"): `${prefix}_<12 hexadecimales>`. */
+  newId: (prefix: string) => string;
+  /**
+   * `ctx.waitUntil` del Worker: mantiene viva una promesa aunque el cliente corte la conexion.
+   * Ausente en las pruebas que no lo necesitan.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+}

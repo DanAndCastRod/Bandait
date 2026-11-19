@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "id": "ses_9f2c",
+  "title": "Hoy - maqueta",
+  "song_id": "sng_41",
+  "bpm": 128,
+  "beats_per_bar": 4,
+  "key": "C#m",
+  "sample_rate": 48000,
+  "latency_offset_ms": 0,
+  "updated_at": "2026-11-18T22:10:00Z",
+  "updated_by": "0b6c1d52-4f0e-4a39-9d0b-6a1f6f0c2e11",
+  "assets": [
+    {
+      "id": "ast_a1",
+      "file": "ast_a1.wav",
+      "kind": "recording",
+      "label": "Voz toma 1",
+      "channels": 1,
+      "sample_rate": 48000,
+      "duration_s": 32.5,
+      "size": 4680044,
+      "source": null
+    },
+    {
+      "id": "ast_a2",
+      "file": "ast_a2.wav",
+      "kind": "recording",
+      "label": "Voz toma 2",
+      "channels": 1,
+      "sample_rate": 48000,
+      "duration_s": 32.5,
+      "size": 4680044,
+      "source": null
+    },
+    {
+      "id": "ast_g1",
+      "file": "ast_g1.wav",
+      "kind": "import",
+      "label": "Guitarra acustica.wav",
+      "channels": 2,
+      "sample_rate": 48000,
+      "duration_s": 212.4,
+      "size": 61171244,
+      "source": null
+    },
+    {
+      "id": "ast_p1",
+      "file": "ast_p1.mp3",
+      "kind": "generated",
+      "label": "Pad 16 compases",
+      "channels": 2,
+      "sample_rate": 44100,
+      "duration_s": 30,
+      "size": 720512,
+      "source": {
+        "provider": "lyria",
+        "job_id": "job_7c21",
+        "prompt": "Pad calido de 16 compases, 128 BPM, Do sostenido menor, sin percusion"
+      }
+    }
+  ],
+  "tracks": [
+    {
+      "id": "trk_1",
+      "name": "Voz",
+      "role": "vocals",
+      "volume_db": 0,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "reverb_send_db": -18,
+      "fx": [
+        {
+          "type": "eq",
+          "bypass": false,
+          "params": {
+            "hpf_hz": 90,
+            "low_db": 0,
+            "mid_hz": 2500,
+            "mid_db": 2,
+            "mid_q": 1,
+            "high_db": 1.5
+          }
+        },
+        {
+          "type": "compressor",
+          "bypass": false,
+          "params": {
+            "threshold_db": -20,
+            "ratio": 3,
+            "attack_ms": 8,
+            "release_ms": 120,
+            "knee_db": 6,
+            "makeup_db": 2
+          }
+        }
+      ],
+      "clips": [
+        {
+          "id": "clp_1",
+          "asset_id": "ast_a1",
+          "start_s": 7.5,
+          "offset_s": 0,
+          "length_s": 30,
+          "gain_db": 0,
+          "fade_in_s": 0.01,
+          "fade_out_s": 0.05,
+          "take_group": "tk_1",
+          "active": false
+        },
+        {
+          "id": "clp_2",
+          "asset_id": "ast_a2",
+          "start_s": 7.5,
+          "offset_s": 0,
+          "length_s": 30,
+          "gain_db": 0,
+          "fade_in_s": 0.01,
+          "fade_out_s": 0.05,
+          "take_group": "tk_1",
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "trk_2",
+      "name": "Guitarra",
+      "role": "guitar",
+      "volume_db": -3,
+      "pan": -0.25,
+      "mute": false,
+      "solo": false,
+      "reverb_send_db": -24,
+      "fx": [],
+      "clips": [
+        {
+          "id": "clp_3",
+          "asset_id": "ast_g1",
+          "start_s": 0,
+          "offset_s": 0,
+          "length_s": 212.4,
+          "gain_db": -1.5,
+          "fade_in_s": 0,
+          "fade_out_s": 2,
+          "take_group": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "trk_3",
+      "name": "Pad IA",
+      "role": "keys",
+      "volume_db": -9,
+      "pan": 0.2,
+      "mute": false,
+      "solo": false,
+      "reverb_send_db": -60,
+      "fx": [],
+      "clips": [
+        {
+          "id": "clp_4",
+          "asset_id": "ast_p1",
+          "start_s": 0,
+          "offset_s": 0,
+          "length_s": 30,
+          "gain_db": 0,
+          "fade_in_s": 0.5,
+          "fade_out_s": 1,
+          "take_group": null,
+          "active": true
+        }
+      ]
+    }
+  ],
+  "master": {
+    "volume_db": 0,
+    "fx": [
+      {
+        "type": "limiter",
+        "bypass": false,
+        "params": {
+          "ceiling_db": -1,
+          "release_ms": 100
+        }
+      }
+    ],
+    "reverb": {
+      "decay_s": 1.8,
+      "return_db": 0
+    }
+  }
+}
