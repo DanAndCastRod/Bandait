@@ -169,7 +169,7 @@ audios en `assets/` o devuelve sugerencias, y el Hub los agrega cuando el usuari
 - `assist` pide al modelo un JSON con el esquema de sugerencias y el Worker **descarta** las que
   no cumplen el contrato (pista inexistente, parámetro fuera de rango, limitador en una pista).
 
-Cada proveedor es un archivo en `src/providers/`: `lyria.ts`, `suno.ts`, `anthropic.ts`. Lo que
+Cada proveedor es un archivo en `src/providers/`: `lyria.ts`, `suno.ts`, `urit.ts` (asistente por URiT IA, por defecto), `gemini.ts` (asistente con la clave de Gemini directa) y `anthropic.ts`. Lo que
 no se pudo confirmar en documentación oficial está marcado ahí con `NO VERIFICADO`.
 
 **Control de gasto.** Antes de llamar al proveedor, el Worker guarda el trabajo en `STARTED` y
@@ -206,8 +206,8 @@ ignorara, crear una sesión o un audio queda protegido solo por el `head` previo
 
 Variables (en `wrangler.jsonc`, públicas): `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
 `ALLOWED_ORIGINS`, `MAX_FILE_MB`, `MUSICAI_WORKFLOW`, `MUSICAI_SPLIT_WORKFLOW`,
-`MUSICAI_MASTER_WORKFLOW`, `MUSICAI_MASTER_LUFS_PARAM`, `ASSIST_PROVIDER` (`anthropic`),
-`ASSIST_MODEL` (`claude-sonnet-5-5`), `STUDIO_MONTHLY_BUDGET_USD`,
+`MUSICAI_MASTER_WORKFLOW`, `MUSICAI_MASTER_LUFS_PARAM`, `ASSIST_PROVIDER` (`urit`; también `gemini` o `anthropic`), `URIT_AI_URL` (`https://ai.urit.services`), `URIT_AI_CONSUMER` (`bandait`),
+`ASSIST_MODEL` (vacío: con `urit` manda la cadena de modelos de URiT; con `gemini`, `gemini-flash-latest`; con `anthropic`, `claude-sonnet-5-5`), `STUDIO_MONTHLY_BUDGET_USD`,
 `STUDIO_GLOBAL_MONTHLY_BUDGET_USD`, `STUDIO_SPENDER_UIDS` y, opcionales,
 `LYRIA_CLIP_MODEL`, `LYRIA_SONG_MODEL` y las tarifas `STUDIO_RATE_*`.
 
@@ -218,7 +218,8 @@ ninguno:
 |---|---|---|
 | `MUSICAI_API_KEY` | análisis de canciones; trabajos `master` y `separate` | 503 `analysis_unavailable` / `provider_unavailable` |
 | `GEMINI_API_KEY` | trabajo `generate` con Lyria (Gemini API, no Vertex AI) | 503 `provider_unavailable` |
-| `ASSIST_API_KEY` | trabajo `assist` (con `ASSIST_PROVIDER` `anthropic`, una clave de la API de Anthropic) | 503 `provider_unavailable` |
+| `URIT_AI_TOKEN` | trabajo `assist` con `ASSIST_PROVIDER` `urit` (token del consumidor `bandait` en URiT IA; ClipVault `urit-ai-credentials/bandait_token`) | 503 `provider_unavailable` |
+| `ASSIST_API_KEY` | opcional: `assist` con `gemini` (si falta, usa `GEMINI_API_KEY`) o con `anthropic` (clave de Anthropic) | 503 `provider_unavailable` |
 | `SUNO_API_KEY` | futuro: hoy `suno` responde 501 aunque exista | no aplica |
 
 No hay `service_role` de Supabase en ningún lado: `SUPABASE_ANON_KEY` es la clave publicable.

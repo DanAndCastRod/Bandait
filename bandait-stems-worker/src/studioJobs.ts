@@ -16,6 +16,8 @@
 
 import { ApiError, STEM_OUTPUTS, json, musicAi } from './index.ts';
 import { anthropic } from './providers/anthropic.ts';
+import { gemini } from './providers/gemini.ts';
+import { urit } from './providers/urit.ts';
 import { detectAudioExt, lyria } from './providers/lyria.ts';
 import { suno } from './providers/suno.ts';
 import { ProviderError } from './providers/types.ts';
@@ -107,7 +109,7 @@ type JobRequest =
   | { kind: 'assist'; metrics: Metrics };
 
 const GENERATE_PROVIDERS: Record<'lyria' | 'suno', GenerateProvider> = { lyria, suno };
-const ASSIST_PROVIDERS: Record<string, AssistProvider> = { anthropic };
+const ASSIST_PROVIDERS: Record<string, AssistProvider> = { anthropic, gemini, urit };
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
@@ -449,7 +451,7 @@ function providerFailure(err: unknown): never {
 }
 
 function assistProvider(env: Env): AssistProvider {
-  const name = (env.ASSIST_PROVIDER || '').trim().toLowerCase() || 'anthropic';
+  const name = (env.ASSIST_PROVIDER || '').trim().toLowerCase() || 'urit';
   const provider = ASSIST_PROVIDERS[name];
   if (!provider) throw new ProviderError(503, 'provider_unavailable', `ASSIST_PROVIDER desconocido: ${name.slice(0, 40)}`);
   return provider;
@@ -472,7 +474,7 @@ function assertAvailable(env: Env, request: JobRequest): void {
 
 function providerName(env: Env, request: JobRequest): string {
   if (request.kind === 'generate') return request.provider;
-  if (request.kind === 'assist') return (env.ASSIST_PROVIDER || '').trim().toLowerCase() || 'anthropic';
+  if (request.kind === 'assist') return (env.ASSIST_PROVIDER || '').trim().toLowerCase() || 'urit';
   return 'musicai';
 }
 
