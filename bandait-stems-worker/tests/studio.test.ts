@@ -636,14 +636,14 @@ test('generate: Lyria con secreto; sin secreto 503; suno 501; fallo del proveedo
   assert.equal(detectAudioExt(new TextEncoder().encode('fLaC....')), 'flac');
 });
 
-test('assist: pide JSON estructurado al modelo y descarta las sugerencias que no cumplen el contrato', async () => {
+test('assist con anthropic: pide JSON estructurado al modelo y descarta las sugerencias que no cumplen el contrato', async () => {
   const noKey = setup();
   const r503 = await noKey.post('/ses_a/jobs', { kind: 'assist', metrics: METRICS });
   assert.deepEqual([r503.status, (await r503.json()).error], [503, 'provider_unavailable']);
   const other = setup({ ASSIST_API_KEY: 'a', ASSIST_PROVIDER: 'otro' });
   assert.equal((await other.post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 503, 'proveedor sin adaptador');
 
-  const { call, post, bucket, external, world } = setup({ ASSIST_API_KEY: 'assist-key' });
+  const { call, post, bucket, external, world } = setup({ ASSIST_API_KEY: 'assist-key', ASSIST_PROVIDER: 'anthropic' });
   assert.equal((await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 202);
   const [req] = external();
   assert.equal(req.url, 'https://api.anthropic.com/v1/messages');
@@ -678,7 +678,7 @@ test('assist: pide JSON estructurado al modelo y descarta las sugerencias que no
   world.assist = () => new Response('{"type":"error"}', { status: 529 });
   assert.equal((await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 502);
 
-  const custom = setup({ ASSIST_API_KEY: 'a', ASSIST_MODEL: 'claude-haiku-5-5' });
+  const custom = setup({ ASSIST_API_KEY: 'a', ASSIST_PROVIDER: 'anthropic', ASSIST_MODEL: 'claude-haiku-5-5' });
   await custom.post('/ses_a/jobs', { kind: 'assist', metrics: METRICS });
   const body = JSON.parse(String(custom.external()[0].body));
   assert.equal(body.model, 'claude-haiku-5-5');
@@ -687,6 +687,69 @@ test('assist: pide JSON estructurado al modelo y descarta las sugerencias que no
   const long = sanitizeSuggestions(Array.from({ length: 40 }, () => ({ track_id: 'a', target: 'pan', value: 0.5, fx_type: null, params: null, reason: 'x'.repeat(400) })), new Set(['a']));
   assert.equal(long.length, 32);
   assert.equal(long[0].reason.length, 280);
+});
+
+test('assist con urit (por defecto): consumidor bandait en URiT IA, sin la clave de Gemini directa', async () => {
+  const noToken = setup({ GEMINI_API_KEY: 'g' });
+  const r503 = await noToken.post('/ses_a/jobs', { kind: 'assist', metrics: METRICS });
+  assert.deepEqual([r503.status, (await r503.json()).error], [503, 'provider_unavailable'], 'sin URIT_AI_TOKEN no usa la clave directa');
+  assert.equal(noToken.external().length, 0);
+
+  let reply: () => Response = () => Response.json({ id: 'ai_x', model: 'gemini-3.8-flash', output: { text: '', json: { suggestions: SUGGESTIONS }, tool_calls: [] }, finish_reason: 'stop' });
+  const { call, post, external, world } = setup({ URIT_AI_TOKEN: 'urit-token' });
+  world.extra = (c) => (c.url === 'https://ai.urit.services/v1/text' ? reply() : undefined);
+  assert.equal((await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 202);
+  const [req] = external();
+  assert.equal(req.url, 'https://ai.urit.services/v1/text');
+  assert.equal(req.headers.get('Authorization'), 'Bearer urit-token');
+  assert.equal(req.headers.get('X-URiT-Consumer'), 'bandait');
+  assert.equal(req.headers.get('User-Agent'), 'bandait-stems/1.0');
+  const sent = JSON.parse(String(req.body));
+  assert.equal(sent.task, 'mix_assist');
+  assert.equal(sent.system, ASSIST_SYSTEM_PROMPT);
+  assert.equal(sent.output.format, 'json');
+  assert.ok(!('models' in sent), 'no fija modelo: manda la cadena de URiT');
+  assert.ok(sent.time_budget_ms <= 85000);
+  assert.ok(sent.messages[0].parts[0].text.includes('"track_id":"trk_2"'));
+  const done = await (await call('GET', '/ses_a/jobs/job_t1', { token: MUSICIAN })).json();
+  assert.equal(done.status, 'SUCCEEDED');
+  assert.equal(done.suggestions.length, 3, 'las sugerencias fuera de contrato se descartan igual');
+
+  reply = () => Response.json({ error: 'invalid_output' }, { status: 502 });
+  assert.equal((await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 202);
+  assert.equal((await (await call('GET', '/ses_a/jobs/job_t2', { token: OWNER })).json()).status, 'FAILED');
+  reply = () => Response.json({ error: 'unauthorized' }, { status: 401 });
+  const unauthorized = await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS });
+  assert.deepEqual([unauthorized.status, (await unauthorized.json()).error], [503, 'provider_unavailable']);
+  reply = () => Response.json({ error: 'consumer_budget_exceeded' }, { status: 429 });
+  assert.equal((await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 502);
+});
+
+test('assist con gemini directo: generateContent con la clave de Gemini y JSON estructurado', async () => {
+  const bodies: unknown[] = [];
+  let first: () => Response = () => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ suggestions: SUGGESTIONS }) }] }, finishReason: 'STOP' }] });
+  const { call, post, world } = setup({ GEMINI_API_KEY: 'gemini-key', ASSIST_PROVIDER: 'gemini' });
+  world.extra = (c) => {
+    if (!c.url.includes(':generateContent')) return undefined;
+    bodies.push(JSON.parse(String(c.body)));
+    assert.equal(c.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent');
+    assert.equal(c.headers.get('x-goog-api-key'), 'gemini-key');
+    const r = first();
+    first = () => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ suggestions: SUGGESTIONS }) }] }, finishReason: 'STOP' }] });
+    return r;
+  };
+  assert.equal((await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 202);
+  const sent = bodies[0] as { generationConfig: Record<string, unknown>; systemInstruction: { parts: { text: string }[] } };
+  assert.equal(sent.generationConfig.responseMimeType, 'application/json');
+  assert.ok('responseJsonSchema' in sent.generationConfig);
+  assert.equal(sent.systemInstruction.parts[0].text, ASSIST_SYSTEM_PROMPT);
+  assert.equal((await (await call('GET', '/ses_a/jobs/job_t1', { token: MUSICIAN })).json()).suggestions.length, 3);
+
+  // Un 400 por el esquema se repite una vez sin el esquema.
+  first = () => new Response('{"error":{"message":"schema"}}', { status: 400 });
+  assert.equal((await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS })).status, 202);
+  assert.equal(bodies.length, 3);
+  assert.ok(!('responseJsonSchema' in (bodies[2] as { generationConfig: Record<string, unknown> }).generationConfig));
 });
 
 test('tope de gasto: estimacion, 429 al pasarlo y contador nuevo cada mes', async () => {

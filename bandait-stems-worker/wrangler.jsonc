@@ -7,8 +7,12 @@
   //   MUSICAI_API_KEY   Music AI: analisis, y los trabajos `master` y `separate` del Estudio.
   //                     ClipVault: bandait-musicai-api-key. Ya esta cargado en produccion.
   //   GEMINI_API_KEY    Gemini API (no Vertex): trabajo `generate` con Lyria. Sin el, 503.
-  //   ASSIST_API_KEY    Modelo de lenguaje del asistente de mezcla (trabajo `assist`); con
-  //                     ASSIST_PROVIDER "anthropic" es una clave de la API de Anthropic. Sin el, 503.
+  //                     ClipVault: gemini-urit-ai-api (la de URiT AI, decision de Daniel Castaneda
+  //                     del 2026-11-19; a mediano plazo, una propia de Bandait).
+  //   URIT_AI_TOKEN     Token del consumidor "bandait" en URiT IA (urit-ai): asistente de mezcla con
+  //                     ASSIST_PROVIDER "urit" (por defecto). ClipVault: urit-ai-credentials/bandait_token.
+  //   ASSIST_API_KEY    Opcional. Con ASSIST_PROVIDER "gemini" (directo) el asistente usa
+  //                     GEMINI_API_KEY si falta; con "anthropic" es una clave de Anthropic.
   //   SUNO_API_KEY      Futuro. Hoy `generate` con `suno` responde 501 aunque exista.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bandait-stems",
@@ -33,8 +37,11 @@
     // Nombre del parametro de ese workflow que recibe el volumen objetivo en LUFS. Vacio: no se envia.
     "MUSICAI_MASTER_LUFS_PARAM": "",
     // Asistente de mezcla: proveedor y modelo.
-    "ASSIST_PROVIDER": "anthropic",
-    "ASSIST_MODEL": "claude-sonnet-5-5",
+    "ASSIST_PROVIDER": "urit",
+    "ASSIST_MODEL": "",
+    // URiT IA (urit-ai): el asistente pasa por ahi como consumidor "bandait". Secreto URIT_AI_TOKEN.
+    "URIT_AI_URL": "https://ai.urit.services",
+    "URIT_AI_CONSUMER": "bandait",
     // Tope mensual de gasto de IA por banda, en USD. Vacio: sin tope. El valor de arranque es
     // prudente y lo decide Daniel Castaneda (plan del Estudio, seccion 12, punto 6).
     "STUDIO_MONTHLY_BUDGET_USD": "20",

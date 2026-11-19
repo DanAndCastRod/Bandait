@@ -93,12 +93,18 @@ export interface Env {
   LYRIA_SONG_MODEL?: string;
   /** Secreto (futuro): clave de Suno. Hoy `generate` con `suno` responde 501 aunque exista. */
   SUNO_API_KEY?: string;
-  /** Secreto: clave del modelo de lenguaje del asistente de mezcla (trabajo `assist`). Sin ella, 503. */
+  /** Secreto opcional: clave del asistente de mezcla. Con gemini, si falta se usa GEMINI_API_KEY. */
   ASSIST_API_KEY?: string;
-  /** Proveedor del asistente. Por defecto `anthropic` (el unico implementado). */
+  /** Proveedor del asistente: `urit` (por defecto, URiT IA), `gemini` (directo) o `anthropic`. */
   ASSIST_PROVIDER?: string;
-  /** Modelo del asistente. Por defecto `claude-sonnet-5-5`. */
+  /** Modelo del asistente con gemini o anthropic. Con urit no se usa: manda la cadena de URiT. */
   ASSIST_MODEL?: string;
+  /** Secreto: token del consumidor en URiT IA (ASSIST_PROVIDER `urit`). Sin el, 503. */
+  URIT_AI_TOKEN?: string;
+  /** Base de URiT IA. Por defecto `https://ai.urit.services`. */
+  URIT_AI_URL?: string;
+  /** Consumidor en URiT IA. Por defecto `bandait`. */
+  URIT_AI_CONSUMER?: string;
   /** Tope mensual de gasto de IA por banda, en USD. Vacio o ausente: sin tope. */
   STUDIO_MONTHLY_BUDGET_USD?: string;
   /**

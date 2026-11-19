@@ -631,13 +631,15 @@ para "no hay sesión de nube". `studioCloud.ts` los distingue por el estado HTTP
 | `MUSICAI_SPLIT_WORKFLOW` | variable (existe) | `separate` |
 | `MUSICAI_MASTER_WORKFLOW` | variable | `master`; sin ella, 503 `provider_unavailable` |
 | `GEMINI_API_KEY` | secreto | `generate` con `lyria` |
-| `ASSIST_API_KEY` | secreto | `assist` |
+| `URIT_AI_TOKEN` | secreto | `assist` con el proveedor `urit` (por defecto) |
+| `ASSIST_API_KEY` | secreto opcional | `assist` con `gemini` (si falta, `GEMINI_API_KEY`) o con `anthropic` |
 | `SUNO_API_KEY` | secreto (futuro) | `generate` con `suno` |
 | `STUDIO_MONTHLY_BUDGET_USD` | variable | tope mensual por banda; sin ella no hay tope |
 | `STUDIO_GLOBAL_MONTHLY_BUDGET_USD` | variable | tope mensual de todo el Worker; sin ella no hay tope global |
 | `STUDIO_SPENDER_UIDS` | variable | uuid (separados por coma) que pueden lanzar trabajos; vacía: cualquier editor |
 | `MUSICAI_MASTER_LUFS_PARAM` | variable | nombre del parámetro del workflow de mastering que recibe `target_lufs`; sin ella no se envía |
-| `ASSIST_PROVIDER` | variable | proveedor del asistente; por defecto `anthropic` (el único implementado) |
+| `ASSIST_PROVIDER` | variable | proveedor del asistente: `urit` (por defecto, URiT IA como consumidor `bandait`), `gemini` (directo) o `anthropic` |
+| `URIT_AI_URL`, `URIT_AI_CONSUMER` | variables | base y consumidor de URiT IA; por defecto `https://ai.urit.services` y `bandait` |
 | `ASSIST_MODEL` | variable | modelo del asistente; tiene valor por defecto en el código |
 | `LYRIA_CLIP_MODEL`, `LYRIA_SONG_MODEL` | variables | modelos de Lyria para pedidos de hasta 30 s y más largos |
 | `STUDIO_RATE_MASTER_USD_PER_MIN`, `STUDIO_RATE_SEPARATE_USD_PER_MIN`, `STUDIO_RATE_LYRIA_USD_PER_30S`, `STUDIO_RATE_ASSIST_USD` | variables | tarifas para estimar el costo; sin ellas, las de referencia del plan |
