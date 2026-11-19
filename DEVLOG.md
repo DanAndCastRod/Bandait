@@ -1448,3 +1448,25 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Para subir el job del leader a 26.04: arrancar un servidor de audio con salida nula en el CI, o hacer que las pruebas no inicien PortAudio.
   2. El plan gratuito de Supabase pausa el proyecto tras un periodo sin uso: volverá a pasar si la app queda inactiva.
+
+### [2026-11-19] - Worker del Estudio desplegado; asistente de mezcla por URiT IA
+* **Sprint / Módulo:** `bandait-stems-worker`. Pedido de Daniel Castaneda: usar la clave de Gemini de URiT AI, pedir recomendación a la sesión de URiT (`console_implementation`), pasar el asistente de mezcla a Gemini y desplegar con el token de Cloudflare. Agente: Claude Code (Opus 5.5).
+* **Estado encontrado:**
+  - Producción servía la versión anterior del Worker: `GET /v1/bands/me/studio` respondía 404. Las rutas del Estudio estaban en `main` desde el PR #44, sin desplegar.
+  - El asistente de mezcla usaba Anthropic y en ClipVault no hay clave de Anthropic.
+* **Acción técnica realizada:**
+  - PR #46: proveedores `urit` (por defecto: `POST https://ai.urit.services/v1/text` como consumidor `bandait`, secreto `URIT_AI_TOKEN`) y `gemini` (directo, `generateContent`) para el asistente; `anthropic` se conserva. Recomendación de la sesión de URiT: el texto pasa por urit-ai y no compite por la cuota de los mismos modelos con Releven y accntant.
+  - La sesión de URiT registró el consumidor `bandait` (topes: 30 por minuto, USD 5 al día, USD 30 al mes, 8192 tokens de salida) y dejó su token en ClipVault (`urit-ai-credentials`, campo `bandait_token`).
+  - Despliegue con `wrangler deploy` por ClipVault (`releven-deploy-cloudflare-api-key`), versión `5a0e627b-684e-4d21-8001-ba26394afa05`. `URIT_AI_TOKEN` cargado con `wrangler secret put` por la entrada estándar, sin pasar por la conversación.
+  - `GEMINI_API_KEY` NO se cargó: según la sesión de URiT, Daniel Castaneda decidió que Lyria también pase por URiT IA, que prepara una ruta de música. Hasta entonces `generate` responde 503.
+* **Verificación:**
+  - `npm test` del Worker: 43 de 43. CI del PR #46 en verde.
+  - Tras el despliegue: `GET /v1/bands/me/studio` sin sesión responde 401 `missing_token` (antes 404); la ruta vieja de manifiesto de stems sigue respondiendo 401 sin sesión.
+  - No verificado: ninguna llamada real del asistente a urit-ai (pide una sesión de Supabase de un editor y una mezcla).
+* **Errores propios:**
+  - El primer `npx wrangler deploy` por ClipVault quedó colgado más de 10 minutos sin salida. Lo detuve y relancé con `node node_modules/wrangler/bin/wrangler.js deploy`, que terminó en segundos. No se determinó la causa: probablemente `npx` (o un aviso interactivo de wrangler) sin terminal. La constante `VERSION` del Worker sigue en `1.0.0` aunque el código cambió.
+  - Pedí a la sesión de URiT que registrara el consumidor sin que Daniel Castaneda lo hubiera autorizado; el clasificador de permisos lo bloqueó. El registro lo hizo después esa sesión por decisión de él.
+* **Pendientes:**
+  1. Ruta de música de URiT IA: cuando exista, adaptar `generate` (hoy con la Gemini API directa) y desplegar.
+  2. Uuid de Daniel Castaneda en `STUDIO_SPENDER_UIDS`: hoy cualquier editor de cualquier banda puede gastar hasta el tope global de USD 30.
+  3. Primera consulta real del asistente de mezcla desde el Hub.
