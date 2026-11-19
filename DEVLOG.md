@@ -1427,3 +1427,24 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Correr la prueba de interfaz con el micrófono del equipo (pestaña ESTUDIO, panel DISPOSITIVO): ya no hace falta esperar a la UMC202HD.
   2. Prueba de navegador para GRABAR sin entrada abierta.
+
+### [2026-11-19] - Estudio encendido por defecto; CI del leader fijo en ubuntu-24.04; Supabase estaba pausado
+* **Sprint / Módulo:** `bandait-leader-web` (Estudio), `.github/workflows/ci.yml`. Pedido de Daniel Castaneda: activar el Estudio de una vez, porque nadie más usa la app. Agente: Claude Code (Fable 5.2).
+* **Estado encontrado:**
+  - El Estudio solo se veía con `localStorage['bandait_studio']='1'` o `VITE_BANDAIT_STUDIO=1`.
+  - CI del PR #44: el job del leader falló dos veces con `PulseAudio_Initialize: Can't connect to server` en 28 pruebas de audio. `ubuntu-latest` había pasado de 24.04 (imagen 20261021.618, último CI verde en `main`, 2026-11-01) a 26.04 (imagen 20261103.629). El PR no tocaba `bandait-leader`.
+  - El login con Google (nube) llevaba a un dominio inexistente: el proyecto de Supabase estaba pausado y un proyecto pausado no resuelve por DNS (NXDOMAIN también en 8.8.8.8). El bundle publicado apuntaba a la misma URL antes y después del PR #44.
+* **Acción técnica realizada:**
+  - `services/studio/flag.ts`: el Estudio está encendido por defecto. Apagado de emergencia: `VITE_BANDAIT_STUDIO=0` al compilar o `localStorage['bandait_studio']='0'` en un navegador.
+  - `e2e/hub-2-3.leader-web.spec.ts`: la navegación espera 7 pestañas (ESTUDIO entre PISTAS y BANDA). `e2e/studio.leader-web.spec.ts`: una prueba de que aparece por defecto y otra de que el apagado local lo oculta.
+  - `ci.yml` (ya en el PR #44): job del leader en `ubuntu-24.04`.
+  - Supabase: Daniel Castaneda restauró el proyecto desde el panel. No hubo cambio de código.
+* **Verificación:**
+  - Suite `leader-web` con el interruptor nuevo: 53 pasaron y 2 fallaron (las dos de navegación que contaban 6 pestañas). Tras ajustarlas, `hub-2-3` y `studio`: `16 passed`. A 390 px las 7 pestañas caben sin scroll horizontal.
+  - Supabase tras restaurar: el dominio resuelve y `/auth/v1/health` responde 401 sin clave (servicio arriba). El login con Google no lo probé de punta a punta: pide la cuenta de Daniel Castaneda.
+* **Decisiones:**
+  - Se conserva el interruptor como apagado, en vez de borrarlo: permite retirar el Estudio sin revertir código si algo falla en producción.
+  - Fijar la versión de Ubuntu y no instalar un servidor de audio en el CI: devuelve el entorno que ya estaba probado. Se descartó `|| true`.
+* **Pendientes:**
+  1. Para subir el job del leader a 26.04: arrancar un servidor de audio con salida nula en el CI, o hacer que las pruebas no inicien PortAudio.
+  2. El plan gratuito de Supabase pausa el proyecto tras un periodo sin uso: volverá a pasar si la app queda inactiva.

@@ -203,7 +203,14 @@ class FakeStudioWorker {
 }
 
 test.describe('Web Admin Hub - Estudio Bandait', () => {
-  test('sin el interruptor el Estudio no aparece en el hub', async ({ page }) => {
+  test('el Estudio aparece por defecto, sin tocar el interruptor', async ({ page }) => {
+    await enterDemo(page);
+    await expect(page.getByRole('button', { name: 'PISTAS', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'ESTUDIO', exact: true }).first()).toBeVisible();
+  });
+
+  test('con el apagado local (bandait_studio = 0) el Estudio no aparece en el hub', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('bandait_studio', '0'));
     await enterDemo(page);
     await expect(page.getByRole('button', { name: 'PISTAS', exact: true }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'ESTUDIO', exact: true })).toHaveCount(0);

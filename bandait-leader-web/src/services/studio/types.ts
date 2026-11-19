@@ -1142,6 +1142,6 @@ export interface StudioCloudApi {
 // ===========================================================================
 
 export interface StudioFlagApi {
-  /** VITE_BANDAIT_STUDIO === '1' o localStorage['bandait_studio'] === '1'. */
+  /** Encendido por defecto; se apaga con VITE_BANDAIT_STUDIO === '0' o localStorage['bandait_studio'] === '0'. */
   studioEnabled(): boolean
 }

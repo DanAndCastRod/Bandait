@@ -30,8 +30,10 @@ Reglas que no se negocian:
 4. **Las claves viven en el Worker.** El navegador nunca ve una clave de Music.AI, Google o Suno.
 5. **Sin re-render en el camino del audio.** Cabezal, medidores y formas de onda se pintan con
    refs, canvas y rAF, como ya hace `StemStudio`.
-6. **Detrás de un interruptor.** Un merge a `main` publica el Hub; el Estudio se ve solo con
-   `VITE_BANDAIT_STUDIO=1` en la compilación o con `localStorage['bandait_studio']='1'`.
+6. **Con un apagado de emergencia.** El Estudio nació oculto tras un interruptor. Desde el
+   2026-11-19 está encendido por defecto (decisión de Daniel Castañeda: nadie más usa la app
+   todavía). Se apaga para todos con `VITE_BANDAIT_STUDIO=0` en la compilación, o en un navegador
+   con `localStorage['bandait_studio']='0'`.
 
 ## 2. Lo que ya existe y se reutiliza
 
