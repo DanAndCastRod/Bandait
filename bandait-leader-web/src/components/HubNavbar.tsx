@@ -50,7 +50,7 @@ const ALL_TABS: readonly TabDef[] = [
   { id: 'settings', label: 'AJUSTES', short: 'AJUSTES', icon: Settings, accent: colors.warning },
 ]
 
-/** El Estudio va detras de un interruptor (services/studio/flag.ts): sin el, su pestana no existe. */
+/** El Estudio esta encendido por defecto; services/studio/flag.ts permite apagarlo y entonces su pestana no existe. */
 const HUB_TABS: readonly TabDef[] = ALL_TABS.filter((tab) => tab.id !== 'studio' || studioEnabled())
 
 interface Props {

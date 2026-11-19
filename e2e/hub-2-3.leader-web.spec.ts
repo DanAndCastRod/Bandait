@@ -9,7 +9,7 @@ import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './suppor
  */
 
 const STEMS = 'https://stems.e2e.invalid';
-const TABS = ['SETLISTS', 'CANCIONES', 'ENSAYO', 'PISTAS', 'BANDA', 'AJUSTES'];
+const TABS = ['SETLISTS', 'CANCIONES', 'ENSAYO', 'PISTAS', 'ESTUDIO', 'BANDA', 'AJUSTES'];
 
 function wav(seconds: number, freq: number, rate = 8000): Buffer {
   const samples = Math.round(seconds * rate);
@@ -44,7 +44,7 @@ async function horizontalOverflow(page: Page): Promise<number> {
 }
 
 test.describe('Web Admin Hub 2.3 - navegacion', () => {
-  test('escritorio: las 6 vistas del lider en orden, sin Escenario, y AJUSTES agrupa voz y equipos', async ({ page }) => {
+  test('escritorio: las 6 vistas del lider y ESTUDIO en orden, sin Escenario, y AJUSTES agrupa voz y equipos', async ({ page }) => {
     await enterDemo(page);
     const nav = page.locator('nav.hub-desktop-nav');
     await expect(nav.getByRole('button')).toHaveText(TABS);
@@ -60,7 +60,7 @@ test.describe('Web Admin Hub 2.3 - navegacion', () => {
     await expect(page.getByRole('heading', { name: 'Rider Técnico & Ruteo de Equipos' })).toBeVisible();
   });
 
-  test('movil 390 px: la barra inferior trae las mismas 6 vistas sin scroll horizontal', async ({ page }) => {
+  test('movil 390 px: la barra inferior trae las mismas 7 vistas sin scroll horizontal', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await enterDemo(page);
     const bottom = page.locator('nav.hub-mobile-nav');
