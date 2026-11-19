@@ -11,7 +11,10 @@ on:
 jobs:
   leader:
     name: Leader (Python)
-    runs-on: ubuntu-latest
+    # Fijo en 24.04: desde que ubuntu-latest paso a 26.04 (2026-11), libportaudio2 trae el backend
+    # de PulseAudio y PortAudio no inicia sin un servidor de audio ("PulseAudio_Initialize: Can't
+    # connect to server"), lo que tumba 28 pruebas de audio. Subir de version pide resolver eso antes.
+    runs-on: ubuntu-24.04
     env:
       QT_QPA_PLATFORM: offscreen
     defaults:
