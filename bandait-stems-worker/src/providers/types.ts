@@ -3,18 +3,57 @@
 
 import type { Env, FetchLike } from '../types.ts';
 
+/**
+ * Metadatos de la respuesta del proveedor para el registro de eventos (src/events.ts) y para
+ * correlacionar con URiT IA. Nunca llevan contenido: ni prompt, ni salida del modelo, ni claves.
+ */
+export interface ProviderMeta {
+  /** Estado HTTP que respondio el proveedor; null si no hubo respuesta (red, espera agotada). */
+  http?: number | null;
+  /** Codigo de error del proveedor (`provider_error`, `blocked`...). */
+  code?: string | null;
+  /** Detalle corto del proveedor (`NO_AUDIO`). Se limpia y recorta antes de guardarlo. */
+  detail?: string | null;
+  /** Id de la llamada en URiT IA (`ai_...`): campo `id` del cuerpo o cabecera X-Request-Id. */
+  requestId?: string | null;
+  /** Modelo que respondio, si el proveedor lo informa. */
+  model?: string | null;
+}
+
 /** Fallo de un proveedor, ya con el estado HTTP y el codigo de STUDIO_V1.md seccion 7. */
 export class ProviderError extends Error {
   status: number;
   code: string;
   /** Texto para los logs del Worker. Nunca lleva la clave. */
   detail: string;
-  constructor(status: number, code: string, detail = '') {
+  /** Lo que se sabe de la respuesta del proveedor, para el registro de eventos. */
+  meta: ProviderMeta;
+  constructor(status: number, code: string, detail = '', meta: ProviderMeta = {}) {
     super(code);
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.meta = meta;
   }
+}
+
+const REQUEST_ID = /^[A-Za-z0-9_.:-]{1,80}$/;
+
+/**
+ * Id de la llamada en URiT IA: el campo `id` de la respuesta o, si falta, la cabecera
+ * X-Request-Id. null si no viene o no tiene forma de id.
+ */
+export function readRequestId(res: Response | null, body: unknown): string | null {
+  const fromBody = (body as { id?: unknown } | null)?.id;
+  if (typeof fromBody === 'string' && REQUEST_ID.test(fromBody)) return fromBody;
+  const fromHeader = res?.headers.get('X-Request-Id') ?? null;
+  return fromHeader !== null && REQUEST_ID.test(fromHeader) ? fromHeader : null;
+}
+
+/** Modelo informado por el proveedor (`model` del cuerpo), corto y sin caracteres raros. */
+export function readModel(body: unknown): string | null {
+  const raw = (body as { model?: unknown } | null)?.model;
+  return typeof raw === 'string' && /^[A-Za-z0-9_.:\/-]{1,80}$/.test(raw) ? raw : null;
 }
 
 export interface GenerateRequest {
@@ -35,9 +74,10 @@ export interface GeneratedAudio {
  * FAILED (bloqueo, sin audio, cuota, espera agotada). `costUsd`: costo real informado por el
  * proveedor; 0 si no cobro; null si no se sabe y queda la estimacion.
  */
-export type GenerateResult =
+export type GenerateResult = (
   | { audio: GeneratedAudio; failure: null; costUsd: number | null }
-  | { audio: null; failure: string; costUsd: number | null };
+  | { audio: null; failure: string; costUsd: number | null }
+) & { meta?: ProviderMeta };
 
 export interface GenerateProvider {
   /** Lanza ProviderError (503 o 501 `provider_unavailable`) si no se puede usar con esta configuracion. */
@@ -54,6 +94,8 @@ export interface AssistResult {
   suggestions: unknown[];
   /** Motivo por el que el modelo no entrego sugerencias (rechazo, respuesta cortada); null si las entrego. */
   failure: string | null;
+  /** Metadatos de la respuesta (URiT IA: id de la llamada y modelo). */
+  meta?: ProviderMeta;
 }
 
 export interface AssistProvider {
@@ -113,6 +155,8 @@ export interface ChatOutput {
 export type TextResult<T> = ({ value: T; failure: null } | { value: null; failure: string }) & {
   /** Costo real informado por el proveedor (URiT: usage.estimated_usd); ausente o null: queda la estimacion. */
   costUsd?: number | null;
+  /** Metadatos de la respuesta (URiT IA: id de la llamada y modelo). */
+  meta?: ProviderMeta;
 };
 
 export interface TextProvider {

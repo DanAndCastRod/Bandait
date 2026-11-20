@@ -31,10 +31,12 @@ import type { MusicAiResult } from './analysis.ts';
 import { anthropic } from './providers/anthropic.ts';
 import { gemini, geminiText } from './providers/gemini.ts';
 import { urit, uritText } from './providers/urit.ts';
-import { CLIP_SECONDS, detectAudioExt, lyria } from './providers/lyria.ts';
+import { CLIP_SECONDS, detectAudioExt, lyria, lyriaModel } from './providers/lyria.ts';
 import { suno } from './providers/suno.ts';
 import { ProviderError } from './providers/types.ts';
-import type { AssistProvider, GenerateProvider, GenerateRequest, TextProvider } from './providers/types.ts';
+import type { AssistProvider, GenerateProvider, GenerateRequest, ProviderMeta, TextProvider } from './providers/types.ts';
+import { recordEvent } from './events.ts';
+import type { EventStatus } from './events.ts';
 import { ASSET_CONTENT_TYPES, assertSpender, createOnly, readLimited } from './studio.ts';
 import type { StudioContext } from './studio.ts';
 import {
@@ -120,6 +122,11 @@ interface JobRecord {
   analysis?: StudioAnalysis;
   /** chat (STUDIO_V2.md 4.3.4). */
   reply?: string | null; tool_calls?: ChatToolCall[];
+  /**
+   * Id de la llamada en URiT IA (`ai_...`, campo `id` de su respuesta o cabecera X-Request-Id):
+   * correlaciona este trabajo con el registro de URiT (docs/PLAN_MCP_BANDAIT_URIT.md, 1.4).
+   */
+  urit_request_id?: string;
 }
 
 interface UsageEntry {
@@ -613,6 +620,81 @@ async function launchMusicAi(
   return job.id;
 }
 
+// --------------------------------------------------------------------------- registro de eventos
+
+/** Lo que se sabe de un fallo o de un final para el evento (src/events.ts). Nunca contenido. */
+interface EventExtra {
+  meta?: ProviderMeta;
+  http?: number | null;
+  code?: string | null;
+  detail?: unknown;
+  model?: string | null;
+  durationMs?: number | null;
+  cost?: number | null;
+}
+
+/** Workflow de Music AI de un tipo de trabajo, sin lanzar si falta la configuracion. */
+function workflowName(env: Env, kind: JobKind): string | null {
+  try {
+    return isMusicAiKind(kind) ? musicAiWorkflow(env, kind) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Modelo que se anota cuando el proveedor no lo informa. */
+function fallbackModel(env: Env, kind: JobKind, provider: string, durationS: number | null): string | null {
+  if (kind === 'generate' && provider === 'lyria' && durationS !== null) return lyriaModel(env, durationS);
+  if (isMusicAiKind(kind)) return workflowName(env, kind);
+  if (provider === 'gemini' || provider === 'anthropic') return (env.ASSIST_MODEL || '').trim() || null;
+  return null;
+}
+
+/** Estado HTTP escrito en el detalle de un ProviderError (`... HTTP 502 ...`), si no vino en meta. */
+function httpFromDetail(detail: string): number | null {
+  const m = /HTTP (\d{3})\b/.exec(detail);
+  return m ? Number(m[1]) : null;
+}
+
+function emitJobEvent(
+  ctx: StudioContext, job: { job_id: string | null; kind: JobKind; provider: string; urit_request_id?: string },
+  status: EventStatus, extra: EventExtra = {},
+): void {
+  const meta = extra.meta ?? {};
+  recordEvent(ctx.env, ctx.deps, {
+    band: ctx.studioPrefix.replace(/\/studio\/$/, ''),
+    session: ctx.session,
+    job: job.job_id,
+    kind: job.kind,
+    provider: job.provider,
+    status,
+    http: extra.http ?? meta.http ?? null,
+    provider_code: extra.code ?? meta.code ?? null,
+    provider_detail: extra.detail ?? meta.detail ?? null,
+    urit_request_id: meta.requestId ?? job.urit_request_id ?? null,
+    model: meta.model ?? extra.model ?? null,
+    duration_ms: extra.durationMs ?? null,
+    cost_usd: extra.cost ?? null,
+  });
+}
+
+/** Evento de un proveedor que no acepto el trabajo (ProviderError, o un fallo de musicAi()). */
+function emitRejected(
+  ctx: StudioContext, job: { job_id: string | null; kind: JobKind; provider: string }, err: unknown, extra: EventExtra = {},
+): void {
+  if (err instanceof ProviderError) {
+    emitJobEvent(ctx, job, 'REJECTED', {
+      ...extra,
+      meta: err.meta,
+      http: err.meta.http !== undefined ? err.meta.http : httpFromDetail(err.detail),
+      code: err.meta.code || err.code,
+      detail: err.meta.detail ?? err.detail,
+    });
+  } else if (err instanceof ApiError) {
+    emitJobEvent(ctx, job, 'REJECTED', { ...extra, code: err.message });
+  }
+}
+
 // --------------------------------------------------------------------------- POST .../jobs
 
 function jobKey(ctx: StudioContext, jobId: string): string {
@@ -656,6 +738,13 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
   try {
     assertAvailable(env, parsed);
   } catch (err) {
+    // Configuracion que falta (secreto, workflow): se anota al lanzar, no al estimar (el Hub estima
+    // para habilitar los botones y llenaria el registro).
+    if (!estimate) {
+      const provider = providerName(env, parsed);
+      const seconds = 'duration_s' in parsed && typeof parsed.duration_s === 'number' ? parsed.duration_s : null;
+      emitRejected(ctx, { job_id: clientJobId, kind: parsed.kind, provider }, err, { model: fallbackModel(env, parsed.kind, provider, seconds) });
+    }
     providerFailure(err);
   }
   const input = isMusicAiKind(parsed.kind) ? await findAsset(ctx, (parsed as { asset_id: string }).asset_id) : null;
@@ -749,12 +838,34 @@ async function runProvider(
 ): Promise<void> {
   const { env } = ctx;
   const jobId = record.job_id;
+  const startedMs = ctx.deps.now().getTime();
+  const seconds = 'duration_s' in request && typeof request.duration_s === 'number' ? request.duration_s : null;
+  const model = fallbackModel(env, request.kind, record.provider, seconds);
+  // Metadatos de la respuesta del proveedor (id de URiT IA, modelo, codigo): para el registro del
+  // trabajo y el evento. Nunca el contenido.
+  let meta: ProviderMeta | undefined;
+  const keep = (m: ProviderMeta | undefined) => {
+    meta = m;
+    if (m?.requestId) record.urit_request_id = m.requestId;
+  };
+  /** Guarda el registro y, si el trabajo ya termino (sincrono), anota el evento. */
+  const finish = async () => {
+    await saveJob(ctx, record);
+    if (record.status === 'SUCCEEDED' || record.status === 'FAILED') {
+      emitJobEvent(ctx, record, record.status, {
+        meta, model, durationMs: ctx.deps.now().getTime() - startedMs, cost: record.cost_usd,
+        // En un FAILED sin codigo del proveedor (respuesta ilegible, sin notas) queda el motivo corto.
+        code: record.status === 'FAILED' && !meta?.code ? 'job_failed' : undefined,
+      });
+    }
+  };
   try {
     if (request.kind === 'analyze') {
       // El analisis no deja audios: el resultado se arma en el GET con las salidas JSON.
       record.external_id = await launchMusicAi(ctx, 'analyze', input!.file, musicAiWorkflow(env, 'analyze'), {});
     } else if (request.kind === 'compose') {
       const result = await textProvider(env).json(env, ctx.fetchFn, composeCall(request));
+      keep(result.meta);
       await settle(result.costUsd);
       const lengthBeats = request.length_bars * request.beats_per_bar;
       // Desde aqui el modelo ya respondio: un problema es un trabajo FAILED y el costo queda.
@@ -776,6 +887,7 @@ async function runProvider(
       }
     } else if (request.kind === 'chat') {
       const result = await textProvider(env).chat(env, ctx.fetchFn, chatCall(request));
+      keep(result.meta);
       await settle(result.costUsd);
       const done = result.failure !== null ? { failure: result.failure } : finishChat(result.value, request.tool_mode);
       if ('failure' in done) {
@@ -801,19 +913,20 @@ async function runProvider(
       record.external_id = await launchMusicAi(ctx, request.kind, input!.file, musicAiWorkflow(env, request.kind), params);
     } else if (request.kind === 'generate') {
       const generated = await GENERATE_PROVIDERS[request.provider].generate(env, ctx.fetchFn, request);
+      keep(generated.meta);
       // Costo real (URiT: usage.estimated_usd; 0 si no cobro: bloqueo, sin audio, cuota).
       await settle(generated.costUsd);
       if (generated.failure !== null) {
         record.status = 'FAILED';
         record.error = generated.failure;
-        await saveJob(ctx, record);
+        await finish();
         return;
       }
       const audio = generated.audio;
       if (audio.bytes.byteLength > ASSET_MAX_BYTES) {
         record.status = 'FAILED';
         record.error = 'El audio generado pesa más de 200 MB y no se guardó.';
-        await saveJob(ctx, record);
+        await finish();
         return;
       }
       const id = ctx.deps.newId('ast');
@@ -823,7 +936,7 @@ async function runProvider(
         // Lyria ya genero (y cobro): el costo queda anotado y el trabajo, fallido.
         record.status = 'FAILED';
         record.error = 'El audio generado no se pudo guardar. Genera de nuevo.';
-        await saveJob(ctx, record);
+        await finish();
         throw new ApiError(502, 'asset_copy_failed');
       }
       record.status = 'SUCCEEDED';
@@ -834,6 +947,7 @@ async function runProvider(
       }];
     } else {
       const result = await assistProvider(env).suggest(env, ctx.fetchFn, request.metrics);
+      keep(result.meta);
       if (result.failure) {
         record.status = 'FAILED';
         record.error = result.failure;
@@ -847,11 +961,12 @@ async function runProvider(
     // El proveedor no acepto el trabajo: no se cobra y no queda registro.
     await release();
     if (err instanceof ApiError && err.message === 'no_asset') throw err;
+    emitRejected(ctx, record, err, { model, durationMs: ctx.deps.now().getTime() - startedMs });
     providerFailure(err);
   }
   // El resultado se guarda sin condicion: mientras el trabajo no tiene id del proveedor, el GET
   // no escribe el registro (ver jobStatus).
-  await saveJob(ctx, record);
+  await finish();
 }
 
 // --------------------------------------------------------------------------- GET .../jobs/{job}
@@ -983,7 +1098,8 @@ function audioOutputs(kind: JobKind, result: Record<string, unknown>): [string, 
 /** Estado de un trabajo en Music AI. `transient`: no se pudo consultar ahora; `gone`: ya no existe. */
 type Poll =
   | { kind: 'ok'; job: { status?: string; result?: Record<string, unknown>; error?: { message?: string } } }
-  | { kind: 'transient' } | { kind: 'gone' };
+  /** `http`: estado del proveedor si respondio; `code`: que fallo (para el registro de eventos). */
+  | { kind: 'transient'; http?: number | null; code?: string } | { kind: 'gone' };
 
 async function pollMusicAi(ctx: StudioContext, externalId: string): Promise<Poll> {
   const key = (ctx.env.MUSICAI_API_KEY || '').trim();
@@ -994,15 +1110,15 @@ async function pollMusicAi(ctx: StudioContext, externalId: string): Promise<Poll
       method: 'GET', headers: { Authorization: key, 'Content-Type': 'application/json' },
     });
   } catch {
-    return { kind: 'transient' };
+    return { kind: 'transient', http: null, code: 'poll_network' };
   }
   if (res.status === 404) return { kind: 'gone' };
   if (!res.ok) {
     console.warn(`studio: sondeo de Music AI HTTP ${res.status}`);
-    return { kind: 'transient' };
+    return { kind: 'transient', http: res.status, code: 'poll_http' };
   }
   const job = await res.json().catch(() => null) as { status?: string } | null;
-  return job && typeof job === 'object' ? { kind: 'ok', job } : { kind: 'transient' };
+  return job && typeof job === 'object' ? { kind: 'ok', job } : { kind: 'transient', http: res.status, code: 'poll_unreadable' };
 }
 
 function finalResponse(record: JobRecord): Response {
@@ -1046,10 +1162,29 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
     if (!r.planned) return json(200, { ...base, status: 'STARTED' });
     return json(200, { ...base, status: 'IMPORTING', done: Object.keys(r.copied ?? {}).length, total: Object.keys(r.planned).length });
   };
-  const failed = async (error: string) => {
+  // Registro de eventos: desde la creacion del trabajo hasta este GET.
+  const elapsed = () => {
+    const ms = ctx.deps.now().getTime() - Date.parse(record.created_at);
+    return Number.isFinite(ms) ? ms : null;
+  };
+  const model = fallbackModel(ctx.env, record.kind, record.provider, null);
+  /** Evento del final, solo si este GET fue el que escribio el registro (el que pierde no anota). */
+  const finished = (extra: EventExtra = {}) => {
+    if (record.status !== 'SUCCEEDED' && record.status !== 'FAILED') return;
+    emitJobEvent(ctx, record, record.status, { model, durationMs: elapsed(), cost: record.cost_usd, ...extra });
+  };
+  const failed = async (error: string, extra: EventExtra = {}) => {
     record.status = 'FAILED';
     record.error = error.slice(0, 300);
-    return (await save()) ? finalResponse(record) : winner();
+    if (!(await save())) return winner();
+    finished({ code: 'job_failed', ...extra });
+    return finalResponse(record);
+  };
+  const succeeded = async () => {
+    record.status = 'SUCCEEDED';
+    if (!(await save())) return winner();
+    finished();
+    return finalResponse(record);
   };
 
   // Sin id del proveedor: el POST sigue en curso (espera a Lyria o al modelo, o sube la mezcla a
@@ -1057,16 +1192,21 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
   if (!record.external_id) {
     const age = ctx.deps.now().getTime() - Date.parse(record.created_at);
     if (Number.isFinite(age) && age < PENDING_GRACE_MS) return json(200, { ...base, status: 'STARTED' });
-    return failed('El trabajo quedó incompleto. Lánzalo de nuevo.');
+    return failed('El trabajo quedó incompleto. Lánzalo de nuevo.', { code: 'incomplete' });
   }
 
   const poll = await pollMusicAi(ctx, record.external_id);
   // Un fallo al consultar (red, 5xx) no es un fallo del trabajo, que ya esta pagado: se informa
   // STARTED y el siguiente GET vuelve a consultar. Solo un 404 del proveedor es definitivo.
-  if (poll.kind === 'transient') return json(200, { ...base, status: 'STARTED' });
-  if (poll.kind === 'gone') return failed('Music AI ya no tiene este trabajo. Lánzalo de nuevo.');
+  if (poll.kind === 'transient') {
+    if (poll.code) emitJobEvent(ctx, record, 'TRANSIENT', { model, http: poll.http ?? null, code: poll.code, durationMs: elapsed() });
+    return json(200, { ...base, status: 'STARTED' });
+  }
+  if (poll.kind === 'gone') return failed('Music AI ya no tiene este trabajo. Lánzalo de nuevo.', { http: 404, code: 'job_gone' });
   const job = poll.job;
-  if (job.status === 'FAILED') return failed(String(job.error?.message || 'Music AI no pudo procesar el audio.'));
+  if (job.status === 'FAILED') {
+    return failed(String(job.error?.message || 'Music AI no pudo procesar el audio.'), { code: 'job_failed', detail: job.error?.message ?? null });
+  }
   // Cualquier estado intermedio del proveedor (en cola, procesando) se informa como STARTED.
   if (job.status !== 'SUCCEEDED' || !job.result) return json(200, { ...base, status: 'STARTED' });
 
@@ -1078,7 +1218,10 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
     try {
       result = await readMusicAiOutputs(Object.entries(job.result), ctx.fetchFn, { strict: true });
     } catch (err) {
-      if (err instanceof TransientOutputError) return json(200, { ...base, status: 'STARTED' });
+      if (err instanceof TransientOutputError) {
+        emitJobEvent(ctx, record, 'TRANSIENT', { model, code: 'output_download', durationMs: elapsed() });
+        return json(200, { ...base, status: 'STARTED' });
+      }
       throw err;
     }
     let analysis: StudioAnalysis;
@@ -1090,9 +1233,8 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
       console.warn(`studio analyze: analisis ilegible (${err instanceof Error ? err.message.slice(0, 120) : 'error'})`);
       return failed('Music AI devolvió un análisis que no se pudo leer.');
     }
-    record.status = 'SUCCEEDED';
     record.analysis = analysis;
-    return (await save()) ? finalResponse(record) : winner();
+    return succeeded();
   }
 
   let outputs: [string, string][];
@@ -1119,7 +1261,11 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
     try {
       record.copied[next[0]] = await copyOutput(ctx, record, next[0], next[1]);
     } catch (err) {
-      if (err instanceof UnsupportedOutput) return failed(err.message);
+      if (err instanceof UnsupportedOutput) return failed(err.message, { code: 'unsupported_output' });
+      // La descarga del audio desde Music AI fallo: el trabajo sigue y el siguiente GET reintenta.
+      if (err instanceof ApiError && err.message === 'asset_copy_failed') {
+        emitJobEvent(ctx, record, 'TRANSIENT', { model, code: 'asset_copy_failed', durationMs: elapsed() });
+      }
       throw err;
     }
   }
@@ -1129,8 +1275,6 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
     if (!(await save())) return winner();
     return json(200, { ...base, status: 'IMPORTING', done, total: known.length });
   }
-  record.status = 'SUCCEEDED';
   record.assets = known.map(([name]) => record.copied![name]);
-  if (!(await save())) return winner();
-  return finalResponse(record);
+  return succeeded();
 }

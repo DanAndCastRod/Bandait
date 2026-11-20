@@ -15,6 +15,9 @@
   //   ASSIST_API_KEY    Opcional. Con ASSIST_PROVIDER "gemini" (directo) assist, compose y chat usan
   //                     GEMINI_API_KEY si falta; con "anthropic" es una clave de Anthropic.
   //   SUNO_API_KEY      Futuro. Hoy `generate` con `suno` responde 501 aunque exista.
+  //   MCP_TOKENS        Tokens del MCP de operador (POST /mcp, src/mcp.ts), separados por coma. Cada
+  //                     entrada es el token o, mejor, `sha256:<64 hex>` (solo su SHA-256). Sin el,
+  //                     /mcp responde 404. ClipVault: bandait-mcp-token. Ve todas las bandas.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bandait-stems",
   "main": "src/index.ts",
@@ -24,6 +27,9 @@
   "r2_buckets": [
     { "binding": "STEMS", "bucket_name": "bandait-stems" }
   ],
+  // Una vez al dia (04:17 UTC): el handler `scheduled` borra los eventos del Estudio
+  // (studio/_events/AAAA-MM-DD/) de mas de 30 dias. Ver src/events.ts.
+  "triggers": { "crons": ["17 4 * * *"] },
   "vars": {
     "SUPABASE_URL": "https://xftzxzwopwzjmttrwtga.supabase.co",
     "SUPABASE_ANON_KEY": "sb_publishable_kuAR_g2Z5RNbssRcuZ2IEA_qhu5iFv8",

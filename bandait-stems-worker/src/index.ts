@@ -15,6 +15,8 @@
 //   GET    /v1/bands/{band}/songs/{song}/analysis        any member: state and draft; for a
 //          separation, each call copies one stem to R2 (IMPORTING) and then writes the manifest
 //   *      /v1/bands/{band}/studio/...                   Estudio: see src/studio.ts
+//   POST   /mcp                                          operator MCP (src/mcp.ts), Bearer from MCP_TOKENS
+//   cron   scheduled()                                   daily: drops Estudio events older than 30 days
 //
 // {band} is a shared band uuid, or "me" for the caller's personal workspace (only the
 // caller can read or write it). Upload the files first, then the manifest: the
@@ -24,9 +26,11 @@
 import { ASSEMBLER_VERSION, assemble } from './analysis.ts';
 import type { MusicAiResult } from './analysis.ts';
 import { assertSpender, defaultStudioDeps, studioRoute, tokenSubject } from './studio.ts';
-import type { Env, ExecutionContextLike, FetchLike, R2Bucket, StudioDeps } from './types.ts';
+import { purgeEvents } from './events.ts';
+import { handleMcp } from './mcp.ts';
+import type { Env, ExecutionContextLike, FetchLike, R2Bucket, ScheduledControllerLike, StudioDeps } from './types.ts';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SONG = /^[A-Za-z0-9_-]{1,80}$/;
 const FILE = /^[A-Za-z0-9 ._()-]{1,120}$/;
@@ -515,6 +519,14 @@ export async function readMusicAiOutputs(
 export async function handle(
   req: Request, env: Env, fetchFn: FetchLike = fetch, deps: Partial<StudioDeps> = {},
 ): Promise<Response> {
+  // MCP de operador (src/mcp.ts): sin CORS (no es para navegadores) y con su propio acceso.
+  if (new URL(req.url).pathname === '/mcp') {
+    try {
+      return await handleMcp(req, env, { ...defaultStudioDeps(), ...deps });
+    } catch {
+      return json(500, { error: 'internal' });
+    }
+  }
   const cors = corsHeaders(req, env);
   if (req.method === 'OPTIONS') return new Response(null, { status: cors['Access-Control-Allow-Origin'] ? 204 : 403, headers: cors });
   let res: Response;
@@ -527,10 +539,20 @@ export async function handle(
   return res;
 }
 
+/** Cron diario (wrangler.jsonc, `triggers.crons`): borra los eventos de mas de 30 dias. */
+export async function scheduled(controller: ScheduledControllerLike, env: Env, ctx?: ExecutionContextLike): Promise<void> {
+  const run = purgeEvents(env, new Date(controller.scheduledTime || Date.now())).then(() => {}, (err: unknown) => {
+    console.warn(`studio events: fallo la retencion (${err instanceof Error ? err.name : 'error'})`);
+  });
+  if (ctx) ctx.waitUntil(run);
+  await run;
+}
+
 export default {
   fetch(req: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     // waitUntil: un trabajo de IA sincrono (generate, assist) termina y deja su registro aunque el
-    // cliente corte la conexion a mitad de la espera.
+    // cliente corte la conexion a mitad de la espera; el registro de eventos tambien va ahi.
     return handle(req, env, (input, init) => fetch(input, init), ctx ? { waitUntil: (p) => ctx.waitUntil(p) } : {});
   },
+  scheduled,
 };

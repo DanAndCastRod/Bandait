@@ -57,12 +57,25 @@ export interface R2Bucket {
   get(key: string, options?: R2GetOptions): Promise<R2ObjectBody | null>;
   put(key: string, value: R2Body, options?: R2PutOptions): Promise<R2Object | null>;
   delete(keys: string | string[]): Promise<void>;
-  list(options?: { prefix?: string; cursor?: string; limit?: number; delimiter?: string }): Promise<R2Objects>;
+  /**
+   * `include: ['customMetadata']` hace que cada objeto listado traiga su customMetadata (lo usa el
+   * MCP para filtrar eventos sin leerlos uno por uno).
+   */
+  list(options?: {
+    prefix?: string; cursor?: string; limit?: number; delimiter?: string; include?: ('httpMetadata' | 'customMetadata')[];
+  }): Promise<R2Objects>;
 }
 
 /** Lo que el Worker usa del ExecutionContext de Cloudflare. */
 export interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
+}
+
+/** Lo que el Worker usa del ScheduledController de Cloudflare (cron de wrangler.jsonc). */
+export interface ScheduledControllerLike {
+  /** Momento programado de la corrida, en ms desde la epoca. */
+  scheduledTime: number;
+  cron?: string;
 }
 
 export interface Env {
@@ -138,6 +151,15 @@ export interface Env {
   STUDIO_RATE_CHAT_USD?: string;
   /** Recargo del chat por cada 32 KB completos de cuerpo. */
   STUDIO_RATE_CHAT_USD_PER_32KB?: string;
+
+  // ---- MCP de operador (docs/PLAN_MCP_BANDAIT_URIT.md, seccion 2; src/mcp.ts) ----
+  /**
+   * Secreto (wrangler secret put): tokens de acceso a `POST /mcp`, separados por coma. Cada uno es
+   * el token tal cual o, mejor, `sha256:<64 hex>` (solo su SHA-256). Vacio o ausente: `/mcp`
+   * responde 404. Acceso de operador (Daniel Castaneda y sus agentes): ve todas las bandas.
+   * ClipVault: bandait-mcp-token.
+   */
+  MCP_TOKENS?: string;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

@@ -1525,3 +1525,19 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Probar GENERAR con Lyria desde el Estudio.
   2. MCP de Bandait y de URiT IA para depurar sin `wrangler tail`: propuesta en `docs/PLAN_MCP_BANDAIT_URIT.md`, pendiente de aprobación.
+
+### [2026-11-20] - MCP de operador de Bandait (etapa 1) y registro de eventos del Estudio
+* **Sprint / Módulo:** `bandait-stems-worker` 1.2.0. Pedido de Daniel Castaneda: "implementa el mcp" (`docs/PLAN_MCP_BANDAIT_URIT.md`, sección 2, etapa 1). Agente: Claude Code (Opus 5.5) con un subagente para el código.
+* **Estado encontrado:** los fallos de los proveedores solo salían por `wrangler tail` y se perdían; diagnosticar el fallo de COMPONER exigió que Daniel Castaneda repitiera la acción con la escucha abierta.
+* **Acción técnica realizada:**
+  - `src/events.ts`: cada trabajo terminado (SUCCEEDED, FAILED), rechazo al lanzar (REJECTED) y fallo pasajero de sondeo o copia (TRANSIENT) escribe un evento en R2 `studio/_events/AAAA-MM-DD/<id>.json` con `waitUntil`: banda, sesión, trabajo, tipo, proveedor, estado, HTTP, código y detalle del proveedor (limpio de cualquier cosa con forma de clave), `urit_request_id`, modelo, duración y costo. Nunca prompt, letra, audio ni claves. Retención de 30 días con un cron diario (`17 4 * * *`).
+  - `urit_request_id` (el `id` de URiT IA o la cabecera `X-Request-Id`) queda en el registro del trabajo: une un trabajo de Bandait con su llamada en URiT.
+  - `src/mcp.ts`: `POST /mcp`, MCP Streamable HTTP sin sesión con el patrón de `urit-admin`. Acceso con `Authorization: Bearer` contra el secreto `MCP_TOKENS` (token o `sha256:<hex>`, comparación en tiempo constante); sin el secreto responde 404. Ocho herramientas de solo lectura: `bandait_salud`, `bandait_eventos`, `bandait_trabajo_ver`, `bandait_gasto`, `bandait_sesiones`, `bandait_sesion_resumen`, `bandait_stems`, `bandait_contrato`. Tope de 45 operaciones de R2 por llamada, con `truncated`.
+  - Dependencia de desarrollo `@modelcontextprotocol/sdk` 1.32.2 (MIT), solo para las pruebas.
+* **Verificación:** `npm test` 72 de 72 (9 nuevas en `tests/mcp.test.ts`: acceso, protocolo, cada herramienta, que ninguna respuesta lleve tokens, prompt ni audio, eventos en éxito y fallo, retención). `tsc --noEmit` limpio. `wrangler deploy --dry-run` correcto. No verificado contra Cloudflare real: `include: ['customMetadata']` en R2 list, el registro del cron y el conteo real de subpeticiones.
+* **Decisiones (del subagente, revisadas):** el evento identifica la banda como `bands/<uuid>` o `users/<uuid>`; los eventos viven en la raíz `studio/_events/` para leer todas las bandas sin recorrer prefijos; no se devuelven nombres de pista ni etiquetas de audio porque la etiqueta de un audio generado es el comienzo del prompt.
+* **Pendientes:**
+  1. Daniel Castaneda: crear en ClipVault la entrada `bandait-mcp-token` (valor aleatorio largo). Después: cargar `MCP_TOKENS` en el Worker y registrar el MCP en Claude Code.
+  2. El análisis de canciones (`.../songs/{song}/analysis`) no anota eventos: no es un trabajo del Estudio.
+  3. Un sondeo de Music.AI que falla repetidamente anota un TRANSIENT por sondeo; la retención los limpia a los 30 días.
+  4. MCP de URiT IA (sección 3 del plan): lo implementa la sesión de URiT, si Daniel Castaneda lo aprueba.
