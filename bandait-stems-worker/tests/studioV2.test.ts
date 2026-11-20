@@ -11,7 +11,7 @@ import {
   finishChat, normalizeComposeNotes, sliceUtf16,
 } from '../src/studioV2.ts';
 import { gemini400 } from '../src/providers/gemini.ts';
-import { ProviderError } from '../src/providers/types.ts';
+import { ProviderError, providerSchema } from '../src/providers/types.ts';
 import type { Env, R2Body, R2Bucket, R2Conditional, R2GetOptions, R2Object, R2ObjectBody, R2PutOptions } from '../src/types.ts';
 
 const FIXTURE_V1 = JSON.parse(readFileSync(new URL('../../bandait-protocol/fixtures/studio_session.json', import.meta.url), 'utf8'));
@@ -277,7 +277,7 @@ test('compose con urit: pide JSON con esquema, normaliza las notas y no fija mod
   const sent = JSON.parse(String(req.body));
   assert.equal(sent.task, 'studio_compose');
   assert.equal(sent.system, COMPOSE_SYSTEM_PROMPT);
-  assert.deepEqual(sent.output, { format: 'json', schema: COMPOSE_SCHEMA });
+  assert.deepEqual(sent.output, { format: 'json', schema: providerSchema(COMPOSE_SCHEMA) });
   assert.deepEqual(COMPOSE_SCHEMA.required, ['notes', 'description']);
   assert.ok(!('models' in sent) && !('tools' in sent), 'sin modelo fijo ni herramientas');
   assert.ok(sent.time_budget_ms <= 85000);
@@ -329,7 +329,7 @@ test('compose con gemini directo: generateContent con responseJsonSchema y reint
   await post('/ses_a/jobs', { ...COMPOSE, role: 'bass' });
   assert.equal(bodies.length, 2);
   const first = bodies[0] as { generationConfig: Record<string, unknown>; systemInstruction: { parts: { text: string }[] } };
-  assert.deepEqual(first.generationConfig.responseJsonSchema, COMPOSE_SCHEMA);
+  assert.deepEqual(first.generationConfig.responseJsonSchema, providerSchema(COMPOSE_SCHEMA));
   assert.equal(first.systemInstruction.parts[0].text, COMPOSE_SYSTEM_PROMPT);
   assert.ok(!('responseJsonSchema' in (bodies[1] as { generationConfig: Record<string, unknown> }).generationConfig));
   const done = await get('job_t1');
@@ -390,7 +390,7 @@ test('chat con urit: traduce la conversacion, manda la lista cerrada y devuelve 
   assert.equal(sent.system, CHAT_SYSTEM_PROMPT);
   assert.equal(sent.tool_mode, 'auto');
   assert.ok(!('models' in sent) && !('output' in sent));
-  assert.deepEqual(sent.tools, CHAT_TOOLS);
+  assert.deepEqual(sent.tools, CHAT_TOOLS.map((t) => ({ ...t, parameters: providerSchema(t.parameters) })));
   assert.ok(!JSON.stringify(sent.tools).includes('command_id'));
   assert.deepEqual(sent.messages, [
     { role: 'user', parts: [{ text: 'La voz esta muy fuerte' }] },
@@ -446,7 +446,7 @@ test('chat con gemini directo: functionDeclarations, firma de pensamiento ida y 
   assert.deepEqual(sent.contents[1].parts[1], { functionCall: { name: 'set_track_mix', args: { track_id: 'trk_1', volume_db: -3 } }, thoughtSignature: 'firma-opaca' });
   assert.deepEqual(sent.contents[2], { role: 'user', parts: [{ functionResponse: { name: 'set_track_mix', response: { status: 'applied', message: 'Aplicado.' } } }] });
   assert.equal(sent.tools[0].functionDeclarations.length, 19);
-  assert.deepEqual(sent.tools[0].functionDeclarations[0], { name: CHAT_TOOLS[0].name, description: CHAT_TOOLS[0].description, parametersJsonSchema: CHAT_TOOLS[0].parameters });
+  assert.deepEqual(sent.tools[0].functionDeclarations[0], { name: CHAT_TOOLS[0].name, description: CHAT_TOOLS[0].description, parametersJsonSchema: providerSchema(CHAT_TOOLS[0].parameters) });
   assert.ok(!('toolConfig' in sent), 'auto: sin toolConfig');
   const done = await get('job_t1');
   assert.deepEqual([done.reply, done.tool_calls], ['Agrego la marca.', [{ id: 'call_1', name: 'add_marker', arguments: { beat: 16, label: 'Coro', kind: 'chorus' }, signature: 'sig-g' }]]);

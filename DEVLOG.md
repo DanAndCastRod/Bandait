@@ -1505,3 +1505,23 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   4. Probar con un teclado MIDI físico (latencia, canal, cierre del puerto con otra aplicación abierta en Windows).
   5. Medir el costo real de `analyze` en Music.AI y ajustar `STUDIO_RATE_ANALYZE_USD_PER_MIN`, o crear un workflow solo de análisis en `MUSICAI_ANALYZE_WORKFLOW`.
   6. Primera generación real con Lyria y primera conversación real del chat desde el Hub. Si URiT responde 422 `model_not_allowed`, el consumidor `bandait` no tiene ese modelo de Lyria en `settings.models`.
+
+### [2026-11-20] - Estudio: COMPONER fallaba porque Gemini rechaza los límites del esquema JSON
+* **Sprint / Módulo:** `bandait-stems-worker` (proveedores de texto). Reporte de Daniel Castaneda: el Estudio mostraba "EL TRABAJO FALLÓ. El proveedor de IA rechazó el trabajo". Agente: Claude Code (Opus 5.5).
+* **Estado encontrado:**
+  - `wrangler tail` (5 min, por ClipVault) mientras Daniel Castaneda repetía la acción: tres `POST .../jobs` con el aviso `studio provider: urit-ai: HTTP 502 provider_error`, en 2 a 3 s.
+  - `GET /v1/admin/requests?consumer=bandait` de URiT IA (solo metadatos): cuatro llamadas `studio_compose`, `models_tried: ["gemini-3.8-flash"]`, 0 tokens, costo 0, `502 provider_error`. La cadena se cortó en el primer modelo: un 400 persistente de Google.
+  - No era Lyria: los cuatro fallos fueron de COMPONER.
+* **Causa (verificada):** prueba directa contra `POST https://ai.urit.services/v1/text` con el token `bandait`: el esquema de compose con `minimum`, `maximum`, `maxItems` y `maxLength` respondió `502 provider_error` con `detail: INVALID_ARGUMENT`; el mismo esquema sin esos límites respondió 200 con 12 notas (USD 0,0018). El agente que escribió el contrato v2 ya había marcado esas palabras como no verificadas contra Gemini.
+* **Corrección aplicada:**
+  - `providerSchema()` en `src/providers/types.ts` quita de todo esquema que va a URiT o a Gemini directo las palabras de límite (`minimum`, `maximum`, `exclusive*`, `multipleOf`, `min/maxItems`, `min/maxLength`, `pattern`, `min/maxProperties`). Se aplica a compose, al asistente de mezcla y a los parámetros de las 19 herramientas del chat. Los rangos se siguen validando en el Worker (compose, assist) y en el Hub (herramientas).
+  - El aviso del Worker incluye ahora el `detail` de URiT (por ejemplo `INVALID_ARGUMENT`).
+* **Verificación:**
+  - Prueba en vivo con los esquemas limpios, una llamada de cada uno: assist 200 (4 sugerencias, USD 0,0021), compose 200 (12 notas, USD 0,0022), chat 200 (propuso `set_track_mix`, USD 0,0034). Total de las pruebas de hoy: menos de USD 0,01.
+  - `npm test` del Worker: 63 de 63 (dos pruebas nuevas: `providerSchema` y el cuerpo de compose sin límites). `tsc --noEmit` limpio.
+  - No verificado: Lyria (`/v1/music`) desde el Estudio; no hubo intento en la ventana de escucha.
+* **Decisiones:** limpiar el esquema en el borde del proveedor y no en el contrato: el contrato y el fixture de herramientas siguen declarando los rangos, que el Hub usa para validar. Se descartó reintentar sin esquema ante un 502 (lo hace solo `gemini` directo ante un 400 de esquema): costaría una llamada extra en cada fallo.
+* **Errores propios:** la primera ventana de escucha (3 min) se abrió sin avisar a Daniel Castaneda que debía repetir la acción en ese momento, y no capturó nada.
+* **Pendientes:**
+  1. Probar GENERAR con Lyria desde el Estudio.
+  2. MCP de Bandait y de URiT IA para depurar sin `wrangler tail`: propuesta en `docs/PLAN_MCP_BANDAIT_URIT.md`, pendiente de aprobación.

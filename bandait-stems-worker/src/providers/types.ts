@@ -122,6 +122,37 @@ export interface TextProvider {
   chat(env: Env, fetchFn: FetchLike, call: ChatCall): Promise<TextResult<ChatOutput>>;
 }
 
+/**
+ * Limites de JSON Schema que Gemini rechaza en `responseJsonSchema` (y que se quitan tambien de los
+ * parametros de herramientas). Verificado el 2026-11-20 contra URiT IA en produccion con
+ * gemini-3.8-flash: el esquema de compose con minimum, maximum, maxItems y maxLength respondio
+ * 502 provider_error / INVALID_ARGUMENT; el mismo esquema sin esos limites respondio 200.
+ */
+const PROVIDER_SCHEMA_DROP = new Set([
+  'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
+  'minItems', 'maxItems', 'minLength', 'maxLength', 'pattern', 'minProperties', 'maxProperties',
+]);
+
+/**
+ * Copia del esquema sin los limites que el proveedor rechaza. Los rangos NO se pierden: el Worker
+ * (compose, assist) y el Hub (herramientas del chat) validan y acotan lo que vuelve del modelo.
+ */
+export function providerSchema<T>(schema: T): T {
+  if (Array.isArray(schema)) return schema.map((item) => providerSchema(item)) as T;
+  if (!schema || typeof schema !== 'object') return schema;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (PROVIDER_SCHEMA_DROP.has(key)) continue;
+    // Dentro de `properties` las claves son nombres de campos, no palabras de JSON Schema.
+    if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([name, sub]) => [name, providerSchema(sub)]));
+    } else {
+      out[key] = providerSchema(value);
+    }
+  }
+  return out as T;
+}
+
 export const FAILURE_BLOCKED = 'El asistente no pudo responder a este pedido.';
 export const FAILURE_UNREADABLE = 'El asistente devolvió una respuesta que no se pudo leer. Intenta de nuevo.';
 export const FAILURE_TRUNCATED = 'La respuesta del asistente quedó incompleta. Intenta de nuevo.';

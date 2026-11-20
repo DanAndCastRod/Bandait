@@ -16,7 +16,7 @@
 //   - el nombre del modelo por defecto. `gemini-flash-latest` es un alias que Google cambia de
 //     version por su cuenta; para fijar una version, ASSIST_MODEL.
 
-import { FAILURE_BLOCKED, FAILURE_TRUNCATED, FAILURE_UNREADABLE, ProviderError } from './types.ts';
+import { FAILURE_BLOCKED, FAILURE_TRUNCATED, FAILURE_UNREADABLE, ProviderError, providerSchema } from './types.ts';
 import type {
   AssistProvider, AssistResult, ChatCall, ChatOutput, JsonCall, ProviderToolCall, TextMessage, TextPart, TextProvider, TextResult,
 } from './types.ts';
@@ -87,7 +87,7 @@ export const gemini: AssistProvider = {
           generationConfig: {
             responseMimeType: 'application/json',
             maxOutputTokens: MAX_OUTPUT_TOKENS,
-            ...(withSchema ? { responseJsonSchema: SUGGESTIONS_SCHEMA } : {}),
+            ...(withSchema ? { responseJsonSchema: providerSchema(SUGGESTIONS_SCHEMA) } : {}),
           },
         }),
       });
@@ -210,7 +210,7 @@ export const geminiText: TextProvider = {
     const payload = (withSchema: boolean) => ({
       systemInstruction: { parts: [{ text: call.system }] },
       contents: [{ role: 'user', parts: [{ text: call.user }] }],
-      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: MAX_OUTPUT_TOKENS, ...(withSchema ? { responseJsonSchema: call.schema } : {}) },
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: MAX_OUTPUT_TOKENS, ...(withSchema ? { responseJsonSchema: providerSchema(call.schema) } : {}) },
     });
     const result = await generate(env, fetchFn, payload(true), () => payload(false));
     if (result.failure !== null) return result;
@@ -229,7 +229,7 @@ export const geminiText: TextProvider = {
       systemInstruction: { parts: [{ text: call.system }] },
       contents: call.messages.map((m: TextMessage) => ({ role: m.role === 'model' ? 'model' : 'user', parts: m.parts.map(toGeminiPart) })),
       generationConfig: { maxOutputTokens: MAX_OUTPUT_TOKENS },
-      tools: [{ functionDeclarations: call.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.parameters })) }],
+      tools: [{ functionDeclarations: call.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: providerSchema(t.parameters) })) }],
     };
     if (call.toolMode === 'none') body.toolConfig = { functionCallingConfig: { mode: 'NONE' } };
     const result = await generate(env, fetchFn, body);
