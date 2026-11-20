@@ -12,8 +12,12 @@
  *       export class StudioEngine implements StudioEngineApi { ... }
  *
  * Reglas comunes:
- *   - Los tipos del documento (`StudioSession`, `StudioClip`...) y sus limites viven en
- *     session.ts. El contrato del cable es bandait-protocol/STUDIO_V1.md.
+ *   - Los tipos del documento (`StudioSession`, `StudioClip`, `StudioMidiClip`...) y sus limites
+ *     viven en session.ts. El contrato del cable es bandait-protocol/STUDIO_V2.md (lo que cambia
+ *     en v2) sobre bandait-protocol/STUDIO_V1.md (lo demas).
+ *   - Las secciones marcadas "v2" al final de este archivo son del Estudio v2
+ *     (docs/PLAN_ESTUDIO_V2.md): se agregaron sin cambiar las firmas de v1. En v2 los tiempos de
+ *     MIDI van en beats (sufijo `Beat` o `Beats`), no en segundos.
  *   - Tiempos en segundos (sufijo `S` o `Seconds`), niveles en dB (sufijo `Db`). Un nivel de
  *     silencio es `-Infinity`.
  *   - En el camino del audio no hay eventos por fotograma: medidores, posicion y niveles se LEEN
@@ -21,20 +25,30 @@
  *     (reproducir, detener, cargar), nunca el avance del cabezal.
  *   - Modulos puros (sin DOM ni import.meta.env; se prueban con node --experimental-strip-types
  *     e importan con extension .ts): session, sessionOps, history, latency, loudness, peaks, wav,
- *     studioCloud. Los demas usan APIs del navegador.
+ *     studioCloud; y en v2: midiOps, smf, commands (el keymap recibe el almacen inyectado) y la
+ *     parte pura de midiInput (midiRecording). Los demas usan APIs del navegador.
  */
 import type { CloudTarget } from '../stemCloud.ts'
 import type { StemRole } from '../stemNames.ts'
 import type {
+  DrumVoice,
   StudioAsset,
   StudioAssetSource,
   StudioClip,
   StudioFx,
   StudioFxParamsByType,
   StudioFxType,
+  StudioInstrument,
+  StudioInstrumentType,
+  StudioMarker,
+  StudioMarkerKind,
   StudioMaster,
+  StudioMidiClip,
+  StudioMidiNote,
+  StudioReverb,
   StudioSession,
   StudioTrack,
+  StudioTrackKind,
 } from './session.ts'
 
 // ===========================================================================
@@ -475,6 +489,12 @@ export interface StudioGraph {
   /** Salida post-fader de cada pista, para medidores y para exportar pistas por separado. */
   trackOutputs: ReadonlyMap<string, AudioNode>
   /**
+   * v2: instrumento de cada pista de instrumento disponible (id de pista -> nodo), ya conectado
+   * a su `trackInputs`. Falta la pista cuyo instrumento no esta disponible (suena su congelado,
+   * que se programa como un clip de audio desde el segundo 0). Opcional para no romper v1.
+   */
+  instruments?: ReadonlyMap<string, StudioInstrumentNode>
+  /**
    * Aplica en caliente los cambios de parametros de `session` (fader, paneo, mute, solo, envio,
    * parametros y bypass de efectos, master, reverb) con rampas cortas, sin clics. Devuelve
    * false si la topologia cambio (pistas agregadas o quitadas, efectos agregados, quitados o
@@ -513,8 +533,10 @@ export interface GraphApi {
    * Construye el grafo de `session` en `ctx`. Es sincrono y es EL MISMO para AudioContext y
    * OfflineAudioContext: lo que suena es lo que se exporta. No incluye el clic del Estudio.
    * `buffers` informa los canales de cada audio; buildGraph no programa clips (scheduleClips).
+   * v2: `instruments` es lo que dejo listo `prepareInstruments` (worklets, plugins WAM creados);
+   * sin el, las pistas de instrumento usan solo nodos nativos o quedan no disponibles.
    */
-  buildGraph(ctx: BaseAudioContext, session: StudioSession, buffers: StudioBuffers): StudioGraph
+  buildGraph(ctx: BaseAudioContext, session: StudioSession, buffers: StudioBuffers, instruments?: InstrumentPreparation): StudioGraph
   /**
    * Programa los clips activos de la sesion contra el grafo, alineados a la muestra en el
    * reloj del contexto: ganancia de clip y fades incluidos. La usan el motor y bounce.
@@ -1144,4 +1166,838 @@ export interface StudioCloudApi {
 export interface StudioFlagApi {
   /** Encendido por defecto; se apaga con VITE_BANDAIT_STUDIO === '0' o localStorage['bandait_studio'] === '0'. */
   studioEnabled(): boolean
+}
+
+// ###########################################################################
+// ESTUDIO v2 (docs/PLAN_ESTUDIO_V2.md, bandait-protocol/STUDIO_V2.md)
+// ###########################################################################
+
+// ===========================================================================
+// v2 · sessionOps.ts (puro): operaciones sobre pistas de instrumento, clips MIDI y marcas
+// ===========================================================================
+//
+// Mismas reglas que SessionOpsApi: (session, args) => sesion NUEVA, sin mutar la entrada; la
+// MISMA referencia si nada cambia; id inexistente o resultado invalido lanza StudioSessionError;
+// numeros fuera de rango se acotan; ids nuevos por parametro. Se exportan desde sessionOps.ts
+// junto a las de v1 y se comprueban aparte:
+//   void ({ addInstrumentTrack, setInstrument, ... } satisfies SessionOpsV2Api)
+// Todas las notas que entran pasan por midiOps.normalizeNotes (orden, solapes, recorte).
+// Un clip MIDI solo va en una pista 'instrument' y un clip de audio solo en una 'audio': lo
+// contrario lanza `bad_value` con ruta `track_id`.
+
+export interface AddInstrumentTrackArgs {
+  /** Pista completa con kind 'instrument' (defaultInstrumentTrack de session.ts). */
+  track: StudioTrack
+  /** Posicion en la lista; por defecto, al final. */
+  index?: number
+}
+
+export interface SetInstrumentArgs {
+  trackId: string
+  /**
+   * Instrumento completo que reemplaza al anterior. Cambiar de tipo esta permitido; las notas se
+   * conservan. Con un sampler, cada zona debe usar un audio de la sesion (`unknown_asset`).
+   */
+  instrument: StudioInstrument
+}
+
+export interface AddMidiClipArgs {
+  trackId: string
+  /** Clip completo (defaultMidiClip de session.ts). Id unico entre clips de audio y MIDI. */
+  clip: StudioMidiClip
+}
+
+export type MidiClipPatch = Partial<Pick<StudioMidiClip, 'notes' | 'loop' | 'loopBeats'>>
+
+export interface UpdateMidiClipArgs {
+  clipId: string
+  /** Lo que no viene no cambia. `notes` se normaliza con el largo del clip. */
+  patch: MidiClipPatch
+}
+
+export interface RemoveMidiClipArgs {
+  clipId: string
+}
+
+export interface MoveMidiClipArgs {
+  clipId: string
+  /** Nueva posicion en beats; se acota a [0, fin de la sesion - lengthBeats]. */
+  startBeat: number
+  /** Si viene y es otra pista de instrumento, el clip cambia de pista (queda al final). */
+  trackId?: string
+}
+
+export interface ResizeMidiClipArgs {
+  clipId: string
+  edge: 'start' | 'end'
+  /**
+   * Beat de la sesion donde debe quedar ese borde (acotado a largo minimo y fin de la sesion).
+   * Con 'end' cambia solo lengthBeats; las notas que quedan fuera (start >= nuevo largo) se
+   * quitan. Con 'start' las notas conservan su posicion ABSOLUTA en la sesion: se corren dentro
+   * del clip y las que quedan antes del nuevo inicio se quitan.
+   */
+  toBeat: number
+}
+
+export interface DuplicateMidiClipArgs {
+  clipId: string
+  newClipId: string
+  /** Por defecto, justo donde termina el original. */
+  startBeat?: number
+}
+
+export interface SplitMidiClipArgs {
+  clipId: string
+  /** Beat de la sesion; debe dejar >= STUDIO_MIDI_MIN_CLIP_BEATS a cada lado (si no, no cambia nada). */
+  atBeat: number
+  /** Id de la mitad derecha; la izquierda conserva el id. Las notas que cruzan el corte se dividen. */
+  newClipId: string
+}
+
+export interface SetFrozenAssetArgs {
+  trackId: string
+  /** Audio de la sesion con el render del instrumento, o null para quitar el congelado. */
+  assetId: string | null
+}
+
+export interface SetMarkersArgs {
+  /** Lista completa que reemplaza a la anterior (se ordena por beat e id). */
+  markers: StudioMarker[]
+}
+
+export interface SessionOpsV2Api {
+  /** Lanza `too_many` si ya hay 16 pistas, `duplicate_id` si el id existe, `bad_value` si kind no es 'instrument'. */
+  addInstrumentTrack(session: StudioSession, args: AddInstrumentTrackArgs): StudioSession
+  setInstrument(session: StudioSession, args: SetInstrumentArgs): StudioSession
+  /** Lanza `too_many` (256 clips por pista, notas por clip o por sesion) y `duplicate_id`. */
+  addMidiClip(session: StudioSession, args: AddMidiClipArgs): StudioSession
+  updateMidiClip(session: StudioSession, args: UpdateMidiClipArgs): StudioSession
+  removeMidiClip(session: StudioSession, args: RemoveMidiClipArgs): StudioSession
+  moveMidiClip(session: StudioSession, args: MoveMidiClipArgs): StudioSession
+  resizeMidiClip(session: StudioSession, args: ResizeMidiClipArgs): StudioSession
+  duplicateMidiClip(session: StudioSession, args: DuplicateMidiClipArgs): StudioSession
+  splitMidiClip(session: StudioSession, args: SplitMidiClipArgs): StudioSession
+  /** Lanza `unknown_asset` si el audio no esta en la sesion y `bad_value` si la pista es de audio. */
+  setFrozenAsset(session: StudioSession, args: SetFrozenAssetArgs): StudioSession
+  /** Lanza `duplicate_id`, `too_many` o `session_too_long` como parseSession. */
+  setMarkers(session: StudioSession, args: SetMarkersArgs): StudioSession
+}
+
+// ===========================================================================
+// v2 · midiOps.ts (puro): operaciones sobre las notas de UN clip
+// ===========================================================================
+//
+// Trabajan sobre el arreglo de notas de un clip, en beats relativos al clip, y devuelven uno
+// NUEVO (nunca mutan). El resultado siempre sale normalizado: ordenado por start y pitch
+// (session.compareNotes), sin solapes del mismo pitch (la anterior se acorta hasta el inicio de
+// la siguiente; si queda con menos de STUDIO_MIDI_MIN_NOTE_BEATS, se quita), con start en
+// [0, clipLengthBeats), pitch 0..127, velocity 1..127, tiempos redondeados con roundBeat.
+// La seleccion son indices en el arreglo ORDENADO; cada operacion devuelve la seleccion nueva
+// (las mismas notas despues de editar, o las nuevas al agregar o duplicar).
+
+/** Rejilla: '1/4' = un beat (negra), '1/16' = un cuarto de beat. */
+export type QuantizeGrid = '1/1' | '1/2' | '1/4' | '1/8' | '1/16' | '1/32'
+
+/** Indices en el arreglo de notas ordenado. null en una firma = todas las notas. */
+export type NoteSelection = readonly number[]
+
+export interface MidiEditResult {
+  notes: StudioMidiNote[]
+  /** Indices (en `notes`) de las notas editadas o creadas. */
+  selection: number[]
+}
+
+export interface QuantizeOptions {
+  grid: QuantizeGrid
+  /** Tresillos: la rejilla vale 2/3. */
+  triplets: boolean
+  /** 0..1: cuanto se acerca cada inicio a la rejilla (1 = del todo). */
+  strength: number
+  /** true = tambien ajusta el final de cada nota a la rejilla. Por defecto false. */
+  ends?: boolean
+}
+
+export interface NoteRange {
+  /** Rango en beats del clip: una nota entra si se cruza con [startBeat, endBeat). */
+  startBeat: number
+  endBeat: number
+  /** Rango de pitch, ambos incluidos. */
+  lowPitch: number
+  highPitch: number
+}
+
+export type VelocityMode = 'set' | 'add' | 'scale'
+
+export interface MidiOpsApi {
+  /** Largo de la rejilla en beats ('1/8' -> 0.5; con tresillos, 1/3). */
+  gridBeats(grid: QuantizeGrid, triplets: boolean): number
+  /** Ordena, resuelve solapes del mismo pitch, acota y recorta al largo del clip. */
+  normalizeNotes(notes: readonly StudioMidiNote[], clipLengthBeats: number): StudioMidiNote[]
+  /** Agrega notas (la seleccion son las agregadas que sobreviven a la normalizacion). */
+  addNotes(notes: readonly StudioMidiNote[], added: readonly StudioMidiNote[], clipLengthBeats: number): MidiEditResult
+  removeNotes(notes: readonly StudioMidiNote[], selection: NoteSelection): StudioMidiNote[]
+  /** Mueve en el tiempo (beats) y en pitch (semitonos); se acota al clip y a 0..127. */
+  moveNotes(notes: readonly StudioMidiNote[], selection: NoteSelection, deltaBeats: number, deltaPitch: number, clipLengthBeats: number): MidiEditResult
+  /** Cambia el inicio ('start', el final queda fijo) o el final ('end'); largo minimo respetado. */
+  resizeNotes(notes: readonly StudioMidiNote[], selection: NoteSelection, edge: 'start' | 'end', deltaBeats: number, clipLengthBeats: number): MidiEditResult
+  /** Transpone; las notas que saldrian de 0..127 se acotan. Flechas = 1, Shift = 12. */
+  transpose(notes: readonly StudioMidiNote[], selection: NoteSelection | null, semitones: number, clipLengthBeats: number): MidiEditResult
+  /** 'set' fija, 'add' suma, 'scale' multiplica; el resultado se redondea y acota a 1..127. */
+  setVelocity(notes: readonly StudioMidiNote[], selection: NoteSelection | null, value: number, mode: VelocityMode): MidiEditResult
+  /** inicio' = inicio + (rejilla_mas_cercana - inicio) * strength; el largo se conserva salvo `ends`. */
+  quantize(notes: readonly StudioMidiNote[], selection: NoteSelection | null, options: QuantizeOptions, clipLengthBeats: number): MidiEditResult
+  /** Cada nota se alarga hasta el inicio de la siguiente nota (de cualquier pitch) de la seleccion; la ultima no cambia. */
+  legato(notes: readonly StudioMidiNote[], selection: NoteSelection | null, clipLengthBeats: number): MidiEditResult
+  /** Copia la seleccion corrida `offsetBeats` (lo que cae fuera del clip se descarta). */
+  duplicateNotes(notes: readonly StudioMidiNote[], selection: NoteSelection, offsetBeats: number, clipLengthBeats: number): MidiEditResult
+  /** Corta en dos las notas que cruzan `atBeat` (beat del clip). Herramienta "cortar nota". */
+  splitNotesAt(notes: readonly StudioMidiNote[], selection: NoteSelection | null, atBeat: number, clipLengthBeats: number): MidiEditResult
+  /** Indices de las notas dentro del rango (seleccion por rectangulo). */
+  notesInRange(notes: readonly StudioMidiNote[], range: NoteRange): number[]
+}
+
+// ===========================================================================
+// v2 · smf.ts (puro, sin dependencias): archivos MIDI estandar tipo 0 y 1
+// ===========================================================================
+
+export interface SmfTrack {
+  /** Meta evento de nombre de pista (0x03), o null. */
+  name: string | null
+  /** Canal 0..15 de la primera nota; null si la pista no tiene notas. */
+  channel: number | null
+  /** true si sus notas van por el canal 10 (indice 9): percusion General MIDI. */
+  isDrums: boolean
+  /**
+   * Notas en beats desde el INICIO DEL ARCHIVO (ticks / division), ordenadas y normalizadas
+   * (solapes del mismo pitch resueltos como en midiOps). Una nota sin note-off se cierra al
+   * final de la pista. Note-on con velocidad 0 es note-off.
+   */
+  notes: StudioMidiNote[]
+}
+
+export interface SmfFile {
+  format: 0 | 1
+  /** Division (ticks por negra). La division SMPTE no se admite (lanza). */
+  ticksPerBeat: number
+  /** Primer meta de tempo (0x51) convertido a BPM, o null si no hay (el usuario decide; 120 por norma). */
+  bpm: number | null
+  /**
+   * Negras por compas del primer meta de compas (0x58): numerador * 4 / 2^denominador (6/8 da 3).
+   * null si no hay meta o si no da un entero de negras (7/8): ver timeSignature.
+   */
+  beatsPerBar: number | null
+  /** Primer compas tal como viene en el archivo ("6/8"), o null si no trae. */
+  timeSignature: string | null
+  /** Solo las pistas con notas, en el orden del archivo. */
+  tracks: SmfTrack[]
+  /** true si el archivo trae mas de un tempo (el Estudio usa el primero: sin mapa de tempo). */
+  tempoChanges: boolean
+}
+
+export interface SmfWriteClip {
+  /** Nombre de la pista en el archivo. */
+  name: string
+  /** Notas en beats desde el inicio de la sesion (clip.startBeat + nota.start). */
+  notes: readonly StudioMidiNote[]
+  /** Canal 0..15; por defecto 0, y 9 para una caja de ritmos. */
+  channel?: number
+}
+
+export interface SmfApi {
+  /**
+   * Lee un archivo MIDI estandar tipo 0 o 1. Lanza un Error con mensaje en espanol si no es un
+   * SMF (cabecera MThd), es tipo 2, usa division SMPTE o esta truncado.
+   */
+  parseSmf(bytes: Uint8Array | ArrayBuffer): SmfFile
+  /**
+   * Escribe un SMF tipo 1 con 480 ticks por negra: pista 0 de tempo y compas, y una pista por
+   * clip (un solo clip tambien va como tipo 1). Determinista: mismos datos, mismos bytes.
+   */
+  writeSmf(clips: readonly SmfWriteClip[], bpm: number, beatsPerBar: number): Uint8Array
+}
+
+// ===========================================================================
+// v2 · commands.ts: registro unico de comandos, atajos y paleta
+// ===========================================================================
+//
+// La interfaz, el teclado, la paleta (Ctrl+K) y el chat llaman al MISMO registro. Los atajos se
+// escriben como texto canonico: modificadores en el orden Ctrl, Alt, Shift y una tecla, unidos
+// con '+': "Ctrl+Shift+Z", "Space", "Delete", "ArrowUp", "Plus", "Minus", "?", "1". Teclas:
+// letras A..Z y digitos 0..9 por `event.code` (no dependen de la distribucion del teclado),
+// simbolos ("?", "Plus", "Minus") por `event.key`, y nombres: Space, Enter, Escape, Tab,
+// Backspace, Delete, Home, End, PageUp, PageDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight.
+// "Ctrl" es Ctrl en Windows y Linux, y Cmd (metaKey) en macOS. Con un simbolo, Shift no cuenta
+// ("?" ya implica Shift en muchas distribuciones). Mapa por defecto: plan, seccion 6.
+
+export type CommandContext = 'global' | 'timeline' | 'piano_roll' | 'mixer'
+
+export type CommandCategory = 'transporte' | 'edicion' | 'pistas' | 'herramientas' | 'vista' | 'archivo' | 'midi' | 'mezcla' | 'marcas'
+
+/** Nombres de la lista cerrada de herramientas del asistente (fixtures/studio_chat_tools_v2.json). */
+export type AssistantToolName =
+  | 'set_session_meta'
+  | 'add_audio_track'
+  | 'add_instrument_track'
+  | 'remove_track'
+  | 'set_track_mix'
+  | 'set_track_fx'
+  | 'set_master'
+  | 'set_instrument'
+  | 'add_midi_clip'
+  | 'replace_midi_notes'
+  | 'transpose_midi_clip'
+  | 'quantize_midi_clip'
+  | 'move_clip'
+  | 'duplicate_clip'
+  | 'split_clip'
+  | 'delete_clip'
+  | 'set_clip_gain'
+  | 'add_marker'
+  | 'remove_marker'
+
+export interface StudioCommand<Ctx> {
+  /** Id estable con punto: "transport.play_pause", "midi.quantize". Es el que guarda el keymap. */
+  id: string
+  /** Nombre en espanol para la paleta y la hoja de atajos. */
+  label: string
+  category: CommandCategory
+  /** Atajos por defecto, canonicos (el primero es el que se muestra). [] = sin atajo. */
+  defaultShortcuts: readonly string[]
+  /** Donde vale el atajo. 'global' vale en todos los contextos. */
+  context: CommandContext
+  /** true si el asistente puede pedirlo (entonces `assistantTool` no es null). */
+  assistantAllowed: boolean
+  /** Herramienta del asistente que lo invoca, con command_id = id (STUDIO_V2.md 4.3.3). */
+  assistantTool: AssistantToolName | null
+  /** false = deshabilitado (la paleta lo muestra gris y el atajo no hace nada). Por defecto true. */
+  isEnabled?(ctx: Ctx): boolean
+  /**
+   * Ejecuta. `args` llega del asistente (argumentos de la herramienta, snake_case, ya validados
+   * con su esquema) o de la interfaz; el teclado lo llama sin args. Un cambio de la sesion es UN
+   * paso de deshacer. Lanza un Error con mensaje en espanol si no se puede aplicar (el chat lo
+   * devuelve como `failed`).
+   */
+  run(ctx: Ctx, args?: Readonly<Record<string, unknown>>): void | Promise<void>
+}
+
+export interface CommandRegistry<Ctx> {
+  /** Lanza si el id ya existe. */
+  register(command: StudioCommand<Ctx>): void
+  get(id: string): StudioCommand<Ctx> | null
+  /** En orden de registro. */
+  list(): readonly StudioCommand<Ctx>[]
+  /** Los que valen en `context` (los suyos mas los globales). */
+  forContext(context: CommandContext): readonly StudioCommand<Ctx>[]
+  /** El comando de una herramienta del asistente, o null si no hay (el chat responde `failed`). */
+  forAssistantTool(name: string): StudioCommand<Ctx> | null
+  /** Ejecuta por id. Lanza si no existe o si esta deshabilitado. */
+  run(id: string, ctx: Ctx, args?: Readonly<Record<string, unknown>>): Promise<void>
+}
+
+export interface ParsedShortcut {
+  /** Ctrl (o Cmd en macOS). */
+  ctrl: boolean
+  alt: boolean
+  shift: boolean
+  /** Token canonico de la tecla ("Z", "Space", "ArrowUp", "?"). */
+  key: string
+}
+
+/** Lo que se usa de un KeyboardEvent (las pruebas pasan objetos simples). */
+export interface KeyEventLike {
+  key: string
+  code: string
+  ctrlKey: boolean
+  metaKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+  repeat?: boolean
+}
+
+/** id de comando -> atajos canonicos. Un comando ausente usa sus defaultShortcuts. */
+export type Keymap = Readonly<Record<string, readonly string[]>>
+
+export interface ShortcutConflict {
+  shortcut: string
+  /** Comandos que comparten el atajo en contextos que se pisan (iguales, o uno es 'global'). */
+  commandIds: string[]
+}
+
+export interface CommandsApi {
+  createCommandRegistry<Ctx>(): CommandRegistry<Ctx>
+  /** Lee un atajo escrito ("ctrl+shift+z", "Ctrl + K"); null si no es valido. */
+  parseShortcut(text: string): ParsedShortcut | null
+  /** Texto canonico ("Ctrl+Shift+Z"). */
+  formatShortcut(shortcut: ParsedShortcut): string
+  /** Texto para mostrar segun la plataforma: en macOS "Cmd+Shift+Z". */
+  displayShortcut(shortcut: string, platform: 'mac' | 'other'): string
+  /** Atajo canonico de una pulsacion, o null si es solo un modificador o una tecla no admitida. */
+  shortcutFromEvent(event: KeyEventLike, platform: 'mac' | 'other'): string | null
+  /** Mapa con los atajos por defecto de todos los comandos. */
+  defaultKeymap(commands: readonly StudioCommand<unknown>[]): Keymap
+  findConflicts(commands: readonly StudioCommand<unknown>[], keymap: Keymap): ShortcutConflict[]
+  /**
+   * Por defecto + lo guardado en `storage` (clave KEYMAP_STORAGE_KEY = "bandait_studio_keymap",
+   * JSON con solo los comandos cambiados). Algo ilegible o un id desconocido se ignora.
+   */
+  loadKeymap(storage: KeyValueStorage, commands: readonly StudioCommand<unknown>[]): Keymap
+  /** Guarda solo las diferencias con el mapa por defecto. Rechaza (lanza) si hay choques. */
+  saveKeymap(storage: KeyValueStorage, commands: readonly StudioCommand<unknown>[], keymap: Keymap): void
+  /** Borra lo guardado: vuelve al mapa por defecto. */
+  resetKeymap(storage: KeyValueStorage): void
+  /**
+   * Id del comando que dispara la pulsacion en `context`, o null. Con `inTextField` true
+   * (input, textarea, select o contenteditable con foco) devuelve null SIEMPRE: los atajos nunca
+   * se disparan mientras se escribe. Un comando del contexto activo gana sobre uno global.
+   */
+  matchEvent(
+    event: KeyEventLike,
+    context: CommandContext,
+    inTextField: boolean,
+    commands: readonly StudioCommand<unknown>[],
+    keymap: Keymap,
+    platform: 'mac' | 'other',
+  ): string | null
+}
+
+// ===========================================================================
+// v2 · instruments.ts: instrumentos en el grafo (los mismos en tiempo real y en offline)
+// ===========================================================================
+//
+// synth y drums con nodos nativos (OscillatorNode, BiquadFilterNode, GainNode, AudioBuffer de
+// ruido con semilla fija) o un AudioWorklet propio; sampler con AudioBufferSourceNode. Todo se
+// programa en el reloj del contexto (ningun setTimeout en el camino del audio) y es determinista
+// (STUDIO_V2.md 2.3): lo que suena es lo que exporta bounce con OfflineAudioContext.
+
+export interface InstrumentAvailability {
+  available: boolean
+  /** Por que no esta disponible, en espanol ("El plugin no esta en la lista de este Hub"); null si lo esta. */
+  reason: string | null
+}
+
+/** Un instrumento vivo en un contexto de audio, con su polifonia. */
+export interface StudioInstrumentNode {
+  readonly type: StudioInstrumentType
+  /** Salida del instrumento (despues de su gain_db); se conecta a la entrada de la pista. */
+  readonly output: AudioNode
+  /** Voces simultaneas antes de robar (STUDIO_INSTRUMENT_POLYPHONY = 32). */
+  readonly polyphony: number
+  /** Empieza una nota en el tiempo `when` del contexto (tocar en vivo y grabar). */
+  noteOn(pitch: number, velocity: number, when: number): void
+  /** Termina la nota mas antigua de ese pitch en `when` (empieza la relajacion). */
+  noteOff(pitch: number, when: number): void
+  /** Nota con inicio y fin ya conocidos (clips): lo que usan scheduleMidiClips y bounce. */
+  playNote(pitch: number, velocity: number, startTime: number, endTime: number): void
+  /** Corta todo con una rampa corta en `when` (por defecto, ya). Detener o saltar. */
+  allNotesOff(when?: number): void
+  /**
+   * Aplica en caliente parametros nuevos del MISMO tipo (y, en sampler, zonas). Devuelve false si
+   * cambio el tipo o el plugin: quien llama reconstruye el instrumento.
+   */
+  update(instrument: StudioInstrument): boolean
+  /** Voces sonando ahora (para pruebas y medidores). */
+  activeVoices(): number
+  /** Desconecta y libera. Idempotente. */
+  dispose(): void
+}
+
+/** Estado de una voz para decidir cual robar. Tiempos del contexto. */
+export interface VoiceInfo {
+  startedAt: number
+  /** Cuando recibio su note-off; null si sigue sostenida. */
+  releasedAt: number | null
+  velocity: number
+}
+
+/** Lo que prepareInstruments deja listo para buildGraph (que es sincrono). */
+export interface InstrumentPreparation {
+  /** true si cargaron los worklets propios (si no, se usan nodos nativos de respaldo). */
+  workletReady: boolean
+  /** Instrumentos WAM ya creados en este contexto, por id de pista. */
+  wamNodes: ReadonlyMap<string, StudioInstrumentNode>
+  /** Pistas cuyo instrumento no esta disponible, con el motivo (suena su congelado si lo hay). */
+  unavailable: ReadonlyMap<string, string>
+}
+
+export interface ScheduleMidiOptions extends ScheduleClipsOptions {
+  /** Tiempo del contexto en que se pidio programar; no se programa nada antes de este instante. */
+  nowCtxTime?: number
+}
+
+export interface InstrumentsApi {
+  /**
+   * Carga worklets y crea los plugins WAM que la sesion usa (asincrono). Se llama antes de cada
+   * buildGraph, en el AudioContext y en cada OfflineAudioContext. Idempotente por contexto.
+   */
+  prepareInstruments(ctx: BaseAudioContext, session: StudioSession): Promise<InstrumentPreparation>
+  /** synth, drums y sampler siempre; wam solo si el plugin esta en la lista cerrada. */
+  instrumentAvailability(instrument: StudioInstrument): InstrumentAvailability
+  /** Crea el instrumento (sincrono); null si no esta disponible. Para wam usa preparation.wamNodes. */
+  createInstrument(
+    ctx: BaseAudioContext,
+    trackId: string,
+    instrument: StudioInstrument,
+    buffers: StudioBuffers,
+    preparation: InstrumentPreparation,
+  ): StudioInstrumentNode | null
+  /**
+   * Indice de la voz a robar (STUDIO_V2.md 2.3): la relajada mas antigua; si no hay, la mas
+   * antigua; a igual antiguedad, la de menor velocidad. -1 con la lista vacia. Puro.
+   */
+  pickVoiceToSteal(voices: readonly VoiceInfo[]): number
+  /** 440 * 2^((pitch - 69) / 12). Puro. */
+  noteFrequency(pitch: number): number
+  /**
+   * Programa las notas de los clips MIDI de la sesion (con repeticion y recorte, STUDIO_V2.md
+   * 2.4) contra `graph.instruments`, y los congelados de las pistas no disponibles contra
+   * `graph.trackInputs`. Mismas opciones y misma alineacion que scheduleClips; beats a segundos
+   * con session.bpm. La usan el motor y bounce.
+   */
+  scheduleMidiClips(ctx: BaseAudioContext, graph: StudioGraph, session: StudioSession, buffers: StudioBuffers, options: ScheduleMidiOptions): ScheduledClips
+}
+
+/** Voz de la caja de ritmos y su nota canonica, para el piano roll en modo percusion. */
+export interface DrumLane {
+  voice: DrumVoice
+  pitch: number
+  label: string
+}
+
+// ===========================================================================
+// v2 · wamHost.ts: anfitrion de plugins WAM 2.0 (lista cerrada)
+// ===========================================================================
+//
+// Solo plugins EMPAQUETADOS con el Hub (import estatico de un modulo del propio bundle). Nunca
+// codigo desde una URL: el documento no trae URL (STUDIO_V2.md 2.3.4). La lista
+// STUDIO_WAM_PLUGINS vive en wamHost.ts y en esta etapa esta VACIA.
+
+export interface WamPluginDescriptor {
+  /** Patron STUDIO_WAM_PLUGIN_ID_RE; es el plugin_id del documento. */
+  id: string
+  name: string
+  vendor: string
+  /** Version exacta empaquetada. */
+  version: string
+  /** Licencia verificada (MIT, Apache-2.0, BSD-2-Clause o BSD-3-Clause). */
+  license: string
+  /** Import del modulo del plugin, empaquetado con el Hub. */
+  loadModule(): Promise<unknown>
+}
+
+export interface WamHostApi {
+  /** La lista cerrada. Hoy vacia. */
+  listPlugins(): readonly WamPluginDescriptor[]
+  pluginAvailability(pluginId: string): InstrumentAvailability
+  /** Crea el plugin con su estado. Rechaza con un Error en espanol si no esta en la lista o no carga. */
+  createWamInstrument(ctx: BaseAudioContext, pluginId: string, state: Readonly<Record<string, unknown>>): Promise<StudioInstrumentNode>
+  /** Estado actual del plugin, para guardarlo en el documento (hasta 16384 bytes serializado). */
+  getWamState(node: StudioInstrumentNode): Promise<Record<string, unknown>>
+}
+
+// ===========================================================================
+// v2 · midiInput.ts: Web MIDI, teclado de computadora y grabacion a clip
+// ===========================================================================
+//
+// Web MIDI existe en Chrome y Edge de escritorio (navigator.requestMIDIAccess). Los mensajes
+// traen `timeStamp` en el reloj de performance.now(); se pasan al reloj del AudioContext con
+// AudioContext.getOutputTimestamp() (contextTime, performanceTime) para alinear la toma igual que
+// el audio (STUDIO_V1.md 2.7, sin latencia de entrada de audio). Teclado de computadora: por
+// `event.code`, fila A..K = Do..Do (W, E, T, Y, U = sostenidos), Z y X bajan y suben la octava;
+// velocidad fija 100; no se dispara con el foco en un campo de texto.
+
+export type MidiAccessStatus = 'unsupported' | 'prompt' | 'granted' | 'denied'
+
+export interface MidiInputDevice {
+  id: string
+  name: string
+  manufacturer: string
+  connected: boolean
+}
+
+export interface MidiNoteEvent {
+  type: 'on' | 'off'
+  pitch: number
+  /** 1..127 en 'on'; en 'off', la velocidad de liberacion (0 si no viene). */
+  velocity: number
+  /** Canal 0..15 (el teclado de computadora usa 0). */
+  channel: number
+  /** Tiempo del AudioContext del evento. */
+  ctxTime: number
+  source: 'midi' | 'keyboard'
+}
+
+export interface MidiRecordOptions {
+  /** Pista de instrumento armada. */
+  trackId: string
+  /** Lo que devolvio engine.play() (despues del conteo): el beat 0 de la toma. */
+  playStart: PlayStart
+  bpm: number
+  /** Canal a grabar, o 'all'. */
+  channel: number | 'all'
+  /** Cuantizar al terminar; null = no. */
+  quantize: QuantizeOptions | null
+}
+
+/** Resultado de una toma MIDI: lo que necesita sessionOps.addMidiClip (falta el id). */
+export interface MidiTake {
+  trackId: string
+  /** Beat de la sesion donde empieza el clip (inicio del compas de la primera nota). */
+  startBeat: number
+  /** Hasta el final del compas de la ultima nota. */
+  lengthBeats: number
+  /** Relativas al clip, normalizadas (midiOps.normalizeNotes). */
+  notes: StudioMidiNote[]
+  /** Notas que seguian apretadas al parar: se cerraron en el instante de parada. */
+  hangingNotes: number
+}
+
+export interface MidiRecordingApi {
+  /** Puro: pasa un timeStamp de performance.now() al reloj del contexto. */
+  performanceToCtxTime(timeStampMs: number, stamp: { contextTime: number; performanceTime: number }): number
+  /**
+   * Puro: eventos capturados -> toma. Eventos antes de `playStart.playStartCtxTime` se descartan;
+   * beat = (ctxTime - playStartCtxTime) * bpm / 60 + secondsToBeats(positionAtStart). Null si no
+   * hubo ninguna nota.
+   */
+  eventsToTake(events: readonly MidiNoteEvent[], options: MidiRecordOptions & { stopCtxTime: number; beatsPerBar: number }): MidiTake | null
+  /** Puro: pitch de una tecla de la computadora (event.code) con la octava base (4 = Do central 60), o null. */
+  computerKeyPitch(code: string, baseOctave: number): number | null
+}
+
+export interface MidiInputApi {
+  isSupported(): boolean
+  /** Pide el permiso de Web MIDI (sin sysex). */
+  requestAccess(): Promise<MidiAccessStatus>
+  listInputs(): MidiInputDevice[]
+  /** Conexion y desconexion de dispositivos. Devuelve la funcion para dejar de escuchar. */
+  onDevicesChange(listener: (devices: MidiInputDevice[]) => void): () => void
+  /** Escucha un dispositivo y canal (y suelta el anterior). */
+  open(deviceId: string, channel: number | 'all'): void
+  /** Activa o desactiva el teclado de computadora como teclado musical (escucha en `target`). */
+  setComputerKeyboard(enabled: boolean, target?: EventTarget): void
+  /** Notas entrantes (para tocar el instrumento en vivo). Devuelve la funcion para dejar de escuchar. */
+  onNote(listener: (event: MidiNoteEvent) => void): () => void
+  startRecording(options: MidiRecordOptions): void
+  /** Termina la toma en `stopCtxTime`; null si no hubo notas. No toca la sesion. */
+  stopRecording(stopCtxTime: number): MidiTake | null
+  isRecording(): boolean
+  /** Suelta el dispositivo, el teclado y los oyentes. Idempotente. */
+  close(): void
+}
+
+// ===========================================================================
+// v2 · audioToMidi.ts: audio a notas en el navegador (sin costo por uso)
+// ===========================================================================
+//
+// Solo si se puede instalar y verificar un modelo abierto con licencia permisiva (por ejemplo
+// Basic Pitch de Spotify, licencia a confirmar). Si no, availability() dice por que y transcribe
+// rechaza: la interfaz queda con el motivo.
+
+export interface AudioToMidiAvailability {
+  available: boolean
+  /** En espanol, si no esta disponible ("El modelo no esta instalado en esta version del Hub"). */
+  reason: string | null
+  /** Modelo y version, si lo hay. */
+  model: string | null
+  /** Licencia verificada del modelo, si lo hay. */
+  license: string | null
+}
+
+export interface AudioToMidiOptions {
+  /** Tempo de la sesion: las notas salen en beats. */
+  bpm: number
+  /** 0..1, sensibilidad de inicio de nota; por defecto la del modelo. */
+  onsetThreshold?: number
+  /** Notas mas cortas se descartan; por defecto 60 ms. */
+  minNoteMs?: number
+  /** Rango de pitch a conservar. */
+  lowPitch?: number
+  highPitch?: number
+  onProgress?: (fraction: number) => void
+  signal?: AbortSignal
+}
+
+export interface AudioToMidiApi {
+  availability(): AudioToMidiAvailability
+  /**
+   * Notas en beats relativos al INICIO del buffer, normalizadas. Rechaza con un Error en espanol
+   * si no esta disponible; abortar rechaza con DOMException 'AbortError'.
+   */
+  transcribe(buffer: AudioBuffer, options: AudioToMidiOptions): Promise<StudioMidiNote[]>
+}
+
+// ===========================================================================
+// v2 · Trabajos de IA nuevos (STUDIO_V2.md seccion 4). Hub en camelCase; studioCloud traduce.
+// ===========================================================================
+//
+// Tipos aparte (sufijo V2) para no cambiar StudioJobKind ni StudioJobState de v1, que ya usan
+// jobs.ts y los paneles. studioCloud puede implementar StudioCloudJobsV2Api ampliando sus
+// funciones o con funciones nuevas.
+
+export type StudioJobKindV2 = StudioJobKind | 'compose' | 'analyze' | 'chat'
+
+export type ComposeRole = 'drums' | 'bass' | 'chords' | 'melody'
+
+export interface ComposeContextTrack {
+  role: ComposeRole | 'other'
+  /** 1..60 caracteres. */
+  name: string
+  /** 0..256 notas en beats relativos al inicio del tramo a componer; 512 entre todas. */
+  notes: StudioMidiNote[]
+}
+
+export interface ComposeJobRequest {
+  kind: 'compose'
+  /** 1..1000 caracteres. */
+  prompt: string
+  bpm: number
+  key: string | null
+  beatsPerBar: number
+  /** 1..64 compases. */
+  lengthBars: number
+  role: ComposeRole
+  /** 0..4 pistas. */
+  context: ComposeContextTrack[]
+}
+
+export interface AnalyzeJobRequest {
+  kind: 'analyze'
+  /** Id (sin extension) de un audio ya subido con putAsset. */
+  assetId: string
+  durationS: number
+}
+
+export type AssistantToolStatus = 'applied' | 'rejected' | 'failed'
+
+/**
+ * Llamada a herramienta tal como la pidio el modelo. Se devuelve INTACTA en el turno siguiente:
+ * `arguments` queda en snake_case (no se traduce) y `signature` es opaca.
+ */
+export interface StudioChatToolCall {
+  /** "call_1", "call_2"... (lo pone el Worker). */
+  id: string
+  /** Normalmente un AssistantToolName; puede no serlo (se responde 'failed'). */
+  name: string
+  arguments: Record<string, unknown>
+  signature: string | null
+}
+
+export interface StudioChatToolResult {
+  callId: string
+  name: string
+  response: {
+    status: AssistantToolStatus
+    /** 0..500 caracteres, en espanol, para el modelo. */
+    message: string
+  }
+}
+
+export type StudioChatMessage =
+  | { role: 'user'; text: string }
+  | { role: 'model'; text: string | null; toolCalls: StudioChatToolCall[] }
+  | { role: 'tool'; toolResults: StudioChatToolResult[] }
+
+export interface StudioTrackSummary {
+  id: string
+  kind: StudioTrackKind
+  name: string
+  role: StemRole
+  volumeDb: number
+  pan: number
+  mute: boolean
+  solo: boolean
+  reverbSendDb: number
+  fx: StudioFx[]
+  instrument: { type: StudioInstrumentType; preset: string | null; pluginId: string | null } | null
+  /** 0..64 clips de audio (los mas cercanos al cabezal si hay mas). */
+  clips: Array<{ id: string; startS: number; lengthS: number; active: boolean }>
+  /** 0..64 clips MIDI. pitchMin y pitchMax son null sin notas. */
+  midiClips: Array<{ id: string; startBeat: number; lengthBeats: number; loop: boolean; noteCount: number; pitchMin: number | null; pitchMax: number | null }>
+}
+
+/** Lo que el asistente sabe de la sesion (STUDIO_V2.md 4.3.2). Nunca audio ni notas. */
+export interface StudioSessionSummary {
+  title: string
+  bpm: number
+  beatsPerBar: number
+  key: string | null
+  /** Fin del ultimo clip activo (sessionEndSeconds). */
+  lengthS: number
+  playheadBeat: number
+  selection: { trackId: string | null; clipIds: string[]; context: CommandContext }
+  tracks: StudioTrackSummary[]
+  markers: StudioMarker[]
+  master: { volumeDb: number; fx: StudioFx[]; reverb: StudioReverb }
+}
+
+export interface ChatJobRequest {
+  kind: 'chat'
+  /** 1..40 mensajes; el primero de 'user', el ultimo de 'user' o 'tool'. */
+  messages: StudioChatMessage[]
+  sessionSummary: StudioSessionSummary
+  /** Por defecto 'auto'; 'none' tras 8 vueltas seguidas con herramientas. */
+  toolMode?: 'auto' | 'none'
+}
+
+export type StudioJobRequestV2 = StudioJobRequest | ComposeJobRequest | AnalyzeJobRequest | ChatJobRequest
+
+export interface StudioAnalysisMarker {
+  /** Segundos dentro del AUDIO analizado (no de la sesion). */
+  timeS: number
+  label: string
+  kind: StudioMarkerKind
+}
+
+export interface StudioAnalysisChord {
+  startS: number
+  endS: number
+  /** "C#m", "A", "F#7". */
+  name: string
+}
+
+/** Resultado de analyze (STUDIO_V2.md 4.2). Tiempos en segundos del audio. */
+export interface StudioAnalysis {
+  bpm: number | null
+  key: string | null
+  beatsPerBar: number
+  /** Inicio del primer compas dentro del audio, o null. */
+  downbeatS: number | null
+  markers: StudioAnalysisMarker[]
+  chords: StudioAnalysisChord[]
+}
+
+export type StudioJobStateV2 =
+  | { status: 'STARTED'; jobId: string; kind: StudioJobKindV2 }
+  | { status: 'IMPORTING'; jobId: string; kind: StudioJobKindV2; done: number; total: number }
+  | Extract<StudioJobState, { status: 'SUCCEEDED' }>
+  | {
+      status: 'SUCCEEDED'
+      jobId: string
+      kind: 'compose'
+      /** Ordenadas, sin solapes, en beats relativos al clip nuevo. */
+      notes: StudioMidiNote[]
+      lengthBeats: number
+      /** En espanol: que compuso. */
+      description: string
+      costUsd: number | null
+    }
+  | { status: 'SUCCEEDED'; jobId: string; kind: 'analyze'; analysis: StudioAnalysis; costUsd: number | null }
+  | { status: 'SUCCEEDED'; jobId: string; kind: 'chat'; reply: string | null; toolCalls: StudioChatToolCall[]; costUsd: number | null }
+  | { status: 'FAILED'; jobId: string; kind: StudioJobKindV2; error: string; resumable?: boolean }
+
+export interface StudioJobEstimateV2 extends Omit<StudioJobEstimate, 'kind'> {
+  kind: StudioJobKindV2
+}
+
+export interface StudioCloudJobsV2Api {
+  /** Como startJob, con los kind de v2. `chat` admite un cuerpo de hasta 192 KB. */
+  startJobV2(target: CloudTarget, sessionId: string, request: StudioJobRequestV2, jobId?: string): Promise<StudioJobStateV2>
+  estimateJobV2(target: CloudTarget, sessionId: string, request: StudioJobRequestV2): Promise<StudioJobEstimateV2>
+  getJobV2(target: CloudTarget, sessionId: string, jobId: string): Promise<StudioJobStateV2>
+  watchJobV2(
+    target: CloudTarget,
+    sessionId: string,
+    jobId: string,
+    options?: Omit<WatchJobOptions, 'onState'> & { onState?: (state: StudioJobStateV2) => void },
+  ): Promise<StudioJobStateV2 | null>
 }

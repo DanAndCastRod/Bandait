@@ -16,6 +16,15 @@
  * `controller.snapshot()`, `controller.apply`, `controller.applyLive`, `controller.commitLive`,
  * `controller.engine` (medidores, bounce con `engine.getBuffers()`), `controller.cloud` (destino
  * de la nube) e `controller.ingestAudio` + `controller.addAssetAsTrack` (audios de un trabajo).
+ *
+ * v2 (docs/PLAN_ESTUDIO_V2.md): pistas de instrumento, clips MIDI, piano roll, entrada MIDI y
+ * archivos .mid. La foto suma la pista elegida, el editor activo (linea de tiempo o piano roll),
+ * el estado del piano roll (herramienta, rejilla, seleccion de notas) y el de la entrada MIDI.
+ * Los comandos del registro (services/studio/commands.ts) se conectan a metodos de esta clase:
+ * toggleEditor, zoomIn/zoomOut, setPianoTool, transposeNotes, nudgeNotes, quantizeSelection,
+ * deleteSelection, duplicateSelection, splitSelection, selectAll, copyNotes/cutNotes/pasteNotes,
+ * toggleTrackMute/toggleTrackSolo, selectAdjacentTrack, toggleComputerKeyboard, importMidiFile y
+ * exportSessionMidi. Ningun componente de esta parte escucha el teclado por su cuenta.
  */
 import { useSyncExternalStore } from 'react'
 import { StemCloudError, type CloudTarget } from '../../services/stemCloud'
@@ -23,49 +32,94 @@ import { recognizeStem, stemBaseName, stemExtension, type StemRole } from '../..
 import { loadStemSong } from '../../services/stemStore'
 import type { SectionSpan } from '../../services/stemTiming'
 import { encodeWav24, parseWavHeader } from '../../services/wav'
-import { StudioEngine } from '../../services/studio/engine'
+import { bounce, bounceRange, soloTrackSession } from '../../services/studio/bounce'
+import { COMPUTER_KEYBOARD_DEFAULT_OCTAVE } from '../../services/studio/computerKeyboard'
+import { StudioEngine, playbackStopS } from '../../services/studio/engine'
+import { instrumentTailSeconds } from '../../services/studio/instruments/core'
 import { createHistory, STUDIO_HISTORY_LIMIT } from '../../services/studio/history'
+import { instrumentAvailability } from '../../services/studio/instruments/index'
 import { jobAssetToSessionAsset } from '../../services/studio/jobs'
 import { clearCalibration } from '../../services/studio/latency'
+import { StudioMidiInput } from '../../services/studio/midiInput'
+import {
+  addNotes,
+  duplicateNotes,
+  gridBeats,
+  legato,
+  moveNotes,
+  normalizeNotes,
+  quantize,
+  removeNotes,
+  setVelocity,
+  splitNotesAt,
+  transpose,
+} from '../../services/studio/midiOps'
 import { computePeaks, PEAKS_BASE_BUCKET } from '../../services/studio/peaks'
 import { StudioRecorder } from '../../services/studio/recorder'
+import { midiClipExportNotes, parseSmf, SMF_DRUM_CHANNEL, writeSmf } from '../../services/studio/smf'
 import { cloudHasOtherVersion, referencedAssetFiles, takeClipWindows, type ClipWindow } from '../../services/studio/timelineMath'
 import {
   assetFileName,
+  defaultInstrument,
+  defaultInstrumentTrack,
+  defaultMidiClip,
   defaultTrack,
   findClip,
+  findMidiClip,
   findTrack,
   newSession,
   newStudioId,
+  roundBeat,
+  secondsToBeats,
   STUDIO_ASSET_EXTENSIONS,
+  STUDIO_BPM_MAX,
+  STUDIO_BPM_MIN,
+  STUDIO_INSTRUMENT_TYPE_LABELS,
   STUDIO_MASTER_ID,
   STUDIO_MAX_ASSET_BYTES,
   STUDIO_MAX_ASSET_LABEL,
+  STUDIO_MAX_BEAT,
+  STUDIO_MAX_NOTES_PER_CLIP,
   STUDIO_MAX_SESSION_SECONDS,
   STUDIO_MAX_TRACK_NAME,
   STUDIO_MAX_TRACKS,
   STUDIO_MIN_CLIP_SECONDS,
+  STUDIO_REVERB_SEND_DB_MIN,
   STUDIO_SAMPLE_RATES,
+  type MidiClipLocation,
   type StudioAsset,
   type StudioAssetExtension,
   type StudioAssetKind,
   type StudioClip,
   type StudioFx,
   type StudioFxType,
+  type StudioInstrument,
+  type StudioMidiNote,
+  type StudioParamInstrumentType,
+  type StudioSamplerZone,
   type StudioSession,
 } from '../../services/studio/session'
 import {
   addAsset,
   addClip,
+  addInstrumentTrack,
+  addMidiClip,
   addTrack,
   deleteClip,
   duplicateClip,
+  duplicateMidiClip,
+  moveMidiClip,
+  removeMidiClip,
   removeTrack,
   removeUnusedAssets,
   setActiveTake,
+  setFrozenAsset,
+  setInstrument,
   setTrackFx,
   snapTime,
   splitClip,
+  splitMidiClip,
+  updateMidiClip,
   updateSessionMeta,
   updateTrack,
 } from '../../services/studio/sessionOps'
@@ -78,7 +132,15 @@ import type {
   EngineLoadProgress,
   EngineState,
   LoopRegionS,
+  MidiAccessStatus,
+  MidiEditResult,
+  MidiInputDevice,
+  MidiNoteEvent,
+  MidiTake,
+  NoteSelection,
   OrphanTake,
+  PlayStart,
+  QuantizeGrid,
   RecorderArm,
   RecorderSettingsReport,
   RecorderStatus,
@@ -132,13 +194,64 @@ export interface StudioFxSelection {
   type: StudioFxType
 }
 
+/** Editor que ocupa el area central: la linea de tiempo o el piano roll del clip abierto. */
+export type StudioEditorView = 'timeline' | 'piano_roll'
+
+/** Herramientas del piano roll (atajos 1..5 en el registro de comandos). */
+export type PianoTool = 'select' | 'draw' | 'erase' | 'cut' | 'velocity'
+
+export interface PianoRollState {
+  tool: PianoTool
+  grid: QuantizeGrid
+  triplets: boolean
+  /** Ajuste a la rejilla al dibujar y mover (Alt mientras se arrastra lo suspende). */
+  snap: boolean
+  /** Indices (en el arreglo ordenado de notas del clip abierto) de las notas elegidas. */
+  selection: readonly number[]
+  /** Fuerza de cuantizar, 0..1. */
+  quantizeStrength: number
+  /** Largo de la nota que dibuja la herramienta de dibujar, en beats (el ultimo usado). */
+  drawLength: number
+}
+
+export interface StudioMidiState {
+  /** Permiso de Web MIDI; 'prompt' mientras no se pidio. */
+  access: MidiAccessStatus
+  devices: readonly MidiInputDevice[]
+  /** Dispositivo abierto, o null. */
+  deviceId: string | null
+  /** Canal 0..15 o todos. */
+  channel: number | 'all'
+  /** Teclado de la computadora como teclado musical. */
+  keyboard: boolean
+  /** Octava base del teclado de la computadora (4 = Do central en la A). */
+  octave: number
+  /** Pista de instrumento armada para grabar MIDI y tocar en vivo. */
+  armedTrackId: string | null
+  /** Cuantizar la toma MIDI al terminar, con la rejilla del piano roll. */
+  quantizeOnStop: boolean
+}
+
+/** Pedidos de vista que el registro de comandos manda al editor activo (zoom). */
+export type StudioViewCommand = { type: 'zoom'; direction: 1 | -1 }
+
 export interface StudioSnapshot {
   session: StudioSession
   engine: EngineState
   /** null mientras carga audios: { done, total }. */
   loading: EngineLoadProgress | null
   ready: boolean
+  /** Clip elegido: de audio o MIDI (los ids son unicos entre los dos). */
   selectedClipId: string | null
+  /** Pista elegida (la del clip elegido o la que se toco en la cabecera). */
+  selectedTrackId: string | null
+  editor: StudioEditorView
+  /** Clip MIDI abierto en el piano roll, o null. */
+  pianoClipId: string | null
+  piano: PianoRollState
+  midi: StudioMidiState
+  /** Pista que se esta congelando (render a audio), o null. */
+  freezing: string | null
   /** PARTE 2: efecto que muestra el inspector, o null si no se eligio ninguno. */
   selectedFx: StudioFxSelection | null
   snap: SnapMode
@@ -271,6 +384,63 @@ export function withoutFx(session: StudioSession, targetId: string, type: Studio
 export function errorText(err: unknown, fallback = 'Algo falló en el Estudio.'): string {
   if (err instanceof Error && err.message) return err.message
   return fallback
+}
+
+const PITCH_NAMES: readonly string[] = ['Do', 'Do#', 'Re', 'Re#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si']
+
+/** Nombre de una nota MIDI en solfeo: 60 -> "Do4" (Do central, como el teclado de la computadora). */
+export function pitchName(pitch: number): string {
+  const p = Math.round(pitch)
+  return `${PITCH_NAMES[((p % 12) + 12) % 12]}${Math.floor(p / 12) - 1}`
+}
+
+/** true si el pitch es una tecla negra. */
+export function isBlackKey(pitch: number): boolean {
+  return [1, 3, 6, 8, 10].includes(((Math.round(pitch) % 12) + 12) % 12)
+}
+
+/** "compas.tiempo" (desde 1) de un beat de la sesion. */
+export function formatBarBeat(beat: number, beatsPerBar: number): string {
+  const b = Math.max(0, beat)
+  const bar = Math.floor(b / beatsPerBar + 1e-9)
+  const inBar = b - bar * beatsPerBar
+  const whole = Math.floor(inBar + 1e-9)
+  const frac = inBar - whole
+  return `${bar + 1}.${whole + 1}${frac > 0.001 ? `.${Math.round(frac * 100)}` : ''}`
+}
+
+/** El navegador ofrece Web MIDI (Chrome y Edge de escritorio). */
+export function midiSupported(): boolean {
+  try {
+    return typeof navigator !== 'undefined' && typeof (navigator as Navigator & { requestMIDIAccess?: unknown }).requestMIDIAccess === 'function'
+  } catch {
+    return false
+  }
+}
+
+/** true si el archivo es un MIDI estandar (.mid o .midi). */
+export function isMidiFile(file: { name: string; type: string }): boolean {
+  return /\.(mid|midi)$/i.test(file.name) || file.type === 'audio/midi' || file.type === 'audio/x-midi'
+}
+
+/** Entrega un archivo al usuario como descarga del navegador. */
+export function downloadBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // El navegador ya tomo el archivo: se libera la URL un momento despues.
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+/** Nombre de archivo seguro para descargar: sin caracteres que el sistema no admite. */
+export function safeFileName(name: string, fallback: string): string {
+  const clean = name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
+  return clean || fallback
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +586,7 @@ const SAVE_DEBOUNCE_MS = 700
 const END_CHECK_MS = 250
 const UPLOADED_PREFIX = 'bandait_studio_uploaded:'
 const INPUT_KEY = 'bandait_studio_input'
+const MIDI_INPUT_KEY = 'bandait_studio_midi_input'
 
 const KEPT_EXTENSIONS: readonly string[] = STUDIO_ASSET_EXTENSIONS
 
@@ -493,6 +664,15 @@ export class StudioController {
   /** Se pidio detener la toma mientras el grabador todavia arrancaba. */
   private recCancel = false
   private disposed = false
+  private readonly viewListeners = new Set<(command: StudioViewCommand) => void>()
+  private midiInput: StudioMidiInput | null = null
+  private readonly midiOffs: (() => void)[] = []
+  /** pitch -> pista en la que sono la nota en vivo: su note-off va a la misma pista. */
+  private readonly liveNotes = new Map<number, string>()
+  /** Toma MIDI en curso; `only` = sin audio armado; `started` = ya corre en midiInput. */
+  private midiRec: { trackId: string; only: boolean; started: boolean } | null = null
+  /** Notas copiadas del piano roll, con la primera en el beat 0. */
+  private noteClipboard: StudioMidiNote[] | null = null
 
   constructor(options: StudioControllerOptions) {
     this.band = options.band
@@ -505,6 +685,21 @@ export class StudioController {
       loading: { done: 0, total: 0 },
       ready: false,
       selectedClipId: null,
+      selectedTrackId: null,
+      editor: 'timeline',
+      pianoClipId: null,
+      piano: { tool: 'draw', grid: '1/16', triplets: false, snap: true, selection: [], quantizeStrength: 1, drawLength: 0.25 },
+      midi: {
+        access: midiSupported() ? 'prompt' : 'unsupported',
+        devices: [],
+        deviceId: null,
+        channel: 'all',
+        keyboard: false,
+        octave: COMPUTER_KEYBOARD_DEFAULT_OCTAVE,
+        armedTrackId: null,
+        quantizeOnStop: false,
+      },
+      freezing: null,
       selectedFx: null,
       snap: 'bar',
       canUndo: false,
@@ -575,6 +770,7 @@ export class StudioController {
     this.emit({ loading: null, ready: true, engine: this.engine.getState() })
     void this.ensurePeaks()
     void this.refreshOrphans()
+    void this.restoreMidiAccess()
   }
 
   async dispose(): Promise<void> {
@@ -587,6 +783,11 @@ export class StudioController {
     this.disposed = true
     this.listeners.clear()
     this.frameCallbacks.clear()
+    this.viewListeners.clear()
+    for (const off of this.midiOffs.splice(0)) off()
+    this.midiInput?.close()
+    this.midiInput = null
+    this.liveNotes.clear()
     if (this.frameHandle) cancelAnimationFrame(this.frameHandle)
     this.frameHandle = 0
     if (this.endTimer) clearInterval(this.endTimer)
@@ -630,7 +831,7 @@ export class StudioController {
   private checkEnd(): void {
     const state = this.engine.getState()
     if (state.status !== 'playing' || state.loop || this.snap.recording || !(state.durationS > 0)) return
-    if (this.engine.position() > state.durationS + 0.4) this.engine.stop()
+    if (this.engine.position() > playbackStopS(state.durationS, instrumentTailSeconds(this.snap.session))) this.engine.stop()
   }
 
   // ---- audio ----
@@ -697,18 +898,24 @@ export class StudioController {
 
   // ---- edicion ----
 
-  /** Un paso de deshacer. Devuelve false si no cambio nada. */
-  apply(next: StudioSession, label: string): boolean {
-    if (next === this.snap.session) return false
+  /**
+   * Un paso de deshacer. Devuelve false si no cambio nada. `extra` cambia a la vez otros datos de
+   * la foto (por ejemplo, la seleccion de notas que deja una edicion del piano roll).
+   */
+  apply(next: StudioSession, label: string, extra: Partial<StudioSnapshot> = {}): boolean {
+    if (next === this.snap.session) {
+      if (Object.keys(extra).length > 0) this.emit(extra)
+      return false
+    }
     this.history.push(next, label)
-    this.setSession(next)
+    this.setSession(next, true, extra)
     return true
   }
 
   /** `apply` con una operacion que puede lanzar (StudioSessionError): el error se muestra. */
-  run(label: string, operation: (session: StudioSession) => StudioSession): boolean {
+  run(label: string, operation: (session: StudioSession) => StudioSession, extra: Partial<StudioSnapshot> = {}): boolean {
     try {
-      return this.apply(operation(this.snap.session), label)
+      return this.apply(operation(this.snap.session), label, extra)
     } catch (err) {
       this.fail(err)
       return false
@@ -729,14 +936,36 @@ export class StudioController {
     this.scheduleSave()
   }
 
-  private setSession(next: StudioSession, save = true): void {
+  private setSession(next: StudioSession, save = true, extra: Partial<StudioSnapshot> = {}): void {
     this.editCount++
-    const selectedClipId = this.snap.selectedClipId && findClip(next, this.snap.selectedClipId) ? this.snap.selectedClipId : null
+    const wantedClip = extra.selectedClipId !== undefined ? extra.selectedClipId : this.snap.selectedClipId
+    const selectedClipId = wantedClip && (findClip(next, wantedClip) || findMidiClip(next, wantedClip)) ? wantedClip : null
+    const wantedTrack = extra.selectedTrackId !== undefined ? extra.selectedTrackId : this.snap.selectedTrackId
+    const selectedTrackId = wantedTrack && findTrack(next, wantedTrack) ? wantedTrack : null
     let arms = this.snap.arms
-    if (Object.keys(arms).some((trackId) => !findTrack(next, trackId))) {
-      arms = Object.fromEntries(Object.entries(arms).filter(([trackId]) => findTrack(next, trackId)))
+    if (Object.keys(arms).some((trackId) => findTrack(next, trackId)?.kind !== 'audio')) {
+      arms = Object.fromEntries(Object.entries(arms).filter(([trackId]) => findTrack(next, trackId)?.kind === 'audio'))
     }
-    this.emit({ session: next, selectedClipId, arms, ...this.historyPatch() })
+    // El piano roll se cierra si su clip ya no existe; la seleccion de notas se acota a las que hay.
+    const wantedPiano = extra.pianoClipId !== undefined ? extra.pianoClipId : this.snap.pianoClipId
+    const pianoLoc = wantedPiano ? findMidiClip(next, wantedPiano) : null
+    const piano = extra.piano ?? this.snap.piano
+    const noteCount = pianoLoc?.clip.notes.length ?? 0
+    const selection = piano.selection.every((index) => index < noteCount) ? piano.selection : piano.selection.filter((index) => index < noteCount)
+    const armedTrack = this.snap.midi.armedTrackId ? findTrack(next, this.snap.midi.armedTrackId) : null
+    const midi = this.snap.midi.armedTrackId && armedTrack?.kind !== 'instrument' ? { ...this.snap.midi, armedTrackId: null } : this.snap.midi
+    this.emit({
+      ...extra,
+      session: next,
+      selectedClipId,
+      selectedTrackId,
+      arms,
+      pianoClipId: pianoLoc ? pianoLoc.clip.id : null,
+      editor: pianoLoc ? (extra.editor ?? this.snap.editor) : 'timeline',
+      piano: selection === piano.selection ? piano : { ...piano, selection },
+      midi,
+      ...this.historyPatch(),
+    })
     this.syncEngine(next)
     if (save) this.scheduleSave()
   }
@@ -744,17 +973,99 @@ export class StudioController {
   undo(): void {
     if (this.snap.recording) return
     const previous = this.history.undo()
-    if (previous) this.setSession(previous)
+    if (previous) this.setSession(previous, true, { piano: { ...this.snap.piano, selection: [] } })
   }
 
   redo(): void {
     if (this.snap.recording) return
     const next = this.history.redo()
-    if (next) this.setSession(next)
+    if (next) this.setSession(next, true, { piano: { ...this.snap.piano, selection: [] } })
   }
 
+  /** Elige un clip (de audio o MIDI) y su pista. null quita la eleccion de clip. */
   select(clipId: string | null): void {
-    if (clipId !== this.snap.selectedClipId) this.emit({ selectedClipId: clipId })
+    if (clipId === this.snap.selectedClipId) return
+    const session = this.snap.session
+    const trackId = clipId ? (findClip(session, clipId)?.track.id ?? findMidiClip(session, clipId)?.track.id ?? this.snap.selectedTrackId) : this.snap.selectedTrackId
+    this.emit({ selectedClipId: clipId, selectedTrackId: trackId })
+  }
+
+  /** Elige una pista (cabecera o fila vacia de la linea de tiempo). */
+  selectTrack(trackId: string | null): void {
+    if (trackId === this.snap.selectedTrackId) return
+    if (trackId !== null && !findTrack(this.snap.session, trackId)) return
+    this.emit({ selectedTrackId: trackId })
+  }
+
+  /** Pista elegida por posicion relativa (flechas arriba y abajo en la linea de tiempo). */
+  selectAdjacentTrack(direction: -1 | 1): void {
+    const tracks = this.snap.session.tracks
+    if (tracks.length === 0) return
+    const at = tracks.findIndex((track) => track.id === this.snap.selectedTrackId)
+    const next = at < 0 ? (direction > 0 ? 0 : tracks.length - 1) : Math.min(tracks.length - 1, Math.max(0, at + direction))
+    this.selectTrack(tracks[next].id)
+  }
+
+  // ---- vista: editor activo y zoom ----
+
+  /** El editor activo escucha los pedidos de vista (zoom del registro de comandos). */
+  onViewCommand(listener: (command: StudioViewCommand) => void): () => void {
+    this.viewListeners.add(listener)
+    return () => {
+      this.viewListeners.delete(listener)
+    }
+  }
+
+  private viewCommand(command: StudioViewCommand): void {
+    for (const listener of [...this.viewListeners]) listener(command)
+  }
+
+  zoomIn(): void {
+    this.viewCommand({ type: 'zoom', direction: 1 })
+  }
+
+  zoomOut(): void {
+    this.viewCommand({ type: 'zoom', direction: -1 })
+  }
+
+  /** Abre un clip MIDI en el piano roll (por defecto el clip elegido). */
+  openPianoRoll(clipId?: string): boolean {
+    const id = clipId ?? this.snap.selectedClipId
+    const loc = id ? findMidiClip(this.snap.session, id) : null
+    if (!loc) {
+      this.notify('info', 'Elige un clip MIDI (o crea uno con doble clic en una pista de instrumento) para abrir el piano roll.')
+      return false
+    }
+    const sameClip = loc.clip.id === this.snap.pianoClipId
+    this.emit({
+      editor: 'piano_roll',
+      pianoClipId: loc.clip.id,
+      selectedClipId: loc.clip.id,
+      selectedTrackId: loc.track.id,
+      piano: sameClip ? this.snap.piano : { ...this.snap.piano, selection: [] },
+    })
+    return true
+  }
+
+  showTimeline(): void {
+    if (this.snap.editor !== 'timeline') this.emit({ editor: 'timeline' })
+  }
+
+  /** Tab: alterna la linea de tiempo y el piano roll del clip MIDI elegido (o del ultimo abierto). */
+  toggleEditor(): void {
+    if (this.snap.editor === 'piano_roll') {
+      this.showTimeline()
+      return
+    }
+    const selected = this.snap.selectedClipId && findMidiClip(this.snap.session, this.snap.selectedClipId) ? this.snap.selectedClipId : null
+    if (selected) {
+      this.openPianoRoll(selected)
+      return
+    }
+    // Sin clip MIDI elegido: el ultimo abierto, o el primero de la pista de instrumento elegida.
+    const track = this.snap.selectedTrackId ? findTrack(this.snap.session, this.snap.selectedTrackId) : null
+    const fallback = this.snap.pianoClipId ?? (track?.kind === 'instrument' ? (track.midiClips[0]?.id ?? null) : null)
+    this.openPianoRoll(fallback ?? undefined)
   }
 
   /** Elige el efecto que edita el inspector (mezclador e inspector comparten esta eleccion). */
@@ -782,12 +1093,17 @@ export class StudioController {
   splitAtPlayhead(): void {
     const atS = this.engine.position()
     this.run('Dividir clip', (session) => {
+      const atBeat = secondsToBeats(atS, session.bpm)
       const selected = this.snap.selectedClipId
-      const ids = selected
-        ? [selected]
+      const audioIds = selected
+        ? findClip(session, selected) ? [selected] : []
         : session.tracks.flatMap((track) => track.clips.filter((clip) => clip.active && atS > clip.startS && atS < clip.startS + clip.lengthS).map((clip) => clip.id))
+      const midiIds = selected
+        ? findMidiClip(session, selected) ? [selected] : []
+        : session.tracks.flatMap((track) => track.midiClips.filter((clip) => atBeat > clip.startBeat && atBeat < clip.startBeat + clip.lengthBeats).map((clip) => clip.id))
       let next = session
-      for (const clipId of ids) next = splitClip(next, { clipId, atS, newClipId: newStudioId('clp') })
+      for (const clipId of audioIds) next = splitClip(next, { clipId, atS, newClipId: newStudioId('clp') })
+      for (const clipId of midiIds) next = splitMidiClip(next, { clipId, atBeat, newClipId: newStudioId('mid') })
       return next
     })
   }
@@ -795,6 +1111,11 @@ export class StudioController {
   duplicateSelected(): void {
     const clipId = this.snap.selectedClipId
     if (!clipId) return
+    if (findMidiClip(this.snap.session, clipId)) {
+      const newClipId = newStudioId('mid')
+      if (this.run('Duplicar clip MIDI', (session) => duplicateMidiClip(session, { clipId, newClipId }))) this.select(newClipId)
+      return
+    }
     const newClipId = newStudioId('clp')
     if (this.run('Duplicar clip', (session) => duplicateClip(session, { clipId, newClipId }))) this.select(newClipId)
   }
@@ -802,7 +1123,45 @@ export class StudioController {
   deleteSelected(): void {
     const clipId = this.snap.selectedClipId
     if (!clipId) return
+    if (findMidiClip(this.snap.session, clipId)) {
+      this.run('Borrar clip MIDI', (session) => removeMidiClip(session, { clipId }))
+      return
+    }
     this.run('Borrar clip', (session) => deleteClip(session, { clipId }))
+  }
+
+  /** Clip MIDI nuevo y vacio en una pista de instrumento. Devuelve su id, o null si no se pudo. */
+  addMidiClipAt(trackId: string, startBeat: number, lengthBeats?: number): string | null {
+    const session = this.snap.session
+    const track = findTrack(session, trackId)
+    if (!track || track.kind !== 'instrument') {
+      this.notify('warn', 'Los clips MIDI van en pistas de instrumento. Crea una con el botón INSTRUMENTO.')
+      return null
+    }
+    const id = newStudioId('mid')
+    const length = lengthBeats ?? session.beatsPerBar
+    const ok = this.run('Agregar clip MIDI', (current) => addMidiClip(current, { trackId, clip: defaultMidiClip({ id, startBeat: Math.max(0, startBeat), lengthBeats: length }) }), {
+      selectedClipId: id,
+      selectedTrackId: trackId,
+    })
+    return ok ? id : null
+  }
+
+  /**
+   * Clip MIDI de 4 compases en el compas del cabezal, en la pista de instrumento elegida (o la
+   * primera que haya). Devuelve su id.
+   */
+  addMidiClipAtPlayhead(): string | null {
+    const session = this.snap.session
+    const picked = this.snap.selectedTrackId ? findTrack(session, this.snap.selectedTrackId) : null
+    const track = picked?.kind === 'instrument' ? picked : session.tracks.find((t) => t.kind === 'instrument')
+    if (!track) {
+      this.notify('warn', 'No hay pistas de instrumento. Crea una con el botón INSTRUMENTO.')
+      return null
+    }
+    const beat = secondsToBeats(this.engine.position(), session.bpm)
+    const bar = Math.floor(beat / session.beatsPerBar + 1e-9) * session.beatsPerBar
+    return this.addMidiClipAt(track.id, bar, session.beatsPerBar * 4)
   }
 
   activateTake(clipId: string): void {
@@ -813,6 +1172,15 @@ export class StudioController {
   nudgeSelected(direction: -1 | 1): void {
     const clipId = this.snap.selectedClipId
     if (!clipId) return
+    const midi = findMidiClip(this.snap.session, clipId)
+    if (midi) {
+      const session = this.snap.session
+      const mode = this.snap.snap
+      const step = mode === 'bar' ? session.beatsPerBar : mode === 'beat' ? 1 : 0.25
+      const target = Math.max(0, Math.round((midi.clip.startBeat + direction * step) / step) * step)
+      this.run('Mover clip MIDI', (current) => moveMidiClip(current, { clipId, startBeat: target }))
+      return
+    }
     this.run('Mover clip', (session) => {
       const loc = findClip(session, clipId)
       if (!loc) return session
@@ -828,6 +1196,209 @@ export class StudioController {
       tracks[loc.trackIndex] = { ...loc.track, clips }
       return { ...session, tracks }
     })
+  }
+
+  // ---- piano roll ----
+  //
+  // Toda edicion de notas pasa por `editNotes` (un paso de deshacer con la seleccion nueva). Las
+  // funciones de abajo son las que conectan los comandos del registro (parte 2): transponer,
+  // mover, cuantizar, legato, duplicar, borrar, copiar y pegar actuan sobre la seleccion del clip
+  // abierto; sin seleccion, transponer, cuantizar y legato actuan sobre todas las notas.
+
+  /** Clip abierto en el piano roll, o null. */
+  pianoClip(): MidiClipLocation | null {
+    const id = this.snap.pianoClipId
+    return id ? findMidiClip(this.snap.session, id) : null
+  }
+
+  setPiano(patch: Partial<Omit<PianoRollState, 'selection'>>): void {
+    const piano = this.snap.piano
+    const next = { ...piano, ...patch }
+    if (Object.keys(patch).every((key) => piano[key as keyof PianoRollState] === next[key as keyof PianoRollState])) return
+    this.emit({ piano: next })
+  }
+
+  setPianoTool(tool: PianoTool): void {
+    this.setPiano({ tool })
+  }
+
+  /** Paso de la rejilla del piano roll en beats (con tresillos, 2/3). */
+  pianoGridBeats(): number {
+    return gridBeats(this.snap.piano.grid, this.snap.piano.triplets)
+  }
+
+  selectNotes(selection: NoteSelection): void {
+    const loc = this.pianoClip()
+    const count = loc?.clip.notes.length ?? 0
+    const clean = [...new Set(selection)].filter((index) => Number.isInteger(index) && index >= 0 && index < count).sort((a, b) => a - b)
+    const current = this.snap.piano.selection
+    if (clean.length === current.length && clean.every((index, i) => index === current[i])) return
+    this.emit({ piano: { ...this.snap.piano, selection: clean } })
+  }
+
+  selectAllNotes(): void {
+    const loc = this.pianoClip()
+    if (loc) this.selectNotes(loc.clip.notes.map((_note, index) => index))
+  }
+
+  clearNoteSelection(): void {
+    this.selectNotes([])
+  }
+
+  /**
+   * Edita las notas del clip abierto con una operacion de midiOps (un paso de deshacer). La
+   * operacion recibe las notas, el largo del clip y la seleccion; devuelve el resultado o null
+   * si no hay nada que hacer.
+   */
+  editNotes(label: string, edit: (notes: readonly StudioMidiNote[], clipLengthBeats: number, selection: NoteSelection) => MidiEditResult | null): boolean {
+    const loc = this.pianoClip()
+    if (!loc || this.snap.recording) return false
+    let result: MidiEditResult | null
+    try {
+      result = edit(loc.clip.notes, loc.clip.lengthBeats, this.snap.piano.selection)
+    } catch (err) {
+      this.fail(err)
+      return false
+    }
+    if (!result) return false
+    const notes = result.notes
+    return this.run(label, (session) => updateMidiClip(session, { clipId: loc.clip.id, patch: { notes } }), { piano: { ...this.snap.piano, selection: result.selection } })
+  }
+
+  /** Selection o null (= todas) para las operaciones que admiten las dos. */
+  private selectionOrAll(): NoteSelection | null {
+    return this.snap.piano.selection.length > 0 ? this.snap.piano.selection : null
+  }
+
+  transposeNotes(semitones: number): void {
+    const selection = this.selectionOrAll()
+    const label = Math.abs(semitones) === 12 ? 'Transponer una octava' : 'Transponer notas'
+    this.editNotes(label, (notes, length) => (notes.length === 0 ? null : transpose(notes, selection, semitones, length)))
+  }
+
+  /** Mueve las notas elegidas un paso de la rejilla. */
+  nudgeNotes(direction: -1 | 1): void {
+    const step = this.pianoGridBeats()
+    this.editNotes('Mover notas', (notes, length, selection) => (selection.length === 0 ? null : moveNotes(notes, selection, direction * step, 0, length)))
+  }
+
+  quantizeNotes(): void {
+    const { grid, triplets, quantizeStrength } = this.snap.piano
+    const selection = this.selectionOrAll()
+    this.editNotes('Cuantizar notas', (notes, length) => (notes.length === 0 ? null : quantize(notes, selection, { grid, triplets, strength: quantizeStrength }, length)))
+  }
+
+  legatoNotes(): void {
+    const selection = this.selectionOrAll()
+    this.editNotes('Legato', (notes, length) => (notes.length < 2 ? null : legato(notes, selection, length)))
+  }
+
+  /** Copia la seleccion justo despues de su ultima nota (ajustado a la rejilla). */
+  duplicateNotes(): void {
+    const step = this.pianoGridBeats()
+    this.editNotes('Duplicar notas', (notes, length, selection) => {
+      if (selection.length === 0) return null
+      const picked = selection.map((index) => notes[index]).filter(Boolean)
+      const first = Math.min(...picked.map((n) => n.start))
+      const last = Math.max(...picked.map((n) => n.start + n.length))
+      const offset = Math.max(step, Math.ceil((last - first) / step - 1e-9) * step)
+      return duplicateNotes(notes, selection, offset, length)
+    })
+  }
+
+  deleteNotes(): void {
+    this.editNotes('Borrar notas', (notes, _length, selection) => (selection.length === 0 ? null : { notes: removeNotes(notes, selection), selection: [] }))
+  }
+
+  setNotesVelocity(value: number, mode: 'set' | 'add' | 'scale' = 'set'): void {
+    const selection = this.selectionOrAll()
+    this.editNotes('Velocidad de notas', (notes) => (notes.length === 0 ? null : setVelocity(notes, selection, value, mode)))
+  }
+
+  /** Corta en el cabezal las notas elegidas (o todas) que lo cruzan. */
+  splitNotesAtPlayhead(): void {
+    const loc = this.pianoClip()
+    if (!loc) return
+    const at = secondsToBeats(this.engine.position(), this.snap.session.bpm) - loc.clip.startBeat
+    if (!(at > 0 && at < loc.clip.lengthBeats)) {
+      this.notify('info', 'El cabezal está fuera del clip abierto: no hay notas que cortar ahí.')
+      return
+    }
+    const selection = this.selectionOrAll()
+    this.editNotes('Cortar notas', (notes, length) => splitNotesAt(notes, selection, at, length))
+  }
+
+  copyNotes(): boolean {
+    const loc = this.pianoClip()
+    const selection = this.snap.piano.selection
+    if (!loc || selection.length === 0) return false
+    const picked = selection.map((index) => loc.clip.notes[index]).filter(Boolean)
+    const first = Math.min(...picked.map((n) => n.start))
+    this.noteClipboard = picked.map((n) => ({ ...n, start: roundBeat(n.start - first) }))
+    return true
+  }
+
+  cutNotes(): void {
+    if (this.copyNotes()) this.deleteNotes()
+  }
+
+  /** Pega las notas copiadas en el cabezal (si cae dentro del clip) o al inicio del clip. */
+  pasteNotes(): void {
+    const copied = this.noteClipboard
+    const loc = this.pianoClip()
+    if (!copied || copied.length === 0 || !loc) return
+    const rel = secondsToBeats(this.engine.position(), this.snap.session.bpm) - loc.clip.startBeat
+    const step = this.pianoGridBeats()
+    const at = rel >= 0 && rel < loc.clip.lengthBeats ? Math.floor(rel / step + 1e-9) * step : 0
+    this.editNotes('Pegar notas', (notes, length) => addNotes(notes, copied.map((n) => ({ ...n, start: roundBeat(n.start + at) })), length))
+  }
+
+  /** Escucha una nota en el instrumento de la pista del piano roll (o de la pista elegida). */
+  previewPitch(pitch: number, velocity = 100): void {
+    const trackId = this.pianoClip()?.track.id ?? this.snap.selectedTrackId
+    if (trackId) this.engine.previewNote(trackId, pitch, velocity)
+  }
+
+  // ---- edicion segun el editor activo (comandos globales de la parte 2) ----
+
+  /** Supr: notas elegidas en el piano roll, o el clip elegido en la linea de tiempo. */
+  deleteSelection(): void {
+    if (this.snap.editor === 'piano_roll') this.deleteNotes()
+    else this.deleteSelected()
+  }
+
+  duplicateSelection(): void {
+    if (this.snap.editor === 'piano_roll') this.duplicateNotes()
+    else this.duplicateSelected()
+  }
+
+  /** S: corta notas en el piano roll; divide clips en la linea de tiempo. */
+  splitSelection(): void {
+    if (this.snap.editor === 'piano_roll') this.splitNotesAtPlayhead()
+    else this.splitAtPlayhead()
+  }
+
+  /** Q: cuantiza las notas del piano roll, o el clip MIDI elegido entero en la linea de tiempo. */
+  quantizeSelection(): void {
+    if (this.snap.editor === 'piano_roll') {
+      this.quantizeNotes()
+      return
+    }
+    const clipId = this.snap.selectedClipId
+    const loc = clipId ? findMidiClip(this.snap.session, clipId) : null
+    if (!loc) {
+      this.notify('info', 'Cuantizar actúa sobre un clip MIDI: elígelo en la línea de tiempo o ábrelo en el piano roll.')
+      return
+    }
+    const { grid, triplets, quantizeStrength } = this.snap.piano
+    this.run('Cuantizar clip MIDI', (session) =>
+      updateMidiClip(session, { clipId: loc.clip.id, patch: { notes: quantize(loc.clip.notes, null, { grid, triplets, strength: quantizeStrength }, loc.clip.lengthBeats).notes } }),
+    )
+  }
+
+  /** Ctrl+A: todas las notas en el piano roll. En la linea de tiempo no hay seleccion multiple. */
+  selectAll(): void {
+    if (this.snap.editor === 'piano_roll') this.selectAllNotes()
   }
 
   // ---- pistas ----
@@ -858,10 +1429,155 @@ export class StudioController {
 
   setArm(trackId: string, channel: ArmChannel | null): void {
     if (this.snap.recording) return
+    // Una pista de instrumento se arma para MIDI (armMidiTrack), no con una entrada de audio.
+    if (channel !== null && findTrack(this.snap.session, trackId)?.kind !== 'audio') return
     const arms: Record<string, ArmChannel> = { ...this.snap.arms }
     if (channel === null) delete arms[trackId]
     else arms[trackId] = channel
     this.emit({ arms })
+  }
+
+  /** Mute de una pista (por defecto la elegida). */
+  toggleTrackMute(trackId: string | null = this.snap.selectedTrackId): void {
+    const track = trackId ? findTrack(this.snap.session, trackId) : null
+    if (track) this.updateTrack(track.id, { mute: !track.mute }, track.mute ? 'Quitar mute' : 'Mute')
+  }
+
+  /** Solo de una pista (por defecto la elegida). */
+  toggleTrackSolo(trackId: string | null = this.snap.selectedTrackId): void {
+    const track = trackId ? findTrack(this.snap.session, trackId) : null
+    if (track) this.updateTrack(track.id, { solo: !track.solo }, track.solo ? 'Quitar solo' : 'Solo')
+  }
+
+  // ---- pistas de instrumento ----
+
+  /**
+   * Pista de instrumento nueva. `option` es el preset (synth y drums) o el plugin (wam). Devuelve
+   * el id de la pista, o null si no se pudo.
+   */
+  addInstrumentTrack(type: StudioParamInstrumentType | 'wam', option?: string): string | null {
+    const session = this.snap.session
+    if (session.tracks.length >= STUDIO_MAX_TRACKS) {
+      this.notify('warn', `El Estudio admite hasta ${STUDIO_MAX_TRACKS} pistas por sesión.`)
+      return null
+    }
+    let instrument: StudioInstrument
+    try {
+      if (type === 'wam') {
+        if (!option) throw new Error('Elige un plugin de la lista de este Hub.')
+        instrument = { type: 'wam', pluginId: option, state: {} }
+      } else {
+        instrument = defaultInstrument(type, option ?? null)
+      }
+    } catch (err) {
+      this.fail(err)
+      return null
+    }
+    const sameType = session.tracks.filter((track) => track.instrument?.type === type).length
+    const id = newStudioId('trk')
+    const name = `${STUDIO_INSTRUMENT_TYPE_LABELS[type]} ${sameType + 1}`.slice(0, STUDIO_MAX_TRACK_NAME)
+    const ok = this.run('Agregar pista de instrumento', (current) => addInstrumentTrack(current, { track: defaultInstrumentTrack({ id, name, instrument }) }), {
+      selectedTrackId: id,
+      selectedClipId: null,
+    })
+    return ok ? id : null
+  }
+
+  /** Reemplaza el instrumento de la pista (un paso de deshacer). */
+  setTrackInstrument(trackId: string, instrument: StudioInstrument, label: string): boolean {
+    return this.run(label, (session) => setInstrument(session, { trackId, instrument }))
+  }
+
+  /** Parametro del instrumento mientras se arrastra: sin paso de deshacer hasta `commitLive`. */
+  setTrackInstrumentLive(trackId: string, instrument: StudioInstrument): void {
+    try {
+      this.applyLive(setInstrument(this.snap.session, { trackId, instrument }))
+    } catch (err) {
+      this.fail(err)
+    }
+  }
+
+  /**
+   * Agrega al sampler una zona con un audio de la sesion (`assetId`) o con un archivo nuevo. La
+   * zona cubre todas las notas y velocidades; su nota raiz es `rootPitch`.
+   */
+  async addSamplerZone(trackId: string, source: { assetId: string } | { file: File }, rootPitch = 60): Promise<void> {
+    if (this.snap.recording) return
+    let added: StudioAsset | null = null
+    try {
+      if ('file' in source) added = (await this.ingestAudio(source.file, source.file.name, 'import')).asset
+    } catch (err) {
+      this.fail(err, 'No se pudo leer el audio para el sampler.')
+      return
+    }
+    this.run('Agregar zona del sampler', (session) => {
+      let next = added ? addAsset(session, { asset: added }) : session
+      const track = findTrack(next, trackId)
+      if (!track || track.instrument?.type !== 'sampler') throw new Error('La pista ya no tiene un sampler.')
+      const assetId = added ? added.id : 'assetId' in source ? source.assetId : ''
+      const asset = next.assets.find((item) => item.id === assetId)
+      if (!asset) throw new Error('Ese audio ya no está en la sesión.')
+      const zone: StudioSamplerZone = {
+        assetId,
+        rootPitch: Math.min(127, Math.max(0, Math.round(rootPitch))),
+        lowPitch: 0,
+        highPitch: 127,
+        lowVelocity: 1,
+        highVelocity: 127,
+        offsetS: 0,
+        lengthS: Math.max(STUDIO_MIN_CLIP_SECONDS, Math.min(asset.durationS, STUDIO_MAX_SESSION_SECONDS)),
+        gainDb: 0,
+        tuneCents: 0,
+      }
+      next = setInstrument(next, { trackId, instrument: { ...track.instrument, zones: [...track.instrument.zones, zone] } })
+      return next
+    })
+  }
+
+  /**
+   * Congela la pista: renderiza su instrumento a un audio de la sesion (sin efectos, fader,
+   * paneo ni envio, desde el segundo 0) y lo anota en `frozen_asset_id`. Ese audio suena en un
+   * equipo donde el instrumento no este disponible (STUDIO_V2.md 2.2). Un paso de deshacer.
+   */
+  async freezeTrack(trackId: string): Promise<void> {
+    if (this.snap.freezing || this.snap.recording || !this.snap.ready) return
+    const session = this.snap.session
+    const track = findTrack(session, trackId)
+    if (!track || track.kind !== 'instrument' || !track.instrument) return
+    const availability = instrumentAvailability(track.instrument)
+    if (!availability.available) {
+      this.notify('warn', `No se puede congelar: ${availability.reason ?? 'el instrumento no está disponible en este equipo.'}`)
+      return
+    }
+    if (track.midiClips.every((clip) => clip.notes.length === 0)) {
+      this.notify('warn', 'La pista no tiene notas: no hay nada que congelar.')
+      return
+    }
+    this.emit({ freezing: trackId })
+    try {
+      // Solo el instrumento: lo congelado entra donde entrarian los clips, antes de los efectos.
+      const dry = {
+        ...session,
+        tracks: session.tracks.map((t) => (t.id === trackId ? { ...t, fx: [], volumeDb: 0, pan: 0, mute: false, solo: false, reverbSendDb: STUDIO_REVERB_SEND_DB_MIN } : t)),
+      }
+      const solo = soloTrackSession(dry, trackId)
+      const range = solo ? bounceRange(solo, undefined, false) : null
+      if (!solo || !range) throw new Error('La pista no tiene nada que suene.')
+      const result = await bounce(solo, this.engine.getBuffers(), { mode: 'tracks', bitDepth: 24, sampleRate: session.sampleRate, range: { startS: 0, endS: range.endS }, trackIds: [trackId] })
+      const file = result.mode === 'tracks' ? result.tracks[0] : null
+      if (!file) throw new Error('El render de la pista quedó vacío.')
+      const { asset } = await this.ingestAudio(file.blob, `${track.name}.wav`, 'bounce', `Congelado: ${track.name}`.slice(0, STUDIO_MAX_ASSET_LABEL))
+      this.run('Congelar pista', (current) => setFrozenAsset(addAsset(current, { asset }), { trackId, assetId: asset.id }))
+    } catch (err) {
+      this.fail(err, 'No se pudo congelar la pista.')
+    } finally {
+      this.emit({ freezing: null })
+    }
+  }
+
+  /** Quita el congelado (el audio sigue en la sesion hasta guardar en la nube sin usarlo). */
+  unfreezeTrack(trackId: string): void {
+    this.run('Quitar congelado', (session) => setFrozenAsset(session, { trackId, assetId: null }))
   }
 
   // ---- transporte ----
@@ -1061,6 +1777,13 @@ export class StudioController {
 
   async startRecording(): Promise<void> {
     if (this.snap.recording || !this.snap.ready) return
+    // Solo MIDI (ninguna pista de audio armada): no necesita entrada de audio ni OPFS.
+    const midiTrackId = this.midiRecordTarget()
+    const hasAudioArms = Object.keys(this.snap.arms).some((trackId) => findTrack(this.snap.session, trackId)?.kind === 'audio')
+    if (midiTrackId && !hasAudioArms) {
+      await this.startMidiOnlyRecording(midiTrackId)
+      return
+    }
     if (this.snap.recordBlockReason) {
       this.notify('warn', this.snap.recordBlockReason)
       return
@@ -1084,8 +1807,10 @@ export class StudioController {
       this.recLoop = this.engine.getState().loop
       this.recCancel = false
       this.emit({ recording: true, notice: null })
+      if (midiTrackId) this.midiRec = { trackId: midiTrackId, only: false, started: false }
       const started = await recorder.start(this.engine)
       this.recStart = started
+      if (midiTrackId) this.beginMidiTake(midiTrackId, started, false)
       // Se pidio detener mientras el grabador todavia arrancaba (esperaba al escritor de OPFS):
       // la toma se cierra apenas existe, en vez de quedar grabando sin que nadie lo sepa.
       if (this.recCancel) {
@@ -1094,12 +1819,17 @@ export class StudioController {
       }
     } catch (err) {
       this.recStart = null
+      this.abortMidiTake()
       this.emit({ recording: false })
       this.fail(err, 'No se pudo empezar a grabar.')
     }
   }
 
   async stopRecording(): Promise<void> {
+    if (this.midiRec?.only) {
+      await this.stopMidiOnlyRecording()
+      return
+    }
     const recorder = this.recorder
     const start = this.recStart
     if (!recorder || !this.snap.recording) return
@@ -1112,11 +1842,13 @@ export class StudioController {
       return
     }
     this.recStart = null
+    // La toma MIDI se cierra en el instante de parar, antes de esperar a los archivos de audio.
+    const midiTake = this.finishMidiTake()
     try {
       const takes = await recorder.stop()
       this.engine.stop()
       const stats = recorder.getLastTakeStats()
-      let next = this.snap.session
+      let next = midiTake ? this.withMidiTake(this.snap.session, midiTake) : this.snap.session
       let dropped = 0
       let uncalibrated = false
       for (const take of takes) {
@@ -1137,7 +1869,7 @@ export class StudioController {
         uncalibrated = uncalibrated || !take.calibrated
         next = addTakeClips(addAsset(next, { asset: take.asset }), take.trackId, take.assetId, windows)
       }
-      if (next !== this.snap.session) this.apply(next, 'Grabar toma')
+      if (next !== this.snap.session) this.apply(next, midiTake && takes.length === 0 ? 'Grabar MIDI' : 'Grabar toma')
       else this.notify('warn', 'La toma quedó vacía: no se agregó nada.')
       // El escritor deja de escribir al llegar al tope de tamano por audio y el transporte sigue
       // en GRABANDO: sin este aviso, lo tocado despues del corte se perdia en silencio.
@@ -1154,6 +1886,336 @@ export class StudioController {
     } finally {
       this.emit({ recording: false })
     }
+  }
+
+  // ---- MIDI: entrada, tocar en vivo y grabar ----
+
+  private patchMidi(patch: Partial<StudioMidiState>): void {
+    this.emit({ midi: { ...this.snap.midi, ...patch } })
+  }
+
+  private ensureMidi(): StudioMidiInput {
+    if (this.midiInput) return this.midiInput
+    const input = new StudioMidiInput({ getContext: () => this.engine.getContext() })
+    this.midiInput = input
+    this.midiOffs.push(
+      input.onNote(this.handleMidiNote),
+      input.onDevicesChange((devices) => {
+        const deviceId = this.snap.midi.deviceId
+        // El dispositivo abierto se desconecto: deja de figurar como abierto.
+        const stillThere = deviceId !== null && devices.some((d) => d.id === deviceId && d.connected)
+        this.patchMidi({ devices, deviceId: stillThere ? deviceId : null })
+      }),
+      input.onOctaveChange((octave) => this.patchMidi({ octave })),
+    )
+    return input
+  }
+
+  /** Si el permiso ya estaba dado en este navegador, abre MIDI sin preguntar (y el ultimo dispositivo). */
+  private async restoreMidiAccess(): Promise<void> {
+    if (this.snap.midi.access === 'unsupported') return
+    try {
+      const status = await this.ensureMidi().queryAccess()
+      if (status === 'granted') await this.midiRequestAccess()
+      else if (status !== this.snap.midi.access) this.patchMidi({ access: status })
+    } catch {
+      // Sin Permissions API se pregunta cuando el usuario lo pida.
+    }
+  }
+
+  /** Pide el permiso de Web MIDI (sin sysex) y abre el dispositivo recordado o el primero. */
+  async midiRequestAccess(): Promise<void> {
+    if (this.disposed) return
+    const input = this.ensureMidi()
+    const access = await input.requestAccess()
+    const devices = input.listInputs()
+    this.patchMidi({ access, devices })
+    if (access !== 'granted' || this.snap.midi.deviceId) return
+    let remembered = ''
+    try {
+      remembered = safeLocalStorage()?.getItem(MIDI_INPUT_KEY) ?? ''
+    } catch {
+      remembered = ''
+    }
+    const pick = devices.find((d) => d.id === remembered && d.connected) ?? devices.find((d) => d.connected)
+    if (pick) this.midiSelectDevice(pick.id, false)
+  }
+
+  /** Abre un dispositivo MIDI con el canal elegido. */
+  midiSelectDevice(deviceId: string, remember = true): void {
+    try {
+      this.ensureMidi().open(deviceId, this.snap.midi.channel)
+      this.patchMidi({ deviceId })
+      if (remember) {
+        try {
+          safeLocalStorage()?.setItem(MIDI_INPUT_KEY, deviceId)
+        } catch {
+          // Sin almacenamiento la eleccion dura lo que la pestana.
+        }
+      }
+    } catch (err) {
+      this.patchMidi({ deviceId: null })
+      this.fail(err, 'No se pudo abrir el dispositivo MIDI.')
+    }
+  }
+
+  midiSetChannel(channel: number | 'all'): void {
+    if (channel === this.snap.midi.channel) return
+    this.patchMidi({ channel })
+    const deviceId = this.snap.midi.deviceId
+    if (deviceId) this.midiSelectDevice(deviceId, false)
+  }
+
+  /** Teclado de la computadora como teclado musical (fila A..K, Z y X cambian la octava). */
+  setComputerKeyboard(enabled: boolean): void {
+    const input = this.ensureMidi()
+    input.setComputerKeyboard(enabled)
+    this.patchMidi({ keyboard: enabled, octave: input.getComputerKeyboardOctave() })
+  }
+
+  toggleComputerKeyboard(): void {
+    this.setComputerKeyboard(!this.snap.midi.keyboard)
+  }
+
+  setKeyboardOctave(octave: number): void {
+    const input = this.ensureMidi()
+    input.setComputerKeyboardOctave(octave)
+    this.patchMidi({ octave: input.getComputerKeyboardOctave() })
+  }
+
+  /** Arma una pista de instrumento para grabar MIDI y tocarla en vivo (una a la vez). */
+  armMidiTrack(trackId: string | null): void {
+    if (this.snap.recording) return
+    if (trackId !== null && findTrack(this.snap.session, trackId)?.kind !== 'instrument') return
+    if (trackId !== this.snap.midi.armedTrackId) {
+      this.midiPanic()
+      this.patchMidi({ armedTrackId: trackId })
+    }
+  }
+
+  setMidiQuantizeOnStop(enabled: boolean): void {
+    this.patchMidi({ quantizeOnStop: enabled })
+  }
+
+  /** Notas entrantes (dispositivo o teclado), para indicadores de la interfaz. Devuelve como dejar de escuchar. */
+  onMidiNote(listener: (event: MidiNoteEvent) => void): () => void {
+    if (this.disposed) return () => undefined
+    return this.ensureMidi().onNote(listener)
+  }
+
+  /** Corta todas las notas que suenan en vivo (nota colgada). */
+  midiPanic(): void {
+    this.engine.liveAllNotesOff()
+    this.liveNotes.clear()
+  }
+
+  /** Pista que suena al tocar: la armada para MIDI, si no la pista de instrumento elegida. */
+  private liveTargetTrack(): string | null {
+    const session = this.snap.session
+    const armed = this.snap.midi.armedTrackId
+    if (armed && findTrack(session, armed)?.kind === 'instrument') return armed
+    const picked = this.pianoClip()?.track.id ?? this.snap.selectedTrackId
+    return picked && findTrack(session, picked)?.kind === 'instrument' ? picked : null
+  }
+
+  private handleMidiNote = (event: MidiNoteEvent): void => {
+    if (event.type === 'on') {
+      const target = this.liveTargetTrack()
+      if (!target) return
+      const previous = this.liveNotes.get(event.pitch)
+      if (previous) this.engine.liveNoteOff(previous, event.pitch)
+      if (this.engine.liveNoteOn(target, event.pitch, event.velocity)) this.liveNotes.set(event.pitch, target)
+      return
+    }
+    const target = this.liveNotes.get(event.pitch)
+    if (target) {
+      this.engine.liveNoteOff(target, event.pitch)
+      this.liveNotes.delete(event.pitch)
+    }
+  }
+
+  /** Pista de instrumento armada para MIDI que existe, o null. */
+  private midiRecordTarget(): string | null {
+    const armed = this.snap.midi.armedTrackId
+    return armed && findTrack(this.snap.session, armed)?.kind === 'instrument' ? armed : null
+  }
+
+  private beginMidiTake(trackId: string, playStart: PlayStart, only: boolean): void {
+    const input = this.ensureMidi()
+    const session = this.snap.session
+    const loop = this.recLoop
+    const { grid, triplets } = this.snap.piano
+    input.startRecording({
+      trackId,
+      playStart: { positionAtStart: playStart.positionAtStart, playStartCtxTime: playStart.playStartCtxTime },
+      bpm: session.bpm,
+      channel: this.snap.midi.channel,
+      quantize: this.snap.midi.quantizeOnStop ? { grid, triplets, strength: 1 } : null,
+      beatsPerBar: session.beatsPerBar,
+      loop: loop ? { startBeat: secondsToBeats(loop.startS, session.bpm), endBeat: secondsToBeats(loop.endS, session.bpm) } : null,
+    })
+    this.midiRec = { trackId, only, started: true }
+  }
+
+  /** Cierra la toma MIDI en este instante; null si no habia o no se toco nada. */
+  private finishMidiTake(): MidiTake | null {
+    const rec = this.midiRec
+    this.midiRec = null
+    const input = this.midiInput
+    if (!rec?.started || !input?.isRecording()) return null
+    return input.stopRecording(this.engine.getContext().currentTime)
+  }
+
+  private abortMidiTake(): void {
+    this.midiRec = null
+    if (this.midiInput?.isRecording()) this.midiInput.stopRecording(0)
+  }
+
+  /** Sesion con la toma MIDI como clip nuevo en su pista. */
+  private withMidiTake(session: StudioSession, take: MidiTake): StudioSession {
+    if (findTrack(session, take.trackId)?.kind !== 'instrument') return session
+    const id = newStudioId('mid')
+    return addMidiClip(session, { trackId: take.trackId, clip: defaultMidiClip({ id, startBeat: take.startBeat, lengthBeats: take.lengthBeats, notes: take.notes }) })
+  }
+
+  private async startMidiOnlyRecording(trackId: string): Promise<void> {
+    this.recLoop = this.engine.getState().loop
+    this.recCancel = false
+    this.midiRec = { trackId, only: true, started: false }
+    this.ensureMidi()
+    this.emit({ recording: true, notice: null })
+    try {
+      const started = await this.engine.play({ countIn: true })
+      this.recStart = { ...started, roundTripSeconds: 0, calibrated: true }
+      this.beginMidiTake(trackId, started, true)
+      if (this.recCancel) {
+        this.recCancel = false
+        await this.stopMidiOnlyRecording()
+      }
+    } catch (err) {
+      this.recStart = null
+      this.abortMidiTake()
+      this.emit({ recording: false })
+      this.fail(err, 'No se pudo empezar a grabar MIDI.')
+    }
+  }
+
+  private async stopMidiOnlyRecording(): Promise<void> {
+    if (!this.snap.recording) return
+    if (!this.recStart) {
+      // Todavia arrancaba: se cancela y startMidiOnlyRecording cierra la toma al resolver.
+      this.recCancel = true
+      this.engine.pause()
+      return
+    }
+    this.recStart = null
+    const take = this.finishMidiTake()
+    this.engine.stop()
+    try {
+      if (!take) {
+        this.notify('warn', 'La toma MIDI quedó vacía: no llegó ninguna nota. Revisa el dispositivo y el canal, o usa el teclado de la computadora.')
+        return
+      }
+      this.apply(this.withMidiTake(this.snap.session, take), 'Grabar MIDI', { selectedClipId: null })
+      if (take.hangingNotes > 0) this.notify('info', `${take.hangingNotes === 1 ? 'Una nota seguía apretada' : `${take.hangingNotes} notas seguían apretadas`} al parar: se cerraron ahí.`)
+    } catch (err) {
+      this.fail(err, 'No se pudo guardar la toma MIDI.')
+    } finally {
+      this.emit({ recording: false })
+    }
+  }
+
+  // ---- archivos MIDI (.mid) ----
+
+  /**
+   * Importa un archivo MIDI estandar: una pista de instrumento por pista del archivo (caja de
+   * ritmos si va por el canal 10), con un clip desde el compas 1. Si la sesion no tiene pistas,
+   * toma el tempo y el compas del archivo. Un paso de deshacer.
+   */
+  async importMidiFile(file: File): Promise<void> {
+    if (this.snap.recording) {
+      this.notify('warn', 'No se puede importar MIDI mientras se graba.')
+      return
+    }
+    let parsed: ReturnType<typeof parseSmf>
+    try {
+      parsed = parseSmf(new Uint8Array(await file.arrayBuffer()))
+    } catch (err) {
+      this.fail(err, `"${file.name}" no se pudo leer como archivo MIDI.`)
+      return
+    }
+    if (parsed.tracks.length === 0) {
+      this.notify('warn', `"${file.name}" no tiene notas.`)
+      return
+    }
+    const warnings: string[] = []
+    this.run(parsed.tracks.length > 1 ? 'Importar archivo MIDI' : 'Importar pista MIDI', (session) => {
+      let next = session
+      if (session.tracks.length === 0 && (parsed.bpm !== null || parsed.beatsPerBar !== null)) {
+        const bpm = parsed.bpm !== null ? Math.min(STUDIO_BPM_MAX, Math.max(STUDIO_BPM_MIN, Math.round(parsed.bpm * 100) / 100)) : undefined
+        const beatsPerBar = parsed.beatsPerBar !== null ? Math.min(12, Math.max(1, parsed.beatsPerBar)) : undefined
+        next = updateSessionMeta(next, { patch: { ...(bpm !== undefined ? { bpm } : {}), ...(beatsPerBar !== undefined ? { beatsPerBar } : {}) } })
+      } else if (parsed.bpm !== null && Math.abs(parsed.bpm - session.bpm) > 0.01) {
+        warnings.push(`El archivo viene a ${Math.round(parsed.bpm)} BPM; las notas quedan en compases a los ${session.bpm} BPM de la sesión.`)
+      }
+      if (session.tracks.length === 0 && parsed.beatsPerBar === null && parsed.timeSignature !== null) {
+        warnings.push(`El archivo viene en ${parsed.timeSignature}, que no es un número entero de negras por compás: la sesión conserva su compás.`)
+      }
+      if (parsed.tempoChanges) warnings.push('El archivo cambia de tempo: el Estudio usa un solo tempo por sesión.')
+      const maxBeat = Math.min(STUDIO_MAX_BEAT, secondsToBeats(STUDIO_MAX_SESSION_SECONDS, next.bpm))
+      const base = fileTitle(file.name)
+      let skipped = 0
+      parsed.tracks.forEach((smfTrack, index) => {
+        if (next.tracks.length >= STUDIO_MAX_TRACKS) {
+          skipped++
+          return
+        }
+        let notes = smfTrack.notes.filter((n) => n.start < maxBeat)
+        if (notes.length > STUDIO_MAX_NOTES_PER_CLIP) {
+          warnings.push(`"${smfTrack.name ?? base}" tiene más de ${STUDIO_MAX_NOTES_PER_CLIP} notas: se importaron las primeras.`)
+          notes = notes.slice(0, STUDIO_MAX_NOTES_PER_CLIP)
+        }
+        if (notes.length === 0) return
+        const last = Math.max(...notes.map((n) => n.start + n.length))
+        const lengthBeats = Math.min(maxBeat, Math.max(next.beatsPerBar, Math.ceil(last / next.beatsPerBar - 1e-9) * next.beatsPerBar))
+        const instrument = defaultInstrument(smfTrack.isDrums ? 'drums' : 'synth')
+        const name = (smfTrack.name?.trim() || (parsed.tracks.length > 1 ? `${base} ${index + 1}` : base)).slice(0, STUDIO_MAX_TRACK_NAME)
+        const trackId = newStudioId('trk')
+        next = addInstrumentTrack(next, { track: defaultInstrumentTrack({ id: trackId, name, instrument }) })
+        next = addMidiClip(next, { trackId, clip: defaultMidiClip({ id: newStudioId('mid'), startBeat: 0, lengthBeats, notes: normalizeNotes(notes, lengthBeats) }) })
+      })
+      if (skipped > 0) warnings.push(`El Estudio admite hasta ${STUDIO_MAX_TRACKS} pistas: ${skipped === 1 ? 'quedó 1 pista' : `quedaron ${skipped} pistas`} del archivo sin importar.`)
+      return next
+    })
+    if (warnings.length > 0) this.notify('warn', warnings.join(' '))
+  }
+
+  /** Un clip MIDI como archivo .mid (tipo 1). null si el clip no existe. */
+  exportMidiClip(clipId: string): { blob: Blob; name: string } | null {
+    const session = this.snap.session
+    const loc = findMidiClip(session, clipId)
+    if (!loc) return null
+    const bytes = writeSmf(
+      [{ name: loc.track.name, notes: midiClipExportNotes(loc.clip), channel: loc.track.instrument?.type === 'drums' ? SMF_DRUM_CHANNEL : 0 }],
+      session.bpm,
+      session.beatsPerBar,
+    )
+    return { blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'audio/midi' }), name: `${safeFileName(`${session.title} - ${loc.track.name}`, 'clip')}.mid` }
+  }
+
+  /** Todas las pistas de instrumento como archivo .mid (una pista del archivo por pista). null si no hay notas. */
+  exportSessionMidi(): { blob: Blob; name: string } | null {
+    const session = this.snap.session
+    const clips = session.tracks
+      .filter((track) => track.kind === 'instrument' && track.midiClips.some((clip) => clip.notes.length > 0))
+      .map((track) => ({
+        name: track.name,
+        notes: track.midiClips.flatMap((clip) => midiClipExportNotes(clip)),
+        channel: track.instrument?.type === 'drums' ? SMF_DRUM_CHANNEL : 0,
+      }))
+    if (clips.length === 0) return null
+    const bytes = writeSmf(clips, session.bpm, session.beatsPerBar)
+    return { blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'audio/midi' }), name: `${safeFileName(session.title, 'sesion')}.mid` }
   }
 
   // ---- importar ----
@@ -1550,9 +2612,15 @@ export class StudioController {
       this.history.clear()
       this.history.push(remote.session)
       this.editCount++
+      this.midiPanic()
       this.emit({
         session: remote.session,
         selectedClipId: null,
+        selectedTrackId: null,
+        editor: 'timeline',
+        pianoClipId: null,
+        piano: { ...this.snap.piano, selection: [] },
+        midi: { ...this.snap.midi, armedTrackId: null },
         arms: {},
         ...this.historyPatch(),
         save: { local: 'saved', dirty: false, etag: remote.etag, cloud: 'idle', cloudDetail: null, uploading: null },

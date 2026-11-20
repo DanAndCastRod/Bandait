@@ -26,7 +26,7 @@ import type { MusicAiResult } from './analysis.ts';
 import { assertSpender, defaultStudioDeps, studioRoute, tokenSubject } from './studio.ts';
 import type { Env, ExecutionContextLike, FetchLike, R2Bucket, StudioDeps } from './types.ts';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SONG = /^[A-Za-z0-9_-]{1,80}$/;
 const FILE = /^[A-Za-z0-9 ._()-]{1,120}$/;
@@ -162,7 +162,7 @@ export async function listAll(bucket: R2Bucket, prefix: string): Promise<string[
 async function route(req: Request, env: Env, fetchFn: FetchLike, deps: StudioDeps): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname === '/v1/health' && req.method === 'GET') return json(200, { ok: true, version: VERSION });
-  // Estudio (bandait-protocol/STUDIO_V1.md): sessions, audio and AI jobs live in src/studio.ts.
+  // Estudio (bandait-protocol/STUDIO_V1.md and STUDIO_V2.md): sessions, audio and AI jobs live in src/studio.ts.
   if (/^\/v1\/bands\/[^/]+\/studio(?:\/|$)/.test(url.pathname)) return studioRoute(req, env, url, fetchFn, deps);
   const m =/^\/v1\/bands\/([^/]+)\/songs\/([^/]+)(?:\/(manifest|analysis|files\/([^/]+)))?$/.exec(url.pathname);
   if (!m) throw new ApiError(404, 'not_found');
@@ -469,10 +469,27 @@ async function analysisStatus(env: Env, songPrefix: string, song: string, fetchF
     record.manifest = await commitSeparatedStems(env, songPrefix, song, record, stems);
     await save();
   }
+  return done(await readMusicAiOutputs(outputs, fetchFn));
+}
+
+/** A Music AI output that could not be downloaded right now (network error or 5xx). */
+export class TransientOutputError extends Error {}
+
+/**
+ * Outputs of a finished Music AI job as one result object: inline values as they are, and each
+ * https output downloaded and parsed as JSON. Audio outputs, outputs over RESULT_CAP and anything
+ * that is not JSON are skipped. Shared by the song analysis and the Estudio `analyze` job.
+ */
+export async function readMusicAiOutputs(
+  outputs: Iterable<[string, unknown]>, fetchFn: FetchLike, options: { strict?: boolean } = {},
+): Promise<Record<string, unknown>> {
   const result: Record<string, unknown> = {};
   for (const [name, value] of outputs) {
     if (typeof value === 'string' && value.startsWith('https://')) {
       const res = await fetchFn(value, {}).catch(() => null);
+      // strict (Estudio analyze): a network error or a 5xx means "not now", not "no output". The
+      // caller answers STARTED without sealing the job, and the next GET downloads it again.
+      if (options.strict && (!res || res.status >= 500)) throw new TransientOutputError(name);
       if (!res || !res.ok) continue;
       // An audio output in the analysis workflow is not read: only JSON results matter here.
       const size = Number(res.headers.get('Content-Length') ?? 0);
@@ -491,7 +508,7 @@ async function analysisStatus(env: Env, songPrefix: string, song: string, fetchF
       result[name] = value;
     }
   }
-  return done(result);
+  return result;
 }
 
 /** `deps` (clock and ids of the Estudio routes) is only passed by tests. */

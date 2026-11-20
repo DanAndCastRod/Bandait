@@ -13,6 +13,43 @@
  */
 import assert from 'node:assert/strict'
 import fixture from '../../bandait-protocol/fixtures/studio_session.json' with { type: 'json' }
+import fixtureV2 from '../../bandait-protocol/fixtures/studio_session_v2.json' with { type: 'json' }
+import chatToolsFixture from '../../bandait-protocol/fixtures/studio_chat_tools_v2.json' with { type: 'json' }
+import {
+  STUDIO_COMMAND_SPECS,
+  KEYMAP_STORAGE_KEY,
+  buildStudioCommands,
+  createCommandRegistry,
+  createStudioRegistry,
+  defaultKeymap,
+  displayShortcut,
+  findConflicts,
+  formatShortcut,
+  loadKeymap,
+  matchEvent,
+  parseShortcut,
+  resetKeymap,
+  saveKeymap,
+  shortcutFromEvent,
+  type StudioCommandId,
+} from '../src/services/studio/commands.ts'
+import { computerKeyPitch, createComputerKeyboard, isComputerKeyboardCode } from '../src/services/studio/computerKeyboard.ts'
+import {
+  addNotes,
+  duplicateNotes,
+  gridBeats,
+  legato,
+  moveNotes,
+  normalizeNotes,
+  notesInRange,
+  quantize,
+  removeNotes,
+  resizeNotes,
+  setVelocity,
+  splitNotesAt,
+  transpose,
+} from '../src/services/studio/midiOps.ts'
+import { SMF_TICKS_PER_BEAT, midiClipExportNotes, parseSmf, writeSmf } from '../src/services/studio/smf.ts'
 import { StemCloudError, type CloudTarget } from '../src/services/stemCloud.ts'
 import { encodeWav16, encodeWav24, encodeWavPcm, buildWavHeader, floatTo24, parseWavHeader, WAV_HEADER_BYTES } from '../src/services/wav.ts'
 import { bounceRange, bounceTrackIds, soloTrackSession } from '../src/services/studio/bounce.ts'
@@ -74,12 +111,19 @@ import {
   STUDIO_MAX_ASSET_BYTES,
   STUDIO_MAX_SESSION_SECONDS,
   STUDIO_MAX_TRACKS,
+  STUDIO_MAX_NOTES_PER_CLIP,
   StudioSessionError,
+  countSessionNotes,
   defaultFx,
+  defaultInstrument,
+  defaultInstrumentTrack,
+  defaultMidiClip,
   defaultTrack,
   findAsset,
   findClip,
+  findMidiClip,
   findTrack,
+  migrateSessionV1,
   newSession,
   parseSession,
   parseSessionJson,
@@ -90,26 +134,40 @@ import {
   validateSession,
   type StudioAsset,
   type StudioClip,
+  type StudioMidiClip,
+  type StudioMidiNote,
   type StudioSession,
 } from '../src/services/studio/session.ts'
 import {
   addAsset,
   addClip,
+  addInstrumentTrack,
+  addMidiClip,
   addTrack,
   applyMixSuggestion,
   deleteClip,
   duplicateClip,
+  duplicateMidiClip,
+  expandMidiClipNotes,
   moveClip,
+  moveMidiClip,
+  removeMidiClip,
   removeTrack,
   removeUnusedAssets,
+  resizeMidiClip,
   setActiveTake,
   setClipFades,
   setClipGain,
+  setFrozenAsset,
+  setInstrument,
+  setMarkers,
   setTrackFx,
   snapTime,
   splitClip,
+  splitMidiClip,
   trimClip,
   updateMaster,
+  updateMidiClip,
   updateSessionMeta,
   updateTrack,
 } from '../src/services/studio/sessionOps.ts'
@@ -131,7 +189,7 @@ import {
   studioUrl,
   watchJob,
 } from '../src/services/studio/studioCloud.ts'
-import type { KeyValueStorage, MixSuggestion, StudioJobRequest, StudioJobState } from '../src/services/studio/types.ts'
+import type { KeyEventLike, KeyValueStorage, MixSuggestion, StudioCommand, StudioJobRequest, StudioJobState } from '../src/services/studio/types.ts'
 
 /** Documento JSON suelto: las pruebas lo rompen a proposito para comprobar cada rechazo. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,10 +303,12 @@ async function main() {
   // =========================================================================
   console.log('session.ts contra bandait-protocol/fixtures/studio_session.json')
 
-  await check('ida y vuelta: el fixture sale identico, con las claves en el mismo orden', () => {
+  await check('ida y vuelta: el fixture v1 sale migrado a v2 (STUDIO_V2.md 1), con las claves en el mismo orden', () => {
     const session = base()
-    assert.deepStrictEqual(serializeSession(session), fixture)
-    assert.equal(JSON.stringify(serializeSession(session)), JSON.stringify(fixture))
+    // v2: el Hub escribe siempre version 2; la migracion solo agrega kind y markers.
+    const migrated = migratedV1Fixture()
+    assert.deepStrictEqual(serializeSession(session), migrated)
+    assert.equal(JSON.stringify(serializeSession(session)), JSON.stringify(migrated))
     assert.deepStrictEqual(parseSession(serializeSession(session)), session)
     assert.deepStrictEqual(parseSessionJson(sessionToJson(session)), session)
   })
@@ -268,7 +328,7 @@ async function main() {
 
   // Cada mutacion del fixture debe dar su codigo y su ruta.
   const mutations: Array<[string, (d: Json) => void, string, string]> = [
-    ['version distinta de 1', (d) => (d.version = 2), 'unsupported_version', 'version'],
+    ['version distinta de 1 y de 2', (d) => (d.version = 3), 'unsupported_version', 'version'],
     ['campo obligatorio ausente', (d) => delete d.bpm, 'missing_field', 'bpm'],
     ['campo desconocido en la raiz', (d) => (d.extra = 1), 'unknown_field', 'extra'],
     ['campo en camelCase', (d) => (d.tracks[0].volumeDb = 0), 'unknown_field', 'tracks[0].volumeDb'],
@@ -324,8 +384,8 @@ async function main() {
     sessionError(() => newSession({ title: '   ', sampleRate: 48000 }), 'out_of_range', 'title')
   })
 
-  await check('el documento de mas de 256 KB se rechaza al leer y al escribir', () => {
-    sessionError(() => parseSessionJson(' '.repeat(256 * 1024 + 1)), 'document_too_large')
+  await check('el documento de mas de 1 MiB (STUDIO_V2.md 2.5) se rechaza al leer y al escribir', () => {
+    sessionError(() => parseSessionJson(' '.repeat(1024 * 1024 + 1)), 'document_too_large')
     sessionError(() => parseSessionJson('{no es json'), 'not_an_object')
     let big = newSession({ title: 'Grande', sampleRate: 48000 })
     const assets: StudioAsset[] = Array.from({ length: 256 }, (_, i) => ({
@@ -354,6 +414,16 @@ async function main() {
       active: true,
     }))
     big = { ...big, tracks: Array.from({ length: 8 }, (_, t) => ({ ...track, id: `trk_${t}`, clips: clips.map((c) => ({ ...c, id: `${c.id}_${t}` })) })) }
+    // v2: con 1 MiB los clips de audio solos ya no alcanzan; se suman 16384 notas en 4 pistas.
+    const notes = Array.from({ length: 1024 }, (_, i) => ({ pitch: i % 128, start: i * 0.0625, length: 0.0625, velocity: 100 }))
+    const instrumentTracks = Array.from({ length: 4 }, (_, t) =>
+      defaultInstrumentTrack({
+        id: `trk_i${t}`,
+        name: 'Instrumento',
+        instrument: defaultInstrument('synth'),
+      }),
+    ).map((t, ti) => ({ ...t, midiClips: Array.from({ length: 4 }, (_, c) => defaultMidiClip({ id: `mid_${ti}_${c}`, startBeat: c * 64, lengthBeats: 64, notes })) }))
+    big = { ...big, tracks: [...big.tracks, ...instrumentTracks] }
     sessionError(() => sessionToJson(big), 'document_too_large')
   })
 
@@ -2091,6 +2161,8 @@ async function main() {
     assert.equal(maxTakeSeconds({ channels: 2, sampleRate: 0, bitDepth: 24, maxBytes: STUDIO_MAX_ASSET_BYTES }), 0)
   })
 
+  await verifyStudioV2()
+
   console.log(`\n${passed} ok, ${failures.length} fallas`)
   if (failures.length > 0) process.exit(1)
 }
@@ -2234,6 +2306,821 @@ class FakeStudioWorker {
     if ('network' in step) throw new TypeError('fetch failed')
     return json(step.status, step.body)
   }
+}
+
+// ###########################################################################
+// Estudio v2: migracion, midiOps, sessionOps v2, smf, comandos y atajos, teclado de computadora
+// ###########################################################################
+
+/**
+ * El fixture v1 migrado A MANO segun STUDIO_V2.md 1 (version 2, "kind": "audio" despues de id,
+ * "markers": [] despues de tracks), para no comprobar la migracion consigo misma.
+ */
+function migratedV1Fixture(): Json {
+  const doc = structuredClone(fixture) as Json
+  const out: Json = {}
+  for (const [k, v] of Object.entries(doc)) {
+    if (k === 'version') {
+      out.version = 2
+    } else if (k === 'tracks') {
+      out.tracks = (v as Json[]).map((t) => {
+        const track: Json = {}
+        for (const [tk, tv] of Object.entries(t as Json)) {
+          track[tk] = tv
+          if (tk === 'id') track.kind = 'audio'
+        }
+        return track
+      })
+      out.markers = []
+    } else {
+      out[k] = v
+    }
+  }
+  return out
+}
+
+function baseV2(): StudioSession {
+  return parseSession(structuredClone(fixtureV2))
+}
+
+function note(pitch: number, start: number, length: number, velocity = 100): StudioMidiNote {
+  return { pitch, start, length, velocity }
+}
+
+function midiClip(session: StudioSession, id: string): StudioMidiClip {
+  const loc = findMidiClip(session, id)
+  assert.ok(loc, `falta el clip MIDI ${id}`)
+  return loc.clip
+}
+
+function keyEvent(code: string, key: string, mods: Partial<KeyEventLike> = {}): KeyEventLike {
+  return { code, key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods }
+}
+
+/** Fragmento SMF: id de 4 letras, largo de 32 bits y cuerpo. */
+function smfChunk(id: string, body: number[]): number[] {
+  const n = body.length
+  return [...[...id].map((c) => c.charCodeAt(0)), (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff, ...body]
+}
+
+function ascii(text: string): number[] {
+  return [...text].map((c) => c.charCodeAt(0))
+}
+
+function smfError(fn: () => unknown, pattern: RegExp) {
+  assert.throws(fn, (err: unknown) => err instanceof Error && pattern.test(err.message))
+}
+
+function containsBytes(haystack: Uint8Array, needle: number[]): boolean {
+  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer
+    return true
+  }
+  return false
+}
+
+async function verifyStudioV2() {
+  // =========================================================================
+  console.log('\nsession.ts v2: fixture v2 y migracion de v1')
+
+  await check('ida y vuelta: el fixture v2 sale identico, con las claves en el mismo orden', () => {
+    const session = baseV2()
+    assert.deepStrictEqual(serializeSession(session), fixtureV2)
+    assert.equal(JSON.stringify(serializeSession(session)), JSON.stringify(fixtureV2))
+    assert.deepStrictEqual(parseSession(serializeSession(session)), session)
+    assert.deepStrictEqual(parseSessionJson(sessionToJson(session)), session)
+  })
+
+  await check('migracion v1 a v2: igual a la migracion a mano, idempotente y sin perdida', () => {
+    const expected = migratedV1Fixture()
+    const migrated = migrateSessionV1(structuredClone(fixture))
+    assert.deepStrictEqual(migrated, expected)
+    assert.equal(JSON.stringify(migrated), JSON.stringify(expected))
+    assert.deepStrictEqual(migrateSessionV1(structuredClone(fixture)), migrated)
+    const fromV1 = parseSession(structuredClone(fixture))
+    assert.deepStrictEqual(parseSession(serializeSession(fromV1)), fromV1)
+    assert.deepStrictEqual(parseSession(migrated), fromV1)
+    assert.equal(fromV1.version, 2)
+    assert.deepStrictEqual(fromV1.markers, [])
+    assert.ok(fromV1.tracks.every((t) => t.kind === 'audio' && t.instrument === null && t.midiClips.length === 0))
+    sessionError(() => migrateSessionV1(structuredClone(fixtureV2)), 'unsupported_version', 'version')
+  })
+
+  await check('un v1 con campos de v2 se rechaza con las reglas de v1', () => {
+    const withKind = structuredClone(fixture) as Json
+    withKind.tracks[0] = { id: withKind.tracks[0].id, kind: 'audio', ...withKind.tracks[0] }
+    sessionError(() => parseSession(withKind), 'unknown_field', 'tracks[0].kind')
+    const withMarkers = structuredClone(fixture) as Json
+    withMarkers.markers = []
+    sessionError(() => parseSession(withMarkers), 'unknown_field', 'markers')
+  })
+
+  // =========================================================================
+  console.log('\nmidiOps.ts')
+
+  await check('gridBeats: negras, semicorcheas y tresillos', () => {
+    assert.equal(gridBeats('1/1', false), 4)
+    assert.equal(gridBeats('1/4', false), 1)
+    assert.equal(gridBeats('1/16', false), 0.25)
+    assert.equal(gridBeats('1/32', false), 0.125)
+    close(gridBeats('1/8', true), 1 / 3)
+    close(gridBeats('1/4', true), 2 / 3)
+    sessionError(() => gridBeats('1/64' as never, false), 'bad_value', 'grid')
+  })
+
+  await check('normalizeNotes: ordena, acorta solapes del mismo tono, acota y descarta lo que sale del clip', () => {
+    const input = [note(60, 1, 1), note(60, 0, 2), note(62, 0, 1, 0), note(130, 0.5, 0.5, 200), note(64, 4, 1), note(65, -1, 1)]
+    const out = normalizeNotes(input, 4)
+    assert.deepStrictEqual(out, [note(60, 0, 1), note(62, 0, 1, 1), note(65, 0, 1), note(127, 0.5, 0.5, 127), note(60, 1, 1)])
+    // No muta la entrada.
+    assert.deepStrictEqual(input[1], note(60, 0, 2))
+    // Igual tono y mismo inicio: gana la que viene despues.
+    assert.deepStrictEqual(normalizeNotes([note(60, 0, 1, 50), note(60, 0, 2, 90)], 4), [note(60, 0, 2, 90)])
+    // Si al acortar queda con menos del largo minimo, se quita.
+    assert.deepStrictEqual(normalizeNotes([note(60, 0, 1), note(60, 0.01, 1)], 4), [note(60, 0.01, 1)])
+    // Una nota puede pasar del final del clip (suena recortada); un largo menor que el minimo sube al minimo.
+    assert.deepStrictEqual(normalizeNotes([note(60, 3, 4), note(61, 0, 0.001)], 4), [note(61, 0, 0.015625), note(60, 3, 4)])
+    // Tiempos redondeados a 6 decimales.
+    assert.deepStrictEqual(normalizeNotes([note(60, 1 / 3, 1 / 3)], 4), [note(60, 0.333333, 0.333333)])
+  })
+
+  await check('addNotes y removeNotes: la seleccion son las notas agregadas que sobreviven', () => {
+    const r = addNotes([note(60, 0, 1)], [note(64, 0, 1), note(60, 0.5, 1)], 4)
+    assert.deepStrictEqual(r.notes, [note(60, 0, 0.5), note(64, 0, 1), note(60, 0.5, 1)])
+    assert.deepStrictEqual(r.selection, [1, 2])
+    // Una nota agregada sobre otra igual la reemplaza.
+    const same = addNotes([note(60, 0, 1, 40)], [note(60, 0, 1, 90)], 4)
+    assert.deepStrictEqual(same.notes, [note(60, 0, 1, 90)])
+    assert.deepStrictEqual(same.selection, [0])
+    assert.deepStrictEqual(removeNotes(r.notes, [1, 9, -1]), [note(60, 0, 0.5), note(60, 0.5, 1)])
+  })
+
+  await check('moveNotes: el grupo se mueve entero y no sale del clip ni de 0..127', () => {
+    const notes = [note(60, 0, 1), note(64, 1, 1)]
+    const up = moveNotes(notes, [0, 1], -2, 100, 4)
+    assert.deepStrictEqual(up.notes, [note(123, 0, 1), note(127, 1, 1)])
+    assert.deepStrictEqual(up.selection, [0, 1])
+    const right = moveNotes(notes, [0, 1], 10, 0, 4)
+    assert.deepStrictEqual(right.notes, [note(60, 2.984375, 1), note(64, 3.984375, 1)])
+    const one = moveNotes(notes, [1], -0.5, -2, 4)
+    assert.deepStrictEqual(one.notes, [note(60, 0, 1), note(62, 0.5, 1)])
+    assert.deepStrictEqual(one.selection, [1])
+    sessionError(() => moveNotes(notes, [0], Number.NaN, 0, 4), 'bad_type', 'delta_beats')
+  })
+
+  await check('resizeNotes: final y principio con el largo minimo', () => {
+    const notes = [note(60, 1, 1)]
+    assert.deepStrictEqual(resizeNotes(notes, [0], 'end', -5, 4).notes, [note(60, 1, 0.015625)])
+    assert.deepStrictEqual(resizeNotes(notes, [0], 'end', 0.5, 4).notes, [note(60, 1, 1.5)])
+    assert.deepStrictEqual(resizeNotes(notes, [0], 'start', -0.5, 4).notes, [note(60, 0.5, 1.5)])
+    assert.deepStrictEqual(resizeNotes(notes, [0], 'start', 2, 4).notes, [note(60, 1.984375, 0.015625)])
+    assert.deepStrictEqual(resizeNotes(notes, [0], 'start', -3, 4).notes, [note(60, 0, 2)])
+  })
+
+  await check('transpose: lo que saldria de 0..127 se acota nota por nota', () => {
+    assert.deepStrictEqual(transpose([note(120, 0, 1), note(126, 1, 1)], null, 5, 4).notes, [note(125, 0, 1), note(127, 1, 1)])
+    assert.deepStrictEqual(transpose([note(2, 0, 1), note(40, 1, 1)], null, -200, 4).notes, [note(0, 0, 1), note(0, 1, 1)])
+    // Dos notas que caen en el mismo tono y el mismo inicio se resuelven con la regla de solape.
+    const collide = transpose([note(125, 0, 1, 60), note(127, 0, 1, 90)], null, 5, 4)
+    assert.deepStrictEqual(collide.notes, [note(127, 0, 1, 90)])
+    assert.deepStrictEqual(collide.selection, [0])
+    // Solo la seleccion; Shift = octava.
+    const octave = transpose([note(60, 0, 1), note(64, 0, 1)], [1], 12, 4)
+    assert.deepStrictEqual(octave.notes, [note(60, 0, 1), note(76, 0, 1)])
+    assert.deepStrictEqual(octave.selection, [1])
+  })
+
+  await check('setVelocity: fijar, sumar y escalar, acotado a 1..127', () => {
+    const notes = [note(60, 0, 1, 101), note(62, 1, 1, 20)]
+    assert.deepStrictEqual(setVelocity(notes, null, 200, 'set').notes.map((n) => n.velocity), [127, 127])
+    assert.deepStrictEqual(setVelocity(notes, [1], -150, 'add').notes.map((n) => n.velocity), [101, 1])
+    assert.deepStrictEqual(setVelocity(notes, null, 0.5, 'scale').notes.map((n) => n.velocity), [51, 10])
+    sessionError(() => setVelocity(notes, null, 1, 'mul' as never), 'bad_value', 'mode')
+  })
+
+  await check('quantize: fuerza del 50 %, tresillos, finales y el borde del clip', () => {
+    const notes = [note(60, 0.3, 0.5)]
+    const grid16 = { grid: '1/16' as const, triplets: false }
+    assert.deepStrictEqual(quantize(notes, null, { ...grid16, strength: 0.5 }, 4).notes, [note(60, 0.275, 0.5)])
+    assert.deepStrictEqual(quantize(notes, null, { ...grid16, strength: 1 }, 4).notes, [note(60, 0.25, 0.5)])
+    assert.deepStrictEqual(quantize(notes, null, { ...grid16, strength: 0 }, 4).notes, [note(60, 0.3, 0.5)])
+    // Fuerza fuera de 0..1 se acota.
+    assert.deepStrictEqual(quantize(notes, null, { ...grid16, strength: 7 }, 4).notes, [note(60, 0.25, 0.5)])
+    // Tresillos de corchea: la rejilla vale 1/3 de beat.
+    const triplet = { grid: '1/8' as const, triplets: true }
+    assert.deepStrictEqual(quantize(notes, null, { ...triplet, strength: 1 }, 4).notes, [note(60, 0.333333, 0.5)])
+    assert.deepStrictEqual(quantize(notes, null, { ...triplet, strength: 0.5 }, 4).notes, [note(60, 0.316667, 0.5)])
+    // Con `ends` tambien se ajusta el final.
+    assert.deepStrictEqual(quantize([note(60, 0.1, 0.8)], null, { grid: '1/4', triplets: false, strength: 1, ends: true }, 4).notes, [note(60, 0, 1)])
+    // La linea mas cercana es el final del clip: se usa la anterior y la nota no se pierde.
+    assert.deepStrictEqual(quantize([note(60, 3.9, 0.1)], null, { grid: '1/4', triplets: false, strength: 1 }, 4).notes, [note(60, 3, 0.1)])
+    // Solo la seleccion.
+    const sel = quantize([note(60, 0.1, 0.5), note(62, 0.3, 0.5)], [1], { grid: '1/4', triplets: false, strength: 1 }, 4)
+    assert.deepStrictEqual(sel.notes, [note(62, 0, 0.5), note(60, 0.1, 0.5)])
+    assert.deepStrictEqual(sel.selection, [0])
+  })
+
+  await check('legato: cada nota llega al inicio de la siguiente de la seleccion; la ultima no cambia', () => {
+    const notes = [note(60, 0, 0.5), note(64, 0, 0.25), note(67, 1, 0.5), note(72, 3, 0.5)]
+    assert.deepStrictEqual(legato(notes, null, 4).notes, [note(60, 0, 1), note(64, 0, 1), note(67, 1, 2), note(72, 3, 0.5)])
+    assert.deepStrictEqual(legato(notes, [0, 2], 4).notes, [note(60, 0, 1), note(64, 0, 0.25), note(67, 1, 0.5), note(72, 3, 0.5)])
+  })
+
+  await check('duplicateNotes: la copia corrida queda seleccionada y lo que cae fuera del clip se descarta', () => {
+    const notes = [note(60, 0, 1), note(62, 1, 1)]
+    const twice = duplicateNotes(notes, [0, 1], 2, 4)
+    assert.deepStrictEqual(twice.notes, [note(60, 0, 1), note(62, 1, 1), note(60, 2, 1), note(62, 3, 1)])
+    assert.deepStrictEqual(twice.selection, [2, 3])
+    const partial = duplicateNotes(notes, [0, 1], 3, 4)
+    assert.deepStrictEqual(partial.notes, [note(60, 0, 1), note(62, 1, 1), note(60, 3, 1)])
+    assert.deepStrictEqual(partial.selection, [2])
+  })
+
+  await check('splitNotesAt: corta las notas que cruzan el punto; cerca del borde no corta', () => {
+    const r = splitNotesAt([note(60, 0, 2), note(64, 1, 0.25)], null, 0.5, 4)
+    assert.deepStrictEqual(r.notes, [note(60, 0, 0.5), note(60, 0.5, 1.5), note(64, 1, 0.25)])
+    assert.deepStrictEqual(r.selection, [0, 1, 2])
+    assert.deepStrictEqual(splitNotesAt([note(60, 0, 2)], null, 0.01, 4).notes, [note(60, 0, 2)])
+    assert.deepStrictEqual(splitNotesAt([note(60, 0, 2), note(62, 0, 2)], [1], 1, 4).notes, [note(60, 0, 2), note(62, 0, 1), note(62, 1, 1)])
+  })
+
+  await check('notesInRange: rectangulo en tiempo y tono, y un clic como punto', () => {
+    const notes = [note(60, 0, 1), note(64, 1, 1), note(67, 2, 1), note(72, 3, 0.5)]
+    assert.deepStrictEqual(notesInRange(notes, { startBeat: 0.5, endBeat: 2.5, lowPitch: 60, highPitch: 66 }), [0, 1])
+    assert.deepStrictEqual(notesInRange(notes, { startBeat: 2.5, endBeat: 0.5, lowPitch: 70, highPitch: 60 }), [0, 1, 2])
+    assert.deepStrictEqual(notesInRange(notes, { startBeat: 1, endBeat: 1, lowPitch: 64, highPitch: 64 }), [1])
+    assert.deepStrictEqual(notesInRange(notes, { startBeat: 1, endBeat: 2, lowPitch: 60, highPitch: 60 }), [])
+  })
+
+  // =========================================================================
+  console.log('\nsessionOps.ts v2 (pistas de instrumento, clips MIDI, congelado y marcas)')
+
+  await check('addInstrumentTrack: agrega la pista y rechaza audio, ids repetidos y la pista 17', () => {
+    const s = baseV2()
+    const track = defaultInstrumentTrack({ id: 'trk_5', name: 'Bajo', instrument: defaultInstrument('synth', 'bajo_sub') })
+    const next = addInstrumentTrack(s, { track, index: 1 })
+    assert.equal(next.tracks.length, 5)
+    assert.equal(next.tracks[1].id, 'trk_5')
+    assert.equal(next.tracks[1].kind, 'instrument')
+    assert.equal(next.tracks[1].role, 'keys')
+    assert.equal(next.tracks[0], s.tracks[0])
+    sessionError(() => addInstrumentTrack(s, { track: defaultTrack({ id: 'trk_9', name: 'Audio' }) }), 'bad_value', 'kind')
+    sessionError(() => addInstrumentTrack(s, { track: { ...track, id: 'trk_2' } }), 'duplicate_id', 'id')
+    let full = s
+    for (let i = s.tracks.length; i < STUDIO_MAX_TRACKS; i++) full = addInstrumentTrack(full, { track: { ...track, id: `trk_x${i}` } })
+    sessionError(() => addInstrumentTrack(full, { track }), 'too_many', 'tracks')
+  })
+
+  await check('addMidiClip: normaliza las notas y respeta pista, ids unicos con los de audio y topes', () => {
+    const s = baseV2()
+    const clip = defaultMidiClip({ id: 'mid_new', startBeat: 40, lengthBeats: 4, notes: [note(60, 1, 1), note(60, 0, 2), note(64, 9, 1)] })
+    const next = addMidiClip(s, { trackId: 'trk_4', clip })
+    assert.deepStrictEqual(midiClip(next, 'mid_new').notes, [note(60, 0, 1), note(60, 1, 1)])
+    assert.equal(next.tracks[0], s.tracks[0])
+    assert.equal(next.tracks[3].midiClips[0], s.tracks[3].midiClips[0])
+    sessionError(() => addMidiClip(s, { trackId: 'trk_1', clip }), 'bad_value', 'track_id')
+    sessionError(() => addMidiClip(s, { trackId: 'trk_4', clip: { ...clip, id: 'clp_1' } }), 'duplicate_id', 'id')
+    sessionError(() => addMidiClip(s, { trackId: 'trk_4', clip: { ...clip, id: 'mid_d1' } }), 'duplicate_id', 'id')
+    sessionError(() => addMidiClip(s, { trackId: 'trk_zz', clip }), 'bad_id', 'track_id')
+    const many = Array.from({ length: STUDIO_MAX_NOTES_PER_CLIP + 1 }, (_, i) => note(i % 128, Math.floor(i / 128) * 0.25, 0.25))
+    sessionError(() => addMidiClip(s, { trackId: 'trk_4', clip: { ...clip, lengthBeats: 64, notes: many } }), 'too_many', 'notes')
+    // Un inicio despues del fin de la sesion se acota (120 BPM: 2400 beats).
+    const late = addMidiClip(s, { trackId: 'trk_4', clip: { ...clip, startBeat: 99999 } })
+    assert.equal(midiClip(late, 'mid_new').startBeat, 2396)
+  })
+
+  await check('v1 en una sesion v2: un clip de audio no va a una pista de instrumento', () => {
+    const s = baseV2()
+    const audio = { ...clip(s, 'clp_1'), id: 'clp_9' }
+    sessionError(() => addClip(s, { trackId: 'trk_2', clip: audio }), 'bad_value', 'track_id')
+    sessionError(() => moveClip(s, { clipId: 'clp_1', startS: 0, trackId: 'trk_3' }), 'bad_value', 'track_id')
+    sessionError(() => addClip(s, { trackId: 'trk_1', clip: { ...audio, id: 'mid_p1' } }), 'duplicate_id', 'id')
+    sessionError(() => splitClip(s, { clipId: 'clp_1', atS: 10, newClipId: 'mid_d1' }), 'duplicate_id', 'new_clip_id')
+  })
+
+  await check('updateMidiClip: normaliza, acota y devuelve la misma sesion si nada cambia', () => {
+    const s = baseV2()
+    const next = updateMidiClip(s, { clipId: 'mid_s1', patch: { notes: [note(72, 3, 1), note(60, 0, 2), note(60, 1, 1), note(50, 8, 1)] } })
+    assert.deepStrictEqual(midiClip(next, 'mid_s1').notes, [note(60, 0, 1), note(60, 1, 1), note(72, 3, 1)])
+    assert.equal(updateMidiClip(s, { clipId: 'mid_s1', patch: { notes: structuredClone(midiClip(s, 'mid_s1').notes) } }), s)
+    const looped = updateMidiClip(s, { clipId: 'mid_d1', patch: { loop: true, loopBeats: 0.001 } })
+    assert.equal(midiClip(looped, 'mid_d1').loop, true)
+    assert.equal(midiClip(looped, 'mid_d1').loopBeats, 0.0625)
+    sessionError(() => updateMidiClip(s, { clipId: 'clp_1', patch: { loop: true } }), 'bad_id', 'clip_id')
+  })
+
+  await check('moveMidiClip y removeMidiClip: acota al inicio y al fin, y solo entre pistas de instrumento', () => {
+    const s = baseV2()
+    assert.equal(midiClip(moveMidiClip(s, { clipId: 'mid_p1', startBeat: -5 }), 'mid_p1').startBeat, 0)
+    assert.equal(midiClip(moveMidiClip(s, { clipId: 'mid_p1', startBeat: 1e9 }), 'mid_p1').startBeat, 2384)
+    assert.equal(moveMidiClip(s, { clipId: 'mid_p1', startBeat: 16 }), s)
+    const moved = moveMidiClip(s, { clipId: 'mid_p1', startBeat: 8, trackId: 'trk_4' })
+    assert.equal(findMidiClip(moved, 'mid_p1')?.track.id, 'trk_4')
+    assert.equal(moved.tracks[1].midiClips.length, 0)
+    sessionError(() => moveMidiClip(s, { clipId: 'mid_p1', startBeat: 0, trackId: 'trk_1' }), 'bad_value', 'track_id')
+    const removed = removeMidiClip(s, { clipId: 'mid_d1' })
+    assert.equal(findMidiClip(removed, 'mid_d1'), null)
+    assert.equal(countSessionNotes(removed), countSessionNotes(s) - 24)
+  })
+
+  await check('resizeMidiClip: el final quita las notas de afuera; el principio conserva la posicion absoluta', () => {
+    const s = baseV2()
+    const shorter = midiClip(resizeMidiClip(s, { clipId: 'mid_d1', edge: 'end', toBeat: 4 }), 'mid_d1')
+    assert.equal(shorter.lengthBeats, 4)
+    assert.equal(shorter.notes.length, 12)
+    assert.ok(shorter.notes.every((n) => n.start < 4))
+    const longer = midiClip(resizeMidiClip(s, { clipId: 'mid_d1', edge: 'end', toBeat: 12 }), 'mid_d1')
+    assert.equal(longer.lengthBeats, 12)
+    assert.equal(longer.notes, midiClip(s, 'mid_d1').notes)
+    const front = midiClip(resizeMidiClip(s, { clipId: 'mid_s1', edge: 'start', toBeat: 33.5 }), 'mid_s1')
+    assert.equal(front.startBeat, 33.5)
+    assert.equal(front.lengthBeats, 2.5)
+    assert.deepStrictEqual(front.notes, [note(67, 0.5, 1, 92), note(72, 1.5, 1, 100)])
+    const minimum = midiClip(resizeMidiClip(s, { clipId: 'mid_s1', edge: 'end', toBeat: 0 }), 'mid_s1')
+    assert.equal(minimum.lengthBeats, 0.0625)
+    assert.equal(resizeMidiClip(s, { clipId: 'mid_s1', edge: 'end', toBeat: 36 }), s)
+  })
+
+  await check('duplicateMidiClip: por defecto justo despues; el id nuevo no puede repetir uno de audio', () => {
+    const s = baseV2()
+    const next = duplicateMidiClip(s, { clipId: 'mid_s1', newClipId: 'mid_s2' })
+    const copy = midiClip(next, 'mid_s2')
+    assert.equal(copy.startBeat, 36)
+    assert.deepStrictEqual(copy.notes, midiClip(s, 'mid_s1').notes)
+    assert.equal(next.tracks[3].midiClips[1].id, 'mid_s2')
+    sessionError(() => duplicateMidiClip(s, { clipId: 'mid_s1', newClipId: 'clp_1' }), 'duplicate_id', 'new_clip_id')
+  })
+
+  await check('splitMidiClip: divide las notas que cruzan el corte y despliega la repeticion', () => {
+    const s = baseV2()
+    const next = splitMidiClip(s, { clipId: 'mid_p1', atBeat: 20, newClipId: 'mid_p2' })
+    const left = midiClip(next, 'mid_p1')
+    const right = midiClip(next, 'mid_p2')
+    assert.equal(left.lengthBeats, 4)
+    assert.deepStrictEqual(left.notes, [note(61, 0, 4, 90), note(64, 0, 4, 90), note(68, 0, 4, 90)])
+    assert.equal(right.startBeat, 20)
+    assert.equal(right.lengthBeats, 12)
+    assert.deepStrictEqual(right.notes, [note(61, 0, 4, 90), note(64, 0, 4, 90), note(68, 0, 4, 90), note(57, 4, 8, 90), note(61, 4, 8, 90), note(64, 4, 8, 90)])
+    assert.equal(countSessionNotes(next), countSessionNotes(s) + 3)
+    // En el borde no hay nada que dividir.
+    assert.equal(splitMidiClip(s, { clipId: 'mid_p1', atBeat: 16, newClipId: 'mid_p2' }), s)
+    assert.equal(splitMidiClip(s, { clipId: 'mid_p1', atBeat: 31.99, newClipId: 'mid_p2' }), s)
+    // Un clip con repeticion: las dos mitades suenan igual y quedan sin repeticion.
+    const loopClip: StudioMidiClip = { id: 'mid_l', startBeat: 40, lengthBeats: 8, loop: true, loopBeats: 2, notes: [note(60, 0, 1)] }
+    const withLoop = addMidiClip(s, { trackId: 'trk_4', clip: loopClip })
+    assert.deepStrictEqual(expandMidiClipNotes(midiClip(withLoop, 'mid_l')), [note(60, 0, 1), note(60, 2, 1), note(60, 4, 1), note(60, 6, 1)])
+    const cut = splitMidiClip(withLoop, { clipId: 'mid_l', atBeat: 43, newClipId: 'mid_l2' })
+    assert.deepStrictEqual(midiClip(cut, 'mid_l').notes, [note(60, 0, 1), note(60, 2, 1)])
+    assert.deepStrictEqual(midiClip(cut, 'mid_l2').notes, [note(60, 1, 1), note(60, 3, 1)])
+    assert.equal(midiClip(cut, 'mid_l').loop, false)
+    assert.equal(midiClip(cut, 'mid_l2').loopBeats, 5)
+  })
+
+  await check('setFrozenAsset y setInstrument: pista de instrumento, audios de la sesion y misma referencia', () => {
+    const s = baseV2()
+    assert.equal(setFrozenAsset(s, { trackId: 'trk_3', assetId: 'ast_s1' }).tracks[2].frozenAssetId, 'ast_s1')
+    assert.equal(setFrozenAsset(s, { trackId: 'trk_2', assetId: 'ast_f1' }), s)
+    assert.equal(setFrozenAsset(s, { trackId: 'trk_2', assetId: null }).tracks[1].frozenAssetId, null)
+    sessionError(() => setFrozenAsset(s, { trackId: 'trk_3', assetId: 'ast_zz' }), 'unknown_asset', 'asset_id')
+    sessionError(() => setFrozenAsset(s, { trackId: 'trk_1', assetId: null }), 'bad_value', 'track_id')
+    const drums = setInstrument(s, { trackId: 'trk_2', instrument: defaultInstrument('drums', 'seco') })
+    assert.equal(drums.tracks[1].instrument?.type, 'drums')
+    assert.deepStrictEqual(drums.tracks[1].midiClips, s.tracks[1].midiClips)
+    assert.equal(setInstrument(s, { trackId: 'trk_2', instrument: structuredClone(s.tracks[1].instrument) as never }), s)
+    const sampler = structuredClone(s.tracks[3].instrument) as Json
+    sampler.zones[0].assetId = 'ast_zz'
+    sessionError(() => setInstrument(s, { trackId: 'trk_4', instrument: sampler }), 'unknown_asset', 'instrument.zones[0].asset_id')
+    sessionError(() => setInstrument(s, { trackId: 'trk_1', instrument: defaultInstrument('synth') }), 'bad_value', 'track_id')
+  })
+
+  await check('setMarkers: ordena por beat e id, y rechaza repetidos, el exceso y las marcas despues de 20 minutos', () => {
+    const s = baseV2()
+    const next = setMarkers(s, {
+      markers: [
+        { id: 'mk_b', beat: 32, label: ' Puente ', kind: 'bridge' },
+        { id: 'mk_a', beat: 32, label: 'Solo', kind: 'solo' },
+        { id: 'mk_0', beat: -4, label: '', kind: 'marker' },
+      ],
+    })
+    assert.deepStrictEqual(
+      next.markers.map((m) => [m.id, m.beat, m.label]),
+      [
+        ['mk_0', 0, ''],
+        ['mk_a', 32, 'Solo'],
+        ['mk_b', 32, 'Puente'],
+      ],
+    )
+    assert.equal(setMarkers(s, { markers: structuredClone(s.markers).reverse() }), s)
+    sessionError(() => setMarkers(s, { markers: [s.markers[0], s.markers[0]] }), 'duplicate_id', 'markers[1].id')
+    sessionError(() => setMarkers(s, { markers: [{ id: 'mk_x', beat: 2401, label: '', kind: 'marker' }] }), 'session_too_long', 'markers[0].beat')
+    const tooMany = Array.from({ length: 257 }, (_, i) => ({ id: `mk_${i}`, beat: i, label: '', kind: 'marker' as const }))
+    sessionError(() => setMarkers(s, { markers: tooMany }), 'too_many', 'markers')
+  })
+
+  await check('removeUnusedAssets conserva zonas del sampler y congelados; bajar el bpm comprueba los clips MIDI', () => {
+    const s = baseV2()
+    assert.equal(removeUnusedAssets(s), s)
+    const noVoice = removeUnusedAssets(deleteClip(s, { clipId: 'clp_1' }))
+    assert.deepStrictEqual(
+      noVoice.assets.map((a) => a.id),
+      ['ast_s1', 'ast_f1'],
+    )
+    const late = addMidiClip(s, { trackId: 'trk_4', clip: defaultMidiClip({ id: 'mid_late', startBeat: 2380, lengthBeats: 16 }) })
+    sessionError(() => updateSessionMeta(late, { patch: { bpm: 100 } }), 'session_too_long')
+    assert.equal(updateSessionMeta(late, { patch: { bpm: 140 } }).bpm, 140)
+  })
+
+  // =========================================================================
+  console.log('\nsmf.ts (archivos MIDI estandar)')
+
+  // Tipo 0 a mano: 96 ticks por negra, nombre, tempo 120, compas 3/4, running status, note-on con
+  // velocidad 0 como note-off y una nota en el canal 10.
+  const type0 = Uint8Array.from([
+    ...smfChunk('MThd', [0x00, 0x00, 0x00, 0x01, 0x00, 0x60]),
+    ...smfChunk('MTrk', [
+      0x00, 0xff, 0x03, 0x04, ...ascii('Bajo'),
+      0x00, 0xff, 0x51, 0x03, 0x07, 0xa1, 0x20,
+      0x00, 0xff, 0x58, 0x04, 0x03, 0x02, 0x18, 0x08,
+      0x00, 0x90, 0x3c, 0x64,
+      0x60, 0x3e, 0x50,
+      0x00, 0x3c, 0x00,
+      0x60, 0x80, 0x3e, 0x40,
+      0x00, 0x99, 0x24, 0x7f,
+      0x30, 0x24, 0x00,
+      0x81, 0x00, 0xff, 0x2f, 0x00,
+    ]),
+  ])
+
+  await check('parseSmf tipo 0: running status, velocidad 0, tempo, compas y canales separados', () => {
+    const file = parseSmf(type0)
+    assert.equal(file.format, 0)
+    assert.equal(file.ticksPerBeat, 96)
+    assert.equal(file.bpm, 120)
+    assert.equal(file.beatsPerBar, 3)
+    assert.equal(file.tempoChanges, false)
+    assert.equal(file.tracks.length, 2)
+    assert.deepStrictEqual(file.tracks[0], { name: 'Bajo (canal 1)', channel: 0, isDrums: false, notes: [note(60, 0, 1, 100), note(62, 1, 1, 80)] })
+    assert.deepStrictEqual(file.tracks[1], { name: 'Bajo (canal 10)', channel: 9, isDrums: true, notes: [note(36, 2, 0.5, 127)] })
+    // Tambien desde un ArrayBuffer.
+    assert.deepStrictEqual(parseSmf(type0.slice().buffer), file)
+  })
+
+  await check('parseSmf tipo 1: cambios de tempo, sysex, fragmento desconocido y nota sin note-off', () => {
+    const type1 = Uint8Array.from([
+      ...smfChunk('MThd', [0x00, 0x01, 0x00, 0x03, 0x01, 0xe0]),
+      ...smfChunk('MTrk', [0x00, 0xff, 0x51, 0x03, 0x09, 0x27, 0xc0, 0x83, 0x60, 0xff, 0x51, 0x03, 0x07, 0xa1, 0x20, 0x00, 0xff, 0x2f, 0x00]),
+      ...smfChunk('XFIL', [0x00, 0x00]),
+      ...smfChunk('MTrk', [
+        0x00, 0xff, 0x03, 0x05, ...ascii('Piano'),
+        0x00, 0xf0, 0x03, 0x7e, 0x7f, 0xf7,
+        0x00, 0x91, 0x40, 0x50,
+        0x83, 0x60, 0x40, 0x00,
+        0x00, 0x43, 0x60,
+        0x83, 0x60, 0xff, 0x2f, 0x00,
+      ]),
+      ...smfChunk('MTrk', [0x00, 0xff, 0x03, 0x05, ...ascii('Vacia'), 0x00, 0xb0, 0x07, 0x64, 0x00, 0xff, 0x2f, 0x00]),
+    ])
+    const file = parseSmf(type1)
+    assert.equal(file.format, 1)
+    assert.equal(file.ticksPerBeat, 480)
+    assert.equal(file.bpm, 100)
+    assert.equal(file.tempoChanges, true)
+    assert.equal(file.beatsPerBar, null)
+    assert.deepStrictEqual(file.tracks, [{ name: 'Piano', channel: 1, isDrums: false, notes: [note(64, 0, 1, 80), note(67, 1, 1, 96)] }])
+  })
+
+  await check('parseSmf rechaza lo que no es un SMF tipo 0 o 1 con ticks por negra, y lo truncado', () => {
+    smfError(() => parseSmf(Uint8Array.from([...ascii('RIFF'), 0, 0, 0, 6, 0, 0, 0, 1, 0, 96])), /MThd/)
+    smfError(() => parseSmf(Uint8Array.from(smfChunk('MThd', [0x00, 0x02, 0x00, 0x01, 0x00, 0x60]))), /tipo 2/)
+    smfError(() => parseSmf(Uint8Array.from(smfChunk('MThd', [0x00, 0x00, 0x00, 0x01, 0xe7, 0x28]))), /SMPTE/)
+    smfError(() => parseSmf(type0.slice(0, type0.length - 6)), /incompleto/)
+    smfError(() => parseSmf(Uint8Array.from(smfChunk('MThd', [0x00, 0x01, 0x00, 0x02, 0x00, 0x60]))), /declara 2 pistas/)
+    // Un meta cancela el running status: un byte de datos despues de un meta no tiene estado.
+    const afterMeta = Uint8Array.from([
+      ...smfChunk('MThd', [0x00, 0x00, 0x00, 0x01, 0x00, 0x60]),
+      ...smfChunk('MTrk', [0x00, 0x90, 0x3c, 0x40, 0x00, 0xff, 0x01, 0x00, 0x00, 0x3c, 0x00, 0x00, 0xff, 0x2f, 0x00]),
+    ])
+    smfError(() => parseSmf(afterMeta), /running status/)
+  })
+
+  await check('writeSmf: tipo 1 de 480 ticks, ida y vuelta, canal 10 para la bateria y bytes deterministas', () => {
+    const clips = [
+      { name: 'Pad', notes: [note(60, 0, 1, 90), note(64, 0.5, 1.5, 80), note(60, 1, 1, 70)] },
+      { name: 'Batería', channel: 9, notes: [note(36, 0, 0.25, 110)] },
+    ]
+    const bytes = writeSmf(clips, 128, 3)
+    assert.deepStrictEqual([...bytes.slice(0, 14)], [...ascii('MThd'), 0, 0, 0, 6, 0, 1, 0, 3, 0x01, 0xe0])
+    assert.equal(SMF_TICKS_PER_BEAT, 480)
+    assert.deepStrictEqual([...writeSmf(clips, 128, 3)], [...bytes])
+    // Bateria: note-on en el canal 10, note-off 120 ticks despues, fin de pista.
+    assert.ok(containsBytes(bytes, [0x00, 0x99, 0x24, 0x6e, 0x78, 0x89, 0x24, 0x40, 0x00, 0xff, 0x2f, 0x00]))
+    const file = parseSmf(bytes)
+    assert.equal(file.format, 1)
+    assert.equal(file.bpm, 128)
+    assert.equal(file.beatsPerBar, 3)
+    assert.equal(file.tempoChanges, false)
+    assert.deepStrictEqual(file.tracks, [
+      { name: 'Pad', channel: 0, isDrums: false, notes: [note(60, 0, 1, 90), note(64, 0.5, 1.5, 80), note(60, 1, 1, 70)] },
+      { name: 'Batería', channel: 9, isDrums: true, notes: [note(36, 0, 0.25, 110)] },
+    ])
+    assert.throws(() => writeSmf(clips, 0, 4))
+    // Un solo clip tambien va como tipo 1, con su pista de tempo.
+    assert.equal(parseSmf(writeSmf([clips[0]], 90, 4)).format, 1)
+  })
+
+  await check('midiClipExportNotes: despliega la repeticion y recorta al final del clip', () => {
+    const looped: StudioMidiClip = { id: 'mid_e', startBeat: 8, lengthBeats: 5, loop: true, loopBeats: 2, notes: [note(60, 0, 1), note(62, 1.5, 1)] }
+    assert.deepStrictEqual(midiClipExportNotes(looped), [note(60, 8, 1), note(62, 9.5, 1), note(60, 10, 1), note(62, 11.5, 1), note(60, 12, 1)])
+    const plain: StudioMidiClip = { id: 'mid_f', startBeat: 4, lengthBeats: 2, loop: false, loopBeats: 2, notes: [note(60, 1, 4)] }
+    assert.deepStrictEqual(midiClipExportNotes(plain), [note(60, 5, 1)])
+  })
+
+  // =========================================================================
+  console.log('\ncommands.ts y keymap.ts (atajos y paleta)')
+
+  const specs = STUDIO_COMMAND_SPECS
+  const memoryKeys = () => memoryStorage()
+
+  await check('registro por defecto: ids unicos, atajos canonicos y el mapa de la seccion 6 sin choques', () => {
+    assert.equal(new Set(specs.map((c) => c.id)).size, specs.length)
+    for (const c of specs) for (const s of c.defaultShortcuts) assert.equal(formatShortcut(parseShortcut(s) as never), s, `${c.id}: ${s}`)
+    const map = defaultKeymap(specs)
+    assert.deepStrictEqual(findConflicts(specs, map), [])
+    const expected: Array<[string, string, 'global' | 'timeline' | 'piano_roll']> = [
+      ['Space', 'transport.play_pause', 'timeline'],
+      ['R', 'transport.record', 'timeline'],
+      ['Enter', 'transport.go_to_start', 'timeline'],
+      ['Home', 'transport.go_to_start', 'piano_roll'],
+      ['L', 'transport.toggle_loop', 'timeline'],
+      ['C', 'transport.toggle_click', 'timeline'],
+      ['Ctrl+Z', 'edit.undo', 'timeline'],
+      ['Ctrl+Y', 'edit.redo', 'timeline'],
+      ['Ctrl+Shift+Z', 'edit.redo', 'piano_roll'],
+      ['Ctrl+C', 'edit.copy', 'piano_roll'],
+      ['Ctrl+X', 'edit.cut', 'piano_roll'],
+      ['Ctrl+V', 'edit.paste', 'timeline'],
+      ['Ctrl+D', 'edit.duplicate', 'timeline'],
+      ['Delete', 'edit.delete', 'timeline'],
+      ['Backspace', 'edit.delete', 'piano_roll'],
+      ['S', 'edit.split', 'timeline'],
+      ['Q', 'edit.quantize', 'piano_roll'],
+      ['M', 'track.toggle_mute', 'timeline'],
+      ['Shift+S', 'track.toggle_solo', 'timeline'],
+      ['Ctrl+A', 'edit.select_all', 'piano_roll'],
+      ['ArrowLeft', 'clip.nudge_left', 'timeline'],
+      ['ArrowUp', 'notes.transpose_up', 'piano_roll'],
+      ['Shift+ArrowDown', 'notes.octave_down', 'piano_roll'],
+      ['Plus', 'view.zoom_in', 'timeline'],
+      ['Minus', 'view.zoom_out', 'timeline'],
+      ['1', 'tool.select', 'piano_roll'],
+      ['5', 'tool.velocity', 'piano_roll'],
+      ['E', 'view.toggle_editor', 'timeline'],
+      ['Ctrl+K', 'view.command_palette', 'timeline'],
+      ['Ctrl+S', 'file.save_cloud', 'timeline'],
+      ['Ctrl+E', 'file.export', 'timeline'],
+      ['Ctrl+T', 'track.add_audio', 'timeline'],
+      ['Ctrl+Shift+T', 'track.add_instrument', 'timeline'],
+      ['?', 'view.shortcuts', 'timeline'],
+    ]
+    for (const [shortcut, id, context] of expected) {
+      const p = parseShortcut(shortcut)
+      assert.ok(p, shortcut)
+      const event = keyEvent(/^[A-Z]$/.test(p.key) ? `Key${p.key}` : /^[0-9]$/.test(p.key) ? `Digit${p.key}` : '', p.key === 'Plus' ? '+' : p.key === 'Minus' ? '-' : p.key === 'Space' ? ' ' : p.key, {
+        ctrlKey: p.ctrl,
+        shiftKey: p.shift || p.key === '?',
+      })
+      assert.equal(matchEvent(event, context, false, specs, map, 'other'), id, `${shortcut} en ${context}`)
+    }
+  })
+
+  await check('herramientas del asistente: las 19 del fixture tienen su comando con el mismo command_id', () => {
+    const tools = chatToolsFixture.tools as Array<{ name: string; command_id: string }>
+    assert.equal(tools.length, 19)
+    for (const tool of tools) {
+      const c = specs.find((s) => s.id === tool.command_id)
+      assert.ok(c, `falta el comando ${tool.command_id}`)
+      assert.equal(c.assistantTool, tool.name)
+      assert.equal(c.assistantAllowed, true)
+    }
+    const allowed = specs.filter((s) => s.assistantAllowed)
+    assert.equal(allowed.length, tools.length)
+    assert.ok(specs.filter((s) => !s.assistantAllowed).every((s) => s.assistantTool === null))
+  })
+
+  await check('parseShortcut, formatShortcut y displayShortcut: forma canonica, alias y Mac', () => {
+    const canon = (t: string) => {
+      const p = parseShortcut(t)
+      return p ? formatShortcut(p) : null
+    }
+    assert.equal(canon('ctrl+shift+z'), 'Ctrl+Shift+Z')
+    assert.equal(canon(' Ctrl + K '), 'Ctrl+K')
+    assert.equal(canon('shift+ctrl+t'), 'Ctrl+Shift+T')
+    assert.equal(canon('alt+shift+ctrl+arrowup'), 'Ctrl+Alt+Shift+ArrowUp')
+    assert.equal(canon('Ctrl++'), 'Ctrl+Plus')
+    assert.equal(canon('-'), 'Minus')
+    assert.equal(canon('Shift+?'), '?')
+    assert.equal(canon('cmd+s'), 'Ctrl+S')
+    assert.equal(canon('Supr'), 'Delete')
+    assert.equal(canon('espacio'), 'Space')
+    assert.equal(canon('f2'), 'F2')
+    for (const bad of ['', 'Ctrl+', 'Ctrl+Ctrl+K', 'Hyper+K', 'Ctrl+Shift', 'Ctrl+F13', 'Tecla']) assert.equal(parseShortcut(bad), null, bad)
+    assert.equal(displayShortcut('Ctrl+Shift+Z', 'mac'), 'Cmd+Shift+Z')
+    assert.equal(displayShortcut('Ctrl+Shift+Z', 'other'), 'Ctrl+Shift+Z')
+    assert.equal(displayShortcut('Space', 'other'), 'Espacio')
+    assert.equal(displayShortcut('Alt+Delete', 'mac'), 'Option+Supr')
+    assert.equal(displayShortcut('Ctrl+Plus', 'other'), 'Ctrl++')
+    assert.equal(displayShortcut('no es atajo', 'other'), 'no es atajo')
+  })
+
+  await check('shortcutFromEvent: letras por code, simbolos por key y Cmd en Mac', () => {
+    assert.equal(shortcutFromEvent(keyEvent('KeyZ', 'Z', { ctrlKey: true, shiftKey: true }), 'other'), 'Ctrl+Shift+Z')
+    assert.equal(shortcutFromEvent(keyEvent('KeyZ', 'z', { metaKey: true, shiftKey: true }), 'mac'), 'Ctrl+Shift+Z')
+    assert.equal(shortcutFromEvent(keyEvent('KeyZ', 'z', { ctrlKey: true }), 'mac'), null)
+    assert.equal(shortcutFromEvent(keyEvent('KeyZ', 'z', { metaKey: true }), 'other'), null)
+    assert.equal(shortcutFromEvent(keyEvent('ShiftLeft', 'Shift', { shiftKey: true }), 'other'), null)
+    assert.equal(shortcutFromEvent(keyEvent('Slash', '?', { shiftKey: true }), 'other'), '?')
+    assert.equal(shortcutFromEvent(keyEvent('Minus', '?', { shiftKey: true }), 'other'), '?')
+    assert.equal(shortcutFromEvent(keyEvent('Space', ' '), 'other'), 'Space')
+    // AZERTY: la tecla de la Q fisica escribe "a"; el atajo sigue siendo por posicion.
+    assert.equal(shortcutFromEvent(keyEvent('KeyQ', 'a'), 'other'), 'Q')
+    assert.equal(shortcutFromEvent(keyEvent('NumpadAdd', '+'), 'other'), 'Plus')
+    assert.equal(shortcutFromEvent(keyEvent('Numpad3', '3'), 'other'), '3')
+    assert.equal(shortcutFromEvent(keyEvent('ArrowUp', 'ArrowUp', { shiftKey: true }), 'other'), 'Shift+ArrowUp')
+  })
+
+  await check('matchEvent: nunca en un campo de texto, contexto activo, teclas sostenidas y Mac', () => {
+    const map = defaultKeymap(specs)
+    const space = keyEvent('Space', ' ')
+    assert.equal(matchEvent(space, 'timeline', false, specs, map, 'other'), 'transport.play_pause')
+    assert.equal(matchEvent(space, 'timeline', true, specs, map, 'other'), null)
+    assert.equal(matchEvent(keyEvent('KeyZ', 'z', { ctrlKey: true }), 'piano_roll', true, specs, map, 'other'), null)
+    const up = keyEvent('ArrowUp', 'ArrowUp')
+    assert.equal(matchEvent(up, 'piano_roll', false, specs, map, 'other'), 'notes.transpose_up')
+    assert.equal(matchEvent(up, 'timeline', false, specs, map, 'other'), 'track.select_prev')
+    assert.equal(matchEvent(up, 'mixer', false, specs, map, 'other'), null)
+    assert.equal(matchEvent(keyEvent('Digit2', '2'), 'timeline', false, specs, map, 'other'), null)
+    assert.equal(matchEvent(keyEvent('Digit2', '2'), 'piano_roll', false, specs, map, 'other'), 'tool.draw')
+    assert.equal(matchEvent({ ...space, repeat: true }, 'timeline', false, specs, map, 'other'), null)
+    assert.equal(matchEvent({ ...keyEvent('ArrowLeft', 'ArrowLeft'), repeat: true }, 'piano_roll', false, specs, map, 'other'), 'notes.nudge_left')
+    assert.equal(matchEvent(keyEvent('KeyZ', 'z', { metaKey: true }), 'timeline', false, specs, map, 'mac'), 'edit.undo')
+    assert.equal(matchEvent(keyEvent('KeyZ', 'z', { metaKey: true, shiftKey: true }), 'timeline', false, specs, map, 'mac'), 'edit.redo')
+    assert.equal(matchEvent(keyEvent('KeyP', 'p'), 'timeline', false, specs, map, 'other'), null)
+    // Un comando del contexto activo gana sobre uno global, y el choque se informa.
+    const custom = { ...map, 'notes.legato': ['S'] }
+    assert.equal(matchEvent(keyEvent('KeyS', 's'), 'piano_roll', false, specs, custom, 'other'), 'notes.legato')
+    assert.equal(matchEvent(keyEvent('KeyS', 's'), 'timeline', false, specs, custom, 'other'), 'edit.split')
+    assert.deepStrictEqual(findConflicts(specs, custom), [{ shortcut: 'S', commandIds: ['edit.split', 'notes.legato'] }])
+    // El mismo atajo en contextos que no se pisan no es choque.
+    assert.deepStrictEqual(findConflicts(specs, { ...map, 'notes.legato': ['ArrowLeft'] }), [{ shortcut: 'ArrowLeft', commandIds: ['notes.nudge_left', 'notes.legato'] }])
+  })
+
+  await check('keymap guardado: solo las diferencias, choques rechazados, restaurar y lectura tolerante', () => {
+    const storage = memoryKeys()
+    assert.deepStrictEqual(loadKeymap(storage, specs), defaultKeymap(specs))
+    const changed = { ...loadKeymap(storage, specs), 'transport.toggle_click': ['k'] }
+    saveKeymap(storage, specs, changed)
+    assert.deepStrictEqual(JSON.parse(storage.data.get(KEYMAP_STORAGE_KEY) ?? 'null'), { 'transport.toggle_click': ['K'] })
+    const loaded = loadKeymap(storage, specs)
+    assert.deepStrictEqual(loaded['transport.toggle_click'], ['K'])
+    assert.deepStrictEqual(loaded['transport.play_pause'], ['Space'])
+    assert.equal(matchEvent(keyEvent('KeyK', 'k'), 'timeline', false, specs, loaded, 'other'), 'transport.toggle_click')
+    assert.equal(matchEvent(keyEvent('KeyC', 'c'), 'timeline', false, specs, loaded, 'other'), null)
+    // Un choque o un atajo no valido no se guardan: lo guardado queda como estaba.
+    const before = storage.data.get(KEYMAP_STORAGE_KEY)
+    assert.throws(() => saveKeymap(storage, specs, { ...loaded, 'edit.split': ['Space'] }), /repetido/)
+    assert.throws(() => saveKeymap(storage, specs, { ...loaded, 'edit.split': ['Ctrl+'] }), /no es válido/)
+    assert.equal(storage.data.get(KEYMAP_STORAGE_KEY), before)
+    // Volver a los valores por defecto borra la clave; restaurar tambien.
+    saveKeymap(storage, specs, defaultKeymap(specs))
+    assert.equal(storage.data.has(KEYMAP_STORAGE_KEY), false)
+    saveKeymap(storage, specs, { 'view.shortcuts': [] })
+    assert.deepStrictEqual(loadKeymap(storage, specs)['view.shortcuts'], [])
+    resetKeymap(storage)
+    assert.equal(storage.data.has(KEYMAP_STORAGE_KEY), false)
+    // Lectura tolerante.
+    for (const garbage of ['{nope', '[]', 'null', '"texto"']) {
+      storage.data.set(KEYMAP_STORAGE_KEY, garbage)
+      assert.deepStrictEqual(loadKeymap(storage, specs), defaultKeymap(specs), garbage)
+    }
+    storage.data.set(KEYMAP_STORAGE_KEY, JSON.stringify({ desconocido: ['X'], 'transport.record': 'R', 'transport.play_pause': ['ctrl+p', '???mal', 'Ctrl+P'] }))
+    const tolerant = loadKeymap(storage, specs)
+    assert.equal('desconocido' in tolerant, false)
+    assert.deepStrictEqual(tolerant['transport.record'], ['R'])
+    assert.deepStrictEqual(tolerant['transport.play_pause'], ['Ctrl+P'])
+    const broken: KeyValueStorage = {
+      getItem: () => {
+        throw new Error('almacen bloqueado')
+      },
+      setItem: () => {},
+      removeItem: () => {},
+    }
+    assert.deepStrictEqual(loadKeymap(broken, specs), defaultKeymap(specs))
+  })
+
+  await check('createCommandRegistry: duplicados, atajos no canonicos, contextos, asistente y ejecucion', async () => {
+    interface Ctx {
+      log: string[]
+      enabled: boolean
+    }
+    const registry = createCommandRegistry<Ctx>()
+    const base: StudioCommand<Ctx> = {
+      id: 'clip.split',
+      label: 'Dividir un clip',
+      category: 'edicion',
+      defaultShortcuts: [],
+      context: 'timeline',
+      assistantAllowed: true,
+      assistantTool: 'split_clip',
+      isEnabled: (ctx) => ctx.enabled,
+      run: (ctx, args) => {
+        ctx.log.push(`split ${String(args?.clip_id)}`)
+      },
+    }
+    registry.register(base)
+    registry.register({ ...base, id: 'transport.play_pause', label: 'Reproducir', category: 'transporte', context: 'global', defaultShortcuts: ['Space'], assistantAllowed: false, assistantTool: null, isEnabled: undefined })
+    registry.register({ ...base, id: 'notes.legato', label: 'Legato', category: 'midi', context: 'piano_roll', assistantAllowed: false, assistantTool: null })
+    assert.throws(() => registry.register(base), /ya está registrado/)
+    assert.throws(() => registry.register({ ...base, id: 'x.y', defaultShortcuts: ['ctrl+z'] }), /canónica/)
+    assert.throws(() => registry.register({ ...base, id: 'x.z', assistantAllowed: false }), /herramienta/)
+    assert.deepStrictEqual(
+      registry.forContext('piano_roll').map((c) => c.id),
+      ['transport.play_pause', 'notes.legato'],
+    )
+    assert.equal(registry.forAssistantTool('split_clip')?.id, 'clip.split')
+    assert.equal(registry.forAssistantTool('desconocida'), null)
+    assert.equal(registry.list().length, 3)
+    const ctx: Ctx = { log: [], enabled: true }
+    await registry.run('clip.split', ctx, { clip_id: 'clp_1' })
+    assert.deepStrictEqual(ctx.log, ['split clp_1'])
+    await assert.rejects(registry.run('clip.split', { log: [], enabled: false }), /no está disponible/)
+    await assert.rejects(registry.run('no.existe', ctx), /desconocido/)
+  })
+
+  await check('buildStudioCommands y createStudioRegistry: solo los comandos con accion', async () => {
+    let played = 0
+    const handlers: Partial<Record<StudioCommandId, { run: () => void }>> = {
+      'transport.play_pause': {
+        run: () => {
+          played++
+        },
+      },
+      'clip.split': { run: () => {} },
+    }
+    const commands = buildStudioCommands(handlers)
+    assert.deepStrictEqual(
+      commands.map((c) => c.id),
+      ['transport.play_pause', 'clip.split'],
+    )
+    const registry = createStudioRegistry(handlers)
+    await registry.run('transport.play_pause', null)
+    assert.equal(played, 1)
+    assert.equal(registry.forAssistantTool('split_clip')?.id, 'clip.split')
+    assert.equal(registry.forAssistantTool('delete_clip'), null)
+    assert.equal(matchEvent(keyEvent('Space', ' '), 'timeline', false, commands, defaultKeymap(commands), 'other'), 'transport.play_pause')
+  })
+
+  // =========================================================================
+  console.log('\ncomputerKeyboard.ts (teclado de la computadora como teclado musical)')
+
+  await check('computerKeyPitch: fila A..K con sostenidos y octava base', () => {
+    assert.equal(computerKeyPitch('KeyA', 4), 60)
+    assert.equal(computerKeyPitch('KeyW', 4), 61)
+    assert.equal(computerKeyPitch('KeyJ', 4), 71)
+    assert.equal(computerKeyPitch('KeyK', 4), 72)
+    assert.equal(computerKeyPitch('KeyA', 3), 48)
+    assert.equal(computerKeyPitch('KeyK', 8), 120)
+    assert.equal(computerKeyPitch('KeyK', 9), null)
+    assert.equal(computerKeyPitch('KeyA', -1), 0)
+    assert.equal(computerKeyPitch('KeyQ', 4), null)
+    assert.equal(isComputerKeyboardCode('KeyZ'), true)
+    assert.equal(isComputerKeyboardCode('KeyS'), true)
+    assert.equal(isComputerKeyboardCode('KeyR'), false)
+  })
+
+  await check('createComputerKeyboard: octavas con Z y X, teclas sostenidas y modificadores', () => {
+    const kb = createComputerKeyboard()
+    assert.equal(kb.octave, 4)
+    assert.deepStrictEqual(kb.keyDown({ code: 'KeyA' }), { type: 'note_on', pitch: 60, velocity: 100 })
+    assert.equal(kb.keyDown({ code: 'KeyA', repeat: true }), null)
+    assert.deepStrictEqual(kb.keyDown({ code: 'KeyX' }), { type: 'octave', octave: 5 })
+    // La tecla suelta el pitch con el que sono, aunque la octava haya cambiado.
+    assert.deepStrictEqual(kb.keyUp({ code: 'KeyA' }), { type: 'note_off', pitch: 60 })
+    assert.equal(kb.keyUp({ code: 'KeyA' }), null)
+    assert.deepStrictEqual(kb.keyDown({ code: 'KeyA' }), { type: 'note_on', pitch: 72, velocity: 100 })
+    assert.equal(kb.keyDown({ code: 'KeyD', ctrlKey: true }), null)
+    assert.equal(kb.keyDown({ code: 'KeyS', shiftKey: true }), null)
+    assert.deepStrictEqual(kb.keyDown({ code: 'KeyE' }), { type: 'note_on', pitch: 75, velocity: 100 })
+    assert.deepStrictEqual(kb.releaseAll(), [
+      { type: 'note_off', pitch: 72 },
+      { type: 'note_off', pitch: 75 },
+    ])
+    for (let i = 0; i < 10; i++) kb.keyDown({ code: 'KeyX' })
+    assert.equal(kb.octave, 8)
+    assert.equal(kb.keyDown({ code: 'KeyX' }), null)
+    kb.setOctave(-7)
+    assert.equal(kb.octave, -1)
+    assert.equal(kb.keyDown({ code: 'KeyZ' }), null)
+  })
 }
 
 main()

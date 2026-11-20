@@ -130,7 +130,7 @@ costo estimado antes de confirmar, `job_id` elegido por el Hub, el trabajo no mo
 | Flechas | Mover; en el piano roll, transponer o mover en la rejilla |
 | + / - | Zoom horizontal |
 | 1..5 | Herramientas (seleccionar, dibujar, borrar, cortar, velocidad) |
-| Tab | Alternar línea de tiempo y piano roll |
+| E | Alternar línea de tiempo y piano roll (no Tab: es la navegación del teclado) |
 | Ctrl+K | Paleta de comandos |
 | Ctrl+S | Guardar en la nube |
 | Ctrl+E | Exportar |

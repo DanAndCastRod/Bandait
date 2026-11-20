@@ -17,8 +17,20 @@
  *   - moveClip a otra pista conserva `takeGroup` (el grupo es local a la pista de destino).
  *   - Un id que no existe se informa con `bad_id` y la ruta del argumento (`clip_id`, `track_id`).
  *
+ * v2 (STUDIO_V2.md; operaciones al final del archivo, SessionOpsV2Api):
+ *   - Un clip de audio solo va en una pista 'audio' y un clip MIDI solo en una 'instrument': lo
+ *     contrario lanza `bad_value` con ruta `track_id`. Los ids de clip son unicos sumando los de
+ *     audio y los MIDI.
+ *   - Toda nota que entra pasa por midiOps.normalizeNotes con el largo de su clip.
+ *   - Los beats se acotan al fin de la sesion (1200 s con el bpm actual) y se redondean con
+ *     roundBeat. Las notas sobre el tope (por clip o por sesion) lanzan `too_many`.
+ *   - splitMidiClip de un clip con repeticion primero "despliega" el patron en notas: las dos
+ *     mitades quedan sin repeticion y suenan igual que antes.
+ *   - removeUnusedAssets conserva los audios de zonas del sampler y de congelados.
+ *
  * Modulo puro: sin DOM ni import.meta.env (se prueba en scripts/verify-studio-logic.ts).
  */
+import { normalizeNotes } from './midiOps.ts'
 import {
   STUDIO_BEATS_PER_BAR_MAX,
   STUDIO_BEATS_PER_BAR_MIN,
@@ -31,10 +43,19 @@ import {
   STUDIO_LATENCY_OFFSET_MS_MIN,
   STUDIO_MASTER_ID,
   STUDIO_MAX_ASSETS,
+  STUDIO_MAX_BEAT,
   STUDIO_MAX_CLIPS_PER_TRACK,
+  STUDIO_MAX_MARKERS,
+  STUDIO_MAX_MIDI_CLIPS_PER_TRACK,
+  STUDIO_MAX_NOTES_PER_CLIP,
+  STUDIO_MAX_NOTES_PER_SESSION,
   STUDIO_MAX_SESSION_SECONDS,
   STUDIO_MAX_TRACKS,
+  STUDIO_MIDI_MIN_CLIP_BEATS,
+  STUDIO_MIDI_MIN_NOTE_BEATS,
   STUDIO_MIN_CLIP_SECONDS,
+  STUDIO_NOTE_EPSILON_BEATS,
+  STUDIO_TIME_EPSILON_S,
   STUDIO_REVERB_DECAY_S_MAX,
   STUDIO_REVERB_DECAY_S_MIN,
   STUDIO_REVERB_RETURN_DB_MAX,
@@ -44,16 +65,28 @@ import {
   STUDIO_VOLUME_DB_MAX,
   STUDIO_VOLUME_DB_MIN,
   StudioSessionError,
+  beatsToSeconds,
+  countSessionNotes,
   defaultFx,
   findAsset,
   findClip,
+  findMidiClip,
+  isClipIdTaken,
   isStudioId,
+  roundBeat,
+  secondsToBeats,
+  sortNotes,
+  usedAssetIds,
   validateSession,
   type ClipLocation,
+  type MidiClipLocation,
   type StudioAsset,
   type StudioClip,
   type StudioFx,
   type StudioFxType,
+  type StudioMarker,
+  type StudioMidiClip,
+  type StudioMidiNote,
   type StudioSession,
   type StudioSessionErrorCode,
   type StudioTrack,
@@ -61,21 +94,33 @@ import {
 import type {
   AddAssetArgs,
   AddClipArgs,
+  AddInstrumentTrackArgs,
+  AddMidiClipArgs,
   AddTrackArgs,
   ApplyMixSuggestionArgs,
   DeleteClipArgs,
   DuplicateClipArgs,
+  DuplicateMidiClipArgs,
   MoveClipArgs,
+  MoveMidiClipArgs,
+  RemoveMidiClipArgs,
   RemoveTrackArgs,
+  ResizeMidiClipArgs,
   SessionOpsApi,
+  SessionOpsV2Api,
   SetActiveTakeArgs,
   SetClipFadesArgs,
   SetClipGainArgs,
+  SetFrozenAssetArgs,
+  SetInstrumentArgs,
+  SetMarkersArgs,
   SetTrackFxArgs,
   SnapTimeArgs,
   SplitClipArgs,
+  SplitMidiClipArgs,
   TrimClipArgs,
   UpdateMasterArgs,
+  UpdateMidiClipArgs,
   UpdateSessionMetaArgs,
   UpdateTrackArgs,
 } from './types.ts'
@@ -133,7 +178,13 @@ function fitFades(fadeInS: number, fadeOutS: number, lengthS: number): { fadeInS
 
 function ensureNewClipId(session: StudioSession, newClipId: string): void {
   if (!isStudioId(newClipId)) fail('bad_id', 'new_clip_id', 'El id solo admite letras, números, guion y guion bajo (1 a 80)')
-  if (findClip(session, newClipId)) fail('duplicate_id', 'new_clip_id', `El id de clip "${newClipId}" está repetido`)
+  // v2: los ids de clip son unicos sumando los de audio y los MIDI.
+  if (isClipIdTaken(session, newClipId)) fail('duplicate_id', 'new_clip_id', `El id de clip "${newClipId}" está repetido`)
+}
+
+/** v2: un clip de audio solo va en una pista de audio. */
+function ensureAudioTrack(track: StudioTrack): void {
+  if (track.kind !== 'audio') fail('bad_value', 'track_id', `La pista "${track.id}" es de instrumento: no admite clips de audio`)
 }
 
 function ensureRoomForClip(track: StudioTrack): void {
@@ -161,6 +212,7 @@ export function moveClip(session: StudioSession, args: MoveClipArgs): StudioSess
     return replaceClip(session, loc, { ...loc.clip, startS })
   }
   const target = session.tracks[targetIndex]
+  ensureAudioTrack(target)
   ensureRoomForClip(target)
   const moved: StudioClip = startS === loc.clip.startS ? loc.clip : { ...loc.clip, startS }
   const tracks = session.tracks.slice()
@@ -297,10 +349,11 @@ export function setActiveTake(session: StudioSession, args: SetActiveTakeArgs): 
 export function addClip(session: StudioSession, args: AddClipArgs): StudioSession {
   const index = trackIndexOf(session, args.trackId)
   const track = session.tracks[index]
+  ensureAudioTrack(track)
   if (!findAsset(session, args.clip.assetId)) {
     fail('unknown_asset', 'asset_id', `El clip usa el audio "${args.clip.assetId}", que no está en la sesión`)
   }
-  if (findClip(session, args.clip.id)) fail('duplicate_id', 'id', `El id de clip "${args.clip.id}" está repetido`)
+  if (isClipIdTaken(session, args.clip.id)) fail('duplicate_id', 'id', `El id de clip "${args.clip.id}" está repetido`)
   ensureRoomForClip(track)
   return checked(replaceTrack(session, index, { ...track, clips: [...track.clips, args.clip] }))
 }
@@ -467,8 +520,8 @@ export function addAsset(session: StudioSession, args: AddAssetArgs): StudioSess
 }
 
 export function removeUnusedAssets(session: StudioSession): StudioSession {
-  const used = new Set<string>()
-  for (const track of session.tracks) for (const clip of track.clips) used.add(clip.assetId)
+  // v2: tambien cuentan las zonas del sampler y los congelados.
+  const used = usedAssetIds(session)
   const assets = session.assets.filter((a) => used.has(a.id))
   if (assets.length === session.assets.length) return session
   return { ...session, assets }
@@ -548,3 +601,334 @@ void ({
   applyMixSuggestion,
   snapTime,
 } satisfies SessionOpsApi)
+
+// ###########################################################################
+// v2: pistas de instrumento, clips MIDI, congelado y marcas (SessionOpsV2Api)
+// ###########################################################################
+
+function locateMidi(session: StudioSession, clipId: string): MidiClipLocation {
+  const loc = findMidiClip(session, clipId)
+  if (!loc) fail('bad_id', 'clip_id', `No existe el clip MIDI "${clipId}"`)
+  return loc
+}
+
+function ensureInstrumentTrack(track: StudioTrack): void {
+  if (track.kind !== 'instrument') fail('bad_value', 'track_id', `La pista "${track.id}" es de audio: no admite clips MIDI ni instrumento`)
+}
+
+function ensureRoomForMidiClip(track: StudioTrack): void {
+  if (track.midiClips.length >= STUDIO_MAX_MIDI_CLIPS_PER_TRACK) {
+    fail('too_many', 'midi_clips', `Una pista admite hasta ${STUDIO_MAX_MIDI_CLIPS_PER_TRACK} clips MIDI`)
+  }
+}
+
+/** Ultimo beat de la sesion con el tempo actual (1200 s). */
+function maxSessionBeat(session: StudioSession): number {
+  return Math.min(STUDIO_MAX_BEAT, secondsToBeats(STUDIO_MAX_SESSION_SECONDS, session.bpm))
+}
+
+function replaceMidiClip(session: StudioSession, loc: MidiClipLocation, clip: StudioMidiClip): StudioSession {
+  const midiClips = loc.track.midiClips.slice()
+  midiClips[loc.clipIndex] = clip
+  return replaceTrack(session, loc.trackIndex, { ...loc.track, midiClips })
+}
+
+/**
+ * Comprueba los topes de notas. `added` es cuantas notas suma la operacion a la sesion (puede ser
+ * negativo); `clipNotes` es el largo final del clip tocado.
+ */
+function ensureNoteRoom(session: StudioSession, clipNotes: number, added: number): void {
+  if (clipNotes > STUDIO_MAX_NOTES_PER_CLIP) fail('too_many', 'notes', `Un clip MIDI admite hasta ${STUDIO_MAX_NOTES_PER_CLIP} notas`)
+  if (added > 0 && countSessionNotes(session) + added > STUDIO_MAX_NOTES_PER_SESSION) {
+    fail('too_many', 'notes', `La sesión admite hasta ${STUDIO_MAX_NOTES_PER_SESSION} notas`)
+  }
+}
+
+function notesEqual(a: readonly StudioMidiNote[], b: readonly StudioMidiNote[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (x.pitch !== y.pitch || x.start !== y.start || x.length !== y.length || x.velocity !== y.velocity) return false
+  }
+  return true
+}
+
+/** Igualdad estructural de valores JSON (instrumentos, estado WAM). */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    const bb = b as unknown[]
+    return a.length === bb.length && a.every((v, i) => jsonEqual(v, bb[i]))
+  }
+  const ao = a as Record<string, unknown>
+  const bo = b as Record<string, unknown>
+  const keys = Object.keys(ao)
+  if (keys.length !== Object.keys(bo).length) return false
+  return keys.every((k) => Object.prototype.hasOwnProperty.call(bo, k) && jsonEqual(ao[k], bo[k]))
+}
+
+/**
+ * Notas que suenan en el clip, relativas a su inicio, con la repeticion desplegada
+ * (STUDIO_V2.md 2.4): el patron [0, loopBeats) se repite hasta el final del clip.
+ */
+export function expandMidiClipNotes(clip: StudioMidiClip): StudioMidiNote[] {
+  if (!clip.loop || clip.loopBeats >= clip.lengthBeats - STUDIO_NOTE_EPSILON_BEATS) return sortNotes(clip.notes)
+  const pattern = clip.notes.filter((n) => n.start < clip.loopBeats)
+  const out: StudioMidiNote[] = []
+  for (let lap = 0; lap * clip.loopBeats < clip.lengthBeats - STUDIO_NOTE_EPSILON_BEATS; lap++) {
+    const offset = lap * clip.loopBeats
+    for (const n of pattern) {
+      const start = roundBeat(n.start + offset)
+      if (start < clip.lengthBeats) out.push({ ...n, start })
+    }
+  }
+  return normalizeNotes(out, clip.lengthBeats)
+}
+
+// ---------------------------------------------------------------------------
+// Pistas de instrumento
+// ---------------------------------------------------------------------------
+
+export function addInstrumentTrack(session: StudioSession, args: AddInstrumentTrackArgs): StudioSession {
+  if (args.track.kind !== 'instrument') fail('bad_value', 'kind', 'La pista debe ser de instrumento')
+  if (session.tracks.length >= STUDIO_MAX_TRACKS) fail('too_many', 'tracks', `Una sesión admite hasta ${STUDIO_MAX_TRACKS} pistas`)
+  if (session.tracks.some((t) => t.id === args.track.id)) fail('duplicate_id', 'id', `El id de pista "${args.track.id}" está repetido`)
+  for (const clip of args.track.midiClips) {
+    if (isClipIdTaken(session, clip.id)) fail('duplicate_id', 'midi_clips.id', `El id de clip "${clip.id}" está repetido`)
+  }
+  const added = args.track.midiClips.reduce((n, c) => n + c.notes.length, 0)
+  ensureNoteRoom(session, 0, added)
+  const track: StudioTrack = {
+    ...args.track,
+    midiClips: args.track.midiClips.map((c) => ({ ...c, notes: normalizeNotes(c.notes, c.lengthBeats) })),
+  }
+  const tracks = session.tracks.slice()
+  const at = args.index === undefined ? tracks.length : Math.round(clamp(args.index, 0, tracks.length, 'index'))
+  tracks.splice(at, 0, track)
+  return checked({ ...session, tracks })
+}
+
+export function setInstrument(session: StudioSession, args: SetInstrumentArgs): StudioSession {
+  const index = trackIndexOf(session, args.trackId)
+  const track = session.tracks[index]
+  ensureInstrumentTrack(track)
+  const instrument = args.instrument
+  if (!instrument || typeof instrument !== 'object') fail('not_an_object', 'instrument', 'Se esperaba un instrumento')
+  if (instrument.type === 'sampler') {
+    instrument.zones.forEach((zone, i) => {
+      if (!findAsset(session, zone.assetId)) {
+        fail('unknown_asset', `instrument.zones[${i}].asset_id`, `La zona usa el audio "${zone.assetId}", que no está en la sesión`)
+      }
+    })
+  }
+  if (jsonEqual(track.instrument, instrument)) return session
+  return checked(replaceTrack(session, index, { ...track, instrument }))
+}
+
+export function setFrozenAsset(session: StudioSession, args: SetFrozenAssetArgs): StudioSession {
+  const index = trackIndexOf(session, args.trackId)
+  const track = session.tracks[index]
+  ensureInstrumentTrack(track)
+  if (args.assetId !== null && !findAsset(session, args.assetId)) {
+    fail('unknown_asset', 'asset_id', `El congelado usa el audio "${args.assetId}", que no está en la sesión`)
+  }
+  if (track.frozenAssetId === args.assetId) return session
+  return replaceTrack(session, index, { ...track, frozenAssetId: args.assetId })
+}
+
+// ---------------------------------------------------------------------------
+// Clips MIDI
+// ---------------------------------------------------------------------------
+
+export function addMidiClip(session: StudioSession, args: AddMidiClipArgs): StudioSession {
+  const index = trackIndexOf(session, args.trackId)
+  const track = session.tracks[index]
+  ensureInstrumentTrack(track)
+  const c = args.clip
+  if (!isStudioId(c.id)) fail('bad_id', 'id', 'El id solo admite letras, números, guion y guion bajo (1 a 80)')
+  if (isClipIdTaken(session, c.id)) fail('duplicate_id', 'id', `El id de clip "${c.id}" está repetido`)
+  ensureRoomForMidiClip(track)
+  const maxBeat = maxSessionBeat(session)
+  const lengthBeats = roundBeat(clamp(c.lengthBeats, STUDIO_MIDI_MIN_CLIP_BEATS, Math.max(STUDIO_MIDI_MIN_CLIP_BEATS, maxBeat), 'length_beats'))
+  const startBeat = roundBeat(clamp(c.startBeat, 0, Math.max(0, maxBeat - lengthBeats), 'start_beat'))
+  const loopBeats = roundBeat(clamp(c.loopBeats, STUDIO_MIDI_MIN_CLIP_BEATS, STUDIO_MAX_BEAT, 'loop_beats'))
+  const notes = normalizeNotes(c.notes, lengthBeats)
+  ensureNoteRoom(session, notes.length, notes.length)
+  const clip: StudioMidiClip = { id: c.id, startBeat, lengthBeats, loop: c.loop === true, loopBeats, notes }
+  return checked(replaceTrack(session, index, { ...track, midiClips: [...track.midiClips, clip] }))
+}
+
+export function updateMidiClip(session: StudioSession, args: UpdateMidiClipArgs): StudioSession {
+  const loc = locateMidi(session, args.clipId)
+  const clip = loc.clip
+  const patch = args.patch
+  const next: StudioMidiClip = { ...clip }
+  if (patch.notes !== undefined) next.notes = normalizeNotes(patch.notes, clip.lengthBeats)
+  if (patch.loop !== undefined) next.loop = patch.loop === true
+  if (patch.loopBeats !== undefined) next.loopBeats = roundBeat(clamp(patch.loopBeats, STUDIO_MIDI_MIN_CLIP_BEATS, STUDIO_MAX_BEAT, 'loop_beats'))
+  const notesSame = notesEqual(next.notes, clip.notes)
+  if (notesSame && next.loop === clip.loop && next.loopBeats === clip.loopBeats) return session
+  if (notesSame) next.notes = clip.notes
+  else ensureNoteRoom(session, next.notes.length, next.notes.length - clip.notes.length)
+  return checked(replaceMidiClip(session, loc, next))
+}
+
+export function removeMidiClip(session: StudioSession, args: RemoveMidiClipArgs): StudioSession {
+  const loc = locateMidi(session, args.clipId)
+  return replaceTrack(session, loc.trackIndex, { ...loc.track, midiClips: loc.track.midiClips.filter((c) => c.id !== args.clipId) })
+}
+
+export function moveMidiClip(session: StudioSession, args: MoveMidiClipArgs): StudioSession {
+  const loc = locateMidi(session, args.clipId)
+  const startBeat = roundBeat(clamp(args.startBeat, 0, Math.max(0, maxSessionBeat(session) - loc.clip.lengthBeats), 'start_beat'))
+  const targetIndex = args.trackId === undefined || args.trackId === loc.track.id ? loc.trackIndex : trackIndexOf(session, args.trackId)
+  if (targetIndex === loc.trackIndex) {
+    if (startBeat === loc.clip.startBeat) return session
+    return replaceMidiClip(session, loc, { ...loc.clip, startBeat })
+  }
+  const target = session.tracks[targetIndex]
+  ensureInstrumentTrack(target)
+  ensureRoomForMidiClip(target)
+  const moved: StudioMidiClip = startBeat === loc.clip.startBeat ? loc.clip : { ...loc.clip, startBeat }
+  const tracks = session.tracks.slice()
+  tracks[loc.trackIndex] = { ...loc.track, midiClips: loc.track.midiClips.filter((c) => c.id !== loc.clip.id) }
+  tracks[targetIndex] = { ...target, midiClips: [...target.midiClips, moved] }
+  return { ...session, tracks }
+}
+
+export function resizeMidiClip(session: StudioSession, args: ResizeMidiClipArgs): StudioSession {
+  const loc = locateMidi(session, args.clipId)
+  const clip = loc.clip
+  const end = clip.startBeat + clip.lengthBeats
+  if (args.edge === 'end') {
+    const newEnd = roundBeat(clamp(args.toBeat, clip.startBeat + STUDIO_MIDI_MIN_CLIP_BEATS, Math.max(clip.startBeat + STUDIO_MIDI_MIN_CLIP_BEATS, maxSessionBeat(session)), 'to_beat'))
+    const lengthBeats = Math.max(STUDIO_MIDI_MIN_CLIP_BEATS, roundBeat(newEnd - clip.startBeat))
+    if (lengthBeats === clip.lengthBeats) return session
+    // Achicar quita las notas que quedan fuera; agrandar no cambia las notas.
+    const notes = lengthBeats < clip.lengthBeats ? clip.notes.filter((n) => n.start < lengthBeats) : clip.notes
+    return checked(replaceMidiClip(session, loc, { ...clip, lengthBeats, notes: notes.length === clip.notes.length ? clip.notes : notes }))
+  }
+  if (args.edge !== 'start') fail('bad_value', 'edge', 'El borde debe ser "start" o "end"')
+  const startBeat = roundBeat(clamp(args.toBeat, 0, Math.max(0, end - STUDIO_MIDI_MIN_CLIP_BEATS), 'to_beat'))
+  if (startBeat === clip.startBeat) return session
+  const lengthBeats = Math.max(STUDIO_MIDI_MIN_CLIP_BEATS, roundBeat(end - startBeat))
+  // Las notas conservan su posicion absoluta en la sesion; las que quedan antes del nuevo inicio se quitan.
+  const shift = startBeat - clip.startBeat
+  const shifted: StudioMidiNote[] = []
+  for (const n of clip.notes) {
+    const start = roundBeat(n.start - shift)
+    if (start >= 0 && start < lengthBeats) shifted.push({ ...n, start })
+  }
+  return checked(replaceMidiClip(session, loc, { ...clip, startBeat, lengthBeats, notes: normalizeNotes(shifted, lengthBeats) }))
+}
+
+export function duplicateMidiClip(session: StudioSession, args: DuplicateMidiClipArgs): StudioSession {
+  const loc = locateMidi(session, args.clipId)
+  ensureNewClipId(session, args.newClipId)
+  ensureRoomForMidiClip(loc.track)
+  ensureNoteRoom(session, loc.clip.notes.length, loc.clip.notes.length)
+  const wanted = args.startBeat === undefined ? loc.clip.startBeat + loc.clip.lengthBeats : args.startBeat
+  const startBeat = roundBeat(clamp(wanted, 0, Math.max(0, maxSessionBeat(session) - loc.clip.lengthBeats), 'start_beat'))
+  // Las notas son inmutables: la copia puede compartir el arreglo.
+  const copy: StudioMidiClip = { ...loc.clip, id: args.newClipId, startBeat }
+  const midiClips = loc.track.midiClips.slice()
+  midiClips.splice(loc.clipIndex + 1, 0, copy)
+  return checked(replaceTrack(session, loc.trackIndex, { ...loc.track, midiClips }))
+}
+
+export function splitMidiClip(session: StudioSession, args: SplitMidiClipArgs): StudioSession {
+  const loc = locateMidi(session, args.clipId)
+  const clip = loc.clip
+  const at = roundBeat(clamp(args.atBeat, 0, STUDIO_MAX_BEAT, 'at_beat'))
+  const cut = roundBeat(at - clip.startBeat)
+  const rightLength = roundBeat(clip.lengthBeats - cut)
+  // En el borde o fuera del clip no hay nada que dividir.
+  if (cut < STUDIO_MIDI_MIN_CLIP_BEATS || rightLength < STUDIO_MIDI_MIN_CLIP_BEATS) return session
+  ensureNewClipId(session, args.newClipId)
+  ensureRoomForMidiClip(loc.track)
+  const source = expandMidiClipNotes(clip)
+  const leftNotes: StudioMidiNote[] = []
+  const rightNotes: StudioMidiNote[] = []
+  for (const n of source) {
+    const end = n.start + n.length
+    if (n.start >= cut) {
+      rightNotes.push({ ...n, start: roundBeat(n.start - cut) })
+      continue
+    }
+    const leftPart = roundBeat(cut - n.start)
+    const rightPart = roundBeat(end - cut)
+    if (rightPart < STUDIO_MIDI_MIN_NOTE_BEATS) {
+      // No cruza el corte (o lo cruza menos que una nota minima): queda entera a la izquierda.
+      leftNotes.push(n)
+    } else if (leftPart < STUDIO_MIDI_MIN_NOTE_BEATS) {
+      // Empieza casi en el corte: pasa entera a la derecha.
+      rightNotes.push({ ...n, start: 0, length: rightPart })
+    } else {
+      // Cruza el corte: se divide en dos.
+      leftNotes.push({ ...n, length: leftPart })
+      rightNotes.push({ ...n, start: 0, length: rightPart })
+    }
+  }
+  const left: StudioMidiClip = { ...clip, lengthBeats: cut, loop: false, loopBeats: cut, notes: normalizeNotes(leftNotes, cut) }
+  const right: StudioMidiClip = {
+    id: args.newClipId,
+    startBeat: at,
+    lengthBeats: rightLength,
+    loop: false,
+    loopBeats: rightLength,
+    notes: normalizeNotes(rightNotes, rightLength),
+  }
+  ensureNoteRoom(session, Math.max(left.notes.length, right.notes.length), left.notes.length + right.notes.length - clip.notes.length)
+  const midiClips = loc.track.midiClips.slice()
+  midiClips.splice(loc.clipIndex, 1, left, right)
+  return checked(replaceTrack(session, loc.trackIndex, { ...loc.track, midiClips }))
+}
+
+// ---------------------------------------------------------------------------
+// Marcas
+// ---------------------------------------------------------------------------
+
+function compareMarkerOrder(a: StudioMarker, b: StudioMarker): number {
+  return a.beat - b.beat || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+}
+
+export function setMarkers(session: StudioSession, args: SetMarkersArgs): StudioSession {
+  const raw = args.markers
+  if (raw.length > STUDIO_MAX_MARKERS) fail('too_many', 'markers', `La sesión admite hasta ${STUDIO_MAX_MARKERS} marcas`)
+  const ids = new Set<string>()
+  const markers = raw.map((m, i) => {
+    if (!isStudioId(m.id)) fail('bad_id', `markers[${i}].id`, 'El id solo admite letras, números, guion y guion bajo (1 a 80)')
+    if (ids.has(m.id)) fail('duplicate_id', `markers[${i}].id`, `El id de marca "${m.id}" está repetido`)
+    ids.add(m.id)
+    const beat = roundBeat(clamp(m.beat, 0, STUDIO_MAX_BEAT, `markers[${i}].beat`))
+    if (beatsToSeconds(beat, session.bpm) > STUDIO_MAX_SESSION_SECONDS + STUDIO_TIME_EPSILON_S) {
+      fail('session_too_long', `markers[${i}].beat`, 'La marca queda después de los 20 minutos que admite una sesión')
+    }
+    return { id: m.id, beat, label: String(m.label ?? '').trim(), kind: m.kind }
+  })
+  markers.sort(compareMarkerOrder)
+  const current = session.markers
+  const same =
+    markers.length === current.length &&
+    markers.every((m, i) => m.id === current[i].id && m.beat === current[i].beat && m.label === current[i].label && m.kind === current[i].kind)
+  if (same) return session
+  return checked({ ...session, markers })
+}
+
+void ({
+  addInstrumentTrack,
+  setInstrument,
+  addMidiClip,
+  updateMidiClip,
+  removeMidiClip,
+  moveMidiClip,
+  resizeMidiClip,
+  duplicateMidiClip,
+  splitMidiClip,
+  setFrozenAsset,
+  setMarkers,
+} satisfies SessionOpsV2Api)

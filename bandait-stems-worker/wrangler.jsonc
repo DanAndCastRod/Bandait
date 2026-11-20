@@ -4,14 +4,15 @@
   // el Worker llama a Supabase con el JWT de quien pide, nunca con la clave de servicio.
   //
   // SECRETOS (nunca en este archivo; se cargan con `wrangler secret put <NOMBRE>`):
-  //   MUSICAI_API_KEY   Music AI: analisis, y los trabajos `master` y `separate` del Estudio.
+  //   MUSICAI_API_KEY   Music AI: analisis, y los trabajos `master`, `separate` y `analyze` del Estudio.
   //                     ClipVault: bandait-musicai-api-key. Ya esta cargado en produccion.
-  //   GEMINI_API_KEY    Gemini API (no Vertex): trabajo `generate` con Lyria. Sin el, 503.
-  //                     ClipVault: gemini-urit-ai-api (la de URiT AI, decision de Daniel Castaneda
-  //                     del 2026-11-19; a mediano plazo, una propia de Bandait).
-  //   URIT_AI_TOKEN     Token del consumidor "bandait" en URiT IA (urit-ai): asistente de mezcla con
-  //                     ASSIST_PROVIDER "urit" (por defecto). ClipVault: urit-ai-credentials/bandait_token.
-  //   ASSIST_API_KEY    Opcional. Con ASSIST_PROVIDER "gemini" (directo) el asistente usa
+  //   URIT_AI_TOKEN     Token del consumidor "bandait" en URiT IA (urit-ai): generar audio con Lyria
+  //                     (POST /v1/music, desde el 2026-11-19), y asistente de mezcla, compose y chat
+  //                     (Estudio v2) con ASSIST_PROVIDER "urit" (por defecto).
+  //                     ClipVault: urit-ai-credentials/bandait_token.
+  //   GEMINI_API_KEY    Opcional y NO necesario para Lyria (ya pasa por URiT IA). Solo si se usa
+  //                     ASSIST_PROVIDER "gemini" (texto directo, alternativa); no se carga.
+  //   ASSIST_API_KEY    Opcional. Con ASSIST_PROVIDER "gemini" (directo) assist, compose y chat usan
   //                     GEMINI_API_KEY si falta; con "anthropic" es una clave de Anthropic.
   //   SUNO_API_KEY      Futuro. Hoy `generate` con `suno` responde 501 aunque exista.
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -31,12 +32,18 @@
     "MUSICAI_WORKFLOW": "stems-workflow-releven-bandait",
     "MUSICAI_SPLIT_WORKFLOW": "splited_stems_bandait",
 
-    // ---- Estudio (bandait-protocol/STUDIO_V1.md, seccion 8) ----
+    // ---- Estudio (bandait-protocol/STUDIO_V1.md, seccion 8, y STUDIO_V2.md, seccion 5) ----
+    // MUSICAI_WORKFLOW (arriba) tambien es el workflow del trabajo `analyze` del Estudio v2, salvo
+    // que se defina MUSICAI_ANALYZE_WORKFLOW (opcional, un workflow solo de analisis). El de arriba
+    // tambien separa stems: por eso analyze cuesta 0.80 por minuto por defecto.
     // Workflow de mastering creado en el panel de Music AI. Vacio: el trabajo `master` responde 503.
     "MUSICAI_MASTER_WORKFLOW": "",
     // Nombre del parametro de ese workflow que recibe el volumen objetivo en LUFS. Vacio: no se envia.
     "MUSICAI_MASTER_LUFS_PARAM": "",
-    // Asistente de mezcla: proveedor y modelo.
+    // Proveedor de texto del asistente de mezcla y, desde v2, de `compose` y `chat` (decision de
+    // STUDIO_V2.md 4: la misma variable, sin una nueva). "urit" (por defecto) o "gemini"; con
+    // "anthropic" solo funciona `assist` y `compose`/`chat` responden 503. El modelo solo se usa
+    // con gemini o anthropic: con urit manda la cadena de URiT IA.
     "ASSIST_PROVIDER": "urit",
     "ASSIST_MODEL": "",
     // URiT IA (urit-ai): el asistente pasa por ahi como consumidor "bandait". Secreto URIT_AI_TOKEN.
@@ -51,11 +58,14 @@
     "STUDIO_GLOBAL_MONTHLY_BUDGET_USD": "30",
     // uuid de Supabase (separados por coma) de quienes pueden lanzar trabajos de IA y analisis.
     // Vacio: cualquier editor. RECOMENDADO llenarlo con el uuid de Daniel Castaneda (y de quien
-    // el autorice) antes de cargar los secretos de Lyria y del asistente.
+    // el autorice) antes de desplegar: con URIT_AI_TOKEN cargado, Lyria y el asistente ya gastan.
     "STUDIO_SPENDER_UIDS": ""
     // Opcionales, con valor por defecto en el codigo:
     //   LYRIA_CLIP_MODEL (lyria-3-clip-preview), LYRIA_SONG_MODEL (lyria-3.5)
     //   STUDIO_RATE_MASTER_USD_PER_MIN (0.20), STUDIO_RATE_SEPARATE_USD_PER_MIN (0.50),
-    //   STUDIO_RATE_LYRIA_USD_PER_30S (0.06), STUDIO_RATE_ASSIST_USD (0.05)
+    //   STUDIO_RATE_LYRIA_CLIP_USD (0.04 por clip de 30 s), STUDIO_RATE_LYRIA_SONG_USD (0.08 por cancion),
+    //   STUDIO_RATE_ASSIST_USD (0.05)
+    //   Estudio v2: STUDIO_RATE_COMPOSE_USD (0.05 por consulta), STUDIO_RATE_ANALYZE_USD_PER_MIN (0.80),
+    //   STUDIO_RATE_CHAT_USD (0.03 por vuelta) y STUDIO_RATE_CHAT_USD_PER_32KB (0.015), MUSICAI_ANALYZE_WORKFLOW
   }
 }

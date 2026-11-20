@@ -1,7 +1,17 @@
 import React, { useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import { Snowflake, X } from 'lucide-react'
 import { KNOWN_STEM_ROLES, STEM_ROLE_CODES, stemRoleLabel, type StemRole } from '../../services/stemNames'
-import { STUDIO_MAX_TRACK_NAME, STUDIO_VOLUME_DB_MAX, STUDIO_VOLUME_DB_MIN, type StudioTrack } from '../../services/studio/session'
+import { instrumentAvailability } from '../../services/studio/instruments/index'
+import {
+  STUDIO_DRUMS_PRESETS,
+  STUDIO_INSTRUMENT_TYPE_LABELS,
+  STUDIO_MAX_TRACK_NAME,
+  STUDIO_SYNTH_PRESETS,
+  STUDIO_VOLUME_DB_MAX,
+  STUDIO_VOLUME_DB_MIN,
+  type StudioInstrument,
+  type StudioTrack,
+} from '../../services/studio/session'
 import { formatDb, formatPan, trackColor, type ArmChannel, type StudioController } from './studioState'
 
 interface Props {
@@ -12,6 +22,10 @@ interface Props {
   height: number
   /** Canal que graba en esta pista, o null si no esta armada. */
   armed: ArmChannel | null
+  /** Pista de instrumento armada para MIDI. */
+  midiArmed: boolean
+  /** Pista elegida (mute, solo e instrumento actuan sobre ella). */
+  selected: boolean
   /** false en modo de solo reproduccion y mezcla: no se muestran armar ni entrada. */
   recordAllowed: boolean
   /** Hay una toma en curso: no se cambia el arme ni se quita la pista. */
@@ -28,14 +42,26 @@ function meterFraction(db: number): number {
   return Math.min(1, Math.max(0, (db - METER_FLOOR_DB) / (METER_TOP_DB - METER_FLOOR_DB)))
 }
 
+/** Texto corto del instrumento para la cabecera: tipo y preset. */
+function instrumentSummary(instrument: StudioInstrument): string {
+  if (instrument.type === 'synth') return STUDIO_SYNTH_PRESETS.find((p) => p.id === instrument.preset)?.label ?? 'Personalizado'
+  if (instrument.type === 'drums') return STUDIO_DRUMS_PRESETS.find((p) => p.id === instrument.preset)?.label ?? 'Personalizada'
+  if (instrument.type === 'sampler') return instrument.zones.length === 1 ? '1 zona' : `${instrument.zones.length} zonas`
+  return instrument.pluginId
+}
+
 /**
  * Cabecera de una pista: nombre, rol, armar, entrada, mute, solo, fader, paneo y medidor.
  * El medidor se pinta en un canvas desde requestAnimationFrame; fader y paneo cambian el motor
- * en caliente y dejan un solo paso de deshacer al soltar.
+ * en caliente y dejan un solo paso de deshacer al soltar. En una pista de instrumento, la fila
+ * de la entrada muestra el instrumento y R arma la pista para MIDI (no necesita entrada de audio).
  */
-export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, height, armed, recordAllowed, recording, inputChannels }) => {
+export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, height, armed, midiArmed, selected, recordAllowed, recording, inputChannels }) => {
   const meterRef = useRef<HTMLCanvasElement>(null)
   const color = trackColor(index)
+  const instrument = track.kind === 'instrument' ? track.instrument : null
+  const availability = instrument ? instrumentAvailability(instrument) : null
+  const clipCount = track.clips.length + track.midiClips.length
 
   useEffect(() => {
     const canvas = meterRef.current
@@ -97,10 +123,14 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
     <div
       className="stu-head"
       style={{ height: `${height}px`, ['--stu-track' as string]: color }}
-      data-armed={armed !== null}
+      data-armed={armed !== null || midiArmed}
+      data-selected={selected}
+      data-kind={track.kind}
       data-testid={`studio-track-${track.id}`}
       role="group"
-      aria-label={`Pista ${index + 1}: ${track.name}`}
+      aria-label={`Pista ${index + 1}: ${track.name}${instrument ? ` (${STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type]})` : ''}`}
+      // Tocar la cabecera elige la pista (mute, solo, instrumento y MIDI actuan sobre ella).
+      onPointerDown={() => controller.selectTrack(track.id)}
     >
       <div className="stu-head-cols">
         <div className="stu-head-row">
@@ -143,7 +173,7 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
             data-tone="ghost"
             disabled={recording}
             onClick={() => {
-              if (track.clips.length === 0 || window.confirm(`¿Quitar la pista "${track.name}" con sus ${track.clips.length} clips? Se puede deshacer.`)) controller.removeTrack(track.id)
+              if (clipCount === 0 || window.confirm(`¿Quitar la pista "${track.name}" con sus ${clipCount} clips? Se puede deshacer.`)) controller.removeTrack(track.id)
             }}
             aria-label={`Quitar la pista ${track.name}`}
             title="Quitar la pista"
@@ -153,7 +183,47 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
         </div>
 
         <div className="stu-head-row">
-          {recordAllowed && (
+          {instrument && (
+            <>
+              <button
+                type="button"
+                className="stu-btn"
+                data-size="mini"
+                data-on={midiArmed}
+                data-accent="rec"
+                aria-pressed={midiArmed}
+                disabled={recording}
+                onClick={() => controller.armMidiTrack(midiArmed ? null : track.id)}
+                aria-label={midiArmed ? 'Desarmar la pista para MIDI' : 'Armar la pista para grabar y tocar MIDI'}
+                title={midiArmed ? 'Desarmar la pista para MIDI' : 'Armar para grabar y tocar MIDI (teclado MIDI o de la computadora)'}
+                data-testid={`studio-midi-arm-${track.id}`}
+              >
+                R
+              </button>
+              <button
+                type="button"
+                className="stu-head-inst"
+                onClick={() => controller.selectTrack(track.id)}
+                title={availability?.available === false ? `${availability.reason ?? 'No disponible'}${track.frozenAssetId ? ' Suena el congelado.' : ' No suena.'}` : 'Ver el instrumento en el inspector'}
+                aria-label={`Instrumento: ${STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type]}, ${instrumentSummary(instrument)}`}
+                data-testid={`studio-track-instrument-${track.id}`}
+              >
+                <span className="stu-head-inst-type">{STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type].toUpperCase()}</span>
+                <span className="stu-head-inst-preset">{instrumentSummary(instrument)}</span>
+              </button>
+              {track.frozenAssetId && (
+                <span className="stu-badge" data-tone="sel" title="Tiene audio congelado: suena donde el instrumento no esté disponible">
+                  <Snowflake size={10} aria-hidden="true" />
+                </span>
+              )}
+              {availability?.available === false && (
+                <span className="stu-badge" data-tone="warn" title={availability.reason ?? 'No disponible'}>
+                  N/D
+                </span>
+              )}
+            </>
+          )}
+          {!instrument && recordAllowed && (
             <>
               <button
                 type="button"
@@ -193,7 +263,7 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
               </select>
             </>
           )}
-          {!recordAllowed && <span style={{ flex: '1 1 auto' }} />}
+          {!instrument && !recordAllowed && <span style={{ flex: '1 1 auto' }} />}
           <button
             type="button"
             className="stu-btn"

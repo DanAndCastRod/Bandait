@@ -76,6 +76,8 @@ export interface Env {
   MUSICAI_WORKFLOW?: string;
   /** Workflow that also separates stems (POST .../analysis?separate=1). */
   MUSICAI_SPLIT_WORKFLOW?: string;
+  /** Workflow del trabajo `analyze` del Estudio v2. Vacio: MUSICAI_WORKFLOW (que tambien separa stems). */
+  MUSICAI_ANALYZE_WORKFLOW?: string;
 
   // ---- Estudio (bandait-protocol/STUDIO_V1.md, seccion 8) ----
   /** Workflow de mastering de Music AI (trabajo `master`). Sin el, 503 provider_unavailable. */
@@ -85,7 +87,10 @@ export interface Env {
    * de como se arme el workflow en el panel de Music AI; sin el, `target_lufs` no se envia.
    */
   MUSICAI_MASTER_LUFS_PARAM?: string;
-  /** Secreto: clave de la Gemini API (trabajo `generate` con Lyria). Sin ella, 503. */
+  /**
+   * Secreto opcional: clave de la Gemini API directa, solo para el asistente de texto con
+   * ASSIST_PROVIDER=gemini. Desde el 2026-11-19 Lyria pasa por URiT IA y no la usa.
+   */
   GEMINI_API_KEY?: string;
   /** Modelo de Lyria para pedidos de hasta 30 s. Por defecto `lyria-3-clip-preview`. */
   LYRIA_CLIP_MODEL?: string;
@@ -95,11 +100,14 @@ export interface Env {
   SUNO_API_KEY?: string;
   /** Secreto opcional: clave del asistente de mezcla. Con gemini, si falta se usa GEMINI_API_KEY. */
   ASSIST_API_KEY?: string;
-  /** Proveedor del asistente: `urit` (por defecto, URiT IA), `gemini` (directo) o `anthropic`. */
+  /**
+   * Proveedor de texto: `urit` (por defecto, URiT IA), `gemini` (directo) o `anthropic`. Lo usan
+   * `assist`, `compose` y `chat` (STUDIO_V2.md 4); `compose` y `chat` no admiten `anthropic` (503).
+   */
   ASSIST_PROVIDER?: string;
   /** Modelo del asistente con gemini o anthropic. Con urit no se usa: manda la cadena de URiT. */
   ASSIST_MODEL?: string;
-  /** Secreto: token del consumidor en URiT IA (ASSIST_PROVIDER `urit`). Sin el, 503. */
+  /** Secreto: token del consumidor en URiT IA (texto con ASSIST_PROVIDER `urit`, y Lyria). Sin el, 503. */
   URIT_AI_TOKEN?: string;
   /** Base de URiT IA. Por defecto `https://ai.urit.services`. */
   URIT_AI_URL?: string;
@@ -120,8 +128,16 @@ export interface Env {
   /** Tarifas para estimar el costo (USD). Ver DEFAULT_RATES en src/studioJobs.ts. */
   STUDIO_RATE_MASTER_USD_PER_MIN?: string;
   STUDIO_RATE_SEPARATE_USD_PER_MIN?: string;
-  STUDIO_RATE_LYRIA_USD_PER_30S?: string;
+  /** Lyria por cancion (URiT IA 4A): clip de 30 s y cancion larga. */
+  STUDIO_RATE_LYRIA_CLIP_USD?: string;
+  STUDIO_RATE_LYRIA_SONG_USD?: string;
   STUDIO_RATE_ASSIST_USD?: string;
+  /** Tarifas de los trabajos de STUDIO_V2.md 4.4 (compose y chat por consulta, analyze por minuto). */
+  STUDIO_RATE_COMPOSE_USD?: string;
+  STUDIO_RATE_ANALYZE_USD_PER_MIN?: string;
+  STUDIO_RATE_CHAT_USD?: string;
+  /** Recargo del chat por cada 32 KB completos de cuerpo. */
+  STUDIO_RATE_CHAT_USD_PER_32KB?: string;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

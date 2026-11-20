@@ -4,39 +4,96 @@
  * reintentos viven en studioCloud.watchJob), textos de estado en espanol, y las medidas por pista
  * que recibe el asistente de mezcla (solo numeros: nunca se manda audio).
  *
+ * v2 (STUDIO_V2.md seccion 4, al final del archivo): compose, analyze y chat con el mismo patron
+ * (runJobV2: job_id elegido por el Hub y guardado antes de enviar, reintentos y retomar), las
+ * peticiones armadas desde la sesion, el resultado convertido en propuesta (clip MIDI, marcas,
+ * datos de la sesion) y la conversacion del chat (resumen de la sesion, recorte, tool_mode).
+ *
  * Modulo sin DOM ni import.meta.env (se prueba en scripts/verify-studio-logic.ts). Quien llama
  * le pasa las muestras ya renderizadas (bounce.renderMix o los buffers del motor).
  */
 import { StemCloudError, type CloudTarget } from '../stemCloud.ts'
 import { bandEnergiesDb, integratedLufs, truePeakDb, LOUDNESS_DEFAULT_TARGET_LUFS } from './loudness.ts'
 import {
+  STUDIO_BEATS_PER_BAR_MAX,
+  STUDIO_BEATS_PER_BAR_MIN,
   STUDIO_BPM_MAX,
   STUDIO_BPM_MIN,
   STUDIO_MASTER_ID,
   STUDIO_MAX_ASSET_LABEL,
+  STUDIO_MAX_BEAT,
   STUDIO_MAX_KEY,
+  STUDIO_MAX_MARKERS,
+  STUDIO_MAX_MARKER_LABEL,
+  STUDIO_MAX_NOTES_PER_CLIP,
   STUDIO_MAX_PROMPT,
   STUDIO_MAX_SESSION_SECONDS,
+  STUDIO_MAX_TRACK_NAME,
   STUDIO_MAX_TRACKS,
+  STUDIO_MIDI_MIN_NOTE_BEATS,
+  STUDIO_TIME_EPSILON_S,
+  beatsToSeconds,
+  compareNotes,
+  defaultMidiClip,
   findTrack,
   isStudioId,
   newStudioId,
+  roundBeat,
+  secondsToBeats,
+  sessionEndSeconds,
   type StudioAsset,
+  type StudioClip,
   type StudioFxType,
+  type StudioMarker,
+  type StudioMidiClip,
+  type StudioMidiNote,
   type StudioSession,
   type StudioTrack,
 } from './session.ts'
-import { STUDIO_JOB_MAX_RETRIES, STUDIO_JOB_POLL_MS, STUDIO_JOB_TIMEOUT_MS, estimateJob, startJob, studioCloudErrorMessage, watchJob } from './studioCloud.ts'
+import { normalizeNotes } from './midiOps.ts'
+import {
+  STUDIO_CHAT_BODY_MAX_BYTES,
+  STUDIO_JOB_MAX_RETRIES,
+  STUDIO_JOB_POLL_MS,
+  STUDIO_JOB_TIMEOUT_MS,
+  STUDIO_MAX_CHAT_TOOL_CALLS,
+  STUDIO_TOOL_CALL_ID_RE,
+  estimateJob,
+  estimateJobV2,
+  jobRequestV2Bytes,
+  sessionSummaryToWire,
+  startJob,
+  startJobV2,
+  studioCloudErrorMessage,
+  watchJob,
+  watchJobV2,
+} from './studioCloud.ts'
 import type {
+  AnalyzeJobRequest,
   BandEnergies,
+  ChatJobRequest,
+  CommandContext,
+  ComposeContextTrack,
+  ComposeJobRequest,
+  ComposeRole,
   GenerateJobRequest,
   MixMetrics,
   MixSuggestion,
+  SessionMetaPatch,
+  StudioAnalysis,
+  StudioChatMessage,
+  StudioChatToolResult,
   StudioJobAsset,
   StudioJobEstimate,
+  StudioJobEstimateV2,
   StudioJobKind,
+  StudioJobKindV2,
   StudioJobRequest,
+  StudioJobRequestV2,
   StudioJobState,
+  StudioJobStateV2,
+  StudioSessionSummary,
+  StudioTrackSummary,
   TrackMetrics,
   WatchJobOptions,
 } from './types.ts'
@@ -111,8 +168,8 @@ export function formatUsd(value: number): string {
   return `USD ${safe.toFixed(2).replace('.', ',')}`
 }
 
-/** Linea de costo para el panel de trabajos, antes de confirmar. */
-export function estimateText(estimate: StudioJobEstimate): string {
+/** Linea de costo para el panel de trabajos, antes de confirmar (sirve para v1 y v2). */
+export function estimateText(estimate: Omit<StudioJobEstimate, 'kind'>): string {
   const cost = `Costo estimado: ${formatUsd(estimate.estimatedCostUsd)}.`
   const spent =
     estimate.budgetUsd === null
@@ -238,7 +295,7 @@ export interface PendingJob {
   at: number
 }
 
-export function pendingJobKey(sessionId: string, kind: StudioJobKind): string {
+export function pendingJobKey(sessionId: string, kind: StudioJobKindV2): string {
   return `bandait_studio_job:${sessionId}:${kind}`
 }
 
@@ -250,20 +307,25 @@ interface PendingStorage {
 
 /** Lee un trabajo pendiente; null si no hay, si esta danado o si el almacenamiento falla. */
 export function readPendingJob(storage: PendingStorage | null, sessionId: string, kind: StudioJobKind): PendingJob | null {
+  return readPendingJobV2(storage, sessionId, kind) as PendingJob | null
+}
+
+/** Como readPendingJob, para cualquier trabajo (v1 o v2). */
+export function readPendingJobV2(storage: PendingStorage | null, sessionId: string, kind: StudioJobKindV2): PendingJobV2 | null {
   if (!storage) return null
   try {
     const raw = storage.getItem(pendingJobKey(sessionId, kind))
     if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<PendingJob> | null
+    const parsed = JSON.parse(raw) as Partial<PendingJobV2> | null
     if (!parsed || typeof parsed.jobId !== 'string' || !/^job_[A-Za-z0-9_-]{1,76}$/.test(parsed.jobId)) return null
     if (parsed.kind !== kind || typeof parsed.request !== 'object' || parsed.request === null) return null
-    return { jobId: parsed.jobId, kind, request: parsed.request as StudioJobRequest, context: parsed.context ?? null, at: typeof parsed.at === 'number' ? parsed.at : 0 }
+    return { jobId: parsed.jobId, kind, request: parsed.request as StudioJobRequestV2, context: parsed.context ?? null, at: typeof parsed.at === 'number' ? parsed.at : 0 }
   } catch {
     return null
   }
 }
 
-export function writePendingJob(storage: PendingStorage | null, sessionId: string, job: PendingJob): void {
+export function writePendingJob(storage: PendingStorage | null, sessionId: string, job: PendingJob | PendingJobV2): void {
   try {
     storage?.setItem(pendingJobKey(sessionId, job.kind), JSON.stringify(job))
   } catch {
@@ -271,7 +333,7 @@ export function writePendingJob(storage: PendingStorage | null, sessionId: strin
   }
 }
 
-export function clearPendingJob(storage: PendingStorage | null, sessionId: string, kind: StudioJobKind): void {
+export function clearPendingJob(storage: PendingStorage | null, sessionId: string, kind: StudioJobKindV2): void {
   try {
     storage?.removeItem(pendingJobKey(sessionId, kind))
   } catch {
@@ -459,4 +521,619 @@ export function buildMixMetrics(input: MixMetricsInput): MixMetrics {
     },
     tracks: input.tracks.slice(0, STUDIO_MAX_TRACKS).map(({ track, audio }) => measureTrack(track, audio.channels, audio.sampleRate)),
   }
+}
+
+// ###########################################################################
+// v2: compose, analyze y chat (STUDIO_V2.md seccion 4)
+// ###########################################################################
+
+export const COMPOSE_ROLES: readonly ComposeRole[] = ['drums', 'bass', 'chords', 'melody']
+export const COMPOSE_LENGTH_BARS_MIN = 1
+export const COMPOSE_LENGTH_BARS_MAX = 64
+export const COMPOSE_MAX_CONTEXT_TRACKS = 4
+export const COMPOSE_MAX_CONTEXT_NOTES_PER_TRACK = 256
+export const COMPOSE_MAX_CONTEXT_NOTES = 512
+export const CHAT_MAX_MESSAGES = 40
+export const CHAT_MAX_USER_TEXT = 4000
+export const CHAT_MAX_MODEL_TEXT = 8000
+export const CHAT_MAX_TOOL_RESULT_MESSAGE = 500
+export const CHAT_SUMMARY_MAX_BYTES = 32768
+/** Clips por pista en el resumen (los mas cercanos al cabezal si hay mas). */
+export const CHAT_SUMMARY_MAX_CLIPS = 64
+/** Vueltas seguidas con herramientas, sin mensaje del usuario, antes de mandar tool_mode 'none'. */
+export const CHAT_MAX_TOOL_ROUNDS = 8
+
+const COMPOSE_CONTEXT_ROLES: readonly (ComposeRole | 'other')[] = [...COMPOSE_ROLES, 'other']
+
+const KIND_LABELS_V2: Record<StudioJobKindV2, string> = {
+  ...KIND_LABELS,
+  compose: 'Componer MIDI',
+  analyze: 'Analizar audio',
+  chat: 'Asistente del Estudio',
+}
+
+const STARTED_TEXT_V2: Record<StudioJobKindV2, string> = {
+  ...STARTED_TEXT,
+  compose: 'COMPONIENDO...',
+  analyze: 'ANALIZANDO EN MUSIC AI...',
+  chat: 'EL ASISTENTE ESTÁ PENSANDO...',
+}
+
+const FAILED_TEXT_V2: Record<StudioJobKindV2, string> = {
+  ...FAILED_TEXT,
+  compose: 'LA COMPOSICIÓN FALLÓ',
+  analyze: 'EL ANÁLISIS FALLÓ',
+  chat: 'EL ASISTENTE FALLÓ',
+}
+
+/**
+ * Trabajos que el Worker resuelve dentro del POST (STUDIO_V1.md 6 y STUDIO_V2.md 4): al volver
+ * el POST ya terminaron, asi que se consultan sin esperar un intervalo (el chat no paga 3 s de
+ * espera por vuelta).
+ */
+const SYNC_KINDS_V2: ReadonlySet<StudioJobKindV2> = new Set<StudioJobKindV2>(['generate', 'assist', 'compose', 'chat'])
+
+export function jobKindLabelV2(kind: StudioJobKindV2): string {
+  return KIND_LABELS_V2[kind]
+}
+
+/** Texto de progreso de cualquier trabajo (v1 o v2). */
+export function jobStatusTextV2(state: StudioJobStateV2): string {
+  if (state.status === 'STARTED') return STARTED_TEXT_V2[state.kind]
+  if (state.status === 'FAILED') return FAILED_TEXT_V2[state.kind]
+  if (state.status === 'IMPORTING') return state.total > 0 ? `COPIANDO AUDIOS ${state.done}/${state.total}...` : 'COPIANDO AUDIOS...'
+  switch (state.kind) {
+    case 'compose': {
+      const n = state.notes.length
+      return n === 0 ? 'LISTO: SIN NOTAS' : n === 1 ? 'LISTO: 1 NOTA' : `LISTO: ${n} NOTAS`
+    }
+    case 'analyze': {
+      const m = state.analysis.markers.length
+      const c = state.analysis.chords.length
+      return `LISTO: ${m === 1 ? '1 SECCIÓN' : `${m} SECCIONES`} Y ${c === 1 ? '1 ACORDE' : `${c} ACORDES`}`
+    }
+    case 'chat': {
+      const n = state.toolCalls.length
+      return n === 0 ? 'LISTO: RESPUESTA DEL ASISTENTE' : n === 1 ? 'LISTO: 1 CAMBIO PROPUESTO' : `LISTO: ${n} CAMBIOS PROPUESTOS`
+    }
+    default:
+      return jobStatusText(state)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v2 · Revision de la peticion (antes de gastar)
+// ---------------------------------------------------------------------------
+
+function isInteger(value: unknown, min: number, max: number): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+}
+
+function validNote(n: StudioMidiNote): boolean {
+  return (
+    isInteger(n?.pitch, 0, 127) &&
+    isInteger(n?.velocity, 1, 127) &&
+    between(n?.start, 0, STUDIO_MAX_BEAT) &&
+    between(n?.length, STUDIO_MIDI_MIN_NOTE_BEATS, STUDIO_MAX_BEAT)
+  )
+}
+
+function utf8Length(text: string): number {
+  return new TextEncoder().encode(text).length
+}
+
+/** STUDIO_V2.md 4.1. */
+export function composeRequestProblem(req: ComposeJobRequest): string | null {
+  const prompt = typeof req.prompt === 'string' ? req.prompt.trim() : ''
+  if (prompt.length < 1) return 'Escribe qué quieres que componga.'
+  if (prompt.length > STUDIO_MAX_PROMPT) return `La descripción admite hasta ${STUDIO_MAX_PROMPT} caracteres.`
+  if (!between(req.bpm, STUDIO_BPM_MIN, STUDIO_BPM_MAX)) return `El tempo debe estar entre ${STUDIO_BPM_MIN} y ${STUDIO_BPM_MAX} BPM.`
+  if (req.key !== null && (typeof req.key !== 'string' || req.key.length < 1 || req.key.length > STUDIO_MAX_KEY)) return 'La tonalidad no es válida.'
+  if (!isInteger(req.beatsPerBar, STUDIO_BEATS_PER_BAR_MIN, STUDIO_BEATS_PER_BAR_MAX)) return 'El compás de la sesión no es válido.'
+  if (!isInteger(req.lengthBars, COMPOSE_LENGTH_BARS_MIN, COMPOSE_LENGTH_BARS_MAX)) {
+    return `El largo debe estar entre ${COMPOSE_LENGTH_BARS_MIN} y ${COMPOSE_LENGTH_BARS_MAX} compases.`
+  }
+  if (!COMPOSE_ROLES.includes(req.role)) return 'Elige qué componer: batería, bajo, acordes o melodía.'
+  if (!Array.isArray(req.context) || req.context.length > COMPOSE_MAX_CONTEXT_TRACKS) return `Se pueden mandar hasta ${COMPOSE_MAX_CONTEXT_TRACKS} pistas de contexto.`
+  let total = 0
+  for (const t of req.context) {
+    if (!COMPOSE_CONTEXT_ROLES.includes(t.role)) return 'Una pista de contexto tiene un rol no válido.'
+    const name = typeof t.name === 'string' ? t.name.trim() : ''
+    if (name.length < 1 || t.name.length > STUDIO_MAX_TRACK_NAME) return 'Una pista de contexto no tiene un nombre válido.'
+    if (!Array.isArray(t.notes) || t.notes.length > COMPOSE_MAX_CONTEXT_NOTES_PER_TRACK) {
+      return `Cada pista de contexto admite hasta ${COMPOSE_MAX_CONTEXT_NOTES_PER_TRACK} notas.`
+    }
+    if (!t.notes.every(validNote)) return 'Una nota de contexto no es válida.'
+    total += t.notes.length
+  }
+  if (total > COMPOSE_MAX_CONTEXT_NOTES) return `El contexto admite hasta ${COMPOSE_MAX_CONTEXT_NOTES} notas entre todas las pistas.`
+  return null
+}
+
+/** STUDIO_V2.md 4.2. */
+export function analyzeRequestProblem(req: AnalyzeJobRequest): string | null {
+  if (!isStudioId(req.assetId)) return 'Falta elegir el audio que se va a analizar.'
+  if (!(req.durationS > 0) || !between(req.durationS, 0, STUDIO_MAX_SESSION_SECONDS)) return 'El audio debe durar entre 0 y 20 minutos.'
+  return null
+}
+
+/** STUDIO_V2.md 4.3.1 y 4.3.2: forma de la conversacion y tope del resumen. */
+export function chatRequestProblem(req: ChatJobRequest): string | null {
+  const bad = (detail: string) => `La conversación con el asistente no es válida: ${detail}`
+  const messages = req.messages
+  if (!Array.isArray(messages) || messages.length < 1) return 'Escribe un mensaje para el asistente.'
+  if (messages.length > CHAT_MAX_MESSAGES) return bad(`admite hasta ${CHAT_MAX_MESSAGES} mensajes.`)
+  if (messages[0].role !== 'user') return bad('debe empezar con un mensaje tuyo.')
+  const last = messages[messages.length - 1]
+  if (last.role !== 'user' && last.role !== 'tool') return bad('el último mensaje debe ser tuyo o el resultado de los cambios.')
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    if (m.role === 'user') {
+      const text = typeof m.text === 'string' ? m.text : ''
+      if (text.trim().length < 1) return 'Escribe un mensaje para el asistente.'
+      if (text.length > CHAT_MAX_USER_TEXT) return `Cada mensaje admite hasta ${CHAT_MAX_USER_TEXT} caracteres.`
+      continue
+    }
+    if (m.role === 'model') {
+      if (m.text !== null && (typeof m.text !== 'string' || m.text.length < 1 || m.text.length > CHAT_MAX_MODEL_TEXT)) return bad('una respuesta del asistente es demasiado larga.')
+      if (!Array.isArray(m.toolCalls) || m.toolCalls.length > STUDIO_MAX_CHAT_TOOL_CALLS) return bad('una respuesta trae demasiados cambios.')
+      if (m.text === null && m.toolCalls.length === 0) return bad('hay una respuesta vacía del asistente.')
+      if (m.toolCalls.some((c) => !STUDIO_TOOL_CALL_ID_RE.test(c.id))) return bad('una llamada del asistente no tiene id.')
+      if (m.toolCalls.length === 0) continue
+      const next = messages[i + 1]
+      if (!next || next.role !== 'tool') return bad('faltan los resultados de los cambios propuestos.')
+      if (next.toolResults.length !== m.toolCalls.length) return bad('cada cambio propuesto necesita un resultado.')
+      for (let k = 0; k < m.toolCalls.length; k++) {
+        const call = m.toolCalls[k]
+        const result = next.toolResults[k]
+        if (result.callId !== call.id || result.name !== call.name) return bad('los resultados no siguen el orden de los cambios propuestos.')
+      }
+      continue
+    }
+    // tool: solo inmediatamente despues de un 'model' con llamadas (comprobado arriba).
+    const prev = messages[i - 1]
+    if (!prev || prev.role !== 'model' || prev.toolCalls.length === 0) return bad('hay resultados de cambios sin una respuesta que los pida.')
+    for (const r of m.toolResults) {
+      if (r.response.status !== 'applied' && r.response.status !== 'rejected' && r.response.status !== 'failed') return bad('un resultado no tiene un estado válido.')
+      if (typeof r.response.message !== 'string' || r.response.message.length > CHAT_MAX_TOOL_RESULT_MESSAGE) return bad('el mensaje de un resultado es demasiado largo.')
+    }
+  }
+  if (req.toolMode !== undefined && req.toolMode !== 'auto' && req.toolMode !== 'none') return bad('modo de herramientas desconocido.')
+  if (sessionSummaryBytes(req.sessionSummary) > CHAT_SUMMARY_MAX_BYTES) return 'La sesión es demasiado grande para resumirla al asistente.'
+  return null
+}
+
+/** Revisa cualquier peticion (v1 o v2) antes de salir a la red. */
+export function jobRequestProblemV2(req: StudioJobRequestV2): string | null {
+  switch (req.kind) {
+    case 'compose':
+      return composeRequestProblem(req)
+    case 'analyze':
+      return analyzeRequestProblem(req)
+    case 'chat':
+      return chatRequestProblem(req)
+    default:
+      return jobRequestProblem(req)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v2 · Lanzar y sondear
+// ---------------------------------------------------------------------------
+
+export interface RunJobV2Options extends Omit<RunJobOptions, 'onState'> {
+  onState?: (state: StudioJobStateV2) => void
+}
+
+/**
+ * Como runJob, para cualquier trabajo (v1 o v2). GASTA CREDITOS. El `job_id` lo elige el Hub y
+ * se entrega a `onStarted` ANTES de enviar (quien llama lo guarda con writePendingJob). Si la
+ * respuesta del POST se pierde, se consulta ese id en vez de relanzar. Los trabajos que el Worker
+ * resuelve dentro del POST (compose, chat, assist, generate) se consultan sin esperar.
+ */
+export async function runJobV2(target: CloudTarget, sessionId: string, req: StudioJobRequestV2, options: RunJobV2Options = {}): Promise<StudioJobStateV2 | null> {
+  const problem = jobRequestProblemV2(req)
+  if (problem) throw new StemCloudError('bad_job', 400, problem)
+  if (options.signal?.aborted) return null
+  const jobId = (options.newJobId ?? (() => newStudioId('job')))()
+  options.onStarted?.(jobId)
+  try {
+    const started = await startJobV2(target, sessionId, req, jobId)
+    options.onState?.(started)
+  } catch (err) {
+    if (!(err instanceof StemCloudError) || err.code !== 'network') throw err
+    try {
+      return await watchJobV2(target, sessionId, jobId, options)
+    } catch (inner) {
+      if (inner instanceof StemCloudError && inner.code === 'no_job') throw err
+      throw inner
+    }
+  }
+  if (options.signal?.aborted) return null
+  if (!SYNC_KINDS_V2.has(req.kind)) {
+    // Primera consulta despues de un intervalo: Music.AI nunca termina al instante.
+    await (options.sleep ?? defaultSleep)(options.intervalMs ?? STUDIO_JOB_POLL_MS, options.signal)
+  }
+  return watchJobV2(target, sessionId, jobId, options)
+}
+
+/** Retoma un trabajo ya lanzado (v1 o v2) sin lanzar nada. */
+export function resumeJobV2(
+  target: CloudTarget,
+  sessionId: string,
+  jobId: string,
+  options: Omit<WatchJobOptions, 'onState'> & { onState?: (state: StudioJobStateV2) => void } = {},
+): Promise<StudioJobStateV2 | null> {
+  return watchJobV2(target, sessionId, jobId, options)
+}
+
+/** Costo estimado de cualquier peticion, sin lanzar nada. */
+export async function estimateV2(target: CloudTarget, sessionId: string, req: StudioJobRequestV2): Promise<StudioJobEstimateV2> {
+  const problem = jobRequestProblemV2(req)
+  if (problem) throw new StemCloudError('bad_job', 400, problem)
+  return estimateJobV2(target, sessionId, req)
+}
+
+/** Trabajo lanzado (v1 o v2) que el Hub recuerda para poder retomarlo. */
+export interface PendingJobV2 {
+  jobId: string
+  kind: StudioJobKindV2
+  request: StudioJobRequestV2
+  context: unknown
+  at: number
+}
+
+// ---------------------------------------------------------------------------
+// v2 · compose: peticion desde la sesion y clip propuesto
+// ---------------------------------------------------------------------------
+
+/** Rol de una pista como contexto de compose (STUDIO_V2.md 4.1). */
+export function composeRoleForTrack(track: StudioTrack): ComposeRole | 'other' {
+  if (track.instrument?.type === 'drums' || track.role === 'drums') return 'drums'
+  if (track.role === 'bass') return 'bass'
+  if (track.role === 'keys' || track.role === 'guitar' || track.role === 'strings') return 'chords'
+  if (track.role === 'vocals' || track.role === 'backing_vocals' || track.role === 'wind') return 'melody'
+  return 'other'
+}
+
+/**
+ * Notas que SUENAN de un clip dentro de [fromBeat, toBeat) de la sesion, en beats de la sesion:
+ * con la repeticion (`loop`) desplegada y cada nota recortada al final del clip (STUDIO_V2.md 2.4).
+ */
+export function soundingClipNotes(clip: StudioMidiClip, fromBeat: number, toBeat: number): StudioMidiNote[] {
+  const clipEnd = clip.startBeat + clip.lengthBeats
+  const lo = Math.max(fromBeat, clip.startBeat)
+  const hi = Math.min(toBeat, clipEnd)
+  if (!(hi > lo)) return []
+  const out: StudioMidiNote[] = []
+  const looping = clip.loop && clip.loopBeats > 0 && clip.loopBeats < clip.lengthBeats
+  const span = looping ? clip.loopBeats : clip.lengthBeats
+  const firstRound = Math.max(0, Math.floor((lo - clip.startBeat) / span) - 1)
+  const lastRound = looping ? Math.ceil((hi - clip.startBeat) / span) : 0
+  for (let round = firstRound; round <= lastRound; round++) {
+    const base = clip.startBeat + round * span
+    for (const n of clip.notes) {
+      if (looping && n.start >= clip.loopBeats) continue
+      const start = base + n.start
+      if (start >= clipEnd || start >= hi) continue
+      const end = Math.min(start + n.length, clipEnd)
+      if (end <= lo) continue
+      out.push({ pitch: n.pitch, start, length: end - start, velocity: n.velocity })
+    }
+  }
+  return out.sort(compareNotes)
+}
+
+/**
+ * Contexto de compose: las pistas de instrumento (o las de `trackIds`) con notas en el tramo
+ * [startBeat, startBeat + lengthBeats), en beats relativos a startBeat. Hasta 4 pistas, 256 notas
+ * por pista y 512 en total (las primeras en el tiempo).
+ */
+export function composeContextForSession(session: StudioSession, startBeat: number, lengthBeats: number, trackIds?: readonly string[]): ComposeContextTrack[] {
+  const wanted = trackIds ? trackIds.map((id) => findTrack(session, id)).filter((t): t is StudioTrack => t !== null) : session.tracks
+  const out: ComposeContextTrack[] = []
+  let total = 0
+  for (const track of wanted) {
+    if (out.length >= COMPOSE_MAX_CONTEXT_TRACKS || total >= COMPOSE_MAX_CONTEXT_NOTES) break
+    if (track.kind !== 'instrument') continue
+    const end = startBeat + lengthBeats
+    const sounding = track.midiClips.flatMap((clip) => soundingClipNotes(clip, startBeat, end)).sort(compareNotes)
+    const notes: StudioMidiNote[] = []
+    for (const n of sounding) {
+      if (notes.length >= COMPOSE_MAX_CONTEXT_NOTES_PER_TRACK || total + notes.length >= COMPOSE_MAX_CONTEXT_NOTES) break
+      // Una nota que empezo antes del tramo entra desde el inicio del tramo.
+      const s = Math.max(n.start, startBeat)
+      const length = roundBeat(Math.min(n.start + n.length, end) - s)
+      if (length < STUDIO_MIDI_MIN_NOTE_BEATS) continue
+      notes.push({ pitch: n.pitch, start: roundBeat(s - startBeat), length, velocity: n.velocity })
+    }
+    if (notes.length === 0) continue
+    total += notes.length
+    const name = track.name.trim().slice(0, STUDIO_MAX_TRACK_NAME) || 'Pista'
+    out.push({ role: composeRoleForTrack(track), name, notes })
+  }
+  return out
+}
+
+export interface ComposeInput {
+  prompt: string
+  role: ComposeRole
+  /** 1..64 compases de la sesion. */
+  lengthBars: number
+  /** Beat de la sesion donde ira el clip (para el contexto). */
+  startBeat: number
+  /** Pistas de contexto; por defecto, las de instrumento con notas en el tramo. */
+  contextTrackIds?: readonly string[]
+}
+
+/** Peticion compose con el tempo, la tonalidad y el compas de la sesion. */
+export function composeRequestForSession(session: StudioSession, input: ComposeInput): ComposeJobRequest {
+  const lengthBars = Number.isFinite(input.lengthBars)
+    ? Math.min(COMPOSE_LENGTH_BARS_MAX, Math.max(COMPOSE_LENGTH_BARS_MIN, Math.round(input.lengthBars)))
+    : 4
+  const lengthBeats = lengthBars * session.beatsPerBar
+  const startBeat = Number.isFinite(input.startBeat) ? Math.max(0, input.startBeat) : 0
+  return {
+    kind: 'compose',
+    prompt: input.prompt.trim(),
+    bpm: session.bpm,
+    key: session.key,
+    beatsPerBar: session.beatsPerBar,
+    lengthBars,
+    role: input.role,
+    context: composeContextForSession(session, startBeat, lengthBeats, input.contextTrackIds),
+  }
+}
+
+type ComposeSucceeded = Extract<StudioJobStateV2, { status: 'SUCCEEDED'; kind: 'compose' }>
+
+/**
+ * Clip MIDI propuesto con el resultado de compose (listo para sessionOps.addMidiClip): sin
+ * repeticion, `loopBeats` = `lengthBeats`, notas validadas otra vez (normalizeNotes).
+ */
+export function composeResultToClip(state: ComposeSucceeded, placement: { clipId: string; startBeat: number }): StudioMidiClip {
+  const lengthBeats = roundBeat(Math.min(STUDIO_MAX_BEAT, state.lengthBeats))
+  const notes = normalizeNotes(state.notes, lengthBeats).slice(0, STUDIO_MAX_NOTES_PER_CLIP)
+  return defaultMidiClip({ id: placement.clipId, startBeat: roundBeat(Math.max(0, placement.startBeat)), lengthBeats, notes })
+}
+
+// ---------------------------------------------------------------------------
+// v2 · analyze: peticion y propuestas (marcas, datos de la sesion)
+// ---------------------------------------------------------------------------
+
+export function analyzeRequestForAsset(asset: StudioAsset): AnalyzeJobRequest {
+  return { kind: 'analyze', assetId: asset.id, durationS: Math.min(STUDIO_MAX_SESSION_SECONDS, asset.durationS) }
+}
+
+/** Donde esta, en la sesion, el audio analizado (el clip que el usuario eligio). */
+export interface AnalysisPlacement {
+  /** Posicion del clip en la sesion. */
+  clipStartS: number
+  /** Inicio de la ventana del clip dentro del audio. */
+  clipOffsetS: number
+  /** Largo de la ventana; lo que cae fuera no se propone. null = todo el audio. */
+  clipLengthS: number | null
+  bpm: number
+}
+
+export function analysisPlacementForClip(session: StudioSession, clip: StudioClip): AnalysisPlacement {
+  return { clipStartS: clip.startS, clipOffsetS: clip.offsetS, clipLengthS: clip.lengthS, bpm: session.bpm }
+}
+
+/** beat = (inicio del clip + tiempo en el audio - offset del clip) * bpm / 60 (STUDIO_V2.md 4.2). */
+export function analysisTimeToBeat(timeS: number, placement: AnalysisPlacement): number {
+  return secondsToBeats(placement.clipStartS + timeS - placement.clipOffsetS, placement.bpm)
+}
+
+/**
+ * Marcas propuestas a partir del analisis: las que caen dentro de la ventana del clip y de la
+ * sesion (0..1200 s), en beats redondeados, ordenadas por beat e id, hasta 256.
+ */
+export function analysisToMarkers(analysis: StudioAnalysis, placement: AnalysisPlacement, newId: () => string = () => newStudioId('mk')): StudioMarker[] {
+  const out: StudioMarker[] = []
+  for (const m of analysis.markers) {
+    if (out.length >= STUDIO_MAX_MARKERS) break
+    const inClip = m.timeS - placement.clipOffsetS
+    if (inClip < -STUDIO_TIME_EPSILON_S) continue
+    if (placement.clipLengthS !== null && inClip > placement.clipLengthS + STUDIO_TIME_EPSILON_S) continue
+    const seconds = placement.clipStartS + Math.max(0, inClip)
+    if (seconds > STUDIO_MAX_SESSION_SECONDS + STUDIO_TIME_EPSILON_S) continue
+    const beat = roundBeat(Math.min(STUDIO_MAX_BEAT, secondsToBeats(seconds, placement.bpm)))
+    out.push({ id: newId(), beat, label: m.label.slice(0, STUDIO_MAX_MARKER_LABEL), kind: m.kind })
+  }
+  return out.sort((a, b) => a.beat - b.beat || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+}
+
+/**
+ * Datos de la sesion que el analisis propone cambiar (solo los que difieren). La interfaz ofrece
+ * cada uno como un paso de deshacer aparte (sessionOps.updateSessionMeta).
+ */
+/**
+ * Marcas del analisis ya agregadas, vueltas a ubicar en beats con un tempo nuevo. Las marcas viven
+ * en beats, pero las del analisis senalan instantes del AUDIO, que no se mueve al cambiar el tempo:
+ * si se aplica el tempo del analisis despues de las marcas, cada una se recalcula desde sus
+ * segundos para que el coro siga cayendo donde esta. Las marcas sin entrada en el mapa no cambian.
+ */
+export function rebeatMarkers(markers: readonly StudioMarker[], secondsById: ReadonlyMap<string, number>, bpm: number): StudioMarker[] {
+  return markers.map((m) => {
+    const seconds = secondsById.get(m.id)
+    return seconds === undefined ? m : { ...m, beat: roundBeat(Math.min(STUDIO_MAX_BEAT, secondsToBeats(seconds, bpm))) }
+  })
+}
+
+export function analysisSessionPatch(session: StudioSession, analysis: StudioAnalysis): SessionMetaPatch {
+  const patch: SessionMetaPatch = {}
+  if (analysis.bpm !== null) {
+    const bpm = Math.round(Math.min(STUDIO_BPM_MAX, Math.max(STUDIO_BPM_MIN, analysis.bpm)) * 100) / 100
+    if (bpm !== session.bpm) patch.bpm = bpm
+  }
+  if (analysis.key !== null && analysis.key !== session.key) patch.key = analysis.key
+  if (analysis.beatsPerBar !== session.beatsPerBar) patch.beatsPerBar = analysis.beatsPerBar
+  return patch
+}
+
+// ---------------------------------------------------------------------------
+// v2 · chat: resumen de la sesion y conversacion
+// ---------------------------------------------------------------------------
+
+/** Lo que la vista sabe y el documento no: cabezal y seleccion. */
+export interface ChatView {
+  playheadBeat: number
+  selection: { trackId: string | null; clipIds: readonly string[]; context: CommandContext }
+}
+
+function distanceTo(point: number, start: number, end: number): number {
+  return point < start ? start - point : point > end ? point - end : 0
+}
+
+/** Los `max` elementos mas cercanos al cabezal, devueltos en su orden original. */
+function nearest<T>(items: readonly T[], max: number, distance: (item: T) => number): T[] {
+  if (items.length <= max) return [...items]
+  const ranked = items.map((item, index) => ({ item, index, d: distance(item) })).sort((a, b) => a.d - b.d || a.index - b.index)
+  return ranked
+    .slice(0, max)
+    .sort((a, b) => a.index - b.index)
+    .map((r) => r.item)
+}
+
+function trackSummary(track: StudioTrack, playheadBeat: number, bpm: number, maxClips: number): StudioTrackSummary {
+  const playheadS = beatsToSeconds(playheadBeat, bpm)
+  const instrument = track.instrument
+    ? {
+        type: track.instrument.type,
+        preset: track.instrument.type === 'synth' || track.instrument.type === 'drums' ? track.instrument.preset : null,
+        pluginId: track.instrument.type === 'wam' ? track.instrument.pluginId : null,
+      }
+    : null
+  const clips = nearest(track.clips, maxClips, (c) => distanceTo(playheadS, c.startS, c.startS + c.lengthS)).map((c) => ({
+    id: c.id,
+    startS: c.startS,
+    lengthS: c.lengthS,
+    active: c.active,
+  }))
+  const midiClips = nearest(track.midiClips, maxClips, (c) => distanceTo(playheadBeat, c.startBeat, c.startBeat + c.lengthBeats)).map((c) => {
+    let pitchMin: number | null = null
+    let pitchMax: number | null = null
+    for (const n of c.notes) {
+      if (pitchMin === null || n.pitch < pitchMin) pitchMin = n.pitch
+      if (pitchMax === null || n.pitch > pitchMax) pitchMax = n.pitch
+    }
+    return { id: c.id, startBeat: c.startBeat, lengthBeats: c.lengthBeats, loop: c.loop, noteCount: c.notes.length, pitchMin, pitchMax }
+  })
+  return {
+    id: track.id,
+    kind: track.kind,
+    name: track.name,
+    role: track.role,
+    volumeDb: track.volumeDb,
+    pan: track.pan,
+    mute: track.mute,
+    solo: track.solo,
+    reverbSendDb: track.reverbSendDb,
+    fx: track.fx,
+    instrument,
+    clips,
+    midiClips,
+  }
+}
+
+/** Resumen de la sesion para el asistente (STUDIO_V2.md 4.3.2): nunca audio ni notas. */
+export function buildSessionSummary(session: StudioSession, view: ChatView, maxClipsPerTrack = CHAT_SUMMARY_MAX_CLIPS): StudioSessionSummary {
+  const playheadBeat = Number.isFinite(view.playheadBeat) ? Math.max(0, view.playheadBeat) : 0
+  const max = Math.max(0, Math.min(CHAT_SUMMARY_MAX_CLIPS, Math.floor(maxClipsPerTrack)))
+  return {
+    title: session.title,
+    bpm: session.bpm,
+    beatsPerBar: session.beatsPerBar,
+    key: session.key,
+    lengthS: sessionEndSeconds(session),
+    playheadBeat,
+    selection: {
+      trackId: view.selection.trackId,
+      clipIds: view.selection.clipIds.slice(0, CHAT_SUMMARY_MAX_CLIPS),
+      context: view.selection.context,
+    },
+    tracks: session.tracks.slice(0, STUDIO_MAX_TRACKS).map((t) => trackSummary(t, playheadBeat, session.bpm, max)),
+    markers: (session.markers ?? []).slice(0, STUDIO_MAX_MARKERS),
+    master: { volumeDb: session.master.volumeDb, fx: session.master.fx, reverb: session.master.reverb },
+  }
+}
+
+export function sessionSummaryBytes(summary: StudioSessionSummary): number {
+  return utf8Length(JSON.stringify(sessionSummaryToWire(summary)))
+}
+
+/**
+ * Resumen que cabe en 32 KB: si no cabe con 64 clips por pista, baja a 32, 16, 8, 4 y 0 (los mas
+ * cercanos al cabezal se conservan). Si ni sin clips cabe, devuelve ese ultimo (chatRequestProblem
+ * lo informa).
+ */
+export function fitSessionSummary(session: StudioSession, view: ChatView): StudioSessionSummary {
+  let summary = buildSessionSummary(session, view, CHAT_SUMMARY_MAX_CLIPS)
+  for (const max of [32, 16, 8, 4, 0]) {
+    if (sessionSummaryBytes(summary) <= CHAT_SUMMARY_MAX_BYTES) return summary
+    summary = buildSessionSummary(session, view, max)
+  }
+  return summary
+}
+
+/**
+ * 'none' despues de 8 vueltas seguidas con herramientas sin un mensaje del usuario (STUDIO_V2.md
+ * 4.3.4): el modelo solo puede responder texto y el bucle se cierra.
+ */
+export function chatToolMode(messages: readonly StudioChatMessage[]): 'auto' | 'none' {
+  let rounds = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role === 'user') break
+    if (m.role === 'model' && m.toolCalls.length > 0) rounds++
+  }
+  return rounds >= CHAT_MAX_TOOL_ROUNDS ? 'none' : 'auto'
+}
+
+export function appendUserMessage(messages: readonly StudioChatMessage[], text: string): StudioChatMessage[] {
+  return [...messages, { role: 'user', text: text.trim().slice(0, CHAT_MAX_USER_TEXT) }]
+}
+
+type ChatSucceeded = Extract<StudioJobStateV2, { status: 'SUCCEEDED'; kind: 'chat' }>
+
+/**
+ * Agrega la respuesta del asistente tal como llego (las llamadas, con su `signature`, intactas).
+ * Solo el texto se corta en 8000 caracteres para que la conversacion siga siendo valida.
+ */
+export function appendModelReply(messages: readonly StudioChatMessage[], state: ChatSucceeded): StudioChatMessage[] {
+  const text = state.reply === null ? null : state.reply.slice(0, CHAT_MAX_MODEL_TEXT)
+  return [...messages, { role: 'model', text, toolCalls: state.toolCalls }]
+}
+
+export function appendToolResults(messages: readonly StudioChatMessage[], results: readonly StudioChatToolResult[]): StudioChatMessage[] {
+  return [...messages, { role: 'tool', toolResults: [...results] }]
+}
+
+/**
+ * Recorta la conversacion por el principio para que quepa: a lo sumo 40 mensajes y, si se da
+ * `fits`, lo que esa funcion acepte. Solo corta en el inicio de un mensaje del usuario, asi la
+ * conversacion sigue empezando por 'user' y ningun par llamada-resultado queda partido. Si ni el
+ * ultimo turno del usuario cabe, devuelve ese ultimo turno.
+ */
+export function trimChatMessages(messages: readonly StudioChatMessage[], fits?: (candidate: readonly StudioChatMessage[]) => boolean): StudioChatMessage[] {
+  const starts: number[] = []
+  for (let i = 0; i < messages.length; i++) if (messages[i].role === 'user') starts.push(i)
+  if (starts.length === 0) return [...messages]
+  for (const start of starts) {
+    const candidate = messages.slice(start)
+    if (candidate.length <= CHAT_MAX_MESSAGES && (!fits || fits(candidate))) return candidate
+  }
+  return messages.slice(starts[starts.length - 1])
+}
+
+/**
+ * Peticion chat lista para runJobV2: la conversacion recortada a 40 mensajes y a 192 KB de
+ * cuerpo, el resumen de la sesion y el tool_mode que toca.
+ */
+export function chatRequestForSession(messages: readonly StudioChatMessage[], summary: StudioSessionSummary): ChatJobRequest {
+  const toolMode = chatToolMode(messages)
+  const fits = (candidate: readonly StudioChatMessage[]) =>
+    jobRequestV2Bytes({ kind: 'chat', messages: [...candidate], sessionSummary: summary, toolMode }) <= STUDIO_CHAT_BODY_MAX_BYTES
+  return { kind: 'chat', messages: trimChatMessages(messages, fits), sessionSummary: summary, toolMode }
 }

@@ -1,34 +1,52 @@
-// Trabajos de IA del Estudio (STUDIO_V1.md, seccion 6): master y separate con Music AI, generate
-// con Lyria (Suno responde 501) y assist con un modelo de lenguaje. Un trabajo nunca modifica la
-// sesion: deja audios en assets/ o devuelve sugerencias.
+// Trabajos de IA del Estudio (STUDIO_V1.md, seccion 6, y STUDIO_V2.md, seccion 4): master y
+// separate con Music AI, generate con Lyria (Suno responde 501), assist con un modelo de lenguaje
+// y, desde v2, compose y chat por el adaptador de texto (URiT IA o Gemini directo) y analyze con
+// Music AI. Un trabajo nunca modifica la sesion: deja audios en assets/ o devuelve propuestas
+// (sugerencias, notas, un analisis o llamadas a herramientas) que el Hub muestra al usuario.
 //
-// master y separate son asincronos: `POST` sube el audio a Music AI y lanza el workflow; cada
-// `GET` consulta el trabajo y, cuando termina, copia UN audio a R2 (patron de copyNextStem en
-// index.ts), para que ninguna peticion dure mas de unos segundos.
-// generate y assist son sincronos: `POST` espera al proveedor y deja el trabajo ya terminado; el
-// primer `GET` devuelve SUCCEEDED o FAILED. El limite de ese camino esta en providers/lyria.ts.
+// master, separate y analyze son asincronos: `POST` sube el audio a Music AI y lanza el workflow;
+// cada `GET` consulta el trabajo y, cuando termina, copia UN audio a R2 (patron de copyNextStem en
+// index.ts) o, en analyze, lee las salidas JSON y arma el analisis, para que ninguna peticion dure
+// mas de unos segundos.
+// generate, assist, compose y chat son sincronos: `POST` espera al proveedor y deja el trabajo ya
+// terminado; el primer `GET` devuelve SUCCEEDED o FAILED. La espera maxima de ese camino esta en
+// providers/lyria.ts (90 s) y providers/urit.ts (75 s).
+//
+// generate con Lyria pasa por URiT IA (POST /v1/music) desde el 2026-11-19: ya no usa la clave de
+// la Gemini API directa.
+//
+// Proveedor de texto de compose y chat: la misma variable ASSIST_PROVIDER que assist (decision de
+// STUDIO_V2.md 4, que no agrega una variable nueva): `urit` por defecto, `gemini` directo como
+// alternativa; con `anthropic` responden 503 provider_unavailable.
 //
 //
 // Gasto: el costo se RESERVA antes de llamar al proveedor (registro del trabajo en STARTED y
 // entrada en los contadores de la banda y global, con escritura condicional). Si el proveedor
 // rechaza la peticion (502) la reserva se revierte. Asi un trabajo cobrado nunca queda sin
-// registro, y dos trabajos simultaneos no pasan los dos el tope.
+// registro, y dos trabajos simultaneos no pasan los dos el tope. Cuando el proveedor informa el
+// costo real (URiT IA: usage.estimated_usd), la entrada se ajusta a ese valor (settle).
 
-import { ApiError, STEM_OUTPUTS, json, musicAi } from './index.ts';
+import { ApiError, STEM_OUTPUTS, TransientOutputError, json, musicAi, readMusicAiOutputs } from './index.ts';
+import type { MusicAiResult } from './analysis.ts';
 import { anthropic } from './providers/anthropic.ts';
-import { gemini } from './providers/gemini.ts';
-import { urit } from './providers/urit.ts';
-import { detectAudioExt, lyria } from './providers/lyria.ts';
+import { gemini, geminiText } from './providers/gemini.ts';
+import { urit, uritText } from './providers/urit.ts';
+import { CLIP_SECONDS, detectAudioExt, lyria } from './providers/lyria.ts';
 import { suno } from './providers/suno.ts';
 import { ProviderError } from './providers/types.ts';
-import type { AssistProvider, GenerateProvider, GenerateRequest } from './providers/types.ts';
+import type { AssistProvider, GenerateProvider, GenerateRequest, TextProvider } from './providers/types.ts';
 import { ASSET_CONTENT_TYPES, assertSpender, createOnly, readLimited } from './studio.ts';
 import type { StudioContext } from './studio.ts';
 import {
   ASSET_EXTENSIONS, ASSET_MAX_BYTES, FX_TYPES, ID_RE, MASTER_ID, MAX_PROMPT, MAX_SESSION_SECONDS, MAX_TRACKS,
   MAX_TRACK_NAME, ROLES, VOLUME_DB_MAX, VOLUME_DB_MIN, validateFxChain, validateFxParams,
 } from './studioSession.ts';
-import type { AssetExtension, FxType, SessionFx } from './studioSession.ts';
+import type { AssetExtension, FxType, SessionFx, SessionNote } from './studioSession.ts';
+import {
+  CHAT_BODY_LIMIT, COMPOSE_EMPTY, buildAnalysis, chatCall, classifyToolCall, composeCall, composeDescription,
+  finishChat, normalizeComposeNotes, validateV2JobRequest,
+} from './studioV2.ts';
+import type { ChatToolCall, StudioAnalysis, V2JobRequest } from './studioV2.ts';
 import type { Env } from './types.ts';
 
 const JOB_BODY_LIMIT = 64 * 1024;
@@ -54,13 +72,23 @@ const HEADER_PROBE_BYTES = 64 * 1024;
  * Se cambian con las variables STUDIO_RATE_* sin tocar el codigo.
  *   master:   USD 0,20 por minuto.
  *   separate: USD 0,07 por minuto y stem, con 7 stems: USD 0,49, redondeado a 0,50 por minuto.
- *   lyria:    USD 0,06 por cada 30 segundos pedidos.
+ *   lyria:    por cancion, como cobra URiT IA (CONTRACT_V1.md 4A): USD 0,04 el clip de 30 s
+ *             (lyria-3-clip-preview) y USD 0,08 la cancion (lyria-3.5), sea cual sea su largo.
  *   assist:   USD 0,05 por consulta (unos 3 000 tokens de entrada y 4 000 de salida en un modelo
  *             de USD 2 / USD 10 por millon).
+ *   compose:  USD 0,05 por consulta.
+ *   chat:     USD 0,03 por vuelta mas USD 0,015 por cada 32 KB completos del cuerpo (conversacion y
+ *             estado): una conversacion larga cuesta mas tokens de entrada (STUDIO_V2.md 4.4).
+ *   analyze:  USD 0,80 por minuto: el workflow por defecto (stems-workflow-releven-bandait) tambien
+ *             separa stems, asi que se cobra como separate (0,50) mas el analisis (0,30). Con un
+ *             workflow solo de analisis (MUSICAI_ANALYZE_WORKFLOW) conviene bajar la tarifa.
  */
-export const DEFAULT_RATES = { masterPerMin: 0.2, separatePerMin: 0.5, lyriaPer30s: 0.06, assist: 0.05 };
+export const DEFAULT_RATES = {
+  masterPerMin: 0.2, separatePerMin: 0.5, lyriaClip: 0.04, lyriaSong: 0.08, assist: 0.05, compose: 0.05, analyzePerMin: 0.8,
+  chat: 0.03, chatPer32Kb: 0.015,
+};
 
-export type JobKind = 'master' | 'separate' | 'generate' | 'assist';
+export type JobKind = 'master' | 'separate' | 'generate' | 'assist' | 'compose' | 'analyze' | 'chat';
 
 export interface JobAsset {
   id: string; file: string; kind: 'master' | 'stem' | 'generated'; label: string; role: string | null; size: number;
@@ -86,6 +114,12 @@ interface JobRecord {
   /** Salidas ya copiadas a assets/. */
   copied?: Record<string, JobAsset>;
   assets?: JobAsset[]; suggestions?: Suggestion[]; error?: string;
+  /** compose (STUDIO_V2.md 4.1). */
+  notes?: SessionNote[]; length_beats?: number; description?: string;
+  /** analyze (STUDIO_V2.md 4.2). */
+  analysis?: StudioAnalysis;
+  /** chat (STUDIO_V2.md 4.3.4). */
+  reply?: string | null; tool_calls?: ChatToolCall[];
 }
 
 interface UsageEntry {
@@ -106,10 +140,15 @@ type JobRequest =
   | { kind: 'master'; asset_id: string; duration_s: number; target_lufs: number }
   | { kind: 'separate'; asset_id: string; duration_s: number }
   | ({ kind: 'generate'; provider: 'lyria' | 'suno' } & GenerateRequest)
-  | { kind: 'assist'; metrics: Metrics };
+  | { kind: 'assist'; metrics: Metrics }
+  | V2JobRequest;
 
 const GENERATE_PROVIDERS: Record<'lyria' | 'suno', GenerateProvider> = { lyria, suno };
 const ASSIST_PROVIDERS: Record<string, AssistProvider> = { anthropic, gemini, urit };
+/** compose y chat: sin anthropic (STUDIO_V2.md 4). */
+const TEXT_PROVIDERS: Record<string, TextProvider> = { gemini: geminiText, urit: uritText };
+/** Workflow de analisis por defecto: el mismo de `POST .../songs/{song}/analysis` (index.ts). */
+const DEFAULT_ANALYSIS_WORKFLOW = 'stems-workflow-releven-bandait';
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
@@ -220,7 +259,8 @@ export function validateJobRequest(raw: unknown): JobRequest {
     const o = obj(raw, ['kind', 'metrics']);
     return { kind, metrics: validateMetrics(o.metrics) };
   }
-  bad();
+  // compose, analyze y chat (STUDIO_V2.md 4).
+  return validateV2JobRequest(raw as Raw) ?? bad();
 }
 
 // --------------------------------------------------------------------------- sugerencias
@@ -290,7 +330,23 @@ export function estimateCost(env: Env, request: JobRequest): { cost: number; sec
     return { cost: round4((request.duration_s / 60) * rate(env.STUDIO_RATE_SEPARATE_USD_PER_MIN, DEFAULT_RATES.separatePerMin)), seconds: request.duration_s };
   }
   if (request.kind === 'generate') {
-    return { cost: round4(Math.ceil(request.duration_s / 30) * rate(env.STUDIO_RATE_LYRIA_USD_PER_30S, DEFAULT_RATES.lyriaPer30s)), seconds: request.duration_s };
+    // Una cancion por pedido: el clip corto (hasta 30 s, y siempre dura 30 s) o la cancion larga.
+    const perSong = request.duration_s <= CLIP_SECONDS
+      ? rate(env.STUDIO_RATE_LYRIA_CLIP_USD, DEFAULT_RATES.lyriaClip)
+      : rate(env.STUDIO_RATE_LYRIA_SONG_USD, DEFAULT_RATES.lyriaSong);
+    return { cost: round4(perSong), seconds: request.duration_s };
+  }
+  if (request.kind === 'analyze') {
+    return { cost: round4((request.duration_s / 60) * rate(env.STUDIO_RATE_ANALYZE_USD_PER_MIN, DEFAULT_RATES.analyzePerMin)), seconds: request.duration_s };
+  }
+  if (request.kind === 'compose') return { cost: round4(rate(env.STUDIO_RATE_COMPOSE_USD, DEFAULT_RATES.compose)), seconds: 0 };
+  if (request.kind === 'chat') {
+    const bytes = new TextEncoder().encode(JSON.stringify([request.messages, request.session_summary])).byteLength;
+    const blocks = Math.floor(bytes / 32768);
+    return {
+      cost: round4(rate(env.STUDIO_RATE_CHAT_USD, DEFAULT_RATES.chat) + blocks * rate(env.STUDIO_RATE_CHAT_USD_PER_32KB, DEFAULT_RATES.chatPer32Kb)),
+      seconds: 0,
+    };
   }
   return { cost: round4(rate(env.STUDIO_RATE_ASSIST_USD, DEFAULT_RATES.assist)), seconds: 0 };
 }
@@ -376,6 +432,20 @@ function reserveUsage(ctx: StudioContext, slot: UsageSlot, entry: UsageEntry): P
   });
 }
 
+/**
+ * Ajusta la entrada de un trabajo al costo real que informo el proveedor (puede subir o bajar; si
+ * sube, el total puede quedar por encima del tope: es gasto ya hecho). Sin entrada no escribe.
+ */
+async function settleUsage(ctx: StudioContext, slot: UsageSlot, jobId: string, cost: number): Promise<void> {
+  await updateUsage(ctx, slot, (file) => {
+    const entry = file.entries.find((e) => e.job_id === jobId);
+    if (!entry || Math.abs(entry.cost_usd - cost) < 1e-9) return false;
+    file.total_usd = Math.max(0, round4(file.total_usd - entry.cost_usd + cost));
+    entry.cost_usd = cost;
+    return true;
+  });
+}
+
 /** Revierte la reserva de un trabajo que el proveedor no acepto. */
 async function releaseUsage(ctx: StudioContext, slot: UsageSlot, jobId: string): Promise<void> {
   await updateUsage(ctx, slot, (file) => {
@@ -450,31 +520,52 @@ function providerFailure(err: unknown): never {
   throw err;
 }
 
+function textProviderName(env: Env): string {
+  return (env.ASSIST_PROVIDER || '').trim().toLowerCase() || 'urit';
+}
+
 function assistProvider(env: Env): AssistProvider {
-  const name = (env.ASSIST_PROVIDER || '').trim().toLowerCase() || 'urit';
+  const name = textProviderName(env);
   const provider = ASSIST_PROVIDERS[name];
   if (!provider) throw new ProviderError(503, 'provider_unavailable', `ASSIST_PROVIDER desconocido: ${name.slice(0, 40)}`);
   return provider;
 }
 
-function musicAiWorkflow(env: Env, kind: 'master' | 'separate'): string {
+/** Adaptador de texto de compose y chat. Con `anthropic` (solo assist) o un nombre desconocido: 503. */
+function textProvider(env: Env): TextProvider {
+  const name = textProviderName(env);
+  const provider = TEXT_PROVIDERS[name];
+  if (!provider) throw new ProviderError(503, 'provider_unavailable', `ASSIST_PROVIDER sin compose ni chat: ${name.slice(0, 40)}`);
+  return provider;
+}
+
+type MusicAiKind = 'master' | 'separate' | 'analyze';
+
+function musicAiWorkflow(env: Env, kind: MusicAiKind): string {
   if (!(env.MUSICAI_API_KEY || '').trim()) throw new ProviderError(503, 'provider_unavailable', 'falta MUSICAI_API_KEY');
-  // separate usa el mismo workflow y el mismo valor por defecto que `POST .../analysis?separate=1`.
+  // separate usa el mismo workflow y el mismo valor por defecto que `POST .../analysis?separate=1`;
+  // analyze, el del analisis de canciones (`POST .../analysis`).
+  if (kind === 'analyze') return (env.MUSICAI_ANALYZE_WORKFLOW || '').trim() || (env.MUSICAI_WORKFLOW || '').trim() || DEFAULT_ANALYSIS_WORKFLOW;
   const workflow = kind === 'master' ? (env.MUSICAI_MASTER_WORKFLOW || '').trim() : (env.MUSICAI_SPLIT_WORKFLOW || '').trim() || 'splited_stems_bandait';
   if (!workflow) throw new ProviderError(503, 'provider_unavailable', 'falta MUSICAI_MASTER_WORKFLOW');
   return workflow;
 }
 
+function isMusicAiKind(kind: JobKind): kind is MusicAiKind {
+  return kind === 'master' || kind === 'separate' || kind === 'analyze';
+}
+
 /** Lanza ProviderError si el trabajo no se puede lanzar con la configuracion actual. */
 function assertAvailable(env: Env, request: JobRequest): void {
-  if (request.kind === 'master' || request.kind === 'separate') musicAiWorkflow(env, request.kind);
+  if (isMusicAiKind(request.kind)) musicAiWorkflow(env, request.kind);
   else if (request.kind === 'generate') GENERATE_PROVIDERS[request.provider].assertAvailable(env);
+  else if (request.kind === 'compose' || request.kind === 'chat') textProvider(env).assertAvailable(env);
   else assistProvider(env).assertAvailable(env);
 }
 
 function providerName(env: Env, request: JobRequest): string {
   if (request.kind === 'generate') return request.provider;
-  if (request.kind === 'assist') return (env.ASSIST_PROVIDER || '').trim().toLowerCase() || 'urit';
+  if (request.kind === 'assist' || request.kind === 'compose' || request.kind === 'chat') return textProviderName(env);
   return 'musicai';
 }
 
@@ -499,7 +590,7 @@ function fixedLength(body: ReadableStream, length: number): ReadableStream {
 
 /** Sube un audio de assets/ a Music AI y lanza el workflow. Devuelve el id del trabajo en Music AI. */
 async function launchMusicAi(
-  ctx: StudioContext, kind: 'master' | 'separate', file: string, workflow: string, params: Record<string, unknown>,
+  ctx: StudioContext, kind: MusicAiKind, file: string, workflow: string, params: Record<string, unknown>,
 ): Promise<string> {
   const { env, fetchFn } = ctx;
   const upload = await musicAi(env, fetchFn, '/upload', { method: 'GET' }) as { uploadUrl?: string; downloadUrl?: string };
@@ -549,7 +640,8 @@ async function saveJob(ctx: StudioContext, record: JobRecord): Promise<void> {
  */
 export async function startJob(req: Request, ctx: StudioContext, estimate: boolean, clientJobId: string | null = null): Promise<Response> {
   if (clientJobId !== null && (!ID_RE.test(clientJobId) || !clientJobId.startsWith('job_'))) bad();
-  const text = await readLimited(req, JOB_BODY_LIMIT);
+  // El cuerpo se lee hasta el tope de chat (192 KB); los demas trabajos siguen en 64 KB.
+  const text = await readLimited(req, CHAT_BODY_LIMIT);
   if (text === null) bad();
   let raw: unknown;
   try {
@@ -557,6 +649,7 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
   } catch {
     bad();
   }
+  if ((raw as { kind?: unknown } | null)?.kind !== 'chat' && new TextEncoder().encode(text).byteLength > JOB_BODY_LIMIT) bad();
   const parsed = validateJobRequest(raw);
   const { env } = ctx;
   assertSpender(env, ctx.user);
@@ -565,10 +658,10 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
   } catch (err) {
     providerFailure(err);
   }
-  const input = parsed.kind === 'master' || parsed.kind === 'separate' ? await findAsset(ctx, parsed.asset_id) : null;
-  // master y separate se cobran por la duracion real del audio en R2, no por la que declara el
-  // cliente: se toma la mayor de las dos (un cliente que declara de menos no baja el costo).
-  const request: JobRequest = input && (parsed.kind === 'master' || parsed.kind === 'separate')
+  const input = isMusicAiKind(parsed.kind) ? await findAsset(ctx, (parsed as { asset_id: string }).asset_id) : null;
+  // master, separate y analyze se cobran por la duracion real del audio en R2, no por la que
+  // declara el cliente: se toma la mayor de las dos (un cliente que declara de menos no baja el costo).
+  const request: JobRequest = input && (parsed.kind === 'master' || parsed.kind === 'separate' || parsed.kind === 'analyze')
     ? { ...parsed, duration_s: Math.max(parsed.duration_s, await assetSeconds(ctx, input)) }
     : parsed;
 
@@ -631,7 +724,17 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
   //    NO VERIFICADO: cuanto tiempo sostiene Cloudflare una promesa de waitUntil despues de que el
   //    cliente se va (la referencia de memoria es 30 s). Si no alcanza, el registro queda en
   //    STARTED y el GET lo da por interrumpido pasado PENDING_GRACE_MS, con el costo anotado.
-  const work = runProvider(ctx, request, record, input, release);
+  // Costo real informado por el proveedor: ajusta los dos contadores y el registro. Un fallo al
+  // ajustar no rompe el trabajo (queda la estimacion, que ya esta anotada).
+  const settle = async (actual: number | null | undefined) => {
+    if (actual === null || actual === undefined || !Number.isFinite(actual) || actual < 0) return;
+    const real = round4(actual);
+    if (Math.abs(real - record.cost_usd) < 1e-9) return;
+    await settleUsage(ctx, slots.band, jobId, real).catch(() => {});
+    await settleUsage(ctx, slots.global, jobId, real).catch(() => {});
+    record.cost_usd = real;
+  };
+  const work = runProvider(ctx, request, record, input, release, settle);
   ctx.deps.waitUntil?.(work.catch(() => {}));
   await work;
   // El contrato responde siempre STARTED: el estado real (tambien el de generate y assist, que ya
@@ -642,12 +745,51 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
 /** Llama al proveedor y guarda el resultado. Si el proveedor rechaza, revierte la reserva. */
 async function runProvider(
   ctx: StudioContext, request: JobRequest, record: JobRecord, input: { file: string; size: number } | null,
-  release: () => Promise<void>,
+  release: () => Promise<void>, settle: (actual: number | null | undefined) => Promise<void>,
 ): Promise<void> {
   const { env } = ctx;
   const jobId = record.job_id;
   try {
-    if (request.kind === 'master' || request.kind === 'separate') {
+    if (request.kind === 'analyze') {
+      // El analisis no deja audios: el resultado se arma en el GET con las salidas JSON.
+      record.external_id = await launchMusicAi(ctx, 'analyze', input!.file, musicAiWorkflow(env, 'analyze'), {});
+    } else if (request.kind === 'compose') {
+      const result = await textProvider(env).json(env, ctx.fetchFn, composeCall(request));
+      await settle(result.costUsd);
+      const lengthBeats = request.length_bars * request.beats_per_bar;
+      // Desde aqui el modelo ya respondio: un problema es un trabajo FAILED y el costo queda.
+      if (result.failure !== null) {
+        record.status = 'FAILED';
+        record.error = result.failure;
+      } else {
+        const out = result.value as { notes?: unknown; description?: unknown };
+        const notes = normalizeComposeNotes(out.notes, lengthBeats, request.role);
+        if (!notes.length) {
+          record.status = 'FAILED';
+          record.error = COMPOSE_EMPTY;
+        } else {
+          record.status = 'SUCCEEDED';
+          record.notes = notes;
+          record.length_beats = lengthBeats;
+          record.description = composeDescription(out.description);
+        }
+      }
+    } else if (request.kind === 'chat') {
+      const result = await textProvider(env).chat(env, ctx.fetchFn, chatCall(request));
+      await settle(result.costUsd);
+      const done = result.failure !== null ? { failure: result.failure } : finishChat(result.value, request.tool_mode);
+      if ('failure' in done) {
+        record.status = 'FAILED';
+        record.error = done.failure;
+      } else {
+        record.status = 'SUCCEEDED';
+        record.reply = done.reply;
+        record.tool_calls = done.tool_calls;
+        // Solo se cuentan: el Hub responde `failed` a estas llamadas (STUDIO_V2.md 4.3.4).
+        const odd = done.tool_calls.filter((c) => classifyToolCall(c) !== 'ok').length;
+        if (odd) console.warn(`studio chat: ${odd} llamada(s) fuera de la lista o con argumentos invalidos`);
+      }
+    } else if (request.kind === 'master' || request.kind === 'separate') {
       const params: Record<string, unknown> = {};
       if (request.kind === 'master') {
         // El nombre del parametro de volumen depende del workflow armado en el panel de Music AI:
@@ -658,8 +800,22 @@ async function runProvider(
       }
       record.external_id = await launchMusicAi(ctx, request.kind, input!.file, musicAiWorkflow(env, request.kind), params);
     } else if (request.kind === 'generate') {
-      const audio = await GENERATE_PROVIDERS[request.provider].generate(env, ctx.fetchFn, request);
-      if (audio.bytes.byteLength > ASSET_MAX_BYTES) throw new ProviderError(502, 'provider_failed', 'audio generado de mas de 200 MB');
+      const generated = await GENERATE_PROVIDERS[request.provider].generate(env, ctx.fetchFn, request);
+      // Costo real (URiT: usage.estimated_usd; 0 si no cobro: bloqueo, sin audio, cuota).
+      await settle(generated.costUsd);
+      if (generated.failure !== null) {
+        record.status = 'FAILED';
+        record.error = generated.failure;
+        await saveJob(ctx, record);
+        return;
+      }
+      const audio = generated.audio;
+      if (audio.bytes.byteLength > ASSET_MAX_BYTES) {
+        record.status = 'FAILED';
+        record.error = 'El audio generado pesa más de 200 MB y no se guardó.';
+        await saveJob(ctx, record);
+        return;
+      }
       const id = ctx.deps.newId('ast');
       const file = `${id}.${audio.ext}`;
       const stored = await env.STEMS.put(`${ctx.sessionPrefix}assets/${file}`, audio.bytes, { httpMetadata: { contentType: ASSET_CONTENT_TYPES[audio.ext] } });
@@ -853,6 +1009,12 @@ function finalResponse(record: JobRecord): Response {
   const base = { job_id: record.job_id, kind: record.kind, status: record.status };
   if (record.status === 'FAILED') return json(200, { ...base, error: record.error || 'El trabajo falló.' });
   if (record.kind === 'assist') return json(200, { ...base, suggestions: record.suggestions ?? [], cost_usd: record.cost_usd });
+  // STUDIO_V2.md 4.5.
+  if (record.kind === 'compose') {
+    return json(200, { ...base, notes: record.notes ?? [], length_beats: record.length_beats, description: record.description ?? '', cost_usd: record.cost_usd });
+  }
+  if (record.kind === 'analyze') return json(200, { ...base, analysis: record.analysis, cost_usd: record.cost_usd });
+  if (record.kind === 'chat') return json(200, { ...base, reply: record.reply ?? null, tool_calls: record.tool_calls ?? [], cost_usd: record.cost_usd });
   return json(200, { ...base, assets: record.assets ?? [], cost_usd: record.cost_usd });
 }
 
@@ -907,6 +1069,31 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
   if (job.status === 'FAILED') return failed(String(job.error?.message || 'Music AI no pudo procesar el audio.'));
   // Cualquier estado intermedio del proveedor (en cola, procesando) se informa como STARTED.
   if (job.status !== 'SUCCEEDED' || !job.result) return json(200, { ...base, status: 'STARTED' });
+
+  if (record.kind === 'analyze') {
+    // Salidas JSON del workflow (las de audio no se leen ni se copian) -> Analysis de STUDIO_V2.md 4.2.
+    // strict: una salida que no se pudo descargar ahora (red o 5xx) no sella el trabajo, que ya esta
+    // cobrado y cuyo resultado crudo no se guarda: se informa STARTED y el siguiente GET reintenta.
+    let result: Record<string, unknown>;
+    try {
+      result = await readMusicAiOutputs(Object.entries(job.result), ctx.fetchFn, { strict: true });
+    } catch (err) {
+      if (err instanceof TransientOutputError) return json(200, { ...base, status: 'STARTED' });
+      throw err;
+    }
+    let analysis: StudioAnalysis;
+    try {
+      analysis = buildAnalysis(result as MusicAiResult);
+    } catch (err) {
+      // buildAnalysis es defensivo; si aun asi una forma inesperada lo rompe, el trabajo falla con
+      // un texto en vez de responder 500 en cada GET y quedar en STARTED para siempre.
+      console.warn(`studio analyze: analisis ilegible (${err instanceof Error ? err.message.slice(0, 120) : 'error'})`);
+      return failed('Music AI devolvió un análisis que no se pudo leer.');
+    }
+    record.status = 'SUCCEEDED';
+    record.analysis = analysis;
+    return (await save()) ? finalResponse(record) : winner();
+  }
 
   let outputs: [string, string][];
   try {

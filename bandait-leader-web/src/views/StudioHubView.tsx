@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ArrowLeft, Check, CloudUpload, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, CloudUpload, Command, Keyboard, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
 import { HubModal } from '../components/HubModal'
 import { StudioDevicePanel } from '../components/studio/StudioDevicePanel'
 import { StudioDeviceProbe } from '../components/studio/StudioDeviceProbe'
+import { StudioCommandPalette } from '../components/studio/StudioCommandPalette'
+import { createStudioCommandRegistry, StudioUiBridge, studioKeymapStorage, type StudioCommandCtx, type StudioRegistry } from '../components/studio/studioCommandHandlers'
 import { StudioExportDialog } from '../components/studio/StudioExportDialog'
+import { StudioShortcuts } from '../components/studio/StudioShortcuts'
 import { StudioInspector } from '../components/studio/StudioInspector'
 import { StudioJobsPanel } from '../components/studio/StudioJobsPanel'
 import { StudioMixer } from '../components/studio/StudioMixer'
@@ -25,7 +28,11 @@ import { cloudBandKey, type CloudTarget } from '../services/stemCloud'
 import { stemCloudTarget } from '../services/stemCloudConfig'
 import { listStemSongs } from '../services/stemStore'
 import { sectionSpans, type SectionSpan } from '../services/stemTiming'
+import { commandShortcuts, displayShortcut, loadKeymap, matchEvent } from '../services/studio/commands'
+import { isComputerKeyboardCode } from '../services/studio/computerKeyboard'
+import { isTextFieldTarget } from '../services/studio/midiInput'
 import { STUDIO_MAX_TITLE } from '../services/studio/session'
+import type { CommandContext, Keymap } from '../services/studio/types'
 import * as studioCloud from '../services/studio/studioCloud'
 import * as studioStore from '../services/studio/studioStore'
 import type { Song } from '../types/hub'
@@ -47,6 +54,19 @@ function useWideScreen(): boolean {
     () => window.matchMedia(WIDE_QUERY).matches,
     () => true
   )
+}
+
+/** "Ctrl" de los atajos: Cmd en macOS (keymap.ts). */
+const PLATFORM: 'mac' | 'other' = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent) ? 'mac' : 'other'
+const KEYBOARD_CTX: StudioCommandCtx = { source: 'keyboard' }
+/** Atajos que, si el comando no aplica aqui, se dejan al navegador. */
+const BROWSER_PASSTHROUGH: ReadonlySet<string> = new Set(['edit.copy', 'edit.cut', 'edit.paste', 'edit.select_all'])
+
+/** Atajo vigente de un comando, para los titulos de los botones. */
+function shortcutLabel(registry: StudioRegistry, keymap: Keymap, id: string): string {
+  const command = registry.get(id)
+  const first = command ? commandShortcuts(command, keymap)[0] : undefined
+  return first ? displayShortcut(first, PLATFORM) : 'sin atajo'
 }
 
 function formatWhen(iso: string): string {
@@ -106,53 +126,83 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
     controller.setSections(sections)
   }, [controller, sections])
 
-  // Atajos de teclado. No se disparan al escribir en un campo ni con la prueba de interfaz abierta.
+  // ---- comandos: un solo registro para el teclado, la paleta y el asistente ----
+  // Lo que el registro lee de la vista va por un puente que se actualiza en un efecto: el
+  // registro se crea una sola vez por controlador.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const midiFileRef = useRef<HTMLInputElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [uiBridge] = useState(() => new StudioUiBridge())
   useEffect(() => {
-    if (probeOpen || exportOpen) return
+    uiBridge.set({
+      recordAllowed: () => recordAllowed,
+      recordHint: () => recordHint,
+      openPalette: () => setPaletteOpen(true),
+      openShortcuts: () => setShortcutsOpen(true),
+      openExport,
+      pickMidiFile: () => midiFileRef.current?.click(),
+    })
+  }, [uiBridge, recordAllowed, recordHint, openExport])
+  const registry = useMemo(() => createStudioCommandRegistry(controller, uiBridge), [controller, uiBridge])
+  const [keymap, setKeymap] = useState<Keymap>(() => loadKeymap(studioKeymapStorage, registry.list()))
+
+  /** Contexto de los atajos: el piano roll si esta abierto, el mezclador si tiene el foco. */
+  const commandContext = useCallback((): CommandContext => {
+    if (controller.snapshot().editor === 'piano_roll') return 'piano_roll'
+    const active = document.activeElement
+    if (active instanceof Element && active.closest('.stu-mixer')) return 'mixer'
+    return 'timeline'
+  }, [controller])
+
+  const runCommand = useCallback(
+    (id: string, source: StudioCommandCtx['source']) => {
+      registry.run(id, { source }).catch((err: unknown) => controller.notify('error', errorText(err, 'No se pudo ejecutar el comando.')))
+    },
+    [registry, controller]
+  )
+
+  // Atajos de teclado (services/studio/keymap.ts). No se disparan al escribir en un campo, con un
+  // dialogo abierto ni con el foco fuera del Estudio.
+  useEffect(() => {
+    if (probeOpen || exportOpen || paletteOpen || shortcutsOpen) return
     const onKey = (event: KeyboardEvent) => {
+      // Ya lo atendio un control propio (lienzo de la linea de tiempo, teclado musical).
+      if (event.defaultPrevented) return
       const target = event.target
-      if (target instanceof HTMLElement) {
-        if (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
-        // En un boton, espacio y Enter son del boton.
-        if ((event.key === ' ' || event.key === 'Enter') && /^(BUTTON|A|SUMMARY)$/.test(target.tagName)) return
+      const root = rootRef.current
+      if (target instanceof Node && target !== document.body && root && !root.contains(target)) return
+      if (target instanceof HTMLElement && target.closest('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) return
+      // Tab y Shift+Tab son siempre del navegador (mover el foco), en cualquier elemento y en el
+      // body: consumirlos dejaba el foco atrapado en los lienzos (WCAG 2.1.2).
+      if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) return
+      // Con el teclado musical encendido, A, S, D... son notas (la clase MIDI ya las consume).
+      const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
+      if (plain && controller.snapshot().midi.keyboard && isComputerKeyboardCode(event.code)) return
+      const inText = isTextFieldTarget(target)
+      if (target instanceof HTMLElement && !inText) {
+        // En un control, espacio, Enter y Tab son del control (Tab sigue moviendo el foco). En un
+        // deslizador, las flechas lo mueven.
+        const control = /^(BUTTON|A|SUMMARY|INPUT)$/.test(target.tagName) || target.getAttribute('role') === 'tab'
+        if (control && (event.key === ' ' || event.key === 'Enter' || event.key === 'Tab')) return
+        if (target.tagName === 'INPUT' && /^(Arrow|Page)|^(Home|End)$/.test(event.key)) return
       }
-      const command = event.ctrlKey || event.metaKey
-      const key = event.key.toLowerCase()
-      // Mientras se graba no se edita: los botones de dividir, duplicar y borrar ya salen
-      // deshabilitados, y sus atajos tampoco deben reprogramar el audio a mitad de la toma.
-      const isRecording = controller.snapshot().recording
-      if (command && !event.altKey) {
-        if (key === 'z' && !event.shiftKey) controller.undo()
-        else if (key === 'y' || (key === 'z' && event.shiftKey)) controller.redo()
-        else if (key === 'd') {
-          if (!isRecording) controller.duplicateSelected()
-        } else if (key === 's') void controller.saveToCloud()
-        else return
-        event.preventDefault()
+      const id = matchEvent(event, commandContext(), inText, registry.list(), keymap, PLATFORM)
+      if (!id) return
+      const command = registry.get(id)
+      if (!command) return
+      if (command.isEnabled && !command.isEnabled(KEYBOARD_CTX)) {
+        // Deshabilitado: copiar, cortar, pegar y seleccionar todo vuelven al navegador; los demas
+        // se consumen igual (Ctrl+D no abre los marcadores a mitad de una toma).
+        if (!BROWSER_PASSTHROUGH.has(id)) event.preventDefault()
         return
       }
-      if (event.altKey) return
-      if (event.key === ' ') {
-        // Mantener la tecla repite el evento: alternaria reproducir y pausar en rafaga.
-        if (!event.repeat) controller.togglePlay()
-      } else if (key === 'r') {
-        // Con repeticion de teclado, la segunda R detendria la toma durante el conteo.
-        if (event.repeat) {
-          event.preventDefault()
-          return
-        }
-        if (recordAllowed) controller.toggleRecord()
-        else controller.notify('warn', recordHint ?? 'La grabación no está disponible aquí.')
-      } else if (key === 's') {
-        if (!isRecording && !event.repeat) controller.splitAtPlayhead()
-      } else if (event.key === 'Delete' || event.key === 'Backspace') {
-        if (!isRecording) controller.deleteSelected()
-      } else return
       event.preventDefault()
+      runCommand(id, 'keyboard')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [controller, probeOpen, exportOpen, recordAllowed, recordHint])
+  }, [controller, registry, keymap, commandContext, runCommand, probeOpen, exportOpen, paletteOpen, shortcutsOpen])
 
   // Cerrar la pestana con una toma en curso la dejaria sin cerrar, y con un guardado pendiente o
   // una subida a la nube en curso se perderia trabajo: el navegador pregunta antes. El estado se
@@ -204,7 +254,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
   const missing = snap.engine.missingAssetIds.length
 
   return (
-    <div className="stu" data-testid="studio-workspace">
+    <div ref={rootRef} className="stu" data-testid="studio-workspace">
       <header className="stu-bar">
         <button type="button" className="stu-btn" data-tone="ghost" onClick={onClose} disabled={recording} aria-label="Volver a la lista de sesiones" data-testid="studio-back">
           <ArrowLeft size={14} />
@@ -249,6 +299,30 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
         >
           <CloudUpload size={14} />
           GUARDAR
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="icon"
+          data-tone="ghost"
+          onClick={() => setPaletteOpen(true)}
+          aria-label="Paleta de comandos"
+          title={`Paleta de comandos (${shortcutLabel(registry, keymap, 'view.command_palette')})`}
+          data-testid="studio-palette-open"
+        >
+          <Command size={14} />
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="icon"
+          data-tone="ghost"
+          onClick={() => setShortcutsOpen(true)}
+          aria-label="Atajos de teclado"
+          title={`Atajos de teclado (${shortcutLabel(registry, keymap, 'view.shortcuts')})`}
+          data-testid="studio-shortcuts-open"
+        >
+          <Keyboard size={14} />
         </button>
         <button type="button" className="stu-btn" data-on={dockOpen} aria-pressed={dockOpen} onClick={() => setDockOpen((value) => !value)} title="Mostrar u ocultar los paneles laterales" data-testid="studio-dock-toggle">
           PANELES
@@ -358,13 +432,45 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
               {dockTab === 'inspector' && <StudioInspector controller={controller} />}
               {/* El panel de IA queda montado al cambiar de pestana, por la misma razon. */}
               <div className="stu-dock-keep" hidden={dockTab !== 'jobs'}>
-                <StudioJobsPanel controller={controller} />
+                <StudioJobsPanel controller={controller} registry={registry} commandContext={commandContext} />
               </div>
             </div>
           </aside>
       </div>
 
       <StudioMixer controller={controller} onEditFx={showInspector} onExport={openExport} />
+
+      <input
+        ref={midiFileRef}
+        type="file"
+        accept=".mid,.midi,audio/midi,audio/x-midi"
+        hidden
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (file) void controller.importMidiFile(file)
+        }}
+        data-testid="studio-midi-file"
+      />
+
+      {paletteOpen && (
+        <StudioCommandPalette
+          registry={registry}
+          keymap={keymap}
+          platform={PLATFORM}
+          ctx={{ source: 'palette' }}
+          onRun={(id) => {
+            setPaletteOpen(false)
+            // Despues de cerrar: el foco ya volvio al Estudio y un dialogo nuevo puede abrirse.
+            setTimeout(() => runCommand(id, 'palette'), 0)
+          }}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+
+      {shortcutsOpen && <StudioShortcuts registry={registry} keymap={keymap} platform={PLATFORM} onChange={setKeymap} onClose={() => setShortcutsOpen(false)} />}
 
       {exportOpen && <StudioExportDialog controller={controller} song={song ? { id: song.id, title: song.title } : null} onClose={() => setExportOpen(false)} />}
 

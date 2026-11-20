@@ -19,16 +19,27 @@
  *
  * Sin region de repeticion el transporte no se detiene al acabar el ultimo clip: sigue hasta los
  * 20 minutos de la sesion, para poder grabar mas alla de lo que ya existe.
+ *
+ * v2, pistas de instrumento: el grafo trae el instrumento de cada pista (graph.buildGraph con lo
+ * que dejo `prepareInstruments`) y cada tramo programa, ademas de los clips de audio, las notas de
+ * los clips MIDI (instruments/schedule.ts) en el mismo instante del reloj; las pistas cuyo
+ * instrumento no esta disponible suenan con su congelado. `previewNote` toca una nota suelta (el
+ * piano roll al dibujar) y `liveNoteOn`/`liveNoteOff` tocan en vivo (teclado MIDI o de
+ * computadora), por la misma cadena de la pista.
  */
 import { StudioClick, clickEventsInWindow, countInSeconds } from './click.ts'
 import { gainToDb, gatedLufs, lufsFromMeanSquare } from './fx.ts'
 import { buildGraph, clipsEqual, prepareGraphContext, scheduleClips, type BuiltStudioGraph } from './graph.ts'
+import { instrumentTailSeconds, midiChangedTrackIds } from './instruments/core.ts'
+import { needsPreparation, prepareInstruments, releaseInstruments } from './instruments/factory.ts'
+import { scheduleMidiClips } from './instruments/schedule.ts'
 import { kWeightingCoefficients, truePeakDb } from './loudness.ts'
-import { STUDIO_MAX_SESSION_SECONDS, STUDIO_VOLUME_DB_MAX, STUDIO_VOLUME_DB_MIN, sessionEndSeconds, type StudioAsset, type StudioSession } from './session.ts'
+import { STUDIO_MAX_SESSION_SECONDS, STUDIO_VOLUME_DB_MAX, STUDIO_VOLUME_DB_MIN, sessionEndSeconds, usedAssetIds, type StudioAsset, type StudioSession } from './session.ts'
 import type {
   ClickSettings,
   EngineLoadProgress,
   EngineState,
+  InstrumentPreparation,
   LoopRegionS,
   MasterMeterReading,
   MeterReading,
@@ -109,11 +120,78 @@ export function clampPosition(positionS: number): number {
   return Math.min(Math.max(0, Number.isFinite(positionS) ? positionS : 0), STUDIO_MAX_SESSION_SECONDS)
 }
 
-/** Audios de la sesion que usa algun clip (activo o no: una toma inactiva se puede activar en caliente). */
+/**
+ * Audios de la sesion que se pueden oir: los de algun clip (activo o no: una toma inactiva se
+ * puede activar en caliente) y, en v2, las zonas del sampler y los congelados.
+ */
 export function assetsInUse(session: StudioSession): StudioAsset[] {
-  const used = new Set<string>()
-  for (const track of session.tracks) for (const clip of track.clips) used.add(clip.assetId)
+  const used = usedAssetIds(session)
   return session.assets.filter((asset) => used.has(asset.id))
+}
+
+/** Nota suelta del piano roll: lo que dura si no se dice otra cosa. */
+export const PREVIEW_NOTE_S = 0.4
+/** Margen para que una nota tocada en vivo no caiga en un bloque de audio ya calculado. */
+export const LIVE_NOTE_DELAY_S = 0.005
+
+/**
+ * Que hay que reprogramar tras una edicion en caliente: los clips de audio y/o las notas de ciertas
+ * pistas de instrumento ('all': todas). Lo que no esta en el alcance sigue sonando sin cortarse.
+ */
+export interface RescheduleScope {
+  audio: boolean
+  midi: ReadonlySet<string> | 'all'
+}
+
+export const FULL_RESCHEDULE: Readonly<RescheduleScope> = { audio: true, midi: 'all' }
+
+/** Une dos alcances pendientes (la edicion sigue mientras espera el asentamiento). */
+export function mergeScope(a: RescheduleScope | null, b: RescheduleScope): RescheduleScope {
+  if (!a) return b
+  const midi = a.midi === 'all' || b.midi === 'all' ? 'all' : new Set([...a.midi, ...b.midi])
+  return { audio: a.audio || b.audio, midi }
+}
+
+/** true si el alcance no pide reprogramar nada. */
+export function scopeIsEmpty(scope: RescheduleScope): boolean {
+  return !scope.audio && scope.midi !== 'all' && scope.midi.size === 0
+}
+
+/** true si una tanda (de audio, o de notas de la pista trackId) entra en el alcance. */
+export function batchInScope(batch: { kind: 'audio' | 'midi'; trackId: string | null }, scope: RescheduleScope): boolean {
+  if (batch.kind === 'audio') return scope.audio
+  return scope.midi === 'all' || (batch.trackId !== null && scope.midi.has(batch.trackId))
+}
+
+/**
+ * Espera antes de soltar las notas de un tramo de repeticion terminado: su cola (relajacion del
+ * synth, caida de la caja) sigue sonando despues del fin de la region. Soltarlas al empezar el
+ * tramo siguiente las cortaba en seco en cada vuelta, con un clic.
+ */
+export function finishedSegmentReleaseMs(tailS: number): number {
+  return (Math.max(0, Number.isFinite(tailS) ? tailS : 0) + 0.1) * 1000
+}
+
+/**
+ * Posicion en la que la escucha sin repeticion se detiene sola: el fin del ultimo clip mas la cola
+ * de los instrumentos (relajacion, caidas), con un minimo de 0.4 s. Asi la ultima nota suena
+ * entera, igual que en la exportacion (bounce suma la misma cola).
+ */
+export function playbackStopS(durationS: number, tailS: number): number {
+  const tail = Number.isFinite(tailS) && tailS > 0 ? tailS + 0.1 : 0
+  return durationS + Math.max(0.4, tail)
+}
+
+/** Un ScheduledClips que maneja varios a la vez (clips de audio y notas de la misma tanda). */
+export function combineScheduled(batches: readonly ScheduledClips[]): ScheduledClips {
+  return {
+    stop(atCtxTime?: number) {
+      for (const batch of batches) batch.stop(atCtxTime)
+    },
+    dispose() {
+      for (const batch of batches) batch.dispose()
+    },
+  }
 }
 
 /** Ajustes de clic validos: volumen en el rango del fader y de 0 a 4 compases enteros de conteo. */
@@ -343,9 +421,16 @@ class MasterMeter {
 // StudioEngine
 // ---------------------------------------------------------------------------
 
+/** Una tanda de fuentes: los clips de audio del tramo, o las notas de UNA pista de instrumento. */
+interface SegmentBatch {
+  kind: 'audio' | 'midi'
+  trackId: string | null
+  batch: ScheduledClips
+}
+
 interface Segment extends TransportSegment {
-  /** Tandas de fuentes de este tramo (mas de una si se reprogramo a mitad de camino). */
-  batches: ScheduledClips[]
+  /** Tandas de fuentes de este tramo (mas de una por pista si se reprogramo a mitad de camino). */
+  batches: SegmentBatch[]
 }
 
 interface Deferred {
@@ -375,6 +460,8 @@ export class StudioEngine implements StudioEngineApi {
   /** Llego audio nuevo desde la ultima vez que se programo. */
   private buffersDirty = false
   private graph: BuiltStudioGraph | null = null
+  /** Lo que prepareInstruments dejo listo en `ctx` (plugins WAM); se pasa a buildGraph. */
+  private preparation: InstrumentPreparation | null = null
   private click: StudioClick | null = null
   private masterMeter: MasterMeter | null = null
   private readonly trackMeters = new Map<string, TrackMeter>()
@@ -390,6 +477,8 @@ export class StudioEngine implements StudioEngineApi {
   private timer: ReturnType<typeof setInterval> | null = null
   /** Reprogramacion pendiente por una edicion de clips en caliente (ver apply). */
   private rescheduleTimer: ReturnType<typeof setTimeout> | null = null
+  /** Lo que la reprogramacion pendiente debe tocar (se acumula mientras la edicion sigue). */
+  private pendingScope: RescheduleScope | null = null
   /** Invalida un play() en curso si llega pause/stop/seek mientras espera resume(). */
   private generation = 0
   /** Invalida una carga o una resolucion de audios cuando llega otra carga. */
@@ -470,6 +559,8 @@ export class StudioEngine implements StudioEngineApi {
     this.click = null
     this.masterMeter?.dispose()
     this.masterMeter = null
+    releaseInstruments(ctx)
+    this.preparation = null
     this.ctx = null
     if (ctx.state !== 'closed') void ctx.close().catch(() => undefined)
   }
@@ -525,6 +616,9 @@ export class StudioEngine implements StudioEngineApi {
     }
     await prepareGraphContext(ctx)
     if (generation !== this.loadGeneration || this.disposed) return
+    const preparation = await prepareInstruments(ctx, session)
+    if (generation !== this.loadGeneration || this.disposed) return
+    this.preparation = preparation
 
     this.pruneBuffers(session)
     this.mountGraph(ctx, session)
@@ -536,7 +630,7 @@ export class StudioEngine implements StudioEngineApi {
   }
 
   private mountGraph(ctx: AudioContext, session: StudioSession): void {
-    const graph = buildGraph(ctx, session, this.buffers)
+    const graph = buildGraph(ctx, session, this.buffers, this.preparation ?? undefined)
     graph.master.connect(ctx.destination)
     this.graph = graph
     if (!this.masterMeter) this.masterMeter = new MasterMeter(ctx)
@@ -616,6 +710,13 @@ export class StudioEngine implements StudioEngineApi {
         this.missing.add(asset.id)
       }
     }
+    // Un plugin WAM nuevo se crea antes de aplicar (buildGraph es sincrono). Sin WAM no se espera.
+    const ctx = this.ctx
+    if (ctx && this.target && needsPreparation(this.target, this.preparation)) {
+      const preparation = await prepareInstruments(ctx, this.target)
+      if (generation !== this.loadGeneration || this.disposed || ctx !== this.ctx) return
+      this.preparation = preparation
+    }
     if (this.target) this.apply(this.target)
   }
 
@@ -644,12 +745,16 @@ export class StudioEngine implements StudioEngineApi {
     const rolling = this.isRolling()
     if (rolling && (retired !== null || newAudio)) {
       this.cancelReschedule()
-      this.reschedule()
-    } else if (rolling && !clipsEqual(prev, next)) {
-      // Solo cambiaron clips (mover, recortar, ganancia, fades): se reprograma cuando la edicion
-      // se queda quieta. Arrastrar un deslizador de clip manda decenas de cambios por segundo, y
-      // reprogramar en cada uno cortaba TODAS las pistas en cada evento (tremolo de cortes).
-      this.requestReschedule()
+      this.reschedule(FULL_RESCHEDULE)
+    } else if (rolling) {
+      // Solo cambiaron clips (mover, recortar, ganancia, fades, notas): se reprograma cuando la
+      // edicion se queda quieta. Arrastrar un deslizador de clip manda decenas de cambios por
+      // segundo, y reprogramar en cada uno cortaba TODAS las pistas en cada evento (tremolo de
+      // cortes). Los parametros de un instrumento no reprograman: graph.update los aplica.
+      // Solo se reprograma lo que cambio: un clip de audio no toca las notas que suenan, y una
+      // nota movida en una pista no vuelve a atacar las notas sostenidas de las otras.
+      const scope: RescheduleScope = { audio: !clipsEqual(prev, next), midi: midiChangedTrackIds(prev, next) }
+      if (!scopeIsEmpty(scope)) this.requestReschedule(scope)
     }
     if (retired) {
       const old = retired
@@ -661,21 +766,28 @@ export class StudioEngine implements StudioEngineApi {
     this.setState({ durationS: sessionEndSeconds(next), missingAssetIds: [...this.missing] })
   }
 
-  private requestReschedule(): void {
+  private requestReschedule(scope: RescheduleScope): void {
     if (this.rescheduleTimer !== null) clearTimeout(this.rescheduleTimer)
+    this.pendingScope = mergeScope(this.pendingScope, scope)
     this.rescheduleTimer = setTimeout(() => {
       this.rescheduleTimer = null
-      if (!this.disposed && this.isRolling()) this.reschedule()
+      const pending = this.pendingScope ?? FULL_RESCHEDULE
+      this.pendingScope = null
+      if (!this.disposed && this.isRolling()) this.reschedule(pending)
     }, RESCHEDULE_SETTLE_MS)
   }
 
   private cancelReschedule(): void {
     if (this.rescheduleTimer !== null) clearTimeout(this.rescheduleTimer)
     this.rescheduleTimer = null
+    this.pendingScope = null
   }
 
-  /** Reprograma lo que falta por sonar de cada tramo, sin mover su reloj. */
-  private reschedule(): void {
+  /**
+   * Reprograma lo que falta por sonar de cada tramo, sin mover su reloj. Solo las tandas del
+   * alcance: las demas siguen sonando sin cortarse ni volver a atacar sus notas.
+   */
+  private reschedule(scope: RescheduleScope): void {
     const ctx = this.ctx
     if (!ctx) return
     const sampleRate = ctx.sampleRate
@@ -683,18 +795,19 @@ export class StudioEngine implements StudioEngineApi {
     for (const segment of this.segments) {
       const end = segment.ctxStart + segment.lengthS
       if (end <= cut) continue
-      const old = segment.batches
+      const keep = segment.batches.filter((entry) => !batchInScope(entry, scope))
+      const old = segment.batches.filter((entry) => batchInScope(entry, scope))
       if (segment.ctxStart >= cut) {
         // Todavia no empezo: se descarta y se programa entero.
-        for (const batch of old) batch.dispose()
-        segment.batches = [this.scheduleSegment(segment.ctxStart, segment.offsetS, segment.lengthS)]
+        for (const entry of old) entry.batch.dispose()
+        segment.batches = [...keep, ...this.scheduleSegment(segment.ctxStart, segment.offsetS, segment.lengthS, scope)]
       } else {
-        for (const batch of old) {
-          batch.stop(cut)
-          this.defer(() => batch.dispose(), (cut - ctx.currentTime) * 1000 + 100)
+        for (const entry of old) {
+          entry.batch.stop(cut)
+          this.defer(() => entry.batch.dispose(), (cut - ctx.currentTime) * 1000 + 100)
         }
         const played = cut - segment.ctxStart
-        segment.batches = [this.scheduleSegment(cut, segment.offsetS + played, segment.lengthS - played)]
+        segment.batches = [...keep, ...this.scheduleSegment(cut, segment.offsetS + played, segment.lengthS - played, scope)]
       }
     }
   }
@@ -747,7 +860,7 @@ export class StudioEngine implements StudioEngineApi {
     const now = ctx.currentTime
     const playStartCtxTime = Math.round((now + START_DELAY_S + countS) * ctx.sampleRate) / ctx.sampleRate
     const lengthS = (loop ? loop.endS : STUDIO_MAX_SESSION_SECONDS) - from
-    this.segments = [{ ctxStart: playStartCtxTime, offsetS: from, lengthS, batches: [this.scheduleSegment(playStartCtxTime, from, lengthS)] }]
+    this.segments = [{ ctxStart: playStartCtxTime, offsetS: from, lengthS, batches: this.scheduleSegment(playStartCtxTime, from, lengthS) }]
     this.buffersDirty = false
     this.countIn = countS > 0 ? { endCtx: playStartCtxTime, bars } : null
     // Lo que el grabador alinea es el instante en que `from` se OYE, no el programado.
@@ -762,14 +875,79 @@ export class StudioEngine implements StudioEngineApi {
     return this.playStart
   }
 
-  private scheduleSegment(ctxStart: number, offsetS: number, lengthS: number): ScheduledClips {
+  /**
+   * Programa un tramo: una tanda con los clips de audio y una por cada pista de instrumento (asi una
+   * edicion reprograma solo la pista que cambio). Con `scope`, solo lo que entra en el alcance.
+   */
+  private scheduleSegment(ctxStart: number, offsetS: number, lengthS: number, scope: RescheduleScope = FULL_RESCHEDULE): SegmentBatch[] {
     const ctx = this.ctx
     const graph = this.graph
     const session = this.session
     if (!ctx || !graph || !session) throw new Error('No hay una sesión cargada en el motor.')
     // Con repeticion el tramo se corta en el fin de la region; sin ella los clips suenan enteros.
     const untilS = this.state.loop ? offsetS + lengthS : undefined
-    return scheduleClips(ctx, graph, session, this.buffers, { fromS: offsetS, atCtxTime: ctxStart, untilS })
+    const options = { fromS: offsetS, atCtxTime: ctxStart, untilS }
+    // Clips de audio y notas MIDI contra el MISMO instante del reloj: quedan alineados a la muestra.
+    const out: SegmentBatch[] = []
+    if (scope.audio) out.push({ kind: 'audio', trackId: null, batch: scheduleClips(ctx, graph, session, this.buffers, options) })
+    for (const track of session.tracks) {
+      if (track.kind !== 'instrument') continue
+      if (scope.midi !== 'all' && !scope.midi.has(track.id)) continue
+      const batch = scheduleMidiClips(ctx, graph, session, this.buffers, { ...options, nowCtxTime: ctx.currentTime, trackIds: new Set([track.id]) })
+      out.push({ kind: 'midi', trackId: track.id, batch })
+    }
+    return out
+  }
+
+  // ---- notas sueltas y en vivo (v2) ----
+
+  /** Instrumento vivo de una pista, o null (pista de audio, instrumento no disponible o sin sesion). */
+  private instrumentOf(trackId: string) {
+    return this.graph?.instruments?.get(trackId) ?? null
+  }
+
+  /** Reanuda el contexto si hace falta: estas funciones se llaman desde un gesto del usuario. */
+  private wake(ctx: AudioContext): void {
+    if (ctx.state !== 'running') void ctx.resume().catch(() => undefined)
+  }
+
+  /**
+   * Toca una nota suelta en el instrumento de la pista (escuchar al dibujar en el piano roll). Pasa
+   * por la cadena de la pista (efectos, fader, mute). false si la pista no tiene instrumento vivo.
+   */
+  previewNote(trackId: string, pitch: number, velocity = 100, durationS = PREVIEW_NOTE_S): boolean {
+    const ctx = this.ctx
+    const node = this.instrumentOf(trackId)
+    if (!ctx || !node || this.disposed) return false
+    this.wake(ctx)
+    const at = ctx.currentTime + LIVE_NOTE_DELAY_S
+    node.playNote(pitch, velocity, at, at + Math.max(0.05, Number.isFinite(durationS) ? durationS : PREVIEW_NOTE_S))
+    return true
+  }
+
+  /** Empieza una nota en vivo (teclado MIDI o de computadora) hasta su liveNoteOff. */
+  liveNoteOn(trackId: string, pitch: number, velocity: number): boolean {
+    const ctx = this.ctx
+    const node = this.instrumentOf(trackId)
+    if (!ctx || !node || this.disposed) return false
+    this.wake(ctx)
+    node.noteOn(pitch, velocity, ctx.currentTime + LIVE_NOTE_DELAY_S)
+    return true
+  }
+
+  liveNoteOff(trackId: string, pitch: number): void {
+    const ctx = this.ctx
+    const node = this.instrumentOf(trackId)
+    if (!ctx || !node || this.disposed) return
+    node.noteOff(pitch, ctx.currentTime + LIVE_NOTE_DELAY_S)
+  }
+
+  /** Corta todo lo que suena en el instrumento de la pista (o de todas). Panico de MIDI. */
+  liveAllNotesOff(trackId?: string): void {
+    const instruments = this.graph?.instruments
+    if (!instruments || this.disposed) return
+    if (trackId !== undefined) instruments.get(trackId)?.allNotesOff()
+    else for (const node of instruments.values()) node.allNotesOff()
   }
 
   pause(): void {
@@ -832,13 +1010,20 @@ export class StudioEngine implements StudioEngineApi {
     if (loop) {
       const lengthS = loop.endS - loop.startS
       while (end - now < SEGMENT_LOOKAHEAD_S) {
-        this.segments.push({ ctxStart: end, offsetS: loop.startS, lengthS, batches: [this.scheduleSegment(end, loop.startS, lengthS)] })
+        this.segments.push({ ctxStart: end, offsetS: loop.startS, lengthS, batches: this.scheduleSegment(end, loop.startS, lengthS) })
         end += lengthS
       }
-      // Olvidar los tramos ya terminados (position() solo mira el actual).
+      // Olvidar los tramos ya terminados (position() solo mira el actual). Las notas se sueltan
+      // despues de su cola: soltarlas ya cortaba en seco la relajacion en cada vuelta. Los clips de
+      // audio terminaron en el fin de la region y se sueltan enseguida.
+      const releaseMs = finishedSegmentReleaseMs(instrumentTailSeconds(session))
       while (this.segments.length > 1 && this.segments[1].ctxStart <= now) {
         const finished = this.segments.shift()
-        if (finished) for (const batch of finished.batches) batch.dispose()
+        if (!finished) continue
+        for (const entry of finished.batches) {
+          if (entry.kind === 'audio') entry.batch.dispose()
+          else this.defer(() => entry.batch.dispose(), releaseMs)
+        }
       }
     } else if (now >= end) {
       // Fin de los 20 minutos de la sesion.
@@ -875,7 +1060,7 @@ export class StudioEngine implements StudioEngineApi {
       this.timer = null
     }
     for (const segment of this.segments) {
-      for (const batch of segment.batches) {
+      for (const { batch } of segment.batches) {
         // Rampa corta antes de soltar las fuentes: cortar en seco hace clic.
         batch.stop()
         this.defer(() => batch.dispose(), 60)
@@ -978,6 +1163,8 @@ export class StudioEngine implements StudioEngineApi {
     this.resolveAudio = null
     const ctx = this.ctx
     this.ctx = null
+    if (ctx) releaseInstruments(ctx)
+    this.preparation = null
     if (ctx && this.ownsContext && ctx.state !== 'closed') void ctx.close().catch(() => undefined)
   }
 }
