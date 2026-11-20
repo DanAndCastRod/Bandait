@@ -10,18 +10,36 @@
  * Los clips no son nodos del grafo: `scheduleClips` los programa contra las entradas de pista,
  * alineados a la muestra en el reloj del contexto (mismo patron que stemPlayer.ts).
  *
+ * v2: una pista de instrumento lleva su instrumento (instruments/) conectado a la entrada de la
+ * pista, antes de los efectos: mute, solo, fader, paneo, envio y efectos funcionan igual que en
+ * una de audio. El instrumento SI es parte del grafo (tambien en OfflineAudioContext); sus notas
+ * las programa instruments/schedule.ts. Si el instrumento no esta disponible (un WAM fuera de la
+ * lista cerrada) la pista queda sin instrumento y suena su congelado.
+ *
  * Compensacion de retardo: el DynamicsCompressorNode retrasa su senal unos 6 ms. Para que una
  * pista comprimida no quede corrida respecto a las demas, cada pista lleva un retardo igual a lo
  * que le falta para alcanzar a la mas lenta. `graphLatency` informa el total, que bounce recorta.
  *
  * La logica de programacion (que clips suenan en un rango, a que muestra arrancan, la curva de
  * ganancia y fades) esta en funciones puras exportadas: planClips, clipEnvelope, clipFadeFactor,
- * clipsEqual, topologySignature, graphLatency, reverbTailSeconds. Se prueban con node.
+ * clipsEqual, topologySignature, graphLatency, reverbTailSeconds, trackHasSound. Se prueban con
+ * node (graph.ts importa instruments/factory.ts, que tampoco toca Web Audio al cargarse).
  */
 import { dbToGain } from '../stemTiming.ts'
 import { createFxUnit, createReverbUnit, fxLatencySeconds, setParam, type FxUnit, type ReverbUnit } from './fx.ts'
+import { instrumentKey } from './instruments/core.ts'
+import { EMPTY_PREPARATION, createInstrument } from './instruments/factory.ts'
 import { STUDIO_REVERB_RETURN_DB_MIN, STUDIO_REVERB_SEND_DB_MIN, type StudioClip, type StudioFx, type StudioSession, type StudioTrack } from './session.ts'
-import type { GraphApi, GraphCapabilities, ScheduleClipsOptions, ScheduledClips, StudioBuffers, StudioGraph } from './types.ts'
+import type {
+  GraphApi,
+  GraphCapabilities,
+  InstrumentPreparation,
+  ScheduleClipsOptions,
+  ScheduledClips,
+  StudioBuffers,
+  StudioGraph,
+  StudioInstrumentNode,
+} from './types.ts'
 
 // ---------------------------------------------------------------------------
 // Logica pura
@@ -193,10 +211,12 @@ export function clipsEqual(a: StudioSession, b: StudioSession): boolean {
 /**
  * Huella de la topologia: pistas (sin importar el orden) con los tipos de sus efectos en orden,
  * y los del master. Si dos sesiones tienen la misma huella, `StudioGraph.update` alcanza.
+ * v2: una pista de instrumento agrega `@` y su tipo (y el plugin, en WAM): cambiar de instrumento
+ * reconstruye; cambiar sus parametros no.
  */
 export function topologySignature(session: StudioSession): string {
   const chain = (fx: readonly StudioFx[]) => fx.map((f) => f.type).join(',')
-  const tracks = session.tracks.map((t) => `${t.id}:${chain(t.fx)}`).sort()
+  const tracks = session.tracks.map((t) => (t.kind === 'instrument' ? `${t.id}@${instrumentKey(t.instrument)}:${chain(t.fx)}` : `${t.id}:${chain(t.fx)}`)).sort()
   return `${tracks.join('|')}#${chain(session.master.fx)}`
 }
 
@@ -227,8 +247,13 @@ export function graphLatency(session: StudioSession, sampleRate: number, limiter
 export function reverbTailSeconds(session: StudioSession): number {
   if (session.master.reverb.returnDb <= STUDIO_REVERB_RETURN_DB_MIN) return 0
   const anySolo = session.tracks.some((t) => t.solo)
-  const sends = session.tracks.some((t) => trackAudible(t, anySolo) && t.reverbSendDb > STUDIO_REVERB_SEND_DB_MIN && t.clips.some((c) => c.active))
+  const sends = session.tracks.some((t) => trackAudible(t, anySolo) && t.reverbSendDb > STUDIO_REVERB_SEND_DB_MIN && trackHasSound(t))
   return sends ? session.master.reverb.decayS : 0
+}
+
+/** true si la pista tiene algo que suene: un clip de audio activo, un clip MIDI o un congelado. */
+export function trackHasSound(track: Pick<StudioTrack, 'clips' | 'midiClips' | 'frozenAssetId'>): boolean {
+  return track.clips.some((c) => c.active) || (track.midiClips ?? []).length > 0 || Boolean(track.frozenAssetId)
 }
 
 /** Regla de STUDIO_V1.md 2.3: con algun solo suenan solo las pistas en solo; mute gana sobre solo. */
@@ -299,10 +324,10 @@ function disconnect(node: AudioNode): void {
   }
 }
 
-export function buildGraph(ctx: BaseAudioContext, session: StudioSession, buffers: StudioBuffers): BuiltStudioGraph {
+export function buildGraph(ctx: BaseAudioContext, session: StudioSession, buffers: StudioBuffers, instruments?: InstrumentPreparation): BuiltStudioGraph {
   // Los canales de cada audio no cambian la topologia: una fuente mono sube a estereo en el
-  // paneo. `buffers` queda en la firma para quien construya el grafo junto con sus clips.
-  void buffers
+  // paneo. `buffers` llega al sampler, que busca sus muestras al tocar cada nota.
+  const preparation = instruments ?? EMPTY_PREPARATION
   const wantWorklet = prepared.get(ctx)?.limiterWorklet ?? false
   const signature = topologySignature(session)
   const extras: AudioNode[] = []
@@ -390,6 +415,20 @@ export function buildGraph(ctx: BaseAudioContext, session: StudioSession, buffer
     trackOutputs.set(track.id, output)
   }
 
+  // --- instrumentos (v2): la salida del instrumento entra donde entrarian los clips de audio ---
+  const instrumentNodes = new Map<string, StudioInstrumentNode>()
+  /** Los WAM son de la preparacion (se reutilizan entre grafos): el grafo solo los desconecta. */
+  const ownedInstruments = new Set<StudioInstrumentNode>()
+  for (const track of session.tracks) {
+    if (track.kind !== 'instrument' || !track.instrument || preparation.unavailable.has(track.id)) continue
+    const input = trackInputs.get(track.id)
+    const node = input ? createInstrument(ctx, track.id, track.instrument, buffers, preparation) : null
+    if (!input || !node) continue
+    node.output.connect(input)
+    instrumentNodes.set(track.id, node)
+    if (track.instrument.type !== 'wam') ownedInstruments.add(node)
+  }
+
   const masterS = masterUnits.reduce((total, unit) => total + unit.latencyS, 0) + (limiterUnit ? limiterUnit.latencyS : 0)
   const latency: GraphLatency = { trackBusS, masterS, totalS: trackBusS + masterS }
 
@@ -397,12 +436,22 @@ export function buildGraph(ctx: BaseAudioContext, session: StudioSession, buffer
     if (disposed) return false
     if (next === applied) return true
     if (topologySignature(next) !== signature) return false
+    // Primero lo que puede obligar a reconstruir, para no dejar cambios a medias.
+    for (const track of next.tracks) {
+      const strip = strips.get(track.id)
+      if (!strip) return false
+      const node = instrumentNodes.get(track.id)
+      if (node && !ownedInstruments.has(node) && track.instrument !== strip.track.instrument) return false
+    }
     const solo = next.tracks.some((t) => t.solo)
     for (const track of next.tracks) {
       const strip = strips.get(track.id)
       if (!strip) return false
       const audible = trackAudible(track, solo)
       if (strip.track === track && strip.audible === audible) continue
+      const node = instrumentNodes.get(track.id)
+      // Mismo tipo garantizado por la huella: synth, drums y sampler aplican siempre en caliente.
+      if (node && track.instrument && track.instrument !== strip.track.instrument) node.update(track.instrument)
       track.fx.forEach((fx, i) => {
         if (strip.track.fx[i] !== fx) strip.units[i].update(fx, false)
       })
@@ -428,6 +477,20 @@ export function buildGraph(ctx: BaseAudioContext, session: StudioSession, buffer
   const dispose = () => {
     if (disposed) return
     disposed = true
+    for (const [trackId, node] of instrumentNodes) {
+      if (ownedInstruments.has(node)) {
+        node.dispose()
+      } else {
+        const input = trackInputs.get(trackId)
+        try {
+          if (input) node.output.disconnect(input)
+        } catch {
+          // ya desconectado
+        }
+      }
+    }
+    instrumentNodes.clear()
+    ownedInstruments.clear()
     for (const strip of strips.values()) {
       for (const unit of strip.units) unit.dispose()
       for (const n of strip.nodes) disconnect(n)
@@ -441,7 +504,7 @@ export function buildGraph(ctx: BaseAudioContext, session: StudioSession, buffer
     for (const n of extras) disconnect(n)
   }
 
-  return { master, trackInputs, trackOutputs, update, dispose, latency, limiterWorklet }
+  return { master, trackInputs, trackOutputs, instruments: instrumentNodes, update, dispose, latency, limiterWorklet }
 }
 
 // ---------------------------------------------------------------------------

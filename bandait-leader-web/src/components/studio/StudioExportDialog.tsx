@@ -8,6 +8,7 @@ import { formatBytes } from '../../services/stemImport'
 import type { StemRole } from '../../services/stemNames'
 import type { StemSongRecord } from '../../services/stemStore'
 import { bounce } from '../../services/studio/bounce'
+import { trackHasSound } from '../../services/studio/graph'
 import type { BounceFile, LoopRegionS, WavBitDepth } from '../../services/studio/types'
 import { HubModal } from '../HubModal'
 import { errorText, formatTimecode, useStudio, type StudioPanelProps } from './studioState'
@@ -95,7 +96,8 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
   }, [phase.kind])
 
   const busy = phase.kind === 'rendering' || phase.kind === 'checking' || phase.kind === 'publishing'
-  const withAudio = session.tracks.filter((track) => track.clips.some((clip) => clip.active))
+  // Pistas con algo que suene: clips de audio activos, clips MIDI o un congelado (v2).
+  const withAudio = session.tracks.filter(trackHasSound)
   const mutedCount = withAudio.filter((track) => track.mute).length
   // Por separado, una pista en mute (un master o una mezcla de referencia) no sale salvo que se pida:
   // asi no termina publicada como stem por descuido.
@@ -120,7 +122,7 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
         bitDepth,
         sampleRate: current.sampleRate,
         range,
-        trackIds: mode === 'tracks' ? current.tracks.filter((track) => track.clips.some((clip) => clip.active) && (includeMuted || !track.mute)).map((track) => track.id) : undefined,
+        trackIds: mode === 'tracks' ? current.tracks.filter((track) => trackHasSound(track) && (includeMuted || !track.mute)).map((track) => track.id) : undefined,
         signal: ctrl.signal,
         onProgress: (fraction) => {
           if (!ctrl.signal.aborted) setPhase({ kind: 'rendering', fraction })
@@ -236,7 +238,7 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
               <p className="stu-help">
                 {mode === 'mix'
                   ? 'Un WAV estéreo con todo lo que suena: efectos, reverb y master incluidos. Respeta mute y solo.'
-                  : `Un WAV por pista con audio (${audibleTracks}), después del fader y el paneo, sin reverb ni master. Ignora el solo; las pistas en mute no salen salvo que lo pidas.`}
+                  : `Un WAV por pista con sonido (${audibleTracks}), después del fader y el paneo, sin reverb ni master. Ignora el solo; las pistas en mute no salen salvo que lo pidas.`}
               </p>
               {mode === 'tracks' && mutedCount > 0 && (
                 <label className="stu-check">
@@ -298,7 +300,7 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
                 EXPORTAR
               </button>
             </div>
-            {audibleTracks === 0 && <p className="stu-help">{withAudio.length === 0 ? 'La sesión no tiene clips activos: no hay nada que exportar.' : 'Todas las pistas con audio están en mute: marca la casilla para incluirlas.'}</p>}
+            {audibleTracks === 0 && <p className="stu-help">{withAudio.length === 0 ? 'La sesión no tiene clips activos ni notas: no hay nada que exportar.' : 'Todas las pistas con sonido están en mute: marca la casilla para incluirlas.'}</p>}
           </>
         )}
 

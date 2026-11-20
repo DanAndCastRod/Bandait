@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { handle } from '../src/index.ts';
 import { ASSIST_SYSTEM_PROMPT } from '../src/providers/anthropic.ts';
-import { detectAudioExt, lyriaModel, lyriaPrompt } from '../src/providers/lyria.ts';
+import { audioFromMusic, detectAudioExt, lyriaModel, lyriaPrompt } from '../src/providers/lyria.ts';
 import { parseRange } from '../src/studio.ts';
 import { audioSecondsFloor, sanitizeSuggestions } from '../src/studioJobs.ts';
 import { SESSION_MAX_BYTES } from '../src/studioSession.ts';
@@ -129,6 +129,14 @@ const SUGGESTIONS = [
   { track_id: 'trk_1', target: 'volume_db', value: -2, fx_type: null, params: null, reason: '   ' },
 ];
 
+/** Respuesta 200 de URiT IA POST /v1/music (CONTRACT_V1.md 4A.1) con un MP3 falso de 15 bytes. */
+function musicReply(estimatedUsd = '0.040000', audio: unknown = { mime_type: 'audio/mpeg', data: Buffer.from('ID3-audio-falso').toString('base64'), bytes: 15 }): Response {
+  return Response.json({
+    id: 'ai_m', model: 'lyria-3-clip-preview', models_tried: ['lyria-3-clip-preview'], output: { audio, text: '' },
+    usage: { songs: 1, input_tokens: 12, output_tokens: 0, thinking_tokens: 0, estimated_usd: estimatedUsd }, finish_reason: 'stop',
+  });
+}
+
 function setup(vars: Partial<Env> = {}) {
   const bucket = new FakeR2();
   const env: Env = {
@@ -143,7 +151,7 @@ function setup(vars: Partial<Env> = {}) {
   const world = {
     musicAiJob: { status: 'QUEUED' } as Record<string, unknown>,
     downloads: {} as Record<string, { bytes: Uint8Array; type: string } | 'fail'>,
-    lyria: (() => Response.json({ steps: [{ type: 'model_output', content: [{ type: 'text', text: '{}' }, { type: 'audio', data: Buffer.from('ID3-audio-falso').toString('base64') }] }] })) as () => Response,
+    lyria: (() => musicReply()) as () => Response,
     assist: (() => Response.json({ stop_reason: 'end_turn', content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: JSON.stringify({ suggestions: SUGGESTIONS }) }] })) as () => Response,
     extra: undefined as Responder | undefined,
   };
@@ -170,7 +178,7 @@ function setup(vars: Partial<Env> = {}) {
       if (d === 'fail') return new Response('no', { status: 500 });
       return new Response(d.bytes, { headers: { 'Content-Type': d.type, 'Content-Length': String(d.bytes.byteLength) } });
     }
-    if (url.startsWith('https://generativelanguage.googleapis.com/')) return world.lyria();
+    if (url === 'https://ai.urit.services/v1/music') return world.lyria();
     if (url === 'https://api.anthropic.com/v1/messages') return world.assist();
     throw new Error(`llamada inesperada: ${url}`);
   };
@@ -245,7 +253,10 @@ test('el fixture canonico valida y vuelve identico; los roles son los de stem_na
 
 test('validacion estricta: cada mutacion del fixture se rechaza con su codigo y su ruta', () => {
   const cases: [string, string, (d: typeof FIXTURE) => void][] = [
-    ['unsupported_version', 'version', (d) => { d.version = 2; }],
+    ['unsupported_version', 'version', (d) => { d.version = 3; }],
+    // Un v1 se valida con las reglas de v1: un campo de v2 es desconocido (STUDIO_V2.md 1).
+    ['unknown_field', 'markers', (d) => { d.markers = []; }],
+    ['unknown_field', 'tracks[0].kind', (d) => { d.tracks[0].kind = 'audio'; }],
     ['unknown_field', 'extra', (d) => { d.extra = 1; }],
     ['missing_field', 'latency_offset_ms', (d) => { delete d.latency_offset_ms; }],
     ['out_of_range', 'bpm', (d) => { d.bpm = 300; }],
@@ -342,7 +353,7 @@ test('sesion: 409 missing_asset, 400 bad_session, 413 session_too_large; guardar
   assert.deepEqual(await bad('{no json'), [400, 'bad_session']);
   assert.deepEqual(await bad(JSON.stringify({ ...FIXTURE, extra: true })), [400, 'bad_session']);
   assert.deepEqual(await bad(body, '/otra/session'), [400, 'bad_session'], 'el id debe ser el de la ruta');
-  assert.deepEqual(await bad(JSON.stringify({ ...FIXTURE, title: 'x'.repeat(300 * 1024) })), [413, 'session_too_large']);
+  assert.deepEqual(await bad(JSON.stringify({ ...FIXTURE, title: 'x'.repeat(1100 * 1024) })), [413, 'session_too_large']);
 
   assert.equal((await call('PUT', '/ses_9f2c/session', { token: OWNER, body, headers: CREATE })).status, 200);
   assert.ok(bucket.objects.has(`${prefix}ses_9f2c/assets/ast_viejo.wav`), 'un audio que el documento no lista sigue ahi');
@@ -590,48 +601,100 @@ test('separate: un stem por GET (IMPORTING) y al final SUCCEEDED con rol y etiqu
 
 const GENERATE = { kind: 'generate', provider: 'lyria', prompt: 'Pad cálido de 16 compases', duration_s: 30, bpm: 128, key: 'C#m', instrumental: true };
 
-test('generate: Lyria con secreto; sin secreto 503; suno 501; fallo del proveedor 502 sin cobrar', async () => {
-  const noKey = setup();
+test('generate: Lyria por URiT IA (/v1/music); sin token 503; suno 501; errores y costo real', async () => {
+  const noKey = setup({ GEMINI_API_KEY: 'g' });
   const r503 = await noKey.post('/ses_a/jobs', GENERATE);
-  assert.deepEqual([r503.status, (await r503.json()).error], [503, 'provider_unavailable']);
-  const suno = setup({ GEMINI_API_KEY: 'g', SUNO_API_KEY: 's' });
+  assert.deepEqual([r503.status, (await r503.json()).error], [503, 'provider_unavailable'], 'la clave directa de Gemini ya no sirve para Lyria');
+  assert.equal(noKey.external().length, 0);
+  const suno = setup({ URIT_AI_TOKEN: 'g', SUNO_API_KEY: 's' });
   const r501 = await suno.post('/ses_a/jobs', { ...GENERATE, provider: 'suno' });
   assert.deepEqual([r501.status, (await r501.json()).error], [501, 'provider_unavailable']);
   assert.equal((await suno.post('/ses_a/jobs?estimate=1', { ...GENERATE, provider: 'suno' })).status, 501);
   assert.equal(suno.external().length, 0);
 
-  const { call, post, bucket, external, world } = setup({ GEMINI_API_KEY: 'gemini-key' });
-  const started = await post('/ses_a/jobs', GENERATE);
-  assert.deepEqual([started.status, await started.json()], [202, { job_id: 'job_t1', status: 'STARTED', kind: 'generate' }]);
+  const { call, post, bucket, external, world } = setup({ URIT_AI_TOKEN: 'urit-token' });
+  const spent = () => bucket.json(`${prefix}_usage/2026-11.json`).total_usd as number;
+  const entry = (jobId: string) => (bucket.json(`${prefix}_usage/2026-11.json`).entries as { job_id: string; cost_usd: number }[]).find((e) => e.job_id === jobId);
+  const get = async (jobId: string) => (await call('GET', `/ses_a/jobs/${jobId}`, { token: MUSICIAN })).json();
+  const started = await post('/ses_a/jobs?job_id=job_g1', GENERATE);
+  assert.deepEqual([started.status, await started.json()], [202, { job_id: 'job_g1', status: 'STARTED', kind: 'generate' }]);
   const [req] = external();
-  assert.equal(req.url, 'https://generativelanguage.googleapis.com/v1beta/interactions');
-  assert.equal(req.headers.get('x-goog-api-key'), 'gemini-key');
+  assert.equal(req.url, 'https://ai.urit.services/v1/music');
+  assert.equal(req.headers.get('Authorization'), 'Bearer urit-token');
+  assert.equal(req.headers.get('X-URiT-Consumer'), 'bandait');
+  assert.equal(req.headers.get('User-Agent'), 'bandait-stems/1.0');
   assert.deepEqual(JSON.parse(String(req.body)), {
-    model: 'lyria-3-clip-preview',
-    input: 'Pad cálido de 16 compases\nTempo: 128 BPM.\nKey: C#m.\nDuration: about 30 seconds.\nInstrumental only, no vocals.',
-  });
-  const status = await (await call('GET', '/ses_a/jobs/job_t1', { token: MUSICIAN })).json();
-  assert.deepEqual(status, {
-    job_id: 'job_t1', kind: 'generate', status: 'SUCCEEDED', cost_usd: 0.06,
+    task: 'studio_generate', model: 'lyria-3-clip-preview', time_budget_ms: 85000,
+    prompt: 'Pad cálido de 16 compases\nTempo: 128 BPM.\nKey: C#m.\nInstrumental only, no vocals.',
+  }, 'sin duracion, bpm ni tonalidad como parametros: van en el texto');
+  assert.deepEqual(await get('job_g1'), {
+    job_id: 'job_g1', kind: 'generate', status: 'SUCCEEDED', cost_usd: 0.04,
     assets: [{
-      id: 'ast_t2', file: 'ast_t2.mp3', kind: 'generated', label: 'Pad cálido de 16 compases', role: null, size: 15, channels: null,
-      sample_rate: null, duration_s: null, source: { provider: 'lyria', job_id: 'job_t1', prompt: GENERATE.prompt },
+      id: 'ast_t1', file: 'ast_t1.mp3', kind: 'generated', label: 'Pad cálido de 16 compases', role: null, size: 15, channels: null,
+      sample_rate: null, duration_s: null, source: { provider: 'lyria', job_id: 'job_g1', prompt: GENERATE.prompt },
     }],
   });
-  assert.equal(new TextDecoder().decode(bucket.objects.get(`${prefix}ses_a/assets/ast_t2.mp3`)!.bytes), 'ID3-audio-falso');
-  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).entries[0].provider, 'lyria');
+  assert.equal(new TextDecoder().decode(bucket.objects.get(`${prefix}ses_a/assets/ast_t1.mp3`)!.bytes), 'ID3-audio-falso');
+  assert.equal(entry('job_g1')!.cost_usd, 0.04);
+  assert.equal(spent(), 0.04);
 
-  for (const broken of [() => new Response('{"error":{"message":"quota"}}', { status: 429 }), () => Response.json({ steps: [{ type: 'model_output', content: [{ type: 'text', text: 'bloqueado' }] }] })]) {
-    world.lyria = broken;
-    const failed = await post('/ses_a/jobs', GENERATE);
-    assert.deepEqual([failed.status, (await failed.json()).error], [502, 'provider_failed']);
+  // Pedido largo: modelo de canciones, la duracion va en el texto; el costo real ajusta el contador.
+  world.lyria = () => musicReply('0.081000');
+  assert.equal((await post('/ses_a/jobs?job_id=job_g2', { ...GENERATE, duration_s: 120 })).status, 202);
+  const long = JSON.parse(String(external().at(-1)!.body));
+  assert.equal(long.model, 'lyria-3.5');
+  assert.match(long.prompt, /Duration: about 2 minutes\./);
+  assert.equal((await get('job_g2')).cost_usd, 0.081);
+  assert.equal(spent(), 0.121);
+  assert.equal(bucket.json('studio/_usage/2026-11.json').total_usd, 0.121, 'tambien el contador global');
+
+  // Configuracion o error del proveedor sin cobro: el POST falla, no queda trabajo ni gasto.
+  const jobs = () => [...bucket.objects.keys()].filter((k) => k.includes('/jobs/')).length;
+  for (const [status, body, expected] of [
+    [401, { error: 'unauthorized' }, [503, 'provider_unavailable']],
+    [403, { error: 'consumer_disabled' }, [503, 'provider_unavailable']],
+    [422, { error: 'model_not_allowed' }, [503, 'provider_unavailable']],
+    [503, { error: 'provider_not_configured' }, [503, 'provider_unavailable']],
+    [502, { error: 'provider_error' }, [502, 'provider_failed']],
+    [400, { error: 'invalid_request', detail: 'duration_s' }, [502, 'provider_failed']],
+  ] as [number, unknown, [number, string]][]) {
+    world.lyria = () => Response.json(body, { status });
+    const res = await post('/ses_a/jobs', GENERATE);
+    assert.deepEqual([res.status, (await res.json()).error], expected, `HTTP ${status}`);
   }
-  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.06, 'los fallos no suman gasto');
-  assert.equal([...bucket.objects.keys()].filter((k) => k.includes('/jobs/')).length, 1);
+  assert.equal(spent(), 0.121, 'los rechazos no suman gasto');
+  assert.equal(jobs(), 2);
+
+  // Llego al proveedor: el trabajo queda FAILED con el motivo; sin cobro en cuota, bloqueo y sin audio.
+  const failures: [string, () => Response, RegExp, number][] = [
+    ['job_q', () => Response.json({ error: 'provider_quota' }, { status: 429 }), /cuota/, 0],
+    ['job_b', () => Response.json({ error: 'blocked' }, { status: 502 }), /filtro de seguridad/, 0],
+    ['job_n', () => Response.json({ error: 'provider_error', detail: 'NO_AUDIO' }, { status: 502 }), /no devolvió audio/, 0],
+    // 504: URiT lo anota como cobrado, y el Worker tambien.
+    ['job_t', () => Response.json({ error: 'time_budget_exhausted', usage: { songs: 1, estimated_usd: '0.040000' } }, { status: 504 }), /tardó demasiado/, 0.04],
+    // 200 sin audio legible: la cancion se cobro.
+    ['job_u', () => musicReply('0.040000', { mime_type: 'audio/ogg', data: Buffer.from('OggS-no').toString('base64'), bytes: 7 }), /no se pudo leer/, 0.04],
+    // Limite propio del Worker (90 s): se trata como el 504, con la estimacion.
+    ['job_a', () => { const e = new Error('tiempo'); e.name = 'TimeoutError'; throw e; }, /tardó demasiado/, 0.04],
+  ];
+  let expectedSpent = 0.121;
+  for (const [jobId, reply, reason, cost] of failures) {
+    world.lyria = reply;
+    assert.equal((await post(`/ses_a/jobs?job_id=${jobId}`, GENERATE)).status, 202, jobId);
+    const done = await get(jobId);
+    assert.equal(done.status, 'FAILED', jobId);
+    assert.match(done.error, reason);
+    assert.equal(entry(jobId)!.cost_usd, cost, jobId);
+    expectedSpent = Math.round((expectedSpent + cost) * 10000) / 10000;
+    assert.equal(spent(), expectedSpent, jobId);
+  }
 
   assert.equal(lyriaModel({ LYRIA_SONG_MODEL: ' ' } as Env, 31), 'lyria-3.5');
   assert.equal(lyriaModel({ LYRIA_CLIP_MODEL: 'otro' } as Env, 30), 'otro');
-  assert.equal(lyriaPrompt({ prompt: ' Riff ', duration_s: 12.4, bpm: 97.5, key: null, instrumental: false }), 'Riff\nTempo: 97.5 BPM.\nDuration: about 12 seconds.');
+  assert.equal(lyriaPrompt({ prompt: ' Riff ', duration_s: 12.4, bpm: 97.5, key: null, instrumental: false }), 'Riff\nTempo: 97.5 BPM.', 'el clip dura 30 s: no se pide duracion');
+  assert.equal(lyriaPrompt({ prompt: 'Riff', duration_s: 75, bpm: 90, key: 'Dm', instrumental: true }), 'Riff\nTempo: 90 BPM.\nKey: Dm.\nDuration: about 75 seconds.\nInstrumental only, no vocals.');
+  assert.deepEqual(audioFromMusic({ output: { audio: { mime_type: 'audio/wav', data: Buffer.from('????').toString('base64') } } })?.ext, 'wav', 'sin firma reconocible vale el mime');
+  assert.equal(audioFromMusic({ output: { audio: { mime_type: 'audio/mpeg', data: '' } } }), null);
   assert.equal(detectAudioExt(new TextEncoder().encode('RIFF....WAVE')), 'wav');
   assert.equal(detectAudioExt(new TextEncoder().encode('fLaC....')), 'flac');
 });
@@ -753,36 +816,37 @@ test('assist con gemini directo: generateContent con la clave de Gemini y JSON e
 });
 
 test('tope de gasto: estimacion, 429 al pasarlo y contador nuevo cada mes', async () => {
-  const { post, bucket, external, clock } = setup({ GEMINI_API_KEY: 'g', STUDIO_MONTHLY_BUDGET_USD: '0.15', STUDIO_RATE_LYRIA_USD_PER_30S: '0.06' });
+  const { post, bucket, external, clock } = setup({ URIT_AI_TOKEN: 'g', STUDIO_MONTHLY_BUDGET_USD: '0.1', STUDIO_RATE_LYRIA_SONG_USD: '0.2' });
   const estimate = async (body: unknown) => (await post('/ses_a/jobs?estimate=1', body)).json();
-  assert.deepEqual(await estimate(GENERATE), { kind: 'generate', estimated_cost_usd: 0.06, spent_usd: 0, budget_usd: 0.15, allowed: true });
+  assert.deepEqual(await estimate(GENERATE), { kind: 'generate', estimated_cost_usd: 0.04, spent_usd: 0, budget_usd: 0.1, allowed: true });
+  assert.equal((await estimate({ ...GENERATE, duration_s: 5 })).estimated_cost_usd, 0.04, 'por cancion: un clip corto cuesta lo mismo (dura 30 s)');
   assert.equal(external().length, 0, 'estimar no llama al proveedor');
   assert.equal(bucket.objects.size, 0, 'ni escribe nada');
-  assert.deepEqual(await estimate({ ...GENERATE, duration_s: 100 }), { kind: 'generate', estimated_cost_usd: 0.24, spent_usd: 0, budget_usd: 0.15, allowed: false });
+  assert.deepEqual(await estimate({ ...GENERATE, duration_s: 100 }), { kind: 'generate', estimated_cost_usd: 0.2, spent_usd: 0, budget_usd: 0.1, allowed: false });
 
   assert.equal((await post('/ses_a/jobs', GENERATE)).status, 202);
   assert.equal((await post('/ses_b/jobs', GENERATE)).status, 202, 'el contador es por banda, no por sesion');
-  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.12);
+  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.08);
   const calls = external().length;
   const over = await post('/ses_a/jobs', GENERATE);
   assert.deepEqual([over.status, (await over.json()).error], [429, 'quota_exceeded']);
   assert.equal(external().length, calls, 'no se llama al proveedor');
-  assert.deepEqual(await estimate(GENERATE), { kind: 'generate', estimated_cost_usd: 0.06, spent_usd: 0.12, budget_usd: 0.15, allowed: false });
+  assert.deepEqual(await estimate(GENERATE), { kind: 'generate', estimated_cost_usd: 0.04, spent_usd: 0.08, budget_usd: 0.1, allowed: false });
 
   clock.now = new Date('2026-12-01T00:00:01.000Z');
   assert.equal((await estimate(GENERATE)).spent_usd, 0);
   assert.equal((await post('/ses_a/jobs', GENERATE)).status, 202);
-  assert.equal(bucket.json(`${prefix}_usage/2026-12.json`).total_usd, 0.06);
-  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.12);
+  assert.equal(bucket.json(`${prefix}_usage/2026-12.json`).total_usd, 0.04);
+  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.08);
 
-  const free = setup({ GEMINI_API_KEY: 'g' });
+  const free = setup({ URIT_AI_TOKEN: 'g' });
   assert.equal((await (await free.post('/ses_a/jobs?estimate=1', GENERATE)).json()).budget_usd, null, 'sin variable no hay tope');
-  const typo = setup({ GEMINI_API_KEY: 'g', STUDIO_MONTHLY_BUDGET_USD: 'veinte' });
+  const typo = setup({ URIT_AI_TOKEN: 'g', STUDIO_MONTHLY_BUDGET_USD: 'veinte' });
   assert.equal((await typo.post('/ses_a/jobs', GENERATE)).status, 429, 'un tope ilegible bloquea en vez de dejar el gasto libre');
 });
 
 test('cuerpo de trabajo invalido: 400 bad_job', async () => {
-  const { post, call, external } = setup({ MUSICAI_API_KEY: 'k', MUSICAI_MASTER_WORKFLOW: 'm', GEMINI_API_KEY: 'g', ASSIST_API_KEY: 'a' });
+  const { post, call, external } = setup({ MUSICAI_API_KEY: 'k', MUSICAI_MASTER_WORKFLOW: 'm', URIT_AI_TOKEN: 'g', ASSIST_API_KEY: 'a' });
   const cases: unknown[] = [
     [], 'texto', { kind: 'otro' }, {},
     { ...MASTER, target_lufs: -30 }, { ...MASTER, extra: 1 }, { ...MASTER, asset_id: 'a.wav' }, { ...MASTER, duration_s: 0 },
@@ -852,22 +916,22 @@ test('escritura condicional: una sesion o un audio escritos entre el head y el p
 });
 
 test('contador de gasto: dos trabajos simultaneos se anotan los dos y no pasan juntos el tope', async () => {
-  const a = setup({ GEMINI_API_KEY: 'g' });
+  const a = setup({ URIT_AI_TOKEN: 'g' });
   const both = await Promise.all([a.post('/ses_a/jobs', GENERATE), a.post('/ses_b/jobs', GENERATE)]);
   assert.deepEqual(both.map((r) => r.status), [202, 202]);
   const usage = a.bucket.json(`${prefix}_usage/2026-11.json`);
-  assert.equal(usage.total_usd, 0.12, 'ninguna entrada se pierde');
+  assert.equal(usage.total_usd, 0.08, 'ninguna entrada se pierde');
   assert.equal(usage.entries.length, 2);
   const global = a.bucket.json('studio/_usage/2026-11.json');
-  assert.equal(global.total_usd, 0.12);
+  assert.equal(global.total_usd, 0.08);
   assert.deepEqual(global.entries.map((e: { scope: string }) => e.scope), [prefix, prefix], 'el contador global dice quien gasto');
 
-  const b = setup({ GEMINI_API_KEY: 'g', STUDIO_MONTHLY_BUDGET_USD: '0.06' });
+  const b = setup({ URIT_AI_TOKEN: 'g', STUDIO_MONTHLY_BUDGET_USD: '0.04' });
   const raced = await Promise.all([b.post('/ses_a/jobs', GENERATE), b.post('/ses_b/jobs', GENERATE)]);
   assert.deepEqual(raced.map((r) => r.status).sort(), [202, 429], 'en el tope cabe uno solo');
   assert.equal(b.external().length, 1, 'el que no cabe no llega al proveedor');
-  assert.equal(b.bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.06);
-  assert.equal(b.bucket.json('studio/_usage/2026-11.json').total_usd, 0.06, 'la reserva global del rechazado se revierte');
+  assert.equal(b.bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.04);
+  assert.equal(b.bucket.json('studio/_usage/2026-11.json').total_usd, 0.04, 'la reserva global del rechazado se revierte');
   assert.equal([...b.bucket.objects.keys()].filter((k) => k.includes('/jobs/')).length, 1);
 });
 
@@ -979,7 +1043,7 @@ test('master: solo una salida de audio reconocible; un informe o un JSON nunca q
 });
 
 test('trabajo sincrono: se reserva antes de pagar, job_id es idempotente y un registro interrumpido caduca', async () => {
-  const { call, post, bucket, external, clock, world, waited } = setup({ GEMINI_API_KEY: 'g' });
+  const { call, post, bucket, external, clock, world, waited } = setup({ URIT_AI_TOKEN: 'g' });
   const answer = world.lyria;
   let seen: unknown = null;
   world.lyria = () => {
@@ -989,14 +1053,14 @@ test('trabajo sincrono: se reserva antes de pagar, job_id es idempotente y un re
   };
   const first = await post('/ses_a/jobs?job_id=job_mio', GENERATE);
   assert.deepEqual([first.status, await first.json()], [202, { job_id: 'job_mio', status: 'STARTED', kind: 'generate' }]);
-  assert.deepEqual(seen, { job: 'STARTED', spent: 0.06 });
+  assert.deepEqual(seen, { job: 'STARTED', spent: 0.04 });
   assert.equal(waited.length, 1, 'la llamada al proveedor va a waitUntil');
 
   // El cliente perdio la respuesta y repite con el mismo id: no se genera ni se cobra otra vez.
   const again = await post('/ses_a/jobs?job_id=job_mio', GENERATE);
   assert.deepEqual([again.status, await again.json()], [202, { job_id: 'job_mio', status: 'STARTED', kind: 'generate' }]);
   assert.equal(external().length, 1);
-  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.06);
+  assert.equal(bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.04);
   assert.equal((await (await call('GET', '/ses_a/jobs/job_mio', { token: MUSICIAN })).json()).status, 'SUCCEEDED');
   assert.equal((await post('/ses_a/jobs?job_id=otro', GENERATE)).status, 400, 'el id del cliente empieza por job_');
   assert.equal((await post('/ses_a/jobs?job_id=job_a.b', GENERATE)).status, 400);
@@ -1013,32 +1077,42 @@ test('trabajo sincrono: se reserva antes de pagar, job_id es idempotente y un re
 });
 
 test('quien puede gastar: tope global del Worker y lista de usuarios', async () => {
-  const g = setup({ GEMINI_API_KEY: 'g', STUDIO_GLOBAL_MONTHLY_BUDGET_USD: '0.06' });
+  const g = setup({ URIT_AI_TOKEN: 'g', STUDIO_GLOBAL_MONTHLY_BUDGET_USD: '0.04' });
   assert.equal((await g.post('/ses_a/jobs', GENERATE)).status, 202);
   const estimate = await (await g.post('/ses_a/jobs?estimate=1', GENERATE)).json();
-  assert.deepEqual([estimate.allowed, estimate.spent_usd, estimate.budget_usd], [false, 0.06, null], 'la banda no tiene tope, el Worker si');
+  assert.deepEqual([estimate.allowed, estimate.spent_usd, estimate.budget_usd], [false, 0.04, null], 'la banda no tiene tope, el Worker si');
   const over = await g.post('/ses_b/jobs', GENERATE);
   assert.deepEqual([over.status, (await over.json()).error], [429, 'quota_exceeded']);
   assert.equal(g.external().length, 1);
-  assert.equal(g.bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.06);
+  assert.equal(g.bucket.json(`${prefix}_usage/2026-11.json`).total_usd, 0.04);
   assert.equal([...g.bucket.objects.keys()].filter((k) => k.includes('/jobs/')).length, 1, 'el rechazado no deja registro');
 
-  const s = setup({ GEMINI_API_KEY: 'g', STUDIO_SPENDER_UIDS: 'ffffffff-0000-4000-8000-000000000000' });
+  const s = setup({ URIT_AI_TOKEN: 'g', STUDIO_SPENDER_UIDS: 'ffffffff-0000-4000-8000-000000000000' });
   const denied = await s.post('/ses_a/jobs', GENERATE);
   assert.deepEqual([denied.status, (await denied.json()).error], [403, 'not_a_spender']);
   assert.equal((await s.post('/ses_a/jobs?estimate=1', GENERATE)).status, 403);
   assert.equal(s.external().length, 0);
-  const ok = setup({ GEMINI_API_KEY: 'g', STUDIO_SPENDER_UIDS: ` ${USER} , ffffffff-0000-4000-8000-000000000000` });
+  const ok = setup({ URIT_AI_TOKEN: 'g', STUDIO_SPENDER_UIDS: ` ${USER} , ffffffff-0000-4000-8000-000000000000` });
   assert.equal((await ok.post('/ses_a/jobs', GENERATE)).status, 202);
 });
 
 test('limites: documento normalizado, cuerpo sin Content-Length, audios por sesion y lista truncada', async () => {
   const { call, bucket } = setup();
   const size = (text: string) => new TextEncoder().encode(text).byteLength;
-  // Un documento cuyo cuerpo cabe pero que, con updated_at y updated_by del Worker, ya no.
-  const make = (lens: number[]) => JSON.stringify(emptySession('ses_big', {
+  // Un documento cuyo cuerpo cabe pero que, con updated_at y updated_by del Worker, ya no. Con el
+  // tope de 1 MiB (STUDIO_V2.md 2.5) hace falta un v2: 16384 notas mas audios con prompts largos.
+  const notes = Array.from({ length: 4096 }, (_, i) => ({ pitch: 36 + (i % 48), start: Math.floor(i / 48) * 0.25, length: 0.25, velocity: 100 }));
+  const make = (lens: number[]) => JSON.stringify(validateSession(emptySession('ses_big', {
+    version: 2,
     assets: lens.map((n, i) => ({ ...FIXTURE.assets[3], id: `ast_g${i}`, file: `ast_g${i}.mp3`, source: { ...FIXTURE.assets[3].source, prompt: 'x'.repeat(n) } })),
-  }));
+    tracks: [{
+      id: 'trk_i', kind: 'instrument', name: 'Notas', role: 'keys', volume_db: 0, pan: 0, mute: false, solo: false, reverb_send_db: -60, fx: [],
+      instrument: { type: 'synth', preset: null, params: {} },
+      midi_clips: [0, 1, 2, 3].map((k) => ({ id: `mid_${k}`, start_beat: k * 32, length_beats: 32, loop: false, loop_beats: 32, notes })),
+      frozen_asset_id: null,
+    }],
+    markers: [],
+  })));
   const sized = (target: number) => {
     let need = target - size(make(Array(240).fill(1)));
     return make(Array.from({ length: 240 }, () => {
@@ -1055,7 +1129,7 @@ test('limites: documento normalizado, cuerpo sin Content-Length, audios por sesi
   assert.deepEqual([fits.status, (await fits.json()).error], [409, 'missing_asset'], 'con margen pasa el limite y sigue la validacion');
 
   // Sin Content-Length el cuerpo se corta al pasar el limite, no despues de leerlo entero.
-  const chunked = await call('PUT', '/ses_a/session', { token: OWNER, body: 'x'.repeat(300 * 1024), headers: CREATE, length: null });
+  const chunked = await call('PUT', '/ses_a/session', { token: OWNER, body: 'x'.repeat(1100 * 1024), headers: CREATE, length: null });
   assert.deepEqual([chunked.status, (await chunked.json()).error], [413, 'session_too_large']);
   const bigJob = await call('POST', '/ses_a/jobs', { token: OWNER, body: 'x'.repeat(70 * 1024), length: null });
   assert.deepEqual([bigJob.status, (await bigJob.json()).error], [400, 'bad_job']);

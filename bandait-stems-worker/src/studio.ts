@@ -1,4 +1,5 @@
-// Rutas del Estudio Bandait. Contrato normativo: bandait-protocol/STUDIO_V1.md.
+// Rutas del Estudio Bandait. Contrato normativo: bandait-protocol/STUDIO_V1.md, con los cambios de
+// STUDIO_V2.md (documento v2 de hasta 1 MiB; trabajos compose, analyze y chat).
 //
 //   GET    /v1/bands/{band}/studio                              integrante
 //   GET    /v1/bands/{band}/studio/{session}/session            integrante

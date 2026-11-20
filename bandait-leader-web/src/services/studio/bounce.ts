@@ -14,10 +14,18 @@
  * Memoria: 20 minutos estereo a 48 kHz son unos 460 MB en coma flotante mas el WAV. Es el limite
  * de la sesion (STUDIO_V1.md 2.8), no el caso normal.
  *
+ * v2: las pistas de instrumento se renderizan con los mismos instrumentos que al escuchar
+ * (prepareInstruments + buildGraph en el OfflineAudioContext) y sus notas las programa
+ * scheduleMidiClips; los instrumentos son deterministas, asi que el archivo suena igual que la
+ * escucha. El tramo por defecto suma la cola de los instrumentos (relajaciones y caidas).
+ *
  * Funciones puras exportadas (se prueban con node): bounceRange, bounceTrackIds, soloTrackSession.
  */
 import { encodeWavPcm } from '../wav.ts'
-import { buildGraph, graphLatency, prepareGraphContext, reverbTailSeconds, scheduleClips } from './graph.ts'
+import { buildGraph, graphLatency, prepareGraphContext, reverbTailSeconds, scheduleClips, trackHasSound } from './graph.ts'
+import { instrumentTailSeconds } from './instruments/core.ts'
+import { prepareInstruments, releaseInstruments } from './instruments/factory.ts'
+import { scheduleMidiClips } from './instruments/schedule.ts'
 import { integratedLufs, truePeakDb } from './loudness.ts'
 import { STUDIO_MAX_SESSION_SECONDS, sessionEndSeconds, type StudioSession } from './session.ts'
 import type { BounceApi, BounceFile, BounceOptions, BounceResult, BouncedTrack, LoopRegionS, StudioBuffers } from './types.ts'
@@ -28,7 +36,8 @@ import type { BounceApi, BounceFile, BounceOptions, BounceResult, BouncedTrack, 
 
 /**
  * Tramo a exportar. Si viene `range` se acota a la sesion; si no, va de 0 al fin del ultimo clip
- * activo, mas la cola de reverb cuando `withTail` es true. null si no queda nada que exportar.
+ * activo (audio o MIDI), mas la cola de los instrumentos (siempre: cortar una relajacion hace
+ * clic) y la de reverb cuando `withTail` es true. null si no queda nada que exportar.
  */
 export function bounceRange(session: StudioSession, range: LoopRegionS | undefined, withTail: boolean): LoopRegionS | null {
   if (range) {
@@ -39,16 +48,20 @@ export function bounceRange(session: StudioSession, range: LoopRegionS | undefin
   }
   const end = sessionEndSeconds(session)
   if (!(end > 0)) return null
-  return { startS: 0, endS: end + (withTail ? reverbTailSeconds(session) : 0) }
+  const tail = instrumentTailSeconds(session) + (withTail ? reverbTailSeconds(session) : 0)
+  return { startS: 0, endS: Math.min(STUDIO_MAX_SESSION_SECONDS, end + tail) }
 }
 
-/** Pistas que exporta el modo 'tracks': las pedidas que existan, o todas las que tienen clips activos. */
+/**
+ * Pistas que exporta el modo 'tracks': las pedidas que existan, o todas las que tienen algo que
+ * suene (clips de audio activos, clips MIDI o congelado).
+ */
 export function bounceTrackIds(session: StudioSession, trackIds?: readonly string[]): string[] {
   if (trackIds) {
     const wanted = new Set(trackIds)
     return session.tracks.filter((track) => wanted.has(track.id)).map((track) => track.id)
   }
-  return session.tracks.filter((track) => track.clips.some((clip) => clip.active)).map((track) => track.id)
+  return session.tracks.filter((track) => trackHasSound(track)).map((track) => track.id)
 }
 
 /**
@@ -96,16 +109,25 @@ async function renderOffline(
   const reserve = Math.ceil(graphLatency(session, rate, false).totalS * rate) + 8
   const offline = new OfflineAudioContext({ numberOfChannels: 2, length: frames + reserve, sampleRate: rate })
   if (tapTrackId === null) await prepareGraphContext(offline)
+  const instruments = await prepareInstruments(offline, session)
   if (signal?.aborted) throw abortError()
 
-  const graph = buildGraph(offline, session, buffers)
+  const graph = buildGraph(offline, session, buffers, instruments)
   const output = tapTrackId === null ? graph.master : graph.trackOutputs.get(tapTrackId)
   if (!output) {
     graph.dispose()
     throw new Error('La pista que se quiere exportar no existe en la sesión.')
   }
   output.connect(offline.destination)
-  const scheduled = scheduleClips(offline, graph, session, buffers, { fromS: range.startS, atCtxTime: 0, untilS: range.endS })
+  const schedule = { fromS: range.startS, atCtxTime: 0, untilS: range.endS }
+  const clips = scheduleClips(offline, graph, session, buffers, schedule)
+  const notes = scheduleMidiClips(offline, graph, session, buffers, { ...schedule, nowCtxTime: 0 })
+  const scheduled = {
+    dispose() {
+      clips.dispose()
+      notes.dispose()
+    },
+  }
   const latencyS = tapTrackId === null ? graph.latency.totalS : graph.latency.trackBusS
   const skipFrames = Math.min(reserve, Math.round(latencyS * rate))
 
@@ -127,6 +149,7 @@ async function renderOffline(
     if (onAbort) signal?.removeEventListener('abort', onAbort)
     scheduled.dispose()
     graph.dispose()
+    releaseInstruments(offline)
   }
 }
 

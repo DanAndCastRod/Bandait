@@ -41,14 +41,22 @@ export interface Draft {
   notes: string[];
 }
 
-const KIND: Record<string, [string, string]> = {
+/** Music AI section label (lower case) -> [section kind, Spanish label]. Also used by the Estudio `analyze` job. */
+export const KIND: Record<string, [string, string]> = {
   intro: ['intro', 'Intro'], verse: ['verse', 'Estrofa'], chorus: ['chorus', 'Coro'], 'pre-chorus': ['pre_chorus', 'Pre coro'],
   prechorus: ['pre_chorus', 'Pre coro'], bridge: ['bridge', 'Puente'], outro: ['outro', 'Final'], solo: ['solo', 'Solo'],
   instrumental: ['interlude', 'Interludio'], interlude: ['interlude', 'Interludio'], break: ['break', 'Corte'],
 };
 
-function chordName(c: MusicAiChord): string {
-  const raw = c.chord_simple_pop ?? c.chord_basic_pop ?? c.chord_majmin ?? 'N';
+/** Music AI section label (lower case) -> [kind, label], or undefined. Own keys only: '__proto__' is no kind. */
+export function kindOf(label: string): [string, string] | undefined {
+  return Object.hasOwn(KIND, label) ? KIND[label] : undefined;
+}
+
+export function chordName(c: MusicAiChord): string {
+  const raw: unknown = c.chord_simple_pop ?? c.chord_basic_pop ?? c.chord_majmin ?? 'N';
+  // A non-string name (a number or an object; null is skipped by ??) is no chord.
+  if (typeof raw !== 'string') return '';
   return raw === 'N' || !raw ? '' : raw.replace(/:maj$/, '').replace(/:min$/, 'm');
 }
 
@@ -195,7 +203,7 @@ export function assemble(result: MusicAiResult, beatsPerBar = 4): Draft {
     const s = merged[i];
     const endBar = i + 1 < merged.length ? Math.round(at(merged[i + 1].start)) : Math.max(cursor + 1, Math.round(at(s.end)));
     const bars = Math.max(1, endBar - cursor);
-    const [kind, base] = KIND[s.label.trim().toLowerCase()] ?? ['custom', s.label.trim() || 'Sección'];
+    const [kind, base] = kindOf(s.label.trim().toLowerCase()) ?? ['custom', s.label.trim() || 'Sección'];
     // A verse split in two passes (over 16 bars) keeps its number: "Estrofa 1", "Estrofa 1".
     if (sections[sections.length - 1]?.kind !== kind) counters[kind] = (counters[kind] ?? 0) + 1;
     const label = kind === 'verse' ? `${base} ${counters[kind]}` : counters[kind] > 1 && kind !== 'chorus' ? `${base} ${counters[kind]}` : base;

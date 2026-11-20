@@ -1,0 +1,310 @@
+{
+  "version": 2,
+  "id": "ses_v2a1",
+  "title": "Maqueta v2 - instrumentos",
+  "song_id": null,
+  "bpm": 120,
+  "beats_per_bar": 4,
+  "key": "C#m",
+  "sample_rate": 48000,
+  "latency_offset_ms": 0,
+  "updated_at": "2026-11-19T15:30:00Z",
+  "updated_by": "0b6c1d52-4f0e-4a39-9d0b-6a1f6f0c2e11",
+  "assets": [
+    {
+      "id": "ast_v1",
+      "file": "ast_v1.wav",
+      "kind": "recording",
+      "label": "Voz toma 1",
+      "channels": 1,
+      "sample_rate": 48000,
+      "duration_s": 24,
+      "size": 3456044,
+      "source": null
+    },
+    {
+      "id": "ast_s1",
+      "file": "ast_s1.wav",
+      "kind": "import",
+      "label": "Piano Do4.wav",
+      "channels": 2,
+      "sample_rate": 48000,
+      "duration_s": 3.2,
+      "size": 921644,
+      "source": null
+    },
+    {
+      "id": "ast_f1",
+      "file": "ast_f1.wav",
+      "kind": "bounce",
+      "label": "Pad congelado",
+      "channels": 2,
+      "sample_rate": 48000,
+      "duration_s": 40,
+      "size": 11520044,
+      "source": null
+    }
+  ],
+  "tracks": [
+    {
+      "id": "trk_1",
+      "kind": "audio",
+      "name": "Voz",
+      "role": "vocals",
+      "volume_db": 0,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "reverb_send_db": -18,
+      "fx": [],
+      "clips": [
+        {
+          "id": "clp_1",
+          "asset_id": "ast_v1",
+          "start_s": 8,
+          "offset_s": 0,
+          "length_s": 20,
+          "gain_db": 0,
+          "fade_in_s": 0.01,
+          "fade_out_s": 0.05,
+          "take_group": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "trk_2",
+      "kind": "instrument",
+      "name": "Pad",
+      "role": "keys",
+      "volume_db": -6,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "reverb_send_db": -12,
+      "fx": [],
+      "instrument": {
+        "type": "synth",
+        "preset": "pad_calido",
+        "params": {
+          "osc1_wave": "sawtooth",
+          "osc1_octave": 0,
+          "osc1_detune_cents": 0,
+          "osc1_level": 0.8,
+          "osc2_wave": "sawtooth",
+          "osc2_octave": 0,
+          "osc2_detune_cents": 9,
+          "osc2_level": 0.6,
+          "noise_level": 0,
+          "filter_type": "lowpass",
+          "filter_cutoff_hz": 1200,
+          "filter_resonance": 0.8,
+          "filter_env_octaves": 1,
+          "filter_attack_ms": 800,
+          "filter_decay_ms": 1500,
+          "filter_sustain": 0.5,
+          "filter_release_ms": 1500,
+          "amp_attack_ms": 600,
+          "amp_decay_ms": 1000,
+          "amp_sustain": 0.8,
+          "amp_release_ms": 1800,
+          "lfo_wave": "sine",
+          "lfo_rate_hz": 0.3,
+          "lfo_target": "filter",
+          "lfo_depth": 0.2,
+          "velocity_sens": 0.3,
+          "gain_db": -10
+        }
+      },
+      "midi_clips": [
+        {
+          "id": "mid_p1",
+          "start_beat": 16,
+          "length_beats": 16,
+          "loop": false,
+          "loop_beats": 16,
+          "notes": [
+            {"pitch": 61, "start": 0, "length": 8, "velocity": 90},
+            {"pitch": 64, "start": 0, "length": 8, "velocity": 90},
+            {"pitch": 68, "start": 0, "length": 8, "velocity": 90},
+            {"pitch": 57, "start": 8, "length": 8, "velocity": 90},
+            {"pitch": 61, "start": 8, "length": 8, "velocity": 90},
+            {"pitch": 64, "start": 8, "length": 8, "velocity": 90}
+          ]
+        }
+      ],
+      "frozen_asset_id": "ast_f1"
+    },
+    {
+      "id": "trk_3",
+      "kind": "instrument",
+      "name": "Bateria",
+      "role": "drums",
+      "volume_db": -3,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "reverb_send_db": -24,
+      "fx": [
+        {
+          "type": "compressor",
+          "bypass": false,
+          "params": {
+            "threshold_db": -16,
+            "ratio": 4,
+            "attack_ms": 5,
+            "release_ms": 120,
+            "knee_db": 6,
+            "makeup_db": 2
+          }
+        }
+      ],
+      "instrument": {
+        "type": "drums",
+        "preset": "basico",
+        "params": {
+          "kick_level_db": 0,
+          "kick_tune": 0,
+          "kick_decay": 1,
+          "snare_level_db": 0,
+          "snare_tune": 0,
+          "snare_decay": 1,
+          "clap_level_db": 0,
+          "clap_tune": 0,
+          "clap_decay": 1,
+          "hat_closed_level_db": 0,
+          "hat_closed_tune": 0,
+          "hat_closed_decay": 1,
+          "hat_open_level_db": 0,
+          "hat_open_tune": 0,
+          "hat_open_decay": 1,
+          "tom_low_level_db": 0,
+          "tom_low_tune": 0,
+          "tom_low_decay": 1,
+          "tom_mid_level_db": 0,
+          "tom_mid_tune": 0,
+          "tom_mid_decay": 1,
+          "tom_high_level_db": 0,
+          "tom_high_tune": 0,
+          "tom_high_decay": 1,
+          "cymbal_level_db": 0,
+          "cymbal_tune": 0,
+          "cymbal_decay": 1,
+          "gain_db": -6
+        }
+      },
+      "midi_clips": [
+        {
+          "id": "mid_d1",
+          "start_beat": 0,
+          "length_beats": 8,
+          "loop": false,
+          "loop_beats": 8,
+          "notes": [
+            {"pitch": 36, "start": 0, "length": 0.25, "velocity": 110},
+            {"pitch": 42, "start": 0, "length": 0.25, "velocity": 80},
+            {"pitch": 42, "start": 0.5, "length": 0.25, "velocity": 60},
+            {"pitch": 38, "start": 1, "length": 0.25, "velocity": 100},
+            {"pitch": 42, "start": 1, "length": 0.25, "velocity": 80},
+            {"pitch": 42, "start": 1.5, "length": 0.25, "velocity": 60},
+            {"pitch": 36, "start": 2, "length": 0.25, "velocity": 110},
+            {"pitch": 42, "start": 2, "length": 0.25, "velocity": 80},
+            {"pitch": 42, "start": 2.5, "length": 0.25, "velocity": 60},
+            {"pitch": 38, "start": 3, "length": 0.25, "velocity": 100},
+            {"pitch": 42, "start": 3, "length": 0.25, "velocity": 80},
+            {"pitch": 46, "start": 3.5, "length": 0.25, "velocity": 70},
+            {"pitch": 36, "start": 4, "length": 0.25, "velocity": 110},
+            {"pitch": 49, "start": 4, "length": 0.25, "velocity": 90},
+            {"pitch": 42, "start": 4.5, "length": 0.25, "velocity": 60},
+            {"pitch": 38, "start": 5, "length": 0.25, "velocity": 100},
+            {"pitch": 42, "start": 5, "length": 0.25, "velocity": 80},
+            {"pitch": 42, "start": 5.5, "length": 0.25, "velocity": 60},
+            {"pitch": 36, "start": 6, "length": 0.25, "velocity": 110},
+            {"pitch": 42, "start": 6, "length": 0.25, "velocity": 80},
+            {"pitch": 42, "start": 6.5, "length": 0.25, "velocity": 60},
+            {"pitch": 38, "start": 7, "length": 0.25, "velocity": 100},
+            {"pitch": 42, "start": 7, "length": 0.25, "velocity": 80},
+            {"pitch": 42, "start": 7.5, "length": 0.25, "velocity": 60}
+          ]
+        }
+      ],
+      "frozen_asset_id": null
+    },
+    {
+      "id": "trk_4",
+      "kind": "instrument",
+      "name": "Piano muestreado",
+      "role": "keys",
+      "volume_db": -4,
+      "pan": 0.15,
+      "mute": false,
+      "solo": false,
+      "reverb_send_db": -20,
+      "fx": [],
+      "instrument": {
+        "type": "sampler",
+        "params": {
+          "amp_attack_ms": 2,
+          "amp_decay_ms": 0,
+          "amp_sustain": 1,
+          "amp_release_ms": 150,
+          "velocity_sens": 0.7,
+          "mode": "sustain",
+          "gain_db": 0
+        },
+        "zones": [
+          {
+            "asset_id": "ast_s1",
+            "root_pitch": 60,
+            "low_pitch": 48,
+            "high_pitch": 72,
+            "low_velocity": 1,
+            "high_velocity": 127,
+            "offset_s": 0,
+            "length_s": 3.2,
+            "gain_db": 0,
+            "tune_cents": 0
+          }
+        ]
+      },
+      "midi_clips": [
+        {
+          "id": "mid_s1",
+          "start_beat": 32,
+          "length_beats": 4,
+          "loop": false,
+          "loop_beats": 4,
+          "notes": [
+            {"pitch": 60, "start": 0, "length": 1, "velocity": 100},
+            {"pitch": 64, "start": 1, "length": 1, "velocity": 96},
+            {"pitch": 67, "start": 2, "length": 1, "velocity": 92},
+            {"pitch": 72, "start": 3, "length": 1, "velocity": 100}
+          ]
+        }
+      ],
+      "frozen_asset_id": null
+    }
+  ],
+  "markers": [
+    {"id": "mk_1", "beat": 0, "label": "Intro", "kind": "intro"},
+    {"id": "mk_2", "beat": 16, "label": "Estrofa", "kind": "verse"},
+    {"id": "mk_3", "beat": 48, "label": "Coro", "kind": "chorus"}
+  ],
+  "master": {
+    "volume_db": 0,
+    "fx": [
+      {
+        "type": "limiter",
+        "bypass": false,
+        "params": {
+          "ceiling_db": -1,
+          "release_ms": 100
+        }
+      }
+    ],
+    "reverb": {
+      "decay_s": 1.8,
+      "return_db": 0
+    }
+  }
+}

@@ -1448,3 +1448,60 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Para subir el job del leader a 26.04: arrancar un servidor de audio con salida nula en el CI, o hacer que las pruebas no inicien PortAudio.
   2. El plan gratuito de Supabase pausa el proyecto tras un periodo sin uso: volverá a pasar si la app queda inactiva.
+
+### [2026-11-19] - Worker del Estudio desplegado; asistente de mezcla por URiT IA
+* **Sprint / Módulo:** `bandait-stems-worker`. Pedido de Daniel Castaneda: usar la clave de Gemini de URiT AI, pedir recomendación a la sesión de URiT (`console_implementation`), pasar el asistente de mezcla a Gemini y desplegar con el token de Cloudflare. Agente: Claude Code (Opus 5.5).
+* **Estado encontrado:**
+  - Producción servía la versión anterior del Worker: `GET /v1/bands/me/studio` respondía 404. Las rutas del Estudio estaban en `main` desde el PR #44, sin desplegar.
+  - El asistente de mezcla usaba Anthropic y en ClipVault no hay clave de Anthropic.
+* **Acción técnica realizada:**
+  - PR #46: proveedores `urit` (por defecto: `POST https://ai.urit.services/v1/text` como consumidor `bandait`, secreto `URIT_AI_TOKEN`) y `gemini` (directo, `generateContent`) para el asistente; `anthropic` se conserva. Recomendación de la sesión de URiT: el texto pasa por urit-ai y no compite por la cuota de los mismos modelos con Releven y accntant.
+  - La sesión de URiT registró el consumidor `bandait` (topes: 30 por minuto, USD 5 al día, USD 30 al mes, 8192 tokens de salida) y dejó su token en ClipVault (`urit-ai-credentials`, campo `bandait_token`).
+  - Despliegue con `wrangler deploy` por ClipVault (`releven-deploy-cloudflare-api-key`), versión `5a0e627b-684e-4d21-8001-ba26394afa05`. `URIT_AI_TOKEN` cargado con `wrangler secret put` por la entrada estándar, sin pasar por la conversación.
+  - `GEMINI_API_KEY` NO se cargó: según la sesión de URiT, Daniel Castaneda decidió que Lyria también pase por URiT IA, que prepara una ruta de música. Hasta entonces `generate` responde 503.
+* **Verificación:**
+  - `npm test` del Worker: 43 de 43. CI del PR #46 en verde.
+  - Tras el despliegue: `GET /v1/bands/me/studio` sin sesión responde 401 `missing_token` (antes 404); la ruta vieja de manifiesto de stems sigue respondiendo 401 sin sesión.
+  - No verificado: ninguna llamada real del asistente a urit-ai (pide una sesión de Supabase de un editor y una mezcla).
+* **Errores propios:**
+  - El primer `npx wrangler deploy` por ClipVault quedó colgado más de 10 minutos sin salida. Lo detuve y relancé con `node node_modules/wrangler/bin/wrangler.js deploy`, que terminó en segundos. No se determinó la causa: probablemente `npx` (o un aviso interactivo de wrangler) sin terminal. La constante `VERSION` del Worker sigue en `1.0.0` aunque el código cambió.
+  - Pedí a la sesión de URiT que registrara el consumidor sin que Daniel Castaneda lo hubiera autorizado; el clasificador de permisos lo bloqueó. El registro lo hizo después esa sesión por decisión de él.
+* **Pendientes:**
+  1. Ruta de música de URiT IA: cuando exista, adaptar `generate` (hoy con la Gemini API directa) y desplegar.
+  2. Uuid de Daniel Castaneda en `STUDIO_SPENDER_UIDS`: hoy cualquier editor de cualquier banda puede gastar hasta el tope global de USD 30.
+  3. Primera consulta real del asistente de mezcla desde el Hub.
+
+### [2026-11-19] - Estudio v2: cierre (revisión de dos revisores, Lyria por URiT IA, pruebas y e2e)
+* **Sprint / Módulo:** Estudio Bandait v2 (`docs/PLAN_ESTUDIO_V2.md`): `bandait-stems-worker`, `bandait-leader-web` (Estudio), `bandait-protocol/STUDIO_V2.md`, `e2e/`. Rama `feat/estudio-v2`, sin commit (lo hace el orquestador). Agente: Claude Code (Opus 5.5), etapa de cierre de un flujo con varios agentes. Además, pedido de Daniel Castaneda: el Generador de audio mostraba "PROVEEDOR NO DISPONIBLE" con Lyria.
+* **Estado encontrado:**
+  - `generate` con Lyria llamaba a la Gemini API directa (`generativelanguage.googleapis.com/v1beta/interactions`) y exigía `GEMINI_API_KEY`, que no está cargada ni se cargará: 503 `provider_unavailable`, que el Hub muestra como "Ese proveedor de IA no está configurado en la nube de Bandait". URiT IA ya tiene `POST /v1/music` (su `CONTRACT_V1.md` 4A, código 0.3.0) con el consumidor `bandait` habilitado.
+  - Dos revisores independientes dejaron 20 hallazgos (10 del Worker, 10 del Hub). Los comprobé uno por uno leyendo el código; todos eran reales salvo matices anotados abajo.
+  - `verify:logic` del Hub no corría `scripts/verify-studio-v2-input.ts`, y casi toda la lógica pura de `instruments/core.ts` y del motor no tenía prueba.
+* **Acción técnica realizada:**
+  - Lyria por URiT IA (`src/providers/lyria.ts` reescrito): `POST {URIT_AI_URL}/v1/music` con `URIT_AI_TOKEN` y las cabeceras de `providers/urit.ts` (`uritHeaders`), cuerpo `{task: "studio_generate", model, prompt, time_budget_ms: 85000}`, espera propia de 90 s, audio de `output.audio` (formato por los primeros bytes; si no se reconocen, por `mime_type`). `lyria-3-clip-preview` hasta 30 s pedidos (siempre entrega 30 s), `lyria-3.5` más largo; tempo, tonalidad y (solo en canciones) duración van en el texto. Errores: 401/403/503 y 422 `model_not_allowed` son 503; 429, 502 `blocked` y 502 `provider_error` con `NO_AUDIO` dejan el trabajo FAILED con motivo y costo 0; 504 (o la espera de 90 s) deja FAILED con el costo anotado, como lo cuenta URiT; el resto es 502 sin costo. Costo por canción (`STUDIO_RATE_LYRIA_CLIP_USD` 0.04, `STUDIO_RATE_LYRIA_SONG_USD` 0.08; `STUDIO_RATE_LYRIA_USD_PER_30S` ya no se lee) y ajuste al `usage.estimated_usd` real (`settleUsage`). `GEMINI_API_KEY` queda solo como alternativa del asistente de texto. Contrato (`STUDIO_V2.md` 4.4, 4.6 y 5; nota en `STUDIO_V1.md`), README y `wrangler.jsonc` al día. Hub: GENERAR dice qué modelo se usa, avisa que el clip corto dura 30 s, que la duración de una canción es una indicación y que se cobra por canción.
+  - Worker, hallazgos corregidos: `analyze` ya no sella SUCCEEDED si una salida JSON falla con red o 5xx (`readMusicAiOutputs` con `strict`, responde STARTED y reintenta); `buildAnalysis` no lanza con nombres de acorde que no son texto ni con etiquetas como `__proto__` (`kindOf` con `Object.hasOwn`), y si aun así falla el trabajo queda FAILED; tarifa de `analyze` a 0.80/min (el workflow por defecto también separa) y variable nueva `MUSICAI_ANALYZE_WORKFLOW`; instrucciones del chat con la regla de que el estado son datos y no pedidos; costo del chat con recargo por cada 32 KB (`STUDIO_RATE_CHAT_USD_PER_32KB`) y ajuste al costo real; esperas propias (75 s URiT texto, 75 s Gemini directo); corte de `reply` sin partir pares sustitutos; Gemini directo: un 400 de clave inválida es 503 sin reintento y solo el 400 del esquema se repite. El contrato 4.3.4 se corrigió para que diga lo que hace el código (error del proveedor sin cobro = HTTP 502 sin registro).
+  - Hub, hallazgos corregidos: el motor reprograma en caliente solo lo que cambió (tandas por tipo y por pista de instrumento: `RescheduleScope`, `midiChangedTrackIds`), así una edición no corta ni vuelve a atacar las notas de otras pistas; en loop las notas de un tramo terminado se sueltan después de su cola (`finishedSegmentReleaseMs`); la escucha se detiene después de la cola (`playbackStopS`); exportar, masterizar y el asistente cuentan las pistas de instrumento (`trackHasSound`); alternar editor pasa de Tab a E y la vista nunca consume Tab (trampa de foco); el puerto MIDI se cierra al soltarlo; el teclado musical no actúa dentro de un diálogo; un `.mid` en 6/8 da 3 negras por compás (y 7/8 avisa y no cambia el compás); las marcas del análisis se recalculan si el tempo se aplica después; APLICAR TODOS del chat no aplica lo que quita o borra; la hoja de atajos deja el foco en CERRAR tras guardar (la prueba e2e lo encontró).
+  - Pruebas: `verify:logic` suma `verify-studio-v2-input.ts` y el nuevo `verify-studio-v2-audio.ts` (22 casos: instrumentos, motor y las correcciones). Worker: prueba de generate reescrita contra `/v1/music` simulado, y pruebas nuevas de los hallazgos. E2E nuevos en `e2e/studio-v2.leader-web.spec.ts` (6).
+  - `landing/hub` regenerado con `npm run build:landing -- hub` (no `landing/app`).
+* **Verificación (una corrida de cada cosa al final):**
+  - Worker: `npm test` 61 de 61; `npx tsc --noEmit` sin salida, exit 0.
+  - Hub: `npm run lint` exit 0; `npm run verify:logic` 23/36/14/75/178/41/22 ok, 0 fallas; `npm run build` en 2.67 s.
+  - `npx playwright test --project=leader-web`: 58 pasaron y 3 fallaron. Dos eran de mis e2e nuevos (aserción sobre el nombre de pista, que vive en un campo, y el foco perdido al guardar atajos: corregido en el producto). La tercera, la grabación con el micrófono simulado en `studio.leader-web.spec.ts`, avisó "La toma perdió 1 bloques de audio" con 6 navegadores en paralelo. Repetí solo esos archivos una vez: `studio-v2` 6 de 6 y `studio` 5 de 5.
+  - Bloque de arranque del Hub: `index-*.js` pasa de 771 195 bytes (main) a 771 376 (+181 bytes). El chunk diferido del Estudio pasa de 295 219 a 560 740 bytes.
+  - NO verificado: ninguna llamada real a URiT IA (ni `/v1/text` ni `/v1/music`) ni a Music.AI; ningún teclado MIDI físico; el sonido real de las colas en loop y de la reprogramación por pista (solo se probó la lógica y que la exportación no sale en silencio).
+* **Decisiones:**
+  - Un error de Lyria sin cobro que llegó al proveedor (cuota, bloqueo, sin audio) queda como trabajo FAILED con costo 0 y no como error HTTP: el usuario ve el motivo en el panel. Los errores de configuración siguen como 503 para que el botón diga "no disponible".
+  - Tab: se cambió el atajo por defecto a E (en vez de solo dejar pasar Tab en los lienzos) porque Tab en el body también atrapaba el foco. Con el teclado musical encendido, E es una nota.
+  - APLICAR TODOS excluye `remove_track`, `delete_clip`, `replace_midi_notes` y `remove_marker`.
+  - Reprogramación por pista: una tanda MIDI por pista de instrumento (hasta 16 temporizadores), en vez de una sola tanda con dueño compartido.
+* **Errores propios:**
+  - Las primeras versiones de los e2e esperaban el nombre de la pista como texto del encabezado y un Escape tras guardar atajos; las dos fallaron en la corrida completa y se corrigieron.
+  - Una prueba de `planMidiNotes` usaba una ventana donde sí empezaban golpes de la caja; la corregí antes de la corrida final.
+  - El primer intento de mover la función nueva de `smf.ts` la insertó dentro de una interfaz; `tsc` lo detectó.
+* **Pendientes (para Daniel Castaneda):**
+  1. Desplegar el Worker 1.1.0 (`wrangler deploy`): sin eso producción sigue con Lyria por la Gemini API directa y responde 503.
+  2. (Resuelto el 2026-11-19: URiT IA 0.3.1 en producción, `/v1/music` siempre con `store: false` y sin reintento; verificado en `https://ai.urit.services/health`.)
+  3. Poner el uuid de Daniel Castaneda en `STUDIO_SPENDER_UIDS`.
+  4. Probar con un teclado MIDI físico (latencia, canal, cierre del puerto con otra aplicación abierta en Windows).
+  5. Medir el costo real de `analyze` en Music.AI y ajustar `STUDIO_RATE_ANALYZE_USD_PER_MIN`, o crear un workflow solo de análisis en `MUSICAI_ANALYZE_WORKFLOW`.
+  6. Primera generación real con Lyria y primera conversación real del chat desde el Hub. Si URiT responde 422 `model_not_allowed`, el consumidor `bandait` no tiene ese modelo de Lyria en `settings.models`.

@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from 'react'
-import { Copy, Power, RotateCcw, Scissors, Sparkles, Trash2 } from 'lucide-react'
+import { Copy, Download, Piano, Power, RotateCcw, Scissors, Sparkles, Trash2 } from 'lucide-react'
 import { eqBands, type EqBand } from '../../services/studio/fx'
 import {
   defaultFx,
   findClip,
+  findMidiClip,
   findTrack,
   STUDIO_CLIP_GAIN_DB_MAX,
   STUDIO_CLIP_GAIN_DB_MIN,
@@ -16,10 +17,14 @@ import {
   type StudioFxType,
   type StudioSession,
 } from '../../services/studio/session'
-import { moveClip, setClipFades, setClipGain } from '../../services/studio/sessionOps'
+import { moveClip, moveMidiClip, resizeMidiClip, setClipFades, setClipGain, updateMidiClip } from '../../services/studio/sessionOps'
+import { StudioInstrumentPanel } from './StudioInstrumentPanel'
+import { StudioMidiDevicePanel } from './StudioMidiDevicePanel'
 import {
   barBeatAt,
+  downloadBlob,
   errorText,
+  formatBarBeat,
   formatDb,
   formatTimecode,
   fxChainOf,
@@ -348,7 +353,7 @@ const ClipSection: React.FC<{ controller: StudioController; session: StudioSessi
     return (
       <section className="stu-section" aria-label="Clip elegido" data-testid="studio-inspector-clip">
         <span className="stu-label">Clip</span>
-        <p className="stu-help">Elige un clip en la línea de tiempo para ajustar su ganancia, sus fades, su posición y su toma.</p>
+        <p className="stu-help">Elige un clip en la línea de tiempo para ajustar su ganancia, sus fades, su posición y su toma; o un clip MIDI para su largo, su repetición y el piano roll.</p>
       </section>
     )
   }
@@ -510,6 +515,156 @@ const ClipSection: React.FC<{ controller: StudioController; session: StudioSessi
 }
 
 // ---------------------------------------------------------------------------
+// Clip MIDI elegido
+// ---------------------------------------------------------------------------
+
+const LOOP_BAR_OPTIONS: readonly number[] = [0.25, 0.5, 1, 2, 4, 8, 16]
+
+const MidiClipSection: React.FC<{ controller: StudioController; session: StudioSession; clipId: string; recording: boolean }> = ({ controller, session, clipId, recording }) => {
+  const loc = findMidiClip(session, clipId)
+  if (!loc) return null
+  const { clip, track } = loc
+  const bpb = session.beatsPerBar
+  const bars = (beats: number) => {
+    const value = beats / bpb
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  }
+  const loopOptions = LOOP_BAR_OPTIONS.map((b) => b * bpb).filter((beats) => beats <= clip.lengthBeats + 1e-9)
+  if (!loopOptions.some((beats) => Math.abs(beats - clip.loopBeats) < 1e-6)) loopOptions.push(clip.loopBeats)
+  loopOptions.sort((a, b) => a - b)
+
+  const commitNumber = (raw: string, input: HTMLInputElement, current: number, apply: (value: number) => void) => {
+    const value = Number(raw.replace(',', '.'))
+    if (!Number.isFinite(value) || value <= 0) {
+      input.value = bars(current)
+      return
+    }
+    apply(value)
+  }
+
+  const exportClip = () => {
+    const file = controller.exportMidiClip(clip.id)
+    if (file) downloadBlob(file.blob, file.name)
+  }
+
+  return (
+    <section className="stu-section" aria-label="Clip MIDI elegido" data-testid="studio-inspector-midi-clip">
+      <div className="stu-param-head">
+        <span className="stu-label">Clip MIDI</span>
+        <span className="stu-badge" data-tone="sel">
+          {clip.notes.length} NOTAS
+        </span>
+      </div>
+      <strong className="stu-inspector-title">{track.name}</strong>
+      <dl className="stu-kv">
+        <dt>Compás</dt>
+        <dd>{formatBarBeat(clip.startBeat, bpb)}</dd>
+        <dt>Largo</dt>
+        <dd>
+          {bars(clip.lengthBeats)} compases ({clip.lengthBeats} tiempos)
+        </dd>
+        <dt>Repetición</dt>
+        <dd>{clip.loop ? `cada ${bars(clip.loopBeats)} compases` : 'no'}</dd>
+      </dl>
+      <div className="stu-inst-pick">
+        <label className="stu-param">
+          <span className="stu-label">Compás de inicio</span>
+          <input
+            key={`midi-start-${clip.id}-${clip.startBeat}`}
+            type="number"
+            className="stu-field"
+            min={1}
+            step={1}
+            defaultValue={bars(clip.startBeat + bpb)}
+            disabled={recording}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+            }}
+            onBlur={(event) =>
+              commitNumber(event.target.value, event.target, clip.startBeat + bpb, (bar) => {
+                const startBeat = Math.max(0, (bar - 1) * bpb)
+                if (Math.abs(startBeat - clip.startBeat) > 1e-6) controller.run('Mover clip MIDI', (current) => moveMidiClip(current, { clipId: clip.id, startBeat }))
+              })
+            }
+            data-testid="studio-midi-clip-start"
+          />
+        </label>
+        <label className="stu-param">
+          <span className="stu-label">Largo (compases)</span>
+          <input
+            key={`midi-len-${clip.id}-${clip.lengthBeats}`}
+            type="number"
+            className="stu-field"
+            min={0.25}
+            step={0.25}
+            defaultValue={bars(clip.lengthBeats)}
+            disabled={recording}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+            }}
+            onBlur={(event) =>
+              commitNumber(event.target.value, event.target, clip.lengthBeats, (value) => {
+                const toBeat = clip.startBeat + value * bpb
+                if (Math.abs(value * bpb - clip.lengthBeats) > 1e-6) controller.run('Recortar clip MIDI', (current) => resizeMidiClip(current, { clipId: clip.id, edge: 'end', toBeat }))
+              })
+            }
+            data-testid="studio-midi-clip-length"
+          />
+        </label>
+      </div>
+      <div className="stu-inst-pick">
+        <label className="stu-check">
+          <input
+            type="checkbox"
+            checked={clip.loop}
+            disabled={recording}
+            onChange={(event) => controller.run(event.target.checked ? 'Repetir clip MIDI' : 'Quitar repetición', (current) => updateMidiClip(current, { clipId: clip.id, patch: { loop: event.target.checked } }))}
+            data-testid="studio-midi-clip-loop"
+          />
+          <span>Repetir el patrón</span>
+        </label>
+        <label className="stu-param">
+          <span className="stu-label">Patrón (compases)</span>
+          <select
+            className="stu-field"
+            value={String(clip.loopBeats)}
+            disabled={recording || !clip.loop}
+            onChange={(event) => controller.run('Largo del patrón', (current) => updateMidiClip(current, { clipId: clip.id, patch: { loopBeats: Number(event.target.value) } }))}
+            data-testid="studio-midi-clip-loop-beats"
+          >
+            {loopOptions.map((beats) => (
+              <option key={beats} value={String(beats)}>
+                {bars(beats)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="stu-actions">
+        <button type="button" className="stu-btn" data-tone="primary" onClick={() => controller.openPianoRoll(clip.id)} title="Abrir en el piano roll (doble clic en el clip o E)" data-testid="studio-midi-clip-open">
+          <Piano size={13} />
+          PIANO ROLL
+        </button>
+        <button type="button" className="stu-btn" disabled={recording} onClick={() => controller.splitAtPlayhead()} title="Dividir en el cabezal (S)">
+          <Scissors size={13} />
+          DIVIDIR
+        </button>
+        <button type="button" className="stu-btn" disabled={recording} onClick={() => controller.duplicateSelected()} title="Duplicar (Ctrl+D)">
+          <Copy size={13} />
+          DUPLICAR
+        </button>
+        <button type="button" className="stu-btn" data-size="icon" disabled={clip.notes.length === 0} onClick={exportClip} aria-label="Exportar el clip a un archivo MIDI" title="Exportar a .mid">
+          <Download size={13} />
+        </button>
+        <button type="button" className="stu-btn" data-tone="danger" data-size="icon" disabled={recording} onClick={() => controller.deleteSelected()} aria-label="Borrar el clip MIDI" title="Borrar el clip (Supr). Se puede deshacer.">
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Efecto elegido
 // ---------------------------------------------------------------------------
 
@@ -639,21 +794,35 @@ const FxSection: React.FC<{ controller: StudioController; session: StudioSession
 }
 
 /**
- * Inspector del Estudio: el clip elegido (ganancia, fades, posicion, toma) y el efecto elegido
- * de una pista o del master (parametros y bypass). Los arrastres cambian el motor en caliente y
- * dejan un solo paso de deshacer al soltar.
+ * Inspector del Estudio: el clip elegido (audio: ganancia, fades, posicion, toma; MIDI: posicion,
+ * largo, repeticion y piano roll), el instrumento de la pista de instrumento elegida, la entrada
+ * MIDI (si la sesion tiene pistas de instrumento) y el efecto elegido de una pista o del master
+ * (parametros y bypass). Los arrastres cambian el motor en caliente y dejan un solo paso de
+ * deshacer al soltar.
  */
 export const StudioInspector: React.FC<StudioPanelProps> = ({ controller }) => {
   const snap = useStudio(controller)
   const { session } = snap
   const picked = snap.selectedFx
   const pickedValid = picked !== null && (picked.targetId === STUDIO_MASTER_ID || findTrack(session, picked.targetId) !== null)
-  const clipTrackId = snap.selectedClipId ? (findClip(session, snap.selectedClipId)?.track.id ?? null) : null
-  const selection: StudioFxSelection = pickedValid && picked ? picked : { targetId: clipTrackId ?? session.tracks[0]?.id ?? STUDIO_MASTER_ID, type: 'eq' }
+  const midiLoc = snap.selectedClipId ? findMidiClip(session, snap.selectedClipId) : null
+  const clipTrackId = snap.selectedClipId ? (findClip(session, snap.selectedClipId)?.track.id ?? midiLoc?.track.id ?? null) : null
+  const selection: StudioFxSelection = pickedValid && picked ? picked : { targetId: clipTrackId ?? snap.selectedTrackId ?? session.tracks[0]?.id ?? STUDIO_MASTER_ID, type: 'eq' }
+  const instrumentTrackId = (() => {
+    const id = midiLoc?.track.id ?? snap.selectedTrackId
+    return id && findTrack(session, id)?.kind === 'instrument' ? id : null
+  })()
+  const hasInstrumentTracks = session.tracks.some((track) => track.kind === 'instrument')
 
   return (
     <>
-      <ClipSection controller={controller} session={session} clipId={snap.selectedClipId} recording={snap.recording} />
+      {midiLoc ? (
+        <MidiClipSection controller={controller} session={session} clipId={midiLoc.clip.id} recording={snap.recording} />
+      ) : (
+        <ClipSection controller={controller} session={session} clipId={snap.selectedClipId} recording={snap.recording} />
+      )}
+      {instrumentTrackId && <StudioInstrumentPanel controller={controller} trackId={instrumentTrackId} />}
+      {hasInstrumentTracks && <StudioMidiDevicePanel controller={controller} />}
       <FxSection controller={controller} session={session} selection={selection} />
     </>
   )

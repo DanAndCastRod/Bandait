@@ -1,15 +1,35 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Layers, Plus, Redo2, Scissors, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
+import { Copy, Download, FileMusic, Layers, Music, Piano, Plus, Redo2, Scissors, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
 import { isStemAudioPath } from '../../services/stemNames'
 import { dbToGain, type SectionSpan } from '../../services/stemTiming'
 import { clipFadeFactor } from '../../services/studio/graph'
+import { listPlugins } from '../../services/studio/instruments/wamHost'
 import { peaksForRange } from '../../services/studio/peaks'
-import { findAsset, findClip, sessionEndSeconds, STUDIO_MAX_SESSION_SECONDS, STUDIO_MAX_TRACKS, type StudioClip, type StudioSession } from '../../services/studio/session'
-import { moveClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
+import {
+  beatsToSeconds,
+  findAsset,
+  findClip,
+  findMidiClip,
+  secondsToBeats,
+  sessionEndSeconds,
+  STUDIO_INSTRUMENT_TYPE_LABELS,
+  STUDIO_MAX_SESSION_SECONDS,
+  STUDIO_MAX_TRACKS,
+  type StudioClip,
+  type StudioMidiClip,
+  type StudioMidiNote,
+  type StudioSession,
+  type StudioTrack,
+} from '../../services/studio/session'
+import { expandMidiClipNotes, moveClip, moveMidiClip, resizeMidiClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
 import type { AssetPeaks, LoopRegionS, PeakColumns, SnapMode } from '../../services/studio/types'
+import { StudioPianoRoll } from './StudioPianoRoll'
 import { StudioTrackHeader } from './StudioTrackHeader'
 import {
+  downloadBlob,
+  formatBarBeat,
   formatTimecode,
+  isMidiFile,
   layoutTracks,
   RULER_H,
   TAKE_LANE_H,
@@ -66,6 +86,9 @@ interface Scene {
   loop: LoopRegionS | null
   missing: ReadonlySet<string>
   arms: Readonly<Record<string, ArmChannel>>
+  /** Pista de instrumento armada para MIDI. */
+  midiArmed: string | null
+  selectedTrackId: string | null
   /** Tramo de la toma en curso, para marcarlo en las pistas armadas. */
   recBand: LoopRegionS | null
   getPeaks: (assetId: string) => AssetPeaks | null
@@ -245,6 +268,109 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
   }
 }
 
+// --- Clips MIDI ---
+
+/** Notas que suenan en cada clip (repeticion desplegada), por identidad del clip: se recalculan solo si cambia. */
+const expandedNotes = new WeakMap<StudioMidiClip, StudioMidiNote[]>()
+
+function soundingNotes(clip: StudioMidiClip): StudioMidiNote[] {
+  let notes = expandedNotes.get(clip)
+  if (!notes) {
+    notes = expandMidiClipNotes(clip)
+    expandedNotes.set(clip, notes)
+  }
+  return notes
+}
+
+function midiClipBox(clip: StudioMidiClip, bpm: number, row: TrackRowLayout, view: View): ClipBox {
+  const x = beatsToSeconds(clip.startBeat, bpm) * view.zoom - view.scrollX
+  const w = beatsToSeconds(clip.lengthBeats, bpm) * view.zoom
+  return { x, y: RULER_H + row.top + 4, w, h: TRACK_ROW_H - 8 }
+}
+
+const MIDI_LABEL_H = 18
+
+function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: StudioTrack, clip: StudioMidiClip, row: TrackRowLayout, color: string, view: View): void {
+  const bpm = scene.session.bpm
+  const box = midiClipBox(clip, bpm, row, view)
+  if (box.x > view.width || box.x + box.w < 0) return
+  const selected = clip.id === scene.selectedClipId
+  const x = Math.max(box.x, -2)
+  const w = Math.min(box.x + box.w, view.width + 2) - x
+  const beatPx = beatsToSeconds(1, bpm) * view.zoom
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x, box.y, w, box.h)
+  ctx.clip()
+  ctx.fillStyle = withAlpha(color, selected ? 0.24 : 0.12)
+  ctx.fillRect(x, box.y, w, box.h)
+
+  // Vueltas del patron: lineas punteadas donde vuelve a empezar.
+  if (clip.loop && clip.loopBeats < clip.lengthBeats) {
+    ctx.strokeStyle = withAlpha(color, 0.5)
+    ctx.setLineDash([3, 3])
+    ctx.beginPath()
+    for (let b = clip.loopBeats; b < clip.lengthBeats - 1e-6; b += clip.loopBeats) {
+      const lx = Math.round(box.x + b * beatPx) + 0.5
+      ctx.moveTo(lx, box.y + MIDI_LABEL_H)
+      ctx.lineTo(lx, box.y + box.h)
+    }
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+
+  // Notas en miniatura: el rango de pitch del clip ocupa el alto bajo la etiqueta.
+  const notes = soundingNotes(clip)
+  if (notes.length > 0) {
+    let low = 127
+    let high = 0
+    for (const n of notes) {
+      if (n.pitch < low) low = n.pitch
+      if (n.pitch > high) high = n.pitch
+    }
+    const span = Math.max(12, high - low + 1)
+    const mid = (low + high) / 2
+    low = Math.max(0, Math.floor(mid - span / 2))
+    const top = box.y + MIDI_LABEL_H
+    const area = box.h - MIDI_LABEL_H - 4
+    const noteH = Math.max(1.5, Math.min(5, area / span))
+    ctx.fillStyle = withAlpha(color, 0.92)
+    for (const n of notes) {
+      const nx = box.x + n.start * beatPx
+      const nw = Math.max(1.5, Math.min(n.length, clip.lengthBeats - n.start) * beatPx - 1)
+      if (nx > view.width || nx + nw < 0) continue
+      const ny = top + area - ((n.pitch - low + 1) / span) * area
+      ctx.fillRect(nx, ny, nw, noteH)
+    }
+  }
+
+  if (w > 34) {
+    const instrument = track.instrument
+    const name = instrument ? STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type].toUpperCase() : 'MIDI'
+    const text = `MIDI  ${name}  ${clip.notes.length}${clip.loop ? '  LOOP' : ''}`
+    ctx.font = FONT
+    ctx.textBaseline = 'top'
+    const tx = Math.max(box.x, 0) + 6
+    const ty = box.y + 5
+    ctx.fillStyle = 'rgba(15, 17, 20, 0.72)'
+    ctx.fillRect(tx - 3, ty - 2, ctx.measureText(text).width + 6, 14)
+    ctx.fillStyle = withAlpha('#D5DAE0', 0.92)
+    ctx.fillText(text, tx, ty)
+  }
+  ctx.restore()
+
+  ctx.strokeStyle = selected ? '#D5DAE0' : withAlpha(color, 0.75)
+  ctx.lineWidth = selected ? 1.5 : 1
+  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1)
+  // Bordes que se arrastran para recortar, en el clip elegido.
+  if (selected && box.w > 24) {
+    ctx.fillStyle = '#D5DAE0'
+    ctx.fillRect(box.x + 1, box.y + box.h / 2 - 8, 2, 16)
+    ctx.fillRect(box.x + box.w - 3, box.y + box.h / 2 - 8, 2, 16)
+  }
+}
+
 function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, buffers: PeakBuffers): void {
   const { session, rows } = scene
   const { width, height, zoom, scrollX } = view
@@ -263,8 +389,11 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
       ctx.fillStyle = '#0D0F12'
       ctx.fillRect(0, y + TRACK_ROW_H, width, row.height - TRACK_ROW_H)
     }
-    if (scene.arms[row.trackId] !== undefined) {
+    if (scene.arms[row.trackId] !== undefined || scene.midiArmed === row.trackId) {
       ctx.fillStyle = 'rgba(217, 100, 89, 0.06)'
+      ctx.fillRect(0, y, width, TRACK_ROW_H)
+    } else if (scene.selectedTrackId === row.trackId) {
+      ctx.fillStyle = 'rgba(122, 165, 214, 0.05)'
       ctx.fillRect(0, y, width, TRACK_ROW_H)
     }
     ctx.fillStyle = '#2E343D'
@@ -308,6 +437,21 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     const row = rows[index]
     if (!row) return
     const color = trackColor(index)
+    if (track.kind === 'instrument') {
+      let selectedMidi: StudioMidiClip | null = null
+      for (const clip of track.midiClips) {
+        if (clip.id === scene.selectedClipId) selectedMidi = clip
+        else paintMidiClip(ctx, scene, track, clip, row, color, view)
+      }
+      if (selectedMidi) paintMidiClip(ctx, scene, track, selectedMidi, row, color, view)
+      if (track.midiClips.length === 0 && view.width > 200) {
+        ctx.font = FONT
+        ctx.textBaseline = 'middle'
+        ctx.fillStyle = 'rgba(142, 151, 163, 0.45)'
+        ctx.fillText('DOBLE CLIC PARA CREAR UN CLIP MIDI', 10, RULER_H + row.top + TRACK_ROW_H / 2)
+      }
+      return
+    }
     let selected: StudioClip | null = null
     for (const clip of track.clips) {
       if (clip.id === scene.selectedClipId) selected = clip
@@ -327,7 +471,7 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     const rx = scene.recBand.startS * zoom - scrollX
     const rw = (scene.recBand.endS - scene.recBand.startS) * zoom
     rows.forEach((row) => {
-      if (scene.arms[row.trackId] === undefined) return
+      if (scene.arms[row.trackId] === undefined && scene.midiArmed !== row.trackId) return
       ctx.fillStyle = 'rgba(217, 100, 89, 0.28)'
       ctx.fillRect(rx, RULER_H + row.top + 4, rw, TRACK_ROW_H - 8)
       ctx.strokeStyle = '#D96459'
@@ -389,11 +533,14 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
 
 type ClipPart = 'body' | 'start' | 'end' | 'fadeIn' | 'fadeOut'
 
+type MidiPart = 'body' | 'start' | 'end'
+
 type Hit =
   | { kind: 'section'; section: SectionSpan }
   | { kind: 'ruler' }
   | { kind: 'clip'; clipId: string; part: ClipPart }
-  | { kind: 'empty' }
+  | { kind: 'midi'; clipId: string; part: MidiPart }
+  | { kind: 'empty'; trackId: string | null }
 
 function rowAt(rows: readonly TrackRowLayout[], y: number): TrackRowLayout | null {
   const inner = y - RULER_H
@@ -414,7 +561,20 @@ function hitTest(scene: Scene, view: View, px: number, py: number): Hit {
   for (let index = 0; index < scene.session.tracks.length; index++) {
     const row = scene.rows[index]
     if (!row || py < RULER_H + row.top || py >= RULER_H + row.top + row.height) continue
-    const clips = scene.session.tracks[index].clips
+    const track = scene.session.tracks[index]
+    if (track.kind === 'instrument') {
+      const ordered = [...track.midiClips].reverse().sort((a, b) => Number(b.id === scene.selectedClipId) - Number(a.id === scene.selectedClipId))
+      for (const clip of ordered) {
+        const box = midiClipBox(clip, scene.session.bpm, row, view)
+        if (px < box.x || px > box.x + box.w || py < box.y || py > box.y + box.h) continue
+        const edge = Math.min(EDGE_PX, box.w / 4)
+        if (px - box.x <= edge) return { kind: 'midi', clipId: clip.id, part: 'start' }
+        if (box.x + box.w - px <= edge) return { kind: 'midi', clipId: clip.id, part: 'end' }
+        return { kind: 'midi', clipId: clip.id, part: 'body' }
+      }
+      return { kind: 'empty', trackId: track.id }
+    }
+    const clips = track.clips
     // El elegido se dibuja encima: se prueba primero. Luego, del ultimo al primero.
     const ordered = [...clips].reverse().sort((a, b) => Number(b.id === scene.selectedClipId) - Number(a.id === scene.selectedClipId))
     for (const clip of ordered) {
@@ -432,17 +592,28 @@ function hitTest(scene: Scene, view: View, px: number, py: number): Hit {
       if (box.x + box.w - px <= edge) return { kind: 'clip', clipId: clip.id, part: 'end' }
       return { kind: 'clip', clipId: clip.id, part: 'body' }
     }
-    return { kind: 'empty' }
+    return { kind: 'empty', trackId: track.id }
   }
-  return { kind: 'empty' }
+  return { kind: 'empty', trackId: null }
+}
+
+/** Beat ajustado a la rejilla de la linea de tiempo (compas, tiempo o libre a 1/64). */
+function snapBeat(beat: number, mode: SnapMode, beatsPerBar: number, floor = false): number {
+  const step = mode === 'bar' ? beatsPerBar : mode === 'beat' ? 1 : 1 / 64
+  const round = floor ? Math.floor : Math.round
+  return Math.max(0, round(beat / step + (floor ? 1e-9 : 0)) * step)
 }
 
 const PART_CURSOR: Record<ClipPart, string> = { body: 'grab', start: 'ew-resize', end: 'ew-resize', fadeIn: 'col-resize', fadeOut: 'col-resize' }
 const PART_LABEL: Record<ClipPart, string> = { body: 'Mover clip', start: 'Recortar clip', end: 'Recortar clip', fadeIn: 'Fade de entrada', fadeOut: 'Fade de salida' }
 
+const MIDI_CURSOR: Record<MidiPart, string> = { body: 'grab', start: 'ew-resize', end: 'ew-resize' }
+const MIDI_LABEL: Record<MidiPart, string> = { body: 'Mover clip MIDI', start: 'Recortar clip MIDI', end: 'Recortar clip MIDI' }
+
 type Drag =
   | { kind: 'ruler'; startPx: number; startS: number; moved: boolean }
   | { kind: 'clip'; part: ClipPart; clipId: string; base: StudioSession; grabS: number; startPx: number; startPy: number; moved: boolean }
+  | { kind: 'midi'; part: MidiPart; clipId: string; base: StudioSession; grabBeat: number; startPx: number; startPy: number; moved: boolean }
 
 /** Ancho visible de los carriles: el del cuerpo menos la columna fija de cabeceras (su primer hijo). */
 function laneWidth(body: HTMLElement): number {
@@ -474,6 +645,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playheadRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const midiFileRef = useRef<HTMLInputElement>(null)
   const dirtyRef = useRef(true)
   const zoomRef = useRef(DEFAULT_ZOOM)
   const draftRef = useRef<StudioSession | null>(null)
@@ -488,11 +660,28 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   const contentHeight = RULER_H + rowsHeight + FOOTER_H
   const contentSeconds = Math.min(STUDIO_MAX_SESSION_SECONDS, Math.max(120, sessionEndSeconds(session) + 60))
   const selected = snap.selectedClipId ? findClip(session, snap.selectedClipId) : null
+  const selectedMidi = snap.selectedClipId ? findMidiClip(session, snap.selectedClipId) : null
+  const pianoOpen = snap.editor === 'piano_roll' && snap.pianoClipId !== null
+  const hasInstrumentTrack = session.tracks.some((track) => track.kind === 'instrument')
+  const wamPlugins = listPlugins()
 
   // Cualquier cambio discreto repinta el canvas en el siguiente fotograma.
   useEffect(() => {
     dirtyRef.current = true
-  }, [session, snap.selectedClipId, snap.peaksVersion, snap.engine.loop, snap.engine.missingAssetIds, snap.sections, snap.arms, recording, zoom, contentHeight])
+  }, [
+    session,
+    snap.selectedClipId,
+    snap.selectedTrackId,
+    snap.midi.armedTrackId,
+    snap.peaksVersion,
+    snap.engine.loop,
+    snap.engine.missingAssetIds,
+    snap.sections,
+    snap.arms,
+    recording,
+    zoom,
+    contentHeight,
+  ])
 
   useLayoutEffect(() => {
     zoomRef.current = zoom
@@ -523,6 +712,8 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       loop: loopDraftRef.current ?? current.engine.loop,
       missing: new Set(current.engine.missingAssetIds),
       arms: current.arms,
+      midiArmed: current.midi.armedTrackId,
+      selectedTrackId: current.selectedTrackId,
       recBand: fromS === null ? null : { startS: fromS, endS: Math.max(fromS, controller.engine.position()) },
       getPeaks: (assetId) => controller.getPeaks(assetId),
     }
@@ -615,6 +806,16 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     return () => scroller.removeEventListener('wheel', onWheel)
   }, [changeZoom])
 
+  // Zoom pedido por el registro de comandos (+ y -) mientras la linea de tiempo es el editor activo.
+  useEffect(
+    () =>
+      controller.onViewCommand((command) => {
+        if (command.type !== 'zoom' || controller.snapshot().editor !== 'timeline') return
+        changeZoom(zoomRef.current * (command.direction > 0 ? 1.5 : 1 / 1.5))
+      }),
+    [controller, changeZoom],
+  )
+
   const fitZoom = () => {
     const scroller = bodyRef.current
     if (!scroller) return
@@ -661,7 +862,17 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
+    if (hit.kind === 'midi') {
+      controller.select(hit.clipId)
+      const loc = findMidiClip(scene.session, hit.clipId)
+      if (!loc || recording) return
+      const beat = secondsToBeats(timeS, scene.session.bpm)
+      dragRef.current = { kind: 'midi', part: hit.part, clipId: hit.clipId, base: scene.session, grabBeat: beat - loc.clip.startBeat, startPx: at.px, startPy: at.py, moved: false }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      return
+    }
     controller.select(null)
+    if (hit.trackId) controller.selectTrack(hit.trackId)
     controller.seek(timeS)
   }
 
@@ -677,7 +888,18 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
         hoverRef.current = hoverId
         dirtyRef.current = true
       }
-      event.currentTarget.style.cursor = hit.kind === 'clip' ? (recording ? 'default' : PART_CURSOR[hit.part]) : hit.kind === 'empty' ? 'default' : 'pointer'
+      event.currentTarget.style.cursor =
+        hit.kind === 'clip'
+          ? recording
+            ? 'default'
+            : PART_CURSOR[hit.part]
+          : hit.kind === 'midi'
+            ? recording
+              ? 'default'
+              : MIDI_CURSOR[hit.part]
+            : hit.kind === 'empty'
+              ? 'default'
+              : 'pointer'
       return
     }
     const current = controller.snapshot()
@@ -693,6 +915,24 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     }
     if (!drag.moved && Math.hypot(at.px - drag.startPx, at.py - drag.startPy) < DRAG_THRESHOLD_PX) return
     drag.moved = true
+    if (drag.kind === 'midi') {
+      const beat = secondsToBeats(timeS, drag.base.bpm)
+      try {
+        if (drag.part === 'body') {
+          const row = rowAt(layoutTracks(drag.base), at.py)
+          const target = row ? drag.base.tracks.find((t) => t.id === row.trackId) : undefined
+          const startBeat = snapBeat(Math.max(0, beat - drag.grabBeat), mode, drag.base.beatsPerBar)
+          draftRef.current = moveMidiClip(drag.base, { clipId: drag.clipId, startBeat, trackId: target?.kind === 'instrument' ? target.id : undefined })
+          event.currentTarget.style.cursor = 'grabbing'
+        } else {
+          draftRef.current = resizeMidiClip(drag.base, { clipId: drag.clipId, edge: drag.part, toBeat: snapBeat(beat, mode, drag.base.beatsPerBar) })
+        }
+      } catch {
+        // Destino invalido (pista llena): el borrador queda como estaba.
+      }
+      dirtyRef.current = true
+      return
+    }
     const loc = findClip(drag.base, drag.clipId)
     if (!loc) return
     try {
@@ -732,7 +972,8 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     draftRef.current = null
     if (commit && draft && draft !== drag.base) {
       // Si la sesion cambio durante el arrastre (deshacer con el teclado), el borrador ya no vale.
-      if (controller.snapshot().session === drag.base) controller.apply(draft, PART_LABEL[drag.part])
+      const label = drag.kind === 'midi' ? MIDI_LABEL[drag.part] : PART_LABEL[drag.part]
+      if (controller.snapshot().session === drag.base) controller.apply(draft, label)
     }
   }
 
@@ -746,20 +987,24 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       const loc = findClip(scene.session, hit.clipId)
       if (loc && !loc.clip.active) controller.activateTake(hit.clipId)
     }
+    if (hit.kind === 'midi') controller.openPianoRoll(hit.clipId)
+    if (hit.kind === 'empty' && hit.trackId && !recording) {
+      const track = scene.session.tracks.find((t) => t.id === hit.trackId)
+      if (track?.kind !== 'instrument') return
+      const beat = secondsToBeats(Math.max(0, (at.view.scrollX + at.px) / at.view.zoom), scene.session.bpm)
+      const startBeat = snapBeat(beat, snap.snap === 'off' ? 'beat' : snap.snap, scene.session.beatsPerBar, true)
+      controller.addMidiClipAt(track.id, startBeat, scene.session.beatsPerBar)
+    }
   }
 
+  // Las flechas, Inicio y los demas atajos los atiende el registro de comandos de la vista
+  // (StudioHubView + commands.ts, contexto 'timeline'). Aqui quedan solo las dos teclas propias
+  // del lienzo; las demas siguen de largo hasta el manejador global.
   const onCanvasKeyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      event.preventDefault()
-      if (snap.selectedClipId) controller.nudgeSelected(event.key === 'ArrowLeft' ? -1 : 1)
-      else controller.seek(Math.max(0, controller.engine.position() + (event.key === 'ArrowLeft' ? -1 : 1) * (60 / session.bpm) * session.beatsPerBar))
-    } else if (event.key === 'Enter' && selected && !selected.clip.active) {
+    if (event.key === 'Enter' && selected && !selected.clip.active) {
       event.preventDefault()
       controller.activateTake(selected.clip.id)
-    } else if (event.key === 'Home') {
-      event.preventDefault()
-      controller.seek(0)
     } else if (event.key === 'Escape') {
       controller.select(null)
     }
@@ -767,18 +1012,32 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
 
   // ---- importar ----
 
-  const audioFiles = (list: FileList | null): File[] => Array.from(list ?? []).filter((file) => file.type.startsWith('audio/') || isStemAudioPath(file.name))
+  const midiFiles = (list: FileList | null): File[] => Array.from(list ?? []).filter((file) => isMidiFile(file))
+  const audioFiles = (list: FileList | null): File[] => Array.from(list ?? []).filter((file) => !isMidiFile(file) && (file.type.startsWith('audio/') || isStemAudioPath(file.name)))
+
+  const exportSession = () => {
+    const file = controller.exportSessionMidi()
+    if (!file) {
+      controller.notify('info', 'No hay notas MIDI que exportar: crea una pista de instrumento con un clip MIDI.')
+      return
+    }
+    downloadBlob(file.blob, file.name)
+  }
 
   const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setDropping(false)
+    const midi = midiFiles(event.dataTransfer.files)
+    for (const file of midi) void controller.importMidiFile(file)
     const files = audioFiles(event.dataTransfer.files)
     if (files.length === 0) {
-      controller.notify('warn', 'Suelta archivos de audio (wav, flac, mp3, m4a, ogg o aac).')
+      if (midi.length === 0) controller.notify('warn', 'Suelta archivos de audio (wav, flac, mp3, m4a, ogg o aac) o archivos MIDI (.mid).')
       return
     }
     const at = pointerAt(event)
-    const row = at && files.length === 1 ? rowAt(rows, at.py) : null
+    const hitRow = at && files.length === 1 ? rowAt(rows, at.py) : null
+    // Sobre una pista de instrumento el audio no puede entrar: crea una pista nueva.
+    const row = hitRow && session.tracks.find((t) => t.id === hitRow.trackId)?.kind === 'audio' ? hitRow : null
     if (at && row && event.target === canvasRef.current) {
       const timeS = snapTime(session, { timeS: Math.max(0, (at.view.scrollX + at.px) / at.view.zoom), mode: snap.snap })
       void controller.importFiles(files, { trackId: row.trackId, atS: timeS })
@@ -791,8 +1050,9 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   const loadingFraction = snap.loading && snap.loading.total > 0 ? snap.loading.done / snap.loading.total : 0
 
   return (
-    <section className="stu-tl" aria-label="Línea de tiempo" data-testid="studio-timeline">
-      <div className="stu-tl-tools">
+    <section className="stu-tl" aria-label={pianoOpen ? 'Piano roll' : 'Línea de tiempo'} data-testid="studio-timeline" data-editor={pianoOpen ? 'piano_roll' : 'timeline'}>
+      {pianoOpen && <StudioPianoRoll controller={controller} />}
+      <div className="stu-tl-tools" hidden={pianoOpen}>
         <div className="stu-bar-group" role="group" aria-label="Deshacer y rehacer">
           <button
             type="button"
@@ -824,10 +1084,10 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
           <button type="button" className="stu-btn" data-size="icon" disabled={recording || !ready} onClick={() => controller.splitAtPlayhead()} aria-label="Dividir en el cabezal (S)" title="Dividir en el cabezal (S)" data-testid="studio-split">
             <Scissors size={14} />
           </button>
-          <button type="button" className="stu-btn" data-size="icon" disabled={!selected || recording} onClick={() => controller.duplicateSelected()} aria-label="Duplicar el clip (Ctrl+D)" title="Duplicar el clip (Ctrl+D)" data-testid="studio-duplicate">
+          <button type="button" className="stu-btn" data-size="icon" disabled={(!selected && !selectedMidi) || recording} onClick={() => controller.duplicateSelected()} aria-label="Duplicar el clip (Ctrl+D)" title="Duplicar el clip (Ctrl+D)" data-testid="studio-duplicate">
             <Copy size={14} />
           </button>
-          <button type="button" className="stu-btn" data-size="icon" disabled={!selected || recording} onClick={() => controller.deleteSelected()} aria-label="Borrar el clip (Supr)" title="Borrar el clip (Supr)" data-testid="studio-delete">
+          <button type="button" className="stu-btn" data-size="icon" disabled={(!selected && !selectedMidi) || recording} onClick={() => controller.deleteSelected()} aria-label="Borrar el clip (Supr)" title="Borrar el clip (Supr)" data-testid="studio-delete">
             <Trash2 size={14} />
           </button>
           {selected && !selected.clip.active && (
@@ -836,6 +1096,31 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
               USAR TOMA
             </button>
           )}
+        </div>
+
+        <div className="stu-bar-group" role="group" aria-label="MIDI">
+          <button
+            type="button"
+            className="stu-btn"
+            disabled={!hasInstrumentTrack || recording || !ready}
+            onClick={() => controller.addMidiClipAtPlayhead()}
+            title={hasInstrumentTrack ? 'Clip MIDI de 4 compases en el cabezal, en la pista de instrumento elegida' : 'Crea antes una pista de instrumento'}
+            data-testid="studio-add-midi-clip"
+          >
+            <Music size={14} />
+            CLIP MIDI
+          </button>
+          <button
+            type="button"
+            className="stu-btn"
+            disabled={!selectedMidi && snap.pianoClipId === null}
+            onClick={() => controller.toggleEditor()}
+            title="Abrir el clip MIDI elegido en el piano roll (doble clic en el clip, o E)"
+            data-testid="studio-open-piano"
+          >
+            <Piano size={14} />
+            PIANO ROLL
+          </button>
         </div>
 
         <div className="stu-bar-group" role="group" aria-label="Ajuste a la rejilla">
@@ -861,7 +1146,9 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
         <span className="stu-label stu-mono" style={{ flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} aria-live="polite" data-testid="studio-selection">
           {selected
             ? `${selected.clip.active ? 'CLIP' : 'TOMA'} ${selected.track.name} · ${formatTimecode(selected.clip.startS)} · ${selected.clip.lengthS.toFixed(2)} s`
-            : 'Sin clip elegido'}
+            : selectedMidi
+              ? `MIDI ${selectedMidi.track.name} · ${formatBarBeat(selectedMidi.clip.startBeat, session.beatsPerBar)} · ${(selectedMidi.clip.lengthBeats / session.beatsPerBar).toFixed(2)} compases · ${selectedMidi.clip.notes.length} notas`
+              : 'Sin clip elegido'}
         </span>
 
         <div className="stu-bar-group" role="group" aria-label="Zoom">
@@ -883,7 +1170,8 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
         </div>
       )}
 
-      <div className="stu-tl-wrap">
+      {/* Oculta (no desmontada) mientras el piano roll ocupa el area: conserva scroll y zoom. */}
+      <div className="stu-tl-wrap" hidden={pianoOpen}>
       <div
         className="stu-tl-body"
         ref={bodyRef}
@@ -913,13 +1201,15 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
               index={index}
               height={rows[index]?.height ?? TRACK_ROW_H}
               armed={snap.arms[track.id] ?? null}
+              midiArmed={snap.midi.armedTrackId === track.id}
+              selected={snap.selectedTrackId === track.id}
               recordAllowed={recordAllowed}
               recording={recording}
               inputChannels={inputChannels}
             />
           ))}
           <div className="stu-add-track">
-            <button type="button" className="stu-btn" disabled={session.tracks.length >= STUDIO_MAX_TRACKS || recording} onClick={() => controller.addEmptyTrack()} data-testid="studio-add-track">
+            <button type="button" className="stu-btn" disabled={session.tracks.length >= STUDIO_MAX_TRACKS || recording} onClick={() => controller.addEmptyTrack()} title="Pista de audio nueva" data-testid="studio-add-track">
               <Plus size={14} />
               PISTA
             </button>
@@ -927,6 +1217,54 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
               <Upload size={14} />
               AUDIO
             </button>
+            <select
+              className="stu-field stu-add-instrument"
+              value=""
+              disabled={!ready || recording || session.tracks.length >= STUDIO_MAX_TRACKS}
+              onChange={(event) => {
+                const [type, option] = event.target.value.split(':')
+                if (type === 'synth' || type === 'drums' || type === 'sampler') controller.addInstrumentTrack(type)
+                else if (type === 'wam' && option) controller.addInstrumentTrack('wam', option)
+              }}
+              aria-label="Agregar una pista de instrumento"
+              title="Pista de instrumento nueva: sintetizador, caja de ritmos, sampler o plugin web"
+              data-testid="studio-add-instrument"
+            >
+              <option value="">+ INSTRUMENTO</option>
+              <option value="synth">{STUDIO_INSTRUMENT_TYPE_LABELS.synth}</option>
+              <option value="drums">{STUDIO_INSTRUMENT_TYPE_LABELS.drums}</option>
+              <option value="sampler">{STUDIO_INSTRUMENT_TYPE_LABELS.sampler}</option>
+              {wamPlugins.length === 0 ? (
+                <option value="wam" disabled>
+                  Plugins web: ninguno en este Hub
+                </option>
+              ) : (
+                wamPlugins.map((plugin) => (
+                  <option key={plugin.id} value={`wam:${plugin.id}`}>
+                    {plugin.name} ({plugin.vendor})
+                  </option>
+                ))
+              )}
+            </select>
+            <button type="button" className="stu-btn" disabled={!ready || recording} onClick={() => midiFileRef.current?.click()} title="Importar un archivo MIDI (.mid) como pistas de instrumento" data-testid="studio-import-midi">
+              <FileMusic size={14} />
+              .MID
+            </button>
+            <button type="button" className="stu-btn" data-size="icon" disabled={!hasInstrumentTrack} onClick={exportSession} aria-label="Exportar las pistas de instrumento a un archivo MIDI" title="Exportar las pistas de instrumento a .mid" data-testid="studio-export-midi">
+              <Download size={14} />
+            </button>
+            <input
+              ref={midiFileRef}
+              type="file"
+              accept=".mid,.midi,audio/midi,audio/x-midi"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                if (file) void controller.importMidiFile(file)
+              }}
+              data-testid="studio-import-midi-input"
+            />
             <input
               ref={fileRef}
               type="file"
@@ -951,7 +1289,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
               style={{ height: `${contentHeight}px` }}
               tabIndex={0}
               role="application"
-              aria-label="Clips de la sesión. Flechas: mover el clip elegido o el cabezal. Enter: usar la toma elegida. Inicio: volver al principio."
+              aria-label="Clips de la sesión. Flechas: mover el clip elegido o el cabezal. Enter: usar la toma elegida. Inicio: volver al principio. Doble clic en un clip MIDI: abrirlo en el piano roll; en una pista de instrumento vacía: crear un clip MIDI."
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={(event) => endDrag(event, true)}
@@ -973,10 +1311,10 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
         {session.tracks.length === 0 && !snap.loading && (
           <div className="stu-empty" style={{ left: 'var(--stu-head-w)' }}>
             <strong style={{ color: 'var(--stu-text)', fontSize: '15px' }}>Sesión vacía</strong>
-            <span>Arrastra archivos de audio aquí, agrega una pista para grabar o importa audio con el botón AUDIO.</span>
+            <span>Arrastra archivos de audio o MIDI aquí, agrega una pista para grabar, importa audio con el botón AUDIO o crea una pista de instrumento para tocar y dibujar notas.</span>
           </div>
         )}
-        {dropping && <div className="stu-drop">SUELTA EL AUDIO: SOBRE UNA PISTA ENTRA AHÍ; FUERA, CREA PISTAS NUEVAS</div>}
+        {dropping && <div className="stu-drop">SUELTA EL AUDIO: SOBRE UNA PISTA ENTRA AHÍ; FUERA, CREA PISTAS NUEVAS. UN .MID CREA PISTAS DE INSTRUMENTO</div>}
       </div>
     </section>
   )

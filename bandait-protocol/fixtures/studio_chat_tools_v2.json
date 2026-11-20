@@ -1,0 +1,310 @@
+{
+  "description": "Lista cerrada de herramientas del asistente del Estudio (STUDIO_V2.md 4.3.3). Normativa: el Worker manda name, description y parameters de cada una a URiT IA (sin command_id); el Hub valida los argumentos con los mismos esquemas y aplica cada llamada con el comando command_id de services/studio/commands.ts. Esquemas JSON con un subconjunto conservador (type, properties, required, items, enum, minimum, maximum, minLength, maxLength, maxItems): sin uniones de tipo ni additionalProperties, porque no esta verificado que Gemini los admita en parametros de funciones. Claves de argumentos en snake_case; los valores fuera de rango se acotan en el Hub.",
+  "version": 2,
+  "tools": [
+    {
+      "name": "set_session_meta",
+      "command_id": "session.set_meta",
+      "description": "Cambia datos de la sesion: titulo, tempo (bpm), tonalidad (key) o compas (beats_per_bar). Manda solo lo que cambia. key vacio quita la tonalidad.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string", "minLength": 1, "maxLength": 120},
+          "bpm": {"type": "number", "minimum": 40, "maximum": 260},
+          "key": {"type": "string", "maxLength": 12, "description": "Tonalidad, por ejemplo C#m o Bb. Vacio = sin tonalidad."},
+          "beats_per_bar": {"type": "integer", "minimum": 1, "maximum": 12}
+        }
+      }
+    },
+    {
+      "name": "add_audio_track",
+      "command_id": "track.add_audio",
+      "description": "Agrega al final una pista de audio vacia.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 60},
+          "role": {"type": "string", "enum": ["vocals", "backing_vocals", "drums", "bass", "guitar", "keys", "strings", "wind", "other", "instrumental", "click", "guide", "unknown"]}
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "add_instrument_track",
+      "command_id": "track.add_instrument",
+      "description": "Agrega al final una pista de instrumento: synth (sintetizador), drums (caja de ritmos) o sampler (sin zonas; el usuario elige las muestras). preset es un id de preset del tipo; si falta, el del tipo por defecto.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 60},
+          "role": {"type": "string", "enum": ["vocals", "backing_vocals", "drums", "bass", "guitar", "keys", "strings", "wind", "other", "instrumental", "click", "guide", "unknown"]},
+          "instrument_type": {"type": "string", "enum": ["synth", "drums", "sampler"]},
+          "preset": {"type": "string", "enum": ["pad_calido", "bajo_sub", "bajo_sintetico", "lead_brillante", "pluck", "cuerdas", "organo", "campanas", "teclas_suaves", "basico", "seco", "amplio", "lofi"], "description": "synth: pad_calido, bajo_sub, bajo_sintetico, lead_brillante, pluck, cuerdas, organo, campanas, teclas_suaves. drums: basico, seco, amplio, lofi."}
+        },
+        "required": ["name", "instrument_type"]
+      }
+    },
+    {
+      "name": "remove_track",
+      "command_id": "track.remove",
+      "description": "Quita una pista con todos sus clips. Los audios quedan en la sesion.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "track_id": {"type": "string", "minLength": 1, "maxLength": 80}
+        },
+        "required": ["track_id"]
+      }
+    },
+    {
+      "name": "set_track_mix",
+      "command_id": "track.set_mix",
+      "description": "Cambia nombre, fader (volume_db), paneo (pan, -1 izquierda a 1 derecha), mute, solo o envio a la reverb (reverb_send_db, -60 = sin envio) de una pista. Manda solo lo que cambia.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "track_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "name": {"type": "string", "minLength": 1, "maxLength": 60},
+          "volume_db": {"type": "number", "minimum": -60, "maximum": 12},
+          "pan": {"type": "number", "minimum": -1, "maximum": 1},
+          "mute": {"type": "boolean"},
+          "solo": {"type": "boolean"},
+          "reverb_send_db": {"type": "number", "minimum": -60, "maximum": 0}
+        },
+        "required": ["track_id"]
+      }
+    },
+    {
+      "name": "set_track_fx",
+      "command_id": "track.set_fx",
+      "description": "Agrega o ajusta un efecto. track_id es el id de una pista o master. Si la pista ya tiene ese efecto se cambian solo los params que vienen y se quita el bypass; si no, se agrega con valores por defecto mas los que vienen. limiter solo en master. Parametros de eq: hpf_hz, low_db, mid_hz, mid_db, mid_q, high_db. De compressor: threshold_db, ratio, attack_ms, release_ms, knee_db, makeup_db. De limiter: ceiling_db, release_ms.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "track_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "fx_type": {"type": "string", "enum": ["eq", "compressor", "limiter"]},
+          "bypass": {"type": "boolean"},
+          "params": {
+            "type": "object",
+            "properties": {
+              "hpf_hz": {"type": "number", "minimum": 0, "maximum": 1000},
+              "low_db": {"type": "number", "minimum": -18, "maximum": 18},
+              "mid_hz": {"type": "number", "minimum": 200, "maximum": 8000},
+              "mid_db": {"type": "number", "minimum": -18, "maximum": 18},
+              "mid_q": {"type": "number", "minimum": 0.1, "maximum": 10},
+              "high_db": {"type": "number", "minimum": -18, "maximum": 18},
+              "threshold_db": {"type": "number", "minimum": -60, "maximum": 0},
+              "ratio": {"type": "number", "minimum": 1, "maximum": 20},
+              "attack_ms": {"type": "number", "minimum": 0, "maximum": 1000},
+              "release_ms": {"type": "number", "minimum": 10, "maximum": 1000},
+              "knee_db": {"type": "number", "minimum": 0, "maximum": 40},
+              "makeup_db": {"type": "number", "minimum": 0, "maximum": 24},
+              "ceiling_db": {"type": "number", "minimum": -12, "maximum": 0}
+            }
+          }
+        },
+        "required": ["track_id", "fx_type"]
+      }
+    },
+    {
+      "name": "set_master",
+      "command_id": "master.set",
+      "description": "Cambia el fader del master (volume_db) o la reverb compartida (reverb_decay_s, reverb_return_db). Manda solo lo que cambia.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "volume_db": {"type": "number", "minimum": -60, "maximum": 12},
+          "reverb_decay_s": {"type": "number", "minimum": 0.2, "maximum": 10},
+          "reverb_return_db": {"type": "number", "minimum": -60, "maximum": 12}
+        }
+      }
+    },
+    {
+      "name": "set_instrument",
+      "command_id": "instrument.set",
+      "description": "Cambia el preset o parametros del instrumento de una pista synth o drums. Con preset se escriben todos sus parametros; despues se aplican los params que vengan (solo los que cambian, nombres snake_case de STUDIO_V2.md 2.3, por ejemplo filter_cutoff_hz o kick_level_db).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "track_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "preset": {"type": "string", "enum": ["pad_calido", "bajo_sub", "bajo_sintetico", "lead_brillante", "pluck", "cuerdas", "organo", "campanas", "teclas_suaves", "basico", "seco", "amplio", "lofi"]},
+          "params": {"type": "object", "description": "Parametros del instrumento que cambian, con su nombre snake_case."}
+        },
+        "required": ["track_id"]
+      }
+    },
+    {
+      "name": "add_midi_clip",
+      "command_id": "midi.add_clip",
+      "description": "Agrega un clip MIDI a una pista de instrumento. Tiempos en beats (negras): start_beat es la posicion en la sesion (beat 0 = inicio); start de cada nota es relativo al clip. En una caja de ritmos usa las notas General MIDI: 36 bombo, 38 caja, 39 palmas, 42 hi-hat cerrado, 46 hi-hat abierto, 41 tom grave, 45 tom medio, 48 tom agudo, 49 platillo.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "track_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "start_beat": {"type": "number", "minimum": 0, "maximum": 5200},
+          "length_beats": {"type": "number", "minimum": 0.0625, "maximum": 5200},
+          "notes": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "object",
+              "properties": {
+                "pitch": {"type": "integer", "minimum": 0, "maximum": 127},
+                "start": {"type": "number", "minimum": 0},
+                "length": {"type": "number", "minimum": 0.015625},
+                "velocity": {"type": "integer", "minimum": 1, "maximum": 127}
+              },
+              "required": ["pitch", "start", "length", "velocity"]
+            }
+          }
+        },
+        "required": ["track_id", "start_beat", "length_beats", "notes"]
+      }
+    },
+    {
+      "name": "replace_midi_notes",
+      "command_id": "midi.replace_notes",
+      "description": "Reemplaza todas las notas de un clip MIDI. start de cada nota en beats, relativo al clip.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "notes": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "object",
+              "properties": {
+                "pitch": {"type": "integer", "minimum": 0, "maximum": 127},
+                "start": {"type": "number", "minimum": 0},
+                "length": {"type": "number", "minimum": 0.015625},
+                "velocity": {"type": "integer", "minimum": 1, "maximum": 127}
+              },
+              "required": ["pitch", "start", "length", "velocity"]
+            }
+          }
+        },
+        "required": ["clip_id", "notes"]
+      }
+    },
+    {
+      "name": "transpose_midi_clip",
+      "command_id": "midi.transpose",
+      "description": "Transpone todas las notas de un clip MIDI en semitonos (12 = una octava). Las notas que saldrian de 0..127 se acotan.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "semitones": {"type": "integer", "minimum": -48, "maximum": 48}
+        },
+        "required": ["clip_id", "semitones"]
+      }
+    },
+    {
+      "name": "quantize_midi_clip",
+      "command_id": "midi.quantize",
+      "description": "Cuantiza el inicio de las notas de un clip MIDI a una rejilla (1/4 = un beat, 1/16 = un cuarto de beat). triplets usa tresillos. strength de 0 a 1 (1 = todo a la rejilla).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "grid": {"type": "string", "enum": ["1/1", "1/2", "1/4", "1/8", "1/16", "1/32"]},
+          "triplets": {"type": "boolean"},
+          "strength": {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "required": ["clip_id", "grid"]
+      }
+    },
+    {
+      "name": "move_clip",
+      "command_id": "clip.move",
+      "description": "Mueve un clip (de audio o MIDI) para que empiece en start_beat. Con track_id lo pasa a otra pista del mismo tipo (audio con audio, instrumento con instrumento).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "start_beat": {"type": "number", "minimum": 0, "maximum": 5200},
+          "track_id": {"type": "string", "minLength": 1, "maxLength": 80}
+        },
+        "required": ["clip_id", "start_beat"]
+      }
+    },
+    {
+      "name": "duplicate_clip",
+      "command_id": "clip.duplicate",
+      "description": "Duplica un clip en su misma pista. Sin start_beat, la copia queda justo despues del original.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "start_beat": {"type": "number", "minimum": 0, "maximum": 5200}
+        },
+        "required": ["clip_id"]
+      }
+    },
+    {
+      "name": "split_clip",
+      "command_id": "clip.split",
+      "description": "Divide un clip en dos en el beat at_beat de la sesion, que debe caer dentro del clip.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "at_beat": {"type": "number", "minimum": 0, "maximum": 5200}
+        },
+        "required": ["clip_id", "at_beat"]
+      }
+    },
+    {
+      "name": "delete_clip",
+      "command_id": "clip.delete",
+      "description": "Borra un clip de audio o MIDI.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80}
+        },
+        "required": ["clip_id"]
+      }
+    },
+    {
+      "name": "set_clip_gain",
+      "command_id": "clip.set_gain",
+      "description": "Cambia la ganancia de un clip de audio, en dB.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "gain_db": {"type": "number", "minimum": -60, "maximum": 24}
+        },
+        "required": ["clip_id", "gain_db"]
+      }
+    },
+    {
+      "name": "add_marker",
+      "command_id": "marker.add",
+      "description": "Agrega una marca en un beat de la sesion. kind es la seccion que empieza ahi, o marker para una marca suelta.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "beat": {"type": "number", "minimum": 0, "maximum": 5200},
+          "label": {"type": "string", "maxLength": 60},
+          "kind": {"type": "string", "enum": ["intro", "verse", "pre_chorus", "chorus", "bridge", "solo", "interlude", "break", "outro", "marker"]}
+        },
+        "required": ["beat", "kind"]
+      }
+    },
+    {
+      "name": "remove_marker",
+      "command_id": "marker.remove",
+      "description": "Quita una marca por su id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "marker_id": {"type": "string", "minLength": 1, "maxLength": 80}
+        },
+        "required": ["marker_id"]
+      }
+    }
+  ]
+}

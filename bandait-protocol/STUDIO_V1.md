@@ -356,7 +356,7 @@ fuera de rango: 400 `bad_job`.
 |---|---|---|
 | `master` | `asset_id`, `duration_s`, `target_lufs` | Music.AI, workflow `MUSICAI_MASTER_WORKFLOW` |
 | `separate` | `asset_id`, `duration_s` | Music.AI, workflow `MUSICAI_SPLIT_WORKFLOW` |
-| `generate` | `provider`, `prompt`, `duration_s`, `bpm`, `key`, `instrumental` | Lyria; Suno cuando tenga API |
+| `generate` | `provider`, `prompt`, `duration_s`, `bpm`, `key`, `instrumental` | Lyria (desde el 2026-11-19 por URiT IA, STUDIO_V2.md 4.6); Suno cuando tenga API |
 | `assist` | `metrics` | modelo de lenguaje |
 
 ```
@@ -630,7 +630,7 @@ para "no hay sesión de nube". `studioCloud.ts` los distingue por el estado HTTP
 | `MUSICAI_API_KEY` | secreto (existe) | `master` y `separate` |
 | `MUSICAI_SPLIT_WORKFLOW` | variable (existe) | `separate` |
 | `MUSICAI_MASTER_WORKFLOW` | variable | `master`; sin ella, 503 `provider_unavailable` |
-| `GEMINI_API_KEY` | secreto | `generate` con `lyria` |
+| `GEMINI_API_KEY` | secreto | `generate` con `lyria` hasta el 2026-11-19. Desde entonces Lyria pasa por URiT IA con `URIT_AI_TOKEN` (STUDIO_V2.md 4.6) y esta clave queda solo para `assist` con `gemini` |
 | `URIT_AI_TOKEN` | secreto | `assist` con el proveedor `urit` (por defecto) |
 | `ASSIST_API_KEY` | secreto opcional | `assist` con `gemini` (si falta, `GEMINI_API_KEY`) o con `anthropic` |
 | `SUNO_API_KEY` | secreto (futuro) | `generate` con `suno` |
@@ -642,6 +642,6 @@ para "no hay sesión de nube". `studioCloud.ts` los distingue por el estado HTTP
 | `URIT_AI_URL`, `URIT_AI_CONSUMER` | variables | base y consumidor de URiT IA; por defecto `https://ai.urit.services` y `bandait` |
 | `ASSIST_MODEL` | variable | modelo del asistente; tiene valor por defecto en el código |
 | `LYRIA_CLIP_MODEL`, `LYRIA_SONG_MODEL` | variables | modelos de Lyria para pedidos de hasta 30 s y más largos |
-| `STUDIO_RATE_MASTER_USD_PER_MIN`, `STUDIO_RATE_SEPARATE_USD_PER_MIN`, `STUDIO_RATE_LYRIA_USD_PER_30S`, `STUDIO_RATE_ASSIST_USD` | variables | tarifas para estimar el costo; sin ellas, las de referencia del plan |
+| `STUDIO_RATE_MASTER_USD_PER_MIN`, `STUDIO_RATE_SEPARATE_USD_PER_MIN`, `STUDIO_RATE_LYRIA_USD_PER_30S`, `STUDIO_RATE_ASSIST_USD` | variables | tarifas para estimar el costo; sin ellas, las de referencia del plan. `STUDIO_RATE_LYRIA_USD_PER_30S` ya no se lee: Lyria se cobra por canción (STUDIO_V2.md 4.4 y 4.6) |
 
 El navegador nunca recibe ninguna de estas claves.
