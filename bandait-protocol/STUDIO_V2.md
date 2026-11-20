@@ -416,6 +416,17 @@ Las mismas de v1 (v1 3). Cambios:
 - `POST .../jobs` admite los `kind` nuevos de la sección 4. El cuerpo sigue limitado a 64 KB,
   salvo `chat`, que admite hasta **196608 bytes (192 KB)**. Pasarse: 400 `bad_job`, como en v1.
 
+Objetos en R2 que se suman a v1 3.1 (Worker 1.2.0, interno: ningún cliente los lee ni las rutas
+los exponen):
+
+- `studio/_events/AAAA-MM-DD/<HHMMSSmmm>-<8 hex>.json`, en la raíz del bucket: registro de eventos
+  de los trabajos (terminados, rechazados por el proveedor y fallos de sondeo o copia), sin
+  prompt, letras, audio ni claves; 30 días de retención. Lo lee el MCP de operador (`POST /mcp`).
+  Forma en `bandait-stems-worker/README.md`, "Registro de eventos".
+- El registro de un trabajo (`studio/<session>/jobs/<job>.json`) guarda además
+  `urit_request_id` cuando el proveedor es URiT IA. La respuesta de `GET .../jobs/{job}` (v1 6.5
+  y 4.5 de este contrato) no cambia.
+
 ## 4. Trabajos nuevos
 
 Mismas reglas de v1 para todo trabajo (v1 6): solo Owner y MusicDirector y, si la variable tiene

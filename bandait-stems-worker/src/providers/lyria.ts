@@ -20,8 +20,8 @@
 // Cloudflare Queues (ver la nota historica en STUDIO_V1.md); no se agrego todavia.
 
 import { ProviderError } from './types.ts';
-import type { GenerateProvider, GenerateRequest, GenerateResult } from './types.ts';
-import { readEstimatedUsd, uritAiUrl, uritHeaders } from './urit.ts';
+import type { GenerateProvider, GenerateRequest, GenerateResult, ProviderMeta } from './types.ts';
+import { readEstimatedUsd, uritAiUrl, uritHeaders, uritMeta } from './urit.ts';
 import type { Env, FetchLike } from '../types.ts';
 
 const DEFAULT_CLIP_MODEL = 'lyria-3-clip-preview';
@@ -126,11 +126,12 @@ export const lyria: GenerateProvider = {
     if (!token) throw new ProviderError(503, 'provider_unavailable', 'falta URIT_AI_TOKEN');
     let res: Response;
     let body: MusicResponse | null;
+    const model = lyriaModel(env, request.duration_s);
     try {
       res = await fetchFn(`${uritAiUrl(env)}/v1/music`, {
         method: 'POST',
         headers: uritHeaders(env, token),
-        body: JSON.stringify({ task: TASK, model: lyriaModel(env, request.duration_s), prompt: lyriaPrompt(request), time_budget_ms: TIME_BUDGET_MS }),
+        body: JSON.stringify({ task: TASK, model, prompt: lyriaPrompt(request), time_budget_ms: TIME_BUDGET_MS }),
         signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
       });
       // El cuerpo entero (varios MB en base64) se lee dentro del mismo limite de tiempo.
@@ -138,29 +139,32 @@ export const lyria: GenerateProvider = {
     } catch (err) {
       // Pasado el limite propio, URiT ya debio cortar con 504: Google pudo cobrar, igual que alli.
       if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-        return { audio: null, failure: FAILURE_LYRIA_TIMEOUT, costUsd: null };
+        return { audio: null, failure: FAILURE_LYRIA_TIMEOUT, costUsd: null, meta: { http: null, code: 'worker_timeout', model } };
       }
-      throw new ProviderError(502, 'provider_failed', 'urit-ai music: sin respuesta');
+      throw new ProviderError(502, 'provider_failed', 'urit-ai music: sin respuesta', { http: null, model });
     }
     const code = typeof body?.error === 'string' ? body.error.slice(0, 60) : '';
     const detail = typeof body?.detail === 'string' ? body.detail.slice(0, 60) : '';
+    // Metadatos para el registro de eventos y la correlacion con URiT IA (sin el audio).
+    const meta: ProviderMeta = { ...uritMeta(res, body) };
+    meta.model ??= model;
     if (!res.ok) {
       // Configuracion (token, consumidor apagado o sin modelos de musica, URiT sin llave): no disponible.
       if (res.status === 401 || res.status === 403 || res.status === 503 || (res.status === 422 && code === 'model_not_allowed')) {
-        throw new ProviderError(503, 'provider_unavailable', `urit-ai music: HTTP ${res.status} ${code}`);
+        throw new ProviderError(503, 'provider_unavailable', `urit-ai music: HTTP ${res.status} ${code}`, meta);
       }
       // Sin costo segun URiT (4A.2): el trabajo falla con un motivo y la reserva vuelve a 0.
-      if (res.status === 429) return { audio: null, failure: FAILURE_LYRIA_QUOTA, costUsd: 0 };
-      if (res.status === 502 && code === 'blocked') return { audio: null, failure: FAILURE_LYRIA_BLOCKED, costUsd: 0 };
-      if (res.status === 502 && detail === 'NO_AUDIO') return { audio: null, failure: FAILURE_LYRIA_NO_AUDIO, costUsd: 0 };
+      if (res.status === 429) return { audio: null, failure: FAILURE_LYRIA_QUOTA, costUsd: 0, meta };
+      if (res.status === 502 && code === 'blocked') return { audio: null, failure: FAILURE_LYRIA_BLOCKED, costUsd: 0, meta };
+      if (res.status === 502 && detail === 'NO_AUDIO') return { audio: null, failure: FAILURE_LYRIA_NO_AUDIO, costUsd: 0, meta };
       // URiT lo cuenta como cobrado: el gasto queda (usage.estimated_usd si vino, si no la estimacion).
-      if (res.status === 504) return { audio: null, failure: FAILURE_LYRIA_TIMEOUT, costUsd: readEstimatedUsd(body) };
-      throw new ProviderError(502, 'provider_failed', `urit-ai music: HTTP ${res.status} ${code} ${detail}`.trim());
+      if (res.status === 504) return { audio: null, failure: FAILURE_LYRIA_TIMEOUT, costUsd: readEstimatedUsd(body), meta };
+      throw new ProviderError(502, 'provider_failed', `urit-ai music: HTTP ${res.status} ${code} ${detail}`.trim(), meta);
     }
     const costUsd = readEstimatedUsd(body);
     const audio = audioFromMusic(body);
     // La cancion ya se genero y se cobro: un audio ilegible es un trabajo FAILED con el costo.
-    if (!audio) return { audio: null, failure: FAILURE_LYRIA_UNREADABLE, costUsd };
-    return { audio, failure: null, costUsd };
+    if (!audio) return { audio: null, failure: FAILURE_LYRIA_UNREADABLE, costUsd, meta };
+    return { audio, failure: null, costUsd, meta };
   },
 };

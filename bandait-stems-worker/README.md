@@ -257,6 +257,60 @@ Pendiente conocido: no hay cuota de almacenamiento por banda ni limpieza de audi
 sin documento; `If-None-Match: *` en `onlyIf` de R2 está sin verificar contra R2 real (si R2 lo
 ignorara, crear una sesión o un audio queda protegido solo por el `head` previo).
 
+### Registro de eventos (desde 1.2.0)
+
+Cada trabajo de IA que termina y cada fallo de proveedor deja un JSON en R2, en la raíz del
+bucket: `studio/_events/AAAA-MM-DD/<HHMMSSmmm>-<8 hex>.json` (`src/events.ts`). Campos: `at`,
+`band` (`bands/<uuid>` o `users/<uuid>` para el workspace personal), `session`, `job`, `kind`,
+`provider`, `status`, `http`, `provider_code`, `provider_detail` (limpio de cualquier cosa con
+forma de clave o token, hasta 80 caracteres), `urit_request_id`, `model`, `duration_ms` y
+`cost_usd`. `status` es `SUCCEEDED` o `FAILED` (el trabajo terminó), `REJECTED` (el proveedor no
+aceptó el trabajo al lanzarlo: no queda registro ni costo) o `TRANSIENT` (falló un sondeo o una
+copia y el trabajo sigue). Nunca guarda el prompt, letras, audio, métricas, la respuesta del
+modelo, tokens ni claves. La escritura va a `waitUntil` y nunca hace fallar la respuesta.
+Retención: 30 días, con el cron diario de `wrangler.jsonc` (handler `scheduled`).
+
+El registro de cada trabajo (`studio/<session>/jobs/<job>.json`) guarda además
+`urit_request_id`: el `id` que devuelve URiT IA (`ai_...`, también en la cabecera
+`X-Request-Id`), para seguir la misma llamada en el MCP de URiT. La respuesta de
+`GET .../jobs/{job}` no cambia.
+
+## MCP de operador (`POST /mcp`, desde 1.2.0)
+
+Servidor MCP Streamable HTTP sin sesión (`src/mcp.ts`), con el mismo patrón que el MCP de URiT
+(`URiT/workers/admin/src/mcp.ts`): JSON-RPC a mano, sin dependencias de ejecución. Plan:
+`docs/PLAN_MCP_BANDAIT_URIT.md`, sección 2.
+
+- **Acceso:** `Authorization: Bearer <token>` contra el secreto `MCP_TOKENS` (tokens separados
+  por coma; cada entrada es el token o, mejor, `sha256:<64 hex>`). Se compara el SHA-256 en
+  tiempo constante. Sin `MCP_TOKENS`, `/mcp` responde 404; con un token malo, 401. Sin CORS: no
+  es para navegadores. Es acceso de operador (Daniel Castaneda y sus agentes) y ve todas las
+  bandas. El token vive en ClipVault, entrada `bandait-mcp-token`.
+- **Registro en Claude Code:**
+
+  ```
+  claude mcp add --transport http bandait https://bandait-stems.oooglue.workers.dev/mcp --header "Authorization: Bearer <token>"
+  ```
+
+- **Solo lectura (etapa 1).** Ninguna herramienta devuelve secretos, prompts, letras, audio,
+  métricas ni respuestas del modelo. Cada llamada hace como máximo 45 operaciones de R2 (plan
+  gratuito: 50 subpeticiones por invocación); si no alcanza, responde lo que tiene con
+  `truncated: true` y un `aviso`.
+
+`band` es el uuid de una banda (o `bands/<uuid>`); el workspace personal de una cuenta se pide
+como `users/<uuid>`.
+
+| Herramienta | Argumentos | Devuelve |
+|---|---|---|
+| `bandait_salud` | ninguno | versión, proveedores configurados (sí/no, nunca valores), workflows, modelos de Lyria, topes, tarifas efectivas, cuántos uuid hay en `STUDIO_SPENDER_UIDS` |
+| `bandait_eventos` | `band`, `kind`, `provider`, `status`, `desde`, `hasta` (AAAA-MM-DD; por omisión los últimos 7 días, hasta 31), `limite` (1 a 40, 20) | eventos del registro, los más nuevos primero |
+| `bandait_trabajo_ver` | `band`, `session`, `job` | estado, costo, fechas, id externo, `urit_request_id`, el texto de error, un resumen del resultado (audios, cuántas sugerencias y notas, nombres de herramientas) y los eventos del trabajo |
+| `bandait_gasto` | `mes` (AAAA-MM, por omisión el actual), `band` (opcional) | gasto global y por banda contra `STUDIO_GLOBAL_MONTHLY_BUDGET_USD` y `STUDIO_MONTHLY_BUDGET_USD`, por tipo y por proveedor; con `band`, su contador propio |
+| `bandait_sesiones` | `band` | sesiones: id, título, versión del documento, fecha y tamaño |
+| `bandait_sesion_resumen` | `band`, `session` | pistas (tipo, rol, clips, clips MIDI, notas, efectos), audios del documento (tipo, tamaño, duración, origen), audios en R2 (huérfanos y faltantes) y trabajos; sin nombres ni etiquetas |
+| `bandait_stems` | `band` | canciones con stems en R2: archivos, bytes, manifiesto, análisis y total |
+| `bandait_contrato` | `codigo` (opcional) | qué significa un código de error y qué secciones de `STUDIO_V1.md` / `STUDIO_V2.md` lo explican; sin código, la lista. La tabla va empaquetada en `src/mcp.ts` (el Worker no tiene sistema de archivos): si cambia el contrato, se actualiza ahí |
+
 ## Variables y secretos
 
 Variables (en `wrangler.jsonc`, públicas): `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
@@ -276,6 +330,7 @@ ninguno:
 | `GEMINI_API_KEY` | opcional: solo `assist`, `compose` y `chat` con `ASSIST_PROVIDER` `gemini` (alternativa directa). Lyria ya no la usa | 503 `provider_unavailable` con `gemini` |
 | `ASSIST_API_KEY` | opcional: `assist`, `compose` y `chat` con `gemini` (si falta, usa `GEMINI_API_KEY`), o `assist` con `anthropic` (clave de Anthropic) | 503 `provider_unavailable` |
 | `SUNO_API_KEY` | futuro: hoy `suno` responde 501 aunque exista | no aplica |
+| `MCP_TOKENS` | acceso al MCP de operador (`POST /mcp`); tokens separados por coma, mejor como `sha256:<hex>`. ClipVault `bandait-mcp-token` | `/mcp` responde 404 |
 
 No hay `service_role` de Supabase en ningún lado: `SUPABASE_ANON_KEY` es la clave publicable.
 
@@ -284,6 +339,7 @@ No hay `service_role` de Supabase en ningún lado: `SUPABASE_ANON_KEY` es la cla
 ```
 npm install
 npm test            # node --experimental-strip-types; R2, Supabase, Music AI, Lyria, URiT IA y Gemini simulados
+                    # (tests/mcp.test.ts usa el cliente oficial @modelcontextprotocol/sdk, devDependency)
 npx tsc --noEmit
 npx wrangler deploy --dry-run --outdir dist
 ```

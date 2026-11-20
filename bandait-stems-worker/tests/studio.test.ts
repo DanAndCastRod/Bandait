@@ -1083,7 +1083,7 @@ test('trabajo sincrono: se reserva antes de pagar, job_id es idempotente y un re
   const first = await post('/ses_a/jobs?job_id=job_mio', GENERATE);
   assert.deepEqual([first.status, await first.json()], [202, { job_id: 'job_mio', status: 'STARTED', kind: 'generate' }]);
   assert.deepEqual(seen, { job: 'STARTED', spent: 0.04 });
-  assert.equal(waited.length, 1, 'la llamada al proveedor va a waitUntil');
+  assert.equal(waited.length, 2, 'la llamada al proveedor y el evento del trabajo van a waitUntil');
 
   // El cliente perdio la respuesta y repite con el mismo id: no se genera ni se cobra otra vez.
   const again = await post('/ses_a/jobs?job_id=job_mio', GENERATE);

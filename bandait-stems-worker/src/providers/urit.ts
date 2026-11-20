@@ -20,9 +20,11 @@
 //              blocked o provider_error, 504 time_budget_exhausted.
 // No se fija modelo: queda la cadena por defecto de URiT (recomendacion de esa sesion).
 
-import { FAILURE_BLOCKED, FAILURE_TRUNCATED, FAILURE_UNREADABLE, ProviderError, providerSchema } from './types.ts';
+import {
+  FAILURE_BLOCKED, FAILURE_TRUNCATED, FAILURE_UNREADABLE, ProviderError, providerSchema, readModel, readRequestId,
+} from './types.ts';
 import type {
-  AssistProvider, AssistResult, ChatCall, ChatOutput, JsonCall, ProviderToolCall, TextProvider, TextResult,
+  AssistProvider, AssistResult, ChatCall, ChatOutput, JsonCall, ProviderMeta, ProviderToolCall, TextProvider, TextResult,
 } from './types.ts';
 import { ASSIST_SYSTEM_PROMPT, SUGGESTIONS_SCHEMA } from './anthropic.ts';
 import type { Env, FetchLike } from '../types.ts';
@@ -68,6 +70,21 @@ export function uritHeaders(env: Env, token: string): Record<string, string> {
   };
 }
 
+/**
+ * Metadatos de una respuesta de URiT IA para el registro de eventos: estado HTTP, codigo, detalle,
+ * id de la llamada (`id` del cuerpo o X-Request-Id) y modelo. Nunca el contenido.
+ */
+export function uritMeta(res: Response, body: unknown): ProviderMeta {
+  const b = body as { error?: unknown; detail?: unknown } | null;
+  return {
+    http: res.status,
+    code: typeof b?.error === 'string' ? b.error.slice(0, 60) : null,
+    detail: typeof b?.detail === 'string' ? b.detail.slice(0, 120) : null,
+    requestId: readRequestId(res, body),
+    model: readModel(body),
+  };
+}
+
 /** usage.estimated_usd (texto decimal o numero) como numero, o null si no viene o no es valido. */
 export function readEstimatedUsd(body: unknown): number | null {
   const raw = (body as { usage?: { estimated_usd?: unknown } } | null)?.usage?.estimated_usd;
@@ -100,32 +117,34 @@ export const urit: AssistProvider = {
         }),
       });
     } catch {
-      throw new ProviderError(502, 'provider_failed', 'urit-ai: sin respuesta');
+      throw new ProviderError(502, 'provider_failed', 'urit-ai: sin respuesta', { http: null });
     }
     const body = (await res.json().catch(() => null)) as UritResponse | null;
     const code = typeof body?.error === 'string' ? body.error.slice(0, 60) : '';
-  const detail = typeof body?.detail === 'string' ? ' ' + body.detail.slice(0, 60) : '';
+    const detail = typeof body?.detail === 'string' ? ' ' + body.detail.slice(0, 60) : '';
+    const meta = uritMeta(res, body);
     if (!res.ok) {
       // Configuracion (token, consumidor apagado, proveedor sin llave): el boton queda como no disponible.
       if (res.status === 401 || res.status === 403 || res.status === 503) {
-        throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}${detail}`);
+        throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}${detail}`, meta);
       }
       // Bloqueo o JSON invalido tras toda la cadena: la consulta llego al modelo; se informa como fallo.
       if (res.status === 502 && (code === 'blocked' || code === 'invalid_output')) {
         return {
           suggestions: [],
           failure: code === 'blocked' ? 'El asistente no pudo responder a este pedido.' : 'El asistente devolvió una respuesta que no se pudo leer. Intenta de nuevo.',
+          meta,
         };
       }
-      throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}${detail}`);
+      throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}${detail}`, meta);
     }
-    if (!body) throw new ProviderError(502, 'provider_failed', 'urit-ai: respuesta ilegible');
-    if (body.finish_reason === 'max_tokens') return { suggestions: [], failure: 'La respuesta del asistente quedó incompleta. Intenta de nuevo.' };
+    if (!body) throw new ProviderError(502, 'provider_failed', 'urit-ai: respuesta ilegible', meta);
+    if (body.finish_reason === 'max_tokens') return { suggestions: [], failure: 'La respuesta del asistente quedó incompleta. Intenta de nuevo.', meta };
     const parsed = body.output?.json as { suggestions?: unknown } | null | undefined;
     if (!parsed || !Array.isArray(parsed.suggestions)) {
-      return { suggestions: [], failure: 'El asistente devolvió una respuesta que no se pudo leer. Intenta de nuevo.' };
+      return { suggestions: [], failure: 'El asistente devolvió una respuesta que no se pudo leer. Intenta de nuevo.', meta };
     }
-    return { suggestions: parsed.suggestions, failure: null };
+    return { suggestions: parsed.suggestions, failure: null, meta };
   },
 };
 
@@ -148,24 +167,25 @@ async function postText(env: Env, fetchFn: FetchLike, body: Record<string, unkno
       body: JSON.stringify({ ...body, max_output_tokens: MAX_OUTPUT_TOKENS, thinking: 'low', time_budget_ms: TIME_BUDGET_MS }),
     });
   } catch {
-    throw new ProviderError(502, 'provider_failed', 'urit-ai: sin respuesta');
+    throw new ProviderError(502, 'provider_failed', 'urit-ai: sin respuesta', { http: null });
   }
   const parsed = (await res.json().catch(() => null)) as UritResponse | null;
   const code = typeof parsed?.error === 'string' ? parsed.error.slice(0, 60) : '';
   const detail = typeof parsed?.detail === 'string' ? ' ' + parsed.detail.slice(0, 60) : '';
   const costUsd = readEstimatedUsd(parsed);
+  const meta = uritMeta(res, parsed);
   if (!res.ok) {
     if (res.status === 401 || res.status === 403 || res.status === 503) {
-      throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}${detail}`);
+      throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}${detail}`, meta);
     }
-    if (res.status === 502 && code === 'blocked') return { value: null, failure: FAILURE_BLOCKED, costUsd };
-    if (res.status === 502 && code === 'invalid_output') return { value: null, failure: FAILURE_UNREADABLE, costUsd };
+    if (res.status === 502 && code === 'blocked') return { value: null, failure: FAILURE_BLOCKED, costUsd, meta };
+    if (res.status === 502 && code === 'invalid_output') return { value: null, failure: FAILURE_UNREADABLE, costUsd, meta };
     // 400 invalid_request con detail "tool_mode" es un URiT anterior a 0.2.0 (CONTRACT_V1.md 3.2).
-    throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}${detail}`);
+    throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}${detail}`, meta);
   }
-  if (!parsed || typeof parsed !== 'object') throw new ProviderError(502, 'provider_failed', 'urit-ai: respuesta ilegible');
-  if (parsed.finish_reason === 'max_tokens') return { value: null, failure: FAILURE_TRUNCATED, costUsd };
-  return { value: parsed, failure: null, costUsd };
+  if (!parsed || typeof parsed !== 'object') throw new ProviderError(502, 'provider_failed', 'urit-ai: respuesta ilegible', meta);
+  if (parsed.finish_reason === 'max_tokens') return { value: null, failure: FAILURE_TRUNCATED, costUsd, meta };
+  return { value: parsed, failure: null, costUsd, meta };
 }
 
 /** Texto y llamadas de `output` (CONTRACT_V1.md 3.4). Una llamada sin nombre es salida ilegible. */
@@ -202,8 +222,8 @@ export const uritText: TextProvider = {
     });
     if (result.failure !== null) return result;
     const parsed = result.value.output?.json;
-    if (parsed === null || parsed === undefined || typeof parsed !== 'object') return { value: null, failure: FAILURE_UNREADABLE, costUsd: result.costUsd };
-    return { value: parsed, failure: null, costUsd: result.costUsd };
+    if (parsed === null || parsed === undefined || typeof parsed !== 'object') return { value: null, failure: FAILURE_UNREADABLE, costUsd: result.costUsd, meta: result.meta };
+    return { value: parsed, failure: null, costUsd: result.costUsd, meta: result.meta };
   },
 
   async chat(env: Env, fetchFn: FetchLike, call: ChatCall): Promise<TextResult<ChatOutput>> {
@@ -216,6 +236,8 @@ export const uritText: TextProvider = {
     });
     if (result.failure !== null) return result;
     const output = readUritChat(result.value);
-    return output ? { value: output, failure: null, costUsd: result.costUsd } : { value: null, failure: FAILURE_UNREADABLE, costUsd: result.costUsd };
+    return output
+      ? { value: output, failure: null, costUsd: result.costUsd, meta: result.meta }
+      : { value: null, failure: FAILURE_UNREADABLE, costUsd: result.costUsd, meta: result.meta };
   },
 };
