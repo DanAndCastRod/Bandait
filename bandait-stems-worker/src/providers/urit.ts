@@ -20,7 +20,7 @@
 //              blocked o provider_error, 504 time_budget_exhausted.
 // No se fija modelo: queda la cadena por defecto de URiT (recomendacion de esa sesion).
 
-import { FAILURE_BLOCKED, FAILURE_TRUNCATED, FAILURE_UNREADABLE, ProviderError } from './types.ts';
+import { FAILURE_BLOCKED, FAILURE_TRUNCATED, FAILURE_UNREADABLE, ProviderError, providerSchema } from './types.ts';
 import type {
   AssistProvider, AssistResult, ChatCall, ChatOutput, JsonCall, ProviderToolCall, TextProvider, TextResult,
 } from './types.ts';
@@ -55,6 +55,7 @@ interface UritResponse {
   finish_reason?: unknown;
   usage?: { estimated_usd?: unknown };
   error?: unknown;
+  detail?: unknown;
 }
 
 /** Cabeceras de toda llamada a URiT IA (CONTRACT_V1.md 2): texto y musica. */
@@ -92,7 +93,7 @@ export const urit: AssistProvider = {
           task: TASK,
           system: ASSIST_SYSTEM_PROMPT,
           messages: [{ role: 'user', parts: [{ text: `Mediciones de la mezcla:\n${JSON.stringify(metrics)}` }] }],
-          output: { format: 'json', schema: SUGGESTIONS_SCHEMA },
+          output: { format: 'json', schema: providerSchema(SUGGESTIONS_SCHEMA) },
           max_output_tokens: MAX_OUTPUT_TOKENS,
           thinking: 'low',
           time_budget_ms: TIME_BUDGET_MS,
@@ -103,10 +104,11 @@ export const urit: AssistProvider = {
     }
     const body = (await res.json().catch(() => null)) as UritResponse | null;
     const code = typeof body?.error === 'string' ? body.error.slice(0, 60) : '';
+  const detail = typeof body?.detail === 'string' ? ' ' + body.detail.slice(0, 60) : '';
     if (!res.ok) {
       // Configuracion (token, consumidor apagado, proveedor sin llave): el boton queda como no disponible.
       if (res.status === 401 || res.status === 403 || res.status === 503) {
-        throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}`);
+        throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}${detail}`);
       }
       // Bloqueo o JSON invalido tras toda la cadena: la consulta llego al modelo; se informa como fallo.
       if (res.status === 502 && (code === 'blocked' || code === 'invalid_output')) {
@@ -115,7 +117,7 @@ export const urit: AssistProvider = {
           failure: code === 'blocked' ? 'El asistente no pudo responder a este pedido.' : 'El asistente devolvió una respuesta que no se pudo leer. Intenta de nuevo.',
         };
       }
-      throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}`);
+      throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}${detail}`);
     }
     if (!body) throw new ProviderError(502, 'provider_failed', 'urit-ai: respuesta ilegible');
     if (body.finish_reason === 'max_tokens') return { suggestions: [], failure: 'La respuesta del asistente quedó incompleta. Intenta de nuevo.' };
@@ -150,15 +152,16 @@ async function postText(env: Env, fetchFn: FetchLike, body: Record<string, unkno
   }
   const parsed = (await res.json().catch(() => null)) as UritResponse | null;
   const code = typeof parsed?.error === 'string' ? parsed.error.slice(0, 60) : '';
+  const detail = typeof parsed?.detail === 'string' ? ' ' + parsed.detail.slice(0, 60) : '';
   const costUsd = readEstimatedUsd(parsed);
   if (!res.ok) {
     if (res.status === 401 || res.status === 403 || res.status === 503) {
-      throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}`);
+      throw new ProviderError(503, 'provider_unavailable', `urit-ai: HTTP ${res.status} ${code}${detail}`);
     }
     if (res.status === 502 && code === 'blocked') return { value: null, failure: FAILURE_BLOCKED, costUsd };
     if (res.status === 502 && code === 'invalid_output') return { value: null, failure: FAILURE_UNREADABLE, costUsd };
     // 400 invalid_request con detail "tool_mode" es un URiT anterior a 0.2.0 (CONTRACT_V1.md 3.2).
-    throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}`);
+    throw new ProviderError(502, 'provider_failed', `urit-ai: HTTP ${res.status} ${code}${detail}`);
   }
   if (!parsed || typeof parsed !== 'object') throw new ProviderError(502, 'provider_failed', 'urit-ai: respuesta ilegible');
   if (parsed.finish_reason === 'max_tokens') return { value: null, failure: FAILURE_TRUNCATED, costUsd };
@@ -195,7 +198,7 @@ export const uritText: TextProvider = {
       task: call.task,
       system: call.system,
       messages: [{ role: 'user', parts: [{ text: call.user }] }],
-      output: { format: 'json', schema: call.schema },
+      output: { format: 'json', schema: providerSchema(call.schema) },
     });
     if (result.failure !== null) return result;
     const parsed = result.value.output?.json;
@@ -208,7 +211,7 @@ export const uritText: TextProvider = {
       task: call.task,
       system: call.system,
       messages: call.messages,
-      tools: call.tools,
+      tools: call.tools.map((t) => ({ ...t, parameters: providerSchema(t.parameters) })),
       tool_mode: call.toolMode,
     });
     if (result.failure !== null) return result;

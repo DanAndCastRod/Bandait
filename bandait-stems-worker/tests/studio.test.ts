@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { handle } from '../src/index.ts';
-import { ASSIST_SYSTEM_PROMPT } from '../src/providers/anthropic.ts';
+import { ASSIST_SYSTEM_PROMPT, SUGGESTIONS_SCHEMA } from '../src/providers/anthropic.ts';
+import { providerSchema } from '../src/providers/types.ts';
+import { CHAT_TOOLS, COMPOSE_SCHEMA } from '../src/studioV2.ts';
 import { audioFromMusic, detectAudioExt, lyriaModel, lyriaPrompt } from '../src/providers/lyria.ts';
 import { parseRange } from '../src/studio.ts';
 import { audioSecondsFloor, sanitizeSuggestions } from '../src/studioJobs.ts';
@@ -750,6 +752,33 @@ test('assist con anthropic: pide JSON estructurado al modelo y descarta las suge
   const long = sanitizeSuggestions(Array.from({ length: 40 }, () => ({ track_id: 'a', target: 'pan', value: 0.5, fx_type: null, params: null, reason: 'x'.repeat(400) })), new Set(['a']));
   assert.equal(long.length, 32);
   assert.equal(long[0].reason.length, 280);
+});
+
+test('providerSchema: quita los limites que Gemini rechaza y conserva la forma', () => {
+  const DROPPED = /"(minimum|maximum|exclusiveMinimum|exclusiveMaximum|multipleOf|minItems|maxItems|minLength|maxLength|pattern|minProperties|maxProperties)"\s*:/;
+  for (const schema of [COMPOSE_SCHEMA, SUGGESTIONS_SCHEMA, ...CHAT_TOOLS.map((t) => t.parameters)]) {
+    const clean = providerSchema(schema);
+    assert.ok(!DROPPED.test(JSON.stringify(clean)), 'sin limites');
+    assert.ok(DROPPED.test(JSON.stringify(schema)) || schema === SUGGESTIONS_SCHEMA, 'el original no se modifica');
+  }
+  const clean = providerSchema(COMPOSE_SCHEMA) as { required: string[]; properties: { notes: { items: { required: string[] } } } };
+  assert.deepEqual(clean.required, ['notes', 'description']);
+  assert.deepEqual(clean.properties.notes.items.required, ['pitch', 'start', 'length', 'velocity']);
+  // Un campo que se llame como una palabra de JSON Schema no se borra: solo se limpian palabras clave.
+  assert.deepEqual(providerSchema({ type: 'object', properties: { maximum: { type: 'number', maximum: 3 } } }), { type: 'object', properties: { maximum: { type: 'number' } } });
+});
+
+test('compose por urit: el esquema que viaja a URiT no lleva limites', async () => {
+  const { post, external, world } = setup({ URIT_AI_TOKEN: 'urit-token' });
+  world.extra = (c) => (c.url === 'https://ai.urit.services/v1/text'
+    ? Response.json({ id: 'ai_x', model: 'gemini-3.8-flash', output: { text: '', json: { notes: [{ pitch: 45, start: 0, length: 1, velocity: 90 }], description: 'Bajo.' }, tool_calls: [] }, finish_reason: 'stop', usage: { estimated_usd: '0.001772' } })
+    : undefined);
+  await post('/ses_a/jobs', { kind: 'compose', prompt: 'Bajo', bpm: 100, key: 'Am', beats_per_bar: 4, length_bars: 2, role: 'bass', context: [] });
+  const req = external().find((c) => c.url === 'https://ai.urit.services/v1/text');
+  assert.ok(req, 'llamo a URiT');
+  const sent = JSON.parse(String(req!.body));
+  assert.equal(sent.task, 'studio_compose');
+  assert.ok(!/"(minimum|maximum|maxItems|maxLength)"/.test(JSON.stringify(sent.output.schema)));
 });
 
 test('assist con urit (por defecto): consumidor bandait en URiT IA, sin la clave de Gemini directa', async () => {
