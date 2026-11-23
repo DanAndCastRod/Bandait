@@ -65,8 +65,11 @@ import {
   STUDIO_REVERB_SEND_DB_MIN,
   STUDIO_VOLUME_DB_MAX,
   STUDIO_VOLUME_DB_MIN,
+  STUDIO_MAX_SESSION_CHORDS,
+  STUDIO_MAX_SESSION_CHORD_NAME,
   StudioSessionError,
   beatsToSeconds,
+  compareChords,
   countSessionNotes,
   defaultFx,
   findAsset,
@@ -115,6 +118,7 @@ import type {
   SetFrozenAssetArgs,
   SetInstrumentArgs,
   SetMarkersArgs,
+  SetChordsArgs,
   SetTrackFxArgs,
   SnapTimeArgs,
   SplitClipArgs,
@@ -920,6 +924,37 @@ export function setMarkers(session: StudioSession, args: SetMarkersArgs): Studio
   return checked({ ...session, markers })
 }
 
+/**
+ * Reemplaza los acordes de referencia (STUDIO_V2.md 2.9) de una vez: un paso de deshacer. Los
+ * tiempos se acotan y redondean; un nombre vacio o demasiado largo, o un acorde despues de los
+ * 1200 s, lanza. Lista vacia = la sesion queda sin la clave.
+ */
+export function setChords(session: StudioSession, args: SetChordsArgs): StudioSession {
+  const raw = args.chords
+  if (raw.length > STUDIO_MAX_SESSION_CHORDS) fail('too_many', 'chords', `La sesión admite hasta ${STUDIO_MAX_SESSION_CHORDS} acordes`)
+  const chords = raw.map((c, i) => {
+    const name = String(c.name ?? '').trim()
+    if (name.length < 1 || name.length > STUDIO_MAX_SESSION_CHORD_NAME) fail('out_of_range', `chords[${i}].name`, `El nombre del acorde debe tener entre 1 y ${STUDIO_MAX_SESSION_CHORD_NAME} caracteres`)
+    const beat = roundBeat(clamp(c.beat, 0, STUDIO_MAX_BEAT, `chords[${i}].beat`))
+    const lengthBeats = roundBeat(clamp(c.lengthBeats, 0, STUDIO_MAX_BEAT, `chords[${i}].length_beats`))
+    if (!(lengthBeats > 0)) fail('out_of_range', `chords[${i}].length_beats`, 'El acorde debe durar más de 0 beats')
+    if (beatsToSeconds(beat + lengthBeats, session.bpm) > STUDIO_MAX_SESSION_SECONDS + STUDIO_TIME_EPSILON_S) {
+      fail('session_too_long', `chords[${i}].length_beats`, 'El acorde termina después de los 20 minutos que admite una sesión')
+    }
+    return { beat, lengthBeats, name }
+  })
+  chords.sort(compareChords)
+  const current = session.chords ?? []
+  const same = chords.length === current.length && chords.every((c, i) => c.beat === current[i].beat && c.lengthBeats === current[i].lengthBeats && c.name === current[i].name)
+  if (same) return session
+  if (chords.length === 0) {
+    const rest = { ...session }
+    delete rest.chords
+    return checked(rest)
+  }
+  return checked({ ...session, chords })
+}
+
 void ({
   addInstrumentTrack,
   setInstrument,
@@ -932,6 +967,7 @@ void ({
   splitMidiClip,
   setFrozenAsset,
   setMarkers,
+  setChords,
 } satisfies SessionOpsV2Api)
 
 // ###########################################################################

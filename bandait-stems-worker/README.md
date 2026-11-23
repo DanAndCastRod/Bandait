@@ -243,7 +243,13 @@ URiT IA, CONTRACT_V1.md 4A), `STUDIO_RATE_ASSIST_USD` (0.05 por consulta),
 `STUDIO_RATE_COMPOSE_USD` (0.05 por consulta), `STUDIO_RATE_ANALYZE_USD_PER_MIN` (0.80: el
 workflow por defecto separa y analiza; 0.30 no cubría la separación) y `STUDIO_RATE_CHAT_USD`
 (0.03 por vuelta) más `STUDIO_RATE_CHAT_USD_PER_32KB` (0.015 por cada 32 KB completos de
-conversación). `STUDIO_RATE_LYRIA_USD_PER_30S` ya no se lee.
+conversación) y `STUDIO_RATE_CHAT_LISTEN_USD` (0.02 por vuelta que escucha un fragmento).
+`STUDIO_RATE_LYRIA_USD_PER_30S` ya no se lee.
+
+Escuchar a pedido en el chat (STUDIO_V2.md 4.3.5): `STUDIO_CHAT_LISTEN` (`"0"` en
+`wrangler.jsonc`) apaga los fragmentos de audio; con otro valor que `"1"`, un chat con `audio`
+responde 503 `provider_unavailable` con `"detail": "listen_disabled"`. Se prende cuando URiT IA
+acepte audio en `/v1/text` (docs/PLAN_ESTUDIO_V2.md, anexo 7.2).
 
 Errores propios del Estudio: 400 `bad_session_id` / `bad_session` / `bad_asset` / `bad_job` /
 `empty_body` / `incomplete_upload`, 403 `not_a_spender`, 404 `no_session` / `no_asset` /

@@ -104,6 +104,9 @@ export const STUDIO_MAX_SAMPLER_ZONES = 64
 export const STUDIO_MAX_WAM_STATE_BYTES = 16384
 export const STUDIO_MAX_MARKERS = 256
 export const STUDIO_MAX_MARKER_LABEL = 60
+/** Acordes de referencia del documento (STUDIO_V2.md 2.9). */
+export const STUDIO_MAX_SESSION_CHORDS = 2048
+export const STUDIO_MAX_SESSION_CHORD_NAME = 16
 /** Beat maximo de cualquier valor en beats: 1200 s a 260 BPM. */
 export const STUDIO_MAX_BEAT = 5200
 /** Largo minimo de un clip MIDI y de su patron de repeticion. */
@@ -394,6 +397,17 @@ export interface StudioMarker {
   kind: StudioMarkerKind
 }
 
+/**
+ * Acorde de referencia (STUDIO_V2.md 2.9): lo que sono en el audio analizado. No suena ni se
+ * exporta; lo usa el asistente del chat. Tiempos en beats de la sesion.
+ */
+export interface StudioChord {
+  beat: number
+  lengthBeats: number
+  /** 1..16 caracteres ("C#m", "F#7", "C/G"). */
+  name: string
+}
+
 export interface StudioTrack {
   id: string
   /** 'audio' (clips de audio) o 'instrument' (instrumento y clips MIDI). */
@@ -451,6 +465,11 @@ export interface StudioSession {
   tracks: StudioTrack[]
   /** Ordenadas por beat y id. */
   markers: StudioMarker[]
+  /**
+   * Acordes de referencia (STUDIO_V2.md 2.9), ordenados por beat y nombre. Opcional: ausente o
+   * vacio = sin acordes (el documento del cable no lleva la clave).
+   */
+  chords?: StudioChord[]
   master: StudioMaster
 }
 
@@ -539,6 +558,12 @@ export interface WireStudioMarker {
   kind: StudioMarkerKind
 }
 
+export interface WireStudioChord {
+  beat: number
+  length_beats: number
+  name: string
+}
+
 interface WireStudioTrackCommon {
   id: string
   name: string
@@ -602,6 +627,8 @@ export interface WireStudioSession extends WireStudioSessionCommon {
   version: 2
   tracks: WireStudioTrack[]
   markers: WireStudioMarker[]
+  /** Solo si hay acordes (STUDIO_V2.md 2.9). */
+  chords?: WireStudioChord[]
   master: WireStudioMaster
 }
 
@@ -1607,6 +1634,29 @@ function parseMarkers(raw: unknown, bpm: number): StudioMarker[] {
   return markers.sort(compareMarkers)
 }
 
+export function compareChords(a: { beat: number; name: string }, b: { beat: number; name: string }): number {
+  return a.beat - b.beat || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+}
+
+/** Acordes de referencia (STUDIO_V2.md 2.9), ordenados por beat y nombre. */
+function parseChords(raw: unknown, bpm: number): StudioChord[] {
+  const container: Raw = { chords: raw }
+  const chords = list(container, 'chords', '', STUDIO_MAX_SESSION_CHORDS).map((item, i) => {
+    const path = `chords[${i}]`
+    const o = asObject(item, path)
+    checkKeys(o, path, ['beat', 'length_beats', 'name'])
+    const beat = num(o, 'beat', path, 0, STUDIO_MAX_BEAT)
+    const lengthBeats = num(o, 'length_beats', path, 0, STUDIO_MAX_BEAT)
+    if (!(lengthBeats > 0)) fail('out_of_range', join(path, 'length_beats'), 'El acorde debe durar más de 0 beats')
+    const name = text(o, 'name', path, 1, STUDIO_MAX_SESSION_CHORD_NAME)
+    if (beatsToSeconds(beat + lengthBeats, bpm) > STUDIO_MAX_SESSION_SECONDS + STUDIO_TIME_EPSILON_S) {
+      fail('session_too_long', join(path, 'length_beats'), 'El acorde termina después de los 20 minutos que admite una sesión')
+    }
+    return { beat, lengthBeats, name }
+  })
+  return chords.sort(compareChords)
+}
+
 function parseMaster(raw: unknown, path: string): StudioMaster {
   const o = asObject(raw, path)
   checkKeys(o, path, ['volume_db', 'fx', 'reverb'])
@@ -1657,7 +1707,7 @@ export function parseSession(raw: unknown): StudioSession {
   if (o.version !== 1 && o.version !== 2) fail('unsupported_version', 'version', 'Este Hub solo entiende sesiones de las versiones 1 y 2')
   const version = o.version
   if (version === 1) checkKeys(o, '', ROOT_KEYS_V1)
-  else checkKeys(o, '', ROOT_KEYS_V1, ['markers'])
+  else checkKeys(o, '', ROOT_KEYS_V1, ['markers', 'chords'])
 
   const title = text(o, 'title', '', 1, 400).trim()
   if (title.length < 1 || title.length > STUDIO_MAX_TITLE) fail('out_of_range', 'title', `El título debe tener entre 1 y ${STUDIO_MAX_TITLE} caracteres`)
@@ -1688,6 +1738,8 @@ export function parseSession(raw: unknown): StudioSession {
   })
 
   const markers = version === 2 && o.markers !== undefined ? parseMarkers(o.markers, bpm) : []
+  // Sin acordes la sesion no lleva la clave: un documento sin acordes vuelve identico.
+  const chords = version === 2 && o.chords !== undefined ? parseChords(o.chords, bpm) : []
 
   return {
     version: 2,
@@ -1704,6 +1756,7 @@ export function parseSession(raw: unknown): StudioSession {
     assets: [...assets.values()],
     tracks,
     markers,
+    ...(chords.length > 0 ? { chords } : {}),
     master: parseMaster(o.master, 'master'),
   }
 }
@@ -1841,6 +1894,9 @@ function toWire(s: StudioSession): WireStudioSession {
     }),
     tracks: (s.tracks ?? []).map(trackToWire),
     markers: [...(s.markers ?? [])].sort(compareMarkers).map((m) => ({ id: m.id, beat: m.beat, label: m.label, kind: m.kind })),
+    ...(s.chords && s.chords.length > 0
+      ? { chords: [...s.chords].sort(compareChords).map((c) => ({ beat: c.beat, length_beats: c.lengthBeats, name: c.name })) }
+      : {}),
     master: {
       volume_db: s.master?.volumeDb,
       fx: (s.master?.fx ?? []).map(serializeFx),

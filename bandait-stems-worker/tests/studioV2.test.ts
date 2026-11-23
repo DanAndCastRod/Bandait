@@ -655,7 +655,7 @@ test('permisos, gasto e idempotencia valen igual para compose, analyze y chat', 
 
   const { post, get, external, world, usage } = setup({ URIT_AI_TOKEN: 't', STUDIO_MONTHLY_BUDGET_USD: '0.1', STUDIO_RATE_CHAT_USD: '0.04' });
   world.urit = () => Response.json({ output: { text: 'Hola.', tool_calls: [] }, finish_reason: 'stop' });
-  assert.deepEqual(await (await post('/ses_a/jobs?estimate=1', CHAT)).json(), { kind: 'chat', estimated_cost_usd: 0.04, spent_usd: 0, budget_usd: 0.1, allowed: true });
+  assert.deepEqual(await (await post('/ses_a/jobs?estimate=1', CHAT)).json(), { kind: 'chat', estimated_cost_usd: 0.04, spent_usd: 0, budget_usd: 0.1, allowed: true, listen: false });
   assert.equal((await post('/ses_a/jobs?job_id=job_turno1', CHAT)).status, 202);
   assert.equal((await post('/ses_a/jobs?job_id=job_turno1', CHAT)).status, 202, 'repetir el mismo job_id no paga dos veces');
   assert.equal(external().length, 1);
@@ -713,4 +713,171 @@ test('gemini directo: un 400 por clave invalida es 503 sin reintento; solo el de
   world.gemini = () => new Response('{"error":{"message":"API key not valid.","details":[{"reason":"API_KEY_INVALID"}]}}', { status: 400 });
   assert.deepEqual(await errorOf(await post('/ses_a/jobs', COMPOSE)), [503, 'provider_unavailable']);
   assert.equal(external().length, 1, 'una sola llamada');
+});
+
+// --------------------------------------------------------------------------- acordes del documento (2.9)
+
+test('documento v2: chords es opcional, se ordena y se valida; vacio no se devuelve', () => {
+  assert.equal(FIXTURE_V2.chords.length, 4, 'el fixture trae acordes');
+  const unsorted = structuredClone(FIXTURE_V2);
+  unsorted.chords.reverse();
+  assert.deepEqual(validateSession(unsorted).chords, FIXTURE_V2.chords);
+  const empty = structuredClone(FIXTURE_V2);
+  empty.chords = [];
+  assert.ok(!('chords' in validateSession(empty)), 'un documento sin acordes queda como antes');
+  const absent = structuredClone(FIXTURE_V2);
+  delete (absent as { chords?: unknown }).chords;
+  assert.ok(!('chords' in validateSession(absent)));
+
+  type Doc = typeof FIXTURE_V2;
+  const cases: [string, string, (d: Doc) => void][] = [
+    ['out_of_range', 'chords[0].name', (d) => { d.chords[0].name = ''; }],
+    ['out_of_range', 'chords[0].name', (d) => { d.chords[0].name = 'x'.repeat(17); }],
+    ['out_of_range', 'chords[0].length_beats', (d) => { d.chords[0].length_beats = 0; }],
+    ['bad_type', 'chords[1].beat', (d) => { (d.chords[1] as { beat: unknown }).beat = 'cuatro'; }],
+    ['unknown_field', 'chords[2].lyrics', (d) => { (d.chords[2] as Record<string, unknown>).lyrics = 'la la'; }],
+    ['session_too_long', 'chords[3].length_beats', (d) => { d.chords[3] = { beat: 2390, length_beats: 20, name: 'B' }; }],
+    ['too_many', 'chords', (d) => { d.chords = Array.from({ length: 2049 }, (_, i) => ({ beat: i, length_beats: 1, name: 'C' })); }],
+  ];
+  for (const [code, path, mutate] of cases) {
+    const doc = structuredClone(FIXTURE_V2);
+    mutate(doc);
+    assert.throws(() => validateSession(doc), (e: unknown) => e instanceof SessionError && e.code === code && e.path === path, `${code} ${path}`);
+  }
+  // Un v1 no admite chords.
+  const v1 = structuredClone(FIXTURE_V1);
+  v1.chords = [];
+  assert.throws(() => validateSession(v1), (e: unknown) => e instanceof SessionError && e.code === 'unknown_field' && e.path === 'chords');
+});
+
+// --------------------------------------------------------------------------- chat: resumen enriquecido y escuchar
+
+const RICH_SUMMARY = {
+  ...SUMMARY,
+  tracks: [
+    SUMMARY.tracks[0],
+    {
+      id: 'trk_2', kind: 'instrument', name: 'Bajo', role: 'bass', volume_db: -2, pan: 0, mute: false, solo: false, reverb_send_db: -60,
+      fx: [], instrument: { type: 'synth', preset: 'bajo_sub', plugin_id: null }, clips: [],
+      midi_clips: [{
+        id: 'mid_1', start_beat: 0, length_beats: 8, loop: false, note_count: 2, pitch_min: 37, pitch_max: 40,
+        digest: { span_beats: 8, pitch_classes: [['C#', 0.5], ['E', 0.5]], notes_per_bar: 1, grid: '1/4', velocity_mean: 96, notes: [[37, 0, 4, 96], [40, 4, 4, 96]] },
+      }],
+      mix: { lufs: -18.2, true_peak_db: -4.1, bands: { low_db: -1.2, low_mid_db: -7, high_mid_db: -20, high_db: -31 }, volume_db: -2 },
+    },
+  ],
+  chords: [[0, 4, 'C#m'], [4, 4, 'A']],
+  song_chart: { title: 'Cancion', key: 'C#m', bpm: 120, beats_per_bar: 4, sections: [{ label: 'Coro', kind: 'chorus', start_bar: 1, bars: 8, chords: 'C#m A E B' }] },
+  mix_measured: { fresh: true, master_lufs: -14, master_true_peak_db: -1 },
+};
+
+test('chat: el resumen con digest, acordes, song_chart y mediciones pasa tal cual; lo desconocido sigue siendo 400', async () => {
+  const { post, external, world } = setup({ URIT_AI_TOKEN: 't' });
+  world.urit = () => Response.json({ output: { text: 'Ok.', tool_calls: [] }, finish_reason: 'stop' });
+  assert.equal((await post('/ses_a/jobs', { ...CHAT, session_summary: RICH_SUMMARY })).status, 202);
+  const sent = JSON.parse(String(external()[0].body));
+  assert.deepEqual(sent.messages[0].parts[0], { text: `Estado del Estudio: ${JSON.stringify(RICH_SUMMARY)}` });
+
+  const track = RICH_SUMMARY.tracks[1];
+  const bad: unknown[] = [
+    { ...RICH_SUMMARY, chords: [] },
+    { ...RICH_SUMMARY, chords: [[0, 4]] },
+    { ...RICH_SUMMARY, chords: [[0, 4, 'x'.repeat(17)]] },
+    { ...RICH_SUMMARY, chords: Array.from({ length: 257 }, (_, i) => [i, 1, 'C']) },
+    { ...RICH_SUMMARY, song_chart: { ...RICH_SUMMARY.song_chart, lyrics: 'la la' } },
+    { ...RICH_SUMMARY, song_chart: { ...RICH_SUMMARY.song_chart, sections: [{ ...RICH_SUMMARY.song_chart.sections[0], lyrics: 'la' }] } },
+    { ...RICH_SUMMARY, song_chart: { ...RICH_SUMMARY.song_chart, sections: [{ ...RICH_SUMMARY.song_chart.sections[0], chords: 'C '.repeat(201) }] } },
+    { ...RICH_SUMMARY, mix_measured: { fresh: 'si', master_lufs: null, master_true_peak_db: null } },
+    { ...RICH_SUMMARY, mix_measured: { fresh: true } },
+    { ...RICH_SUMMARY, tracks: [{ ...track, mix: { lufs: -18 } }] },
+    { ...RICH_SUMMARY, tracks: [{ ...track, midi_clips: [{ ...track.midi_clips[0], digest: [1, 2] }] }] },
+    { ...RICH_SUMMARY, tracks: [{ ...track, audio: 'base64' }] },
+  ];
+  for (const summary of bad) assert.deepEqual(await errorOf(await post('/ses_a/jobs', { ...CHAT, session_summary: summary })), [400, 'bad_job'], JSON.stringify(summary).slice(-90));
+  assert.equal(external().length, 1);
+});
+
+test('chat: las instrucciones piden razonar con acordes y notas, no inventar armonia y pedir ANALIZAR AUDIO o MEDIR MEZCLA', () => {
+  assert.match(CHAT_SYSTEM_PROMPT, /No inventes armonía/);
+  assert.match(CHAT_SYSTEM_PROMPT, /ANALIZAR AUDIO/);
+  assert.match(CHAT_SYSTEM_PROMPT, /MEDIR MEZCLA/);
+  assert.match(CHAT_SYSTEM_PROMPT, /song_chart/);
+  assert.match(CHAT_SYSTEM_PROMPT, /nombres de acordes/);
+});
+
+const LISTEN_ASSET = `${prefix}ses_a/assets/ast_listen.wav`;
+const LISTEN_BYTES = (() => {
+  const data = 16000 * 2; // 1 s de 16 kHz mono 16 bit
+  const out = new Uint8Array(44 + data);
+  out.set(wavHeader(16000, data), 0);
+  for (let i = 44; i < out.length; i++) out[i] = i % 251;
+  return out;
+})();
+const LISTEN_CHAT = { ...CHAT, messages: [{ role: 'user', text: 'Escucha el coro: ¿el bajo choca?', audio: { asset_id: 'ast_listen', duration_s: 1 } }] };
+
+test('chat: escuchar esta apagado por defecto: 503 provider_unavailable con listen_disabled, sin llegar a URiT', async () => {
+  const { post, bucket, external } = setup({ URIT_AI_TOKEN: 't' });
+  bucket.seed(LISTEN_ASSET, LISTEN_BYTES.byteLength, LISTEN_BYTES);
+  const estimate = await (await post('/ses_a/jobs?estimate=1', CHAT)).json();
+  assert.equal(estimate.listen, false, 'la estimacion avisa que no escucha');
+  for (const path of ['/ses_a/jobs', '/ses_a/jobs?estimate=1']) {
+    const res = await post(path, LISTEN_CHAT);
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: 'provider_unavailable', detail: 'listen_disabled' });
+  }
+  const off = setup({ URIT_AI_TOKEN: 't', STUDIO_CHAT_LISTEN: 'si' });
+  off.bucket.seed(LISTEN_ASSET, LISTEN_BYTES.byteLength, LISTEN_BYTES);
+  assert.deepEqual(await errorOf(await off.post('/ses_a/jobs', LISTEN_CHAT)), [503, 'provider_unavailable'], 'solo "1" lo prende');
+  assert.equal(external().length + off.external().length, 0);
+});
+
+test('chat: con STUDIO_CHAT_LISTEN=1 el fragmento llega a URiT como inline audio/wav y cobra el recargo', async () => {
+  const { post, get, bucket, external, world } = setup({ URIT_AI_TOKEN: 't', STUDIO_CHAT_LISTEN: '1' });
+  bucket.seed(LISTEN_ASSET, LISTEN_BYTES.byteLength, LISTEN_BYTES);
+  world.urit = () => Response.json({ output: { text: 'El bajo y la guitarra comparten registro.', tool_calls: [] }, finish_reason: 'stop' });
+
+  const estimate = await (await post('/ses_a/jobs?estimate=1', LISTEN_CHAT)).json();
+  assert.equal(estimate.listen, true);
+  assert.equal(estimate.estimated_cost_usd, 0.05, '0.03 de la vuelta + 0.02 por escuchar');
+
+  // Turno 2: el fragmento del primer mensaje ya se escucho y va como nota; solo el ultimo se adjunta.
+  const second = {
+    ...CHAT,
+    messages: [
+      LISTEN_CHAT.messages[0],
+      { role: 'model', text: 'Comparten registro.', tool_calls: [] },
+      { role: 'user', text: 'Y ahora este otro', audio: { asset_id: 'ast_listen', duration_s: 1 } },
+    ],
+  };
+  assert.equal((await post('/ses_a/jobs', second)).status, 202);
+  const sent = JSON.parse(String(external()[0].body));
+  assert.deepEqual(sent.messages[0].parts, [{ text: 'Escucha el coro: ¿el bajo choca?' }, { text: '(Aquí el músico adjuntó un fragmento de audio de 1 s, que ya escuchaste.)' }]);
+  assert.deepEqual(sent.messages[2].parts, [
+    { text: `Estado del Estudio: ${JSON.stringify(SUMMARY)}` },
+    { text: 'Y ahora este otro' },
+    { inline: { mime_type: 'audio/wav', data: Buffer.from(LISTEN_BYTES).toString('base64') } },
+  ]);
+  const done = await get('job_t1');
+  assert.equal(done.reply, 'El bajo y la guitarra comparten registro.');
+  assert.equal(done.cost_usd, 0.05);
+
+  // mp3 tambien sirve; un turno sin audio en el ultimo mensaje no adjunta ni cobra el recargo.
+  bucket.seed(`${prefix}ses_a/assets/ast_mp3.mp3`, 4, new Uint8Array([0xff, 0xfb, 0x90, 0x00]));
+  await post('/ses_a/jobs', { ...CHAT, messages: [{ role: 'user', text: 'Oye', audio: { asset_id: 'ast_mp3', duration_s: 2 } }] });
+  assert.deepEqual(JSON.parse(String(external()[1].body)).messages[0].parts[2], { inline: { mime_type: 'audio/mpeg', data: '//uQAA==' } });
+  const plain = { ...CHAT, messages: [LISTEN_CHAT.messages[0], { role: 'model', text: 'Ok.', tool_calls: [] }, { role: 'user', text: 'Gracias' }] };
+  assert.equal((await (await post('/ses_a/jobs?estimate=1', plain)).json()).estimated_cost_usd, 0.03);
+});
+
+test('chat: un fragmento que falta es 404 no_asset; uno de mas de 1 MiB o de mas de 30 s es 400 bad_job', async () => {
+  const { post, bucket, external } = setup({ URIT_AI_TOKEN: 't', STUDIO_CHAT_LISTEN: '1' });
+  assert.deepEqual(await errorOf(await post('/ses_a/jobs', LISTEN_CHAT)), [404, 'no_asset']);
+  bucket.seed(LISTEN_ASSET, 1048577);
+  assert.deepEqual(await errorOf(await post('/ses_a/jobs', LISTEN_CHAT)), [400, 'bad_job']);
+  bucket.seed(LISTEN_ASSET, LISTEN_BYTES.byteLength, LISTEN_BYTES);
+  const user = LISTEN_CHAT.messages[0];
+  for (const audio of [{ asset_id: 'ast_listen', duration_s: 31 }, { asset_id: 'ast_listen', duration_s: 0 }, { asset_id: 'ast_listen.wav', duration_s: 1 }, { asset_id: 'ast_listen' }, { asset_id: 'ast_listen', duration_s: 1, data: 'AAAA' }]) {
+    assert.deepEqual(await errorOf(await post('/ses_a/jobs', { ...CHAT, messages: [{ ...user, audio }] })), [400, 'bad_job'], JSON.stringify(audio));
+  }
+  assert.equal(external().length, 0);
 });

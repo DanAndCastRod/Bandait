@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Check, Headphones, MessageSquare, RefreshCw, RotateCcw, Send, Sparkles, Undo2, X } from 'lucide-react'
+import { Activity, Check, Headphones, MessageSquare, RefreshCw, RotateCcw, Send, Sparkles, Undo2, X } from 'lucide-react'
 import { StemCloudError } from '../../services/stemCloud'
 import {
   applyPendingCommand,
@@ -37,7 +37,7 @@ import {
 } from '../../services/studio/jobs'
 import { beatsToSeconds, findTrack, secondsToBeats, type StudioSession } from '../../services/studio/session'
 import * as studioStore from '../../services/studio/studioStore'
-import type { ChatJobRequest, CommandContext, LoopRegionS, StudioChatMessage, StudioChatToolCall, StudioJobEstimateV2, StudioJobStateV2 } from '../../services/studio/types'
+import type { ChatJobRequest, CommandContext, LoopRegionS, StudioChatListen, StudioChatMessage, StudioChatToolCall, StudioJobEstimateV2, StudioJobStateV2 } from '../../services/studio/types'
 import { StudioChatMarkdown } from './StudioChatMarkdown'
 import type { StudioRegistry } from './studioCommandHandlers'
 import { useStudio, type StudioController } from './studioState'
@@ -78,6 +78,17 @@ export interface StudioChatStatus {
 }
 
 const ASSISTANT_CTX = { source: 'assistant' } as const
+
+/** true si el ultimo mensaje es del usuario y lleva un fragmento para escuchar. */
+function lastHasListen(messages: readonly StudioChatMessage[]): boolean {
+  const last = messages[messages.length - 1]
+  return last?.role === 'user' && last.audio !== undefined
+}
+
+/** La conversacion sin fragmentos (cuando el Worker no escucha). */
+function withoutListen(messages: readonly StudioChatMessage[]): StudioChatMessage[] {
+  return messages.map((m) => (m.role === 'user' && m.audio ? { role: 'user', text: m.text } : m))
+}
 
 function failureOf(err: unknown): { title: string; message: string } {
   if (err instanceof StemCloudError) {
@@ -136,6 +147,10 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
   /** La conversacion guardada ya se leyo (antes no se guarda nada: se pisaria). */
   const [loaded, setLoaded] = useState(false)
   const [restored, setRestored] = useState(false)
+  /** MEDIR MEZCLA (gratis, en este equipo) y ESCUCHAR FRAGMENTO (STUDIO_V2.md 4.3.5). */
+  const [measure, setMeasure] = useState<{ busy: boolean; note: string | null }>({ busy: false, note: null })
+  const [listenAvailable, setListenAvailable] = useState(false)
+  const [listen, setListen] = useState<{ busy: boolean; attached: StudioChatListen | null; error: string | null }>({ busy: false, attached: null, error: null })
   const abortRef = useRef<AbortController | null>(null)
   const logRef = useRef<HTMLOListElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -206,11 +221,16 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
 
   const buildRequest = (outgoing: StudioChatMessage[]): ChatJobRequest => {
     const s = controller.snapshot()
-    const summary = fitSessionSummary(s.session, {
-      playheadBeat: secondsToBeats(controller.engine.position(), s.session.bpm),
-      selection: { trackId: s.selectedTrackId, clipIds: s.selectedClipId ? [s.selectedClipId] : [], context: commandContext() },
-      loop: loopBeats(controller.engine.getState().loop, s.session.bpm),
-    })
+    // Con el loop, la cancion ligada (acordes sin letra) y la ultima medicion de mezcla (STUDIO_V2.md 4.3.2).
+    const summary = fitSessionSummary(
+      s.session,
+      {
+        playheadBeat: secondsToBeats(controller.engine.position(), s.session.bpm),
+        selection: { trackId: s.selectedTrackId, clipIds: s.selectedClipId ? [s.selectedClipId] : [], context: commandContext() },
+        loop: loopBeats(controller.engine.getState().loop, s.session.bpm),
+      },
+      controller.chatExtras(),
+    )
     return chatRequestForSession(outgoing, summary)
   }
 
@@ -275,25 +295,36 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
         setPhase({ kind: 'pending', jobId: launched, message: 'Se perdió la conexión con la nube. Si el mensaje alcanzó a enviarse, la respuesta sigue en la nube: consúltala antes de reenviar.', outgoing: request.messages })
         return
       }
-      setPhase({ kind: 'failed', ...failureOf(err), outgoing })
+      setPhase({ kind: 'failed', ...failureOf(err), outgoing: listenRefused(err, outgoing) })
     }
   }
 
-  /** Envia la conversacion: la primera vez pide el costo y espera la confirmacion. */
+  /** Si el Worker no escucha (listen_disabled), se esconde el boton y el reintento va sin audio. */
+  const listenRefused = (err: unknown, outgoing: StudioChatMessage[]): StudioChatMessage[] => {
+    if (!(err instanceof StemCloudError) || err.code !== 'provider_unavailable' || !outgoing.some((m) => m.role === 'user' && m.audio)) return outgoing
+    setListenAvailable(false)
+    return withoutListen(outgoing)
+  }
+
+  /**
+   * Envia la conversacion: la primera vez pide el costo y espera la confirmacion. Un mensaje con
+   * fragmento para escuchar se cotiza y confirma siempre (lleva recargo).
+   */
   const send = async (outgoing: StudioChatMessage[]) => {
     const cloud = controller.cloud
     if (!cloud || !canRun) return
     touchedRef.current = true
-    if (approved) {
+    if (approved && !lastHasListen(outgoing)) {
       await launch(outgoing)
       return
     }
     setPhase({ kind: 'quoting' })
     try {
       const quoted = await estimateV2(cloud, controller.sessionId, buildRequest(outgoing))
+      setListenAvailable(quoted.listen === true)
       setPhase({ kind: 'confirm', outgoing, estimate: quoted })
     } catch (err) {
-      setPhase({ kind: 'failed', ...failureOf(err), outgoing })
+      setPhase({ kind: 'failed', ...failureOf(err), outgoing: listenRefused(err, outgoing) })
     }
   }
 
@@ -302,7 +333,34 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
     const text = draft.trim()
     if (!text || busy || waitingDecision || audition) return
     setDraft('')
-    void send(appendUserMessage(messages, text))
+    const attached = listen.attached
+    setListen({ busy: false, attached: null, error: null })
+    void send(appendUserMessage(messages, text, attached))
+  }
+
+  /** MEDIR MEZCLA: la medicion del asistente de mezcla, en este equipo; viaja en el resumen. */
+  const measureMix = async () => {
+    if (measure.busy) return
+    setMeasure({ busy: true, note: 'MIDIENDO...' })
+    try {
+      const m = await controller.measureForChat({ progress: (text) => setMeasure({ busy: true, note: text }) })
+      const n = m.metrics.tracks.length
+      setMeasure({ busy: false, note: `MEZCLA MEDIDA (${n === 1 ? '1 PISTA' : `${n} PISTAS`}): VA EN EL PRÓXIMO MENSAJE` })
+    } catch (err) {
+      setMeasure({ busy: false, note: err instanceof Error && err.message ? err.message : 'No se pudo medir la mezcla.' })
+    }
+  }
+
+  /** ESCUCHAR FRAGMENTO: 30 s desde el cabezal, se sube y se adjunta al proximo mensaje. */
+  const prepareListen = async () => {
+    if (listen.busy) return
+    setListen({ busy: true, attached: null, error: null })
+    try {
+      const attached = await controller.prepareListenExcerpt(controller.engine.position())
+      setListen({ busy: false, attached, error: null })
+    } catch (err) {
+      setListen({ busy: false, attached: null, error: err instanceof Error && err.message ? err.message : 'No se pudo preparar el fragmento.' })
+    }
   }
 
   const resume = async () => {
@@ -377,7 +435,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
   }
 
   /** Aplica el cambio de forma provisional y reproduce en loop la zona que toca. */
-  const listen = async (index: number) => {
+  const startAudition = async (index: number) => {
     if (!proposal || !registry || applying || audition) return
     const target = proposal.pendings[index]
     if (!target || target.status !== 'pending') return
@@ -449,6 +507,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
     setApproved(null)
     setSpentUsd(0)
     setRestored(false)
+    setListen({ busy: false, attached: null, error: null })
   }
 
   // ---- contexto y pedidos rapidos ----
@@ -484,10 +543,10 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
         <li key={call.id} className="stu-chat-call" data-state={listening ? 'listening' : p.status} data-testid="studio-chat-call">
           <span className="stu-chat-call-text">
             <strong>{p.description}</strong>
-            {p.warnings && p.warnings.length > 0 && (
+            {p.status === 'pending' && p.warnings && p.warnings.length > 0 && (
               <span className="stu-chat-warnings" data-testid="studio-chat-warnings">
-                {p.warnings.map((w, i) => (
-                  <span key={i} className="stu-help" data-tone="warn">
+                {p.warnings.map((w, k) => (
+                  <span key={k} className="stu-help" data-tone="warn" data-testid="studio-chat-warning">
                     {w}
                   </span>
                 ))}
@@ -522,7 +581,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
                 className="stu-btn"
                 data-size="small"
                 disabled={editLocked || audition !== null}
-                onClick={() => void listen(index)}
+                onClick={() => void startAudition(index)}
                 aria-label={`Escuchar antes de aplicar: ${p.description}`}
                 title="Aplica el cambio de forma provisional y reproduce en loop la zona que toca"
                 data-testid="studio-chat-listen"
@@ -584,7 +643,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
             if (m.role === 'user') {
               return (
                 <li key={i} className="stu-chat-msg" data-role="user">
-                  <span className="stu-label">TÚ</span>
+                  <span className="stu-label">TÚ{m.audio ? ` · FRAGMENTO DE ${Math.round(m.audio.durationS)} S` : ''}</span>
                   <p>{m.text}</p>
                 </li>
               )
@@ -775,6 +834,34 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
               CONTINUAR
             </button>
           )}
+          <button
+            type="button"
+            className="stu-btn"
+            data-size="small"
+            data-tone="ghost"
+            disabled={measure.busy || busy || !snap.ready || snap.recording}
+            onClick={() => void measureMix()}
+            title="Mide volumen, pico y energía por banda de cada pista en este equipo (gratis, no sale audio). El asistente recibe esos números"
+            data-testid="studio-chat-measure"
+          >
+            <Activity size={12} />
+            {measure.busy ? 'MIDIENDO...' : 'MEDIR MEZCLA'}
+          </button>
+          {listenAvailable && (
+            <button
+              type="button"
+              className="stu-btn"
+              data-size="small"
+              data-tone="ghost"
+              disabled={listen.busy || composeLocked || !snap.ready}
+              onClick={() => void prepareListen()}
+              title="Adjunta al próximo mensaje 30 s de la mezcla desde el cabezal (mono, baja resolución). El envío pide confirmar el costo"
+              data-testid="studio-chat-listen"
+            >
+              <Headphones size={12} />
+              {listen.busy ? 'PREPARANDO...' : 'ESCUCHAR FRAGMENTO'}
+            </button>
+          )}
           <span className="stu-bar-spacer" />
           {(messages.length > 0 || proposal) && (
             <button type="button" className="stu-btn" data-tone="ghost" disabled={busy || applying || audition !== null} onClick={restart} title="Empieza una conversación nueva; los cambios aplicados se quedan en la sesión" data-testid="studio-chat-restart">
@@ -783,6 +870,21 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
             </button>
           )}
         </div>
+        {measure.note && (
+          <p className="stu-help" aria-live="polite" data-testid="studio-chat-measure-note">
+            {measure.note}
+          </p>
+        )}
+        {(listen.attached || listen.error) && (
+          <p className="stu-help" data-tone={listen.error ? 'warn' : undefined} aria-live="polite" data-testid="studio-chat-listen-note">
+            {listen.error ?? `FRAGMENTO DE ${Math.round(listen.attached?.durationS ?? 0)} S ADJUNTO AL PRÓXIMO MENSAJE (con recargo). `}
+            {listen.attached && (
+              <button type="button" className="stu-btn" data-size="small" data-tone="ghost" onClick={() => setListen({ busy: false, attached: null, error: null })}>
+                QUITAR
+              </button>
+            )}
+          </p>
+        )}
       </form>
     </div>
   )

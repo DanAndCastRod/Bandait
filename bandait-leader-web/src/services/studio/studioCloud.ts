@@ -52,6 +52,7 @@ import type {
   CloudSession,
   CloudSessionSummary,
   ComposeContextTrack,
+  MidiClipDigest,
   MixMetrics,
   MixSuggestion,
   PutSessionOptions,
@@ -191,8 +192,19 @@ async function request(target: CloudTarget, url: string, init: RequestInit): Pro
   }
 }
 
+/** Texto de `provider_unavailable` con `detail` `listen_disabled` (STUDIO_V2.md 4.3.5). */
+export const LISTEN_DISABLED_MESSAGE =
+  'Escuchar fragmentos no está habilitado en la nube de Bandait: el proveedor todavía no acepta audio en el chat. Envía el mensaje sin el fragmento.'
+
 async function failure(res: Response): Promise<StemCloudError> {
+  // `detail` (opcional) precisa el error; failFrom solo lee `error`.
+  const detail = await res
+    .clone()
+    .json()
+    .then((b: unknown) => (isObject(b) && typeof b.detail === 'string' ? b.detail : null))
+    .catch(() => null)
   const err = await failFrom(res)
+  if (err.code === 'provider_unavailable' && detail === 'listen_disabled') return new StemCloudError(err.code, err.status, LISTEN_DISABLED_MESSAGE)
   return studioError(err.code, err.status)
 }
 
@@ -655,7 +667,9 @@ function toolCallToWire(c: StudioChatToolCall): Raw {
 }
 
 function chatMessageToWire(m: StudioChatMessage): Raw {
-  if (m.role === 'user') return { role: 'user', text: m.text }
+  if (m.role === 'user') {
+    return m.audio ? { role: 'user', text: m.text, audio: { asset_id: m.audio.assetId, duration_s: m.audio.durationS } } : { role: 'user', text: m.text }
+  }
   if (m.role === 'model') return { role: 'model', text: m.text, tool_calls: m.toolCalls.map(toolCallToWire) }
   return {
     role: 'tool',
@@ -670,6 +684,36 @@ function fxSummaryToWire(fx: StudioFx): Raw {
 
 function markerToWire(m: StudioMarker): Raw {
   return { id: m.id, beat: m.beat, label: m.label, kind: m.kind }
+}
+
+function digestToWire(d: MidiClipDigest): Raw {
+  const out: Raw = {
+    span_beats: d.spanBeats,
+    pitch_classes: d.pitchClasses,
+    notes_per_bar: d.notesPerBar,
+    grid: d.grid,
+    velocity_mean: d.velocityMean,
+  }
+  if (d.hits) out.hits = d.hits
+  if (d.notes) out.notes = d.notes
+  return out
+}
+
+/** Campos opcionales de la raiz del resumen (4.3.2): solo los que hay. */
+function summaryExtrasToWire(s: StudioSessionSummary): Raw {
+  const out: Raw = {}
+  if (s.chords && s.chords.length > 0) out.chords = s.chords
+  if (s.songChart) {
+    out.song_chart = {
+      title: s.songChart.title,
+      key: s.songChart.key,
+      bpm: s.songChart.bpm,
+      beats_per_bar: s.songChart.beatsPerBar,
+      sections: s.songChart.sections.map((x) => ({ label: x.label, kind: x.kind, start_bar: x.startBar, bars: x.bars, chords: x.chords })),
+    }
+  }
+  if (s.mixMeasured) out.mix_measured = { fresh: s.mixMeasured.fresh, master_lufs: s.mixMeasured.masterLufs, master_true_peak_db: s.mixMeasured.masterTruePeakDb }
+  return out
 }
 
 /** SessionSummary al cable (STUDIO_V2.md 4.3.2). */
@@ -705,9 +749,21 @@ export function sessionSummaryToWire(s: StudioSessionSummary): Record<string, un
         note_count: c.noteCount,
         pitch_min: c.pitchMin,
         pitch_max: c.pitchMax,
+        ...(c.digest ? { digest: digestToWire(c.digest) } : {}),
       })),
+      ...(t.mix
+        ? {
+            mix: {
+              lufs: t.mix.lufs,
+              true_peak_db: t.mix.truePeakDb,
+              bands: t.mix.bands ? { low_db: t.mix.bands.lowDb, low_mid_db: t.mix.bands.lowMidDb, high_mid_db: t.mix.bands.highMidDb, high_db: t.mix.bands.highDb } : null,
+              volume_db: t.mix.volumeDb,
+            },
+          }
+        : {}),
     })),
     markers: s.markers.map(markerToWire),
+    ...summaryExtrasToWire(s),
     master: {
       volume_db: s.master.volumeDb,
       fx: s.master.fx.map(fxSummaryToWire),
@@ -865,6 +921,8 @@ export async function estimateJobV2(target: CloudTarget, sessionId: string, req:
     spentUsd: finite(body.spent_usd) ? body.spent_usd : 0,
     budgetUsd: finite(body.budget_usd) ? body.budget_usd : null,
     allowed: body.allowed,
+    // Solo chat (STUDIO_V2.md 4.3): un Worker anterior no lo manda = no escucha.
+    ...(req.kind === 'chat' ? { listen: body.listen === true } : {}),
   }
 }
 

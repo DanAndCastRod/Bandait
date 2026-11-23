@@ -513,7 +513,8 @@ async function main() {
     assert.deepEqual(wire.messages[1], { role: 'model', text: null, tool_calls: [{ id: 'call_1', name: 'set_track_mix', arguments: { track_id: 'trk_1', volume_db: -3, extraCamel: { keepMe: true } }, signature: 'firma-opaca==' }] })
     assert.deepEqual(wire.messages[2], { role: 'tool', tool_results: [{ call_id: 'call_1', name: 'set_track_mix', response: { status: 'applied', message: 'ok' } }] })
     assert.equal(wire.tool_mode, 'auto')
-    assert.deepEqual(Object.keys(wire.session_summary), ['title', 'bpm', 'beats_per_bar', 'key', 'length_s', 'playhead_beat', 'selection', 'tracks', 'markers', 'master'])
+    // El fixture trae acordes guardados: `chords` (opcional, 4.3.2) va antes de master.
+    assert.deepEqual(Object.keys(wire.session_summary), ['title', 'bpm', 'beats_per_bar', 'key', 'length_s', 'playhead_beat', 'selection', 'tracks', 'markers', 'chords', 'master'])
     const v1 = jobRequestV2ToWire({ kind: 'separate', assetId: 'ast_1', durationS: 10 })
     assert.deepEqual(v1, { kind: 'separate', asset_id: 'ast_1', duration_s: 10 })
   })
@@ -523,7 +524,11 @@ async function main() {
     const pad = wire.tracks.find((t) => t.id === 'trk_2')
     assert.ok(pad)
     assert.deepEqual(pad.instrument, { type: 'synth', preset: 'pad_calido', plugin_id: null })
-    assert.deepEqual(pad.midi_clips, [{ id: 'mid_p1', start_beat: 16, length_beats: 16, loop: false, note_count: 6, pitch_min: 57, pitch_max: 68 }])
+    const [padClip] = pad.midi_clips as Array<Record<string, unknown>>
+    const { digest, ...padClipRest } = padClip
+    assert.deepEqual(padClipRest, { id: 'mid_p1', start_beat: 16, length_beats: 16, loop: false, note_count: 6, pitch_min: 57, pitch_max: 68 })
+    assert.deepEqual(Object.keys(digest as object), ['span_beats', 'pitch_classes', 'notes_per_bar', 'grid', 'velocity_mean', 'notes'])
+    assert.equal(((digest as { notes: unknown[] }).notes).length, 6, 'clip corto: van las notas literales')
     assert.deepEqual(Object.keys(pad), ['id', 'kind', 'name', 'role', 'volume_db', 'pan', 'mute', 'solo', 'reverb_send_db', 'fx', 'instrument', 'clips', 'midi_clips'])
     assert.deepEqual(Object.keys(wire.master.reverb as object), ['decay_s', 'return_db'])
     const voz = wire.tracks.find((t) => t.id === 'trk_1')
@@ -604,7 +609,7 @@ async function main() {
     const done = await getJobV2(target, 'ses_1', 'job_x')
     assert.ok(done.status === 'SUCCEEDED' && done.kind === 'chat' && done.reply === 'Hecho')
     const est = await estimateJobV2(target, 'ses_1', req)
-    assert.deepEqual(est, { kind: 'chat', estimatedCostUsd: 0.03, spentUsd: 1, budgetUsd: 10, allowed: true })
+    assert.deepEqual(est, { kind: 'chat', estimatedCostUsd: 0.03, spentUsd: 1, budgetUsd: 10, allowed: true, listen: false })
     const before = calls.length
     const huge = chatRequest([{ role: 'user', text: 'x'.repeat(STUDIO_CHAT_BODY_MAX_BYTES) }])
     await assert.rejects(startJobV2(target, 'ses_1', huge, 'job_y'), (e: unknown) => e instanceof StemCloudError && e.code === 'job_too_large')
