@@ -1619,3 +1619,10 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Verificación:** Hub lint, `tsc -b`, `verify:logic` (8 suites), build; Worker `npm test` 78/78; Playwright `--project=leader-web` 64/64; CI del PR #52 en verde.
 * **Despliegue:** Worker desplegado por ClipVault (versión de Cloudflare `c8c2b66a-8681-487b-89be-f6bb7772b954`, `STUDIO_CHAT_LISTEN` = "0") ANTES de fusionar el PR #52; después el Hub publicado sirve `index-BV8USf1x.js`. La constante `VERSION` del Worker sigue en 1.2.0: no se subió.
 * **Pendientes:** el anexo 7.2 se envió a la sesión `console_implementation` el 2026-11-23; esperar su respuesta para encender la escucha. Los demás pendientes de las tres entradas anteriores siguen abiertos.
+
+### [2026-11-23] - Estudio: ESCUCHAR FRAGMENTO encendido (URiT IA 0.4.0 acepta audio)
+* **Sprint / Módulo:** `bandait-stems-worker` 1.3.0. Aviso de la sesión `console_implementation`: URiT IA 0.4.0 en producción (versión `c0c85ecb`), consumidor `bandait` con `allow_audio` y sus modelos y topes de antes. Plan aprobado por Daniel Castaneda: probar, encender, ajustar el recargo y desplegar. Agente: Claude Code (Opus 5.5).
+* **Verificación previa:** script en el scratchpad que usa las funciones del Worker (`chatCall` + `uritText.chat`, empaquetado con esbuild) y manda un WAV de 6 s (16 kHz mono, arpegio de Do mayor a 120 bpm) con el token de `bandait` por ClipVault: 200 en 5626 ms, `costUsd` 0.004202, respuesta "120 BPM y La menor (Am)". El tempo es correcto; la tonalidad no.
+* **Acción técnica realizada:** `STUDIO_CHAT_LISTEN` = "1" en `wrangler.jsonc`; `DEFAULT_RATES.chatListen` de 0.02 a 0.002 (contrato 4.3.5 y tabla de tarifas, README); `VERSION` 1.3.0; pruebas actualizadas (versión y cotización 0.032). `max_output_tokens` del chat ya es 8192, con margen para el razonamiento (URiT advirtió que con 300 se corta la llamada a herramienta).
+* **Verificación:** `npm test` 78/78.
+* **Pendientes:** probar ESCUCHAR FRAGMENTO desde el Hub publicado (render a 16 kHz, subida a R2, botón visible); limpieza de fragmentos huérfanos en `assets/`.

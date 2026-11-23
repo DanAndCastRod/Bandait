@@ -851,7 +851,7 @@ Listen
 - El Worker busca `assets/<asset_id>.wav` y `.mp3`: si no existe, 404 `no_asset`; si pesa más de
   1048576 bytes, 400 `bad_job`. Lo manda a URiT como parte `inline` con `mime_type`
   `audio/wav` o `audio/mpeg` y los bytes en base64, después del texto del mensaje.
-- Costo: `STUDIO_RATE_CHAT_LISTEN_USD` (0.02 por defecto) más, cuando el último mensaje `user`
+- Costo: `STUDIO_RATE_CHAT_LISTEN_USD` (0.002 por defecto) más, cuando el último mensaje `user`
   trae `audio`. Precio de referencia: lo fija URiT cuando habilite audio.
 - El fragmento queda en `assets/` como audio sin referencia en el documento (el MCP de operador
   lo cuenta como huérfano). No se borra solo.
@@ -865,7 +865,7 @@ Se suman a v1 6.6 y 6.7. Tarifas de referencia, sobreescribibles por variable:
 | `compose` | por consulta | `STUDIO_RATE_COMPOSE_USD` | 0.05 |
 | `analyze` | por minuto de audio | `STUDIO_RATE_ANALYZE_USD_PER_MIN` | 0.8 |
 | `chat` | por consulta (cada vuelta), más un recargo por tamaño | `STUDIO_RATE_CHAT_USD` y `STUDIO_RATE_CHAT_USD_PER_32KB` | 0.03 y 0.015 |
-| `chat` con fragmento de audio (4.3.5) | recargo por vuelta que escucha | `STUDIO_RATE_CHAT_LISTEN_USD` | 0.02 |
+| `chat` con fragmento de audio (4.3.5) | recargo por vuelta que escucha | `STUDIO_RATE_CHAT_LISTEN_USD` | 0.002 |
 | `generate` con `lyria` | por canción (v2 4.6) | `STUDIO_RATE_LYRIA_CLIP_USD` (hasta 30 s) y `STUDIO_RATE_LYRIA_SONG_USD` (más de 30 s) | 0.04 y 0.08 |
 
 - `analyze`: el workflow por defecto (`MUSICAI_WORKFLOW`, `stems-workflow-releven-bandait`)

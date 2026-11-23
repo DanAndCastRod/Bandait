@@ -245,6 +245,14 @@ Cuando URiT lo publique: verificar con una llamada real (un fragmento corto), ca
 `STUDIO_RATE_CHAT_LISTEN_USD` al precio real y desplegar el Worker. El botón ESCUCHAR FRAGMENTO
 aparece solo cuando la estimación del chat responde `listen: true`.
 
+**Hecho el 2026-11-23.** URiT IA 0.4.0 en producción (contrato `workers/ai/CONTRACT_V1.md` 3.5,
+consumidor `bandait` con `allow_audio`). Prueba real con el código del Worker (`chatCall` +
+`uritText.chat`) y un WAV de 6 s: 200 en 5,6 s, USD 0,0042 la llamada completa (sistema,
+herramientas, razonamiento y audio). El modelo acertó el tempo (120 BPM) y erró la tonalidad
+(dijo La menor de un arpegio de Do mayor): lo que oye orienta, no reemplaza ANALIZAR AUDIO.
+`STUDIO_CHAT_LISTEN` = `"1"` y recargo por defecto de 0,002 USD por vuelta que escucha (el audio
+cuesta unos 0,0006 USD por 30 s; se cobra el `usage.estimated_usd` real). Worker 1.3.0.
+
 ## 8. VST
 
 | Opción | Veredicto |
