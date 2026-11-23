@@ -87,7 +87,7 @@ export interface StudioCommandUi {
   openShortcuts: () => void
   openExport: () => void
   pickMidiFile: () => void
-  /** Muestra u oculta la ventana del asistente (Ctrl+J). */
+  /** Muestra u oculta la ventana del asistente (Alt+A). */
   toggleAssistant: () => void
 }
 

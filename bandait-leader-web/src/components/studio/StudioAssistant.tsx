@@ -62,7 +62,7 @@ interface Props {
   commandContext: () => CommandContext
   layout: AssistantLayout
   onLayout: (layout: AssistantLayout) => void
-  /** Atajo vigente de view.toggle_assistant, para los titulos ("Ctrl+J"). */
+  /** Atajo vigente de view.toggle_assistant, para los titulos ("Alt+A"). */
   shortcut: string
 }
 

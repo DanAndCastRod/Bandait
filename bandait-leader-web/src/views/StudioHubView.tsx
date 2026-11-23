@@ -205,7 +205,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
       const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
       if (plain && controller.snapshot().midi.keyboard && isComputerKeyboardCode(event.code)) return
       const inText = isTextFieldTarget(target)
-      // Escribiendo en el asistente, su atajo con modificador (Ctrl+J) lo sigue ocultando.
+      // Escribiendo en el asistente, su atajo con modificador (Alt+A) lo sigue ocultando.
       if (inText && (event.ctrlKey || event.metaKey || event.altKey) && target instanceof Element && target.closest('[data-studio-assistant]')) {
         const toggle = registry.get('view.toggle_assistant')
         if (toggle && matchEvent(event, commandContext(), false, [toggle], keymap, PLATFORM) === toggle.id) {

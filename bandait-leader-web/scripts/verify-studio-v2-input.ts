@@ -1034,14 +1034,14 @@ async function main() {
     assert.equal(clampDockWidth(410.6, VP), 411)
   })
 
-  await check('layout del asistente: se guarda, se restaura saneado y Ctrl+J alterna con el ultimo modo', () => {
+  await check('layout del asistente: se guarda, se restaura saneado y Alt+A alterna con el ultimo modo', () => {
     const base = defaultAssistantLayout(VP)
     assert.equal(base.mode, 'minimized')
     const floating = withAssistantMode({ ...base, float: { x: 200, y: 100, w: 500, h: 600 } }, 'floating')
     assert.equal(floating.lastOpen, 'floating')
     const restored = parseAssistantLayout(serializeAssistantLayout(floating), VP)
     assert.deepEqual(restored, floating)
-    // Ctrl+J: minimiza y vuelve al flotante, no al acoplado.
+    // Alt+A: minimiza y vuelve al flotante, no al acoplado.
     const hidden = toggleAssistantLayout(floating)
     assert.deepEqual([hidden.mode, hidden.lastOpen], ['minimized', 'floating'])
     assert.equal(toggleAssistantLayout(hidden).mode, 'floating')
@@ -1162,10 +1162,10 @@ async function main() {
     assert.equal(buildSessionSummary(s, { ...VIEW, loop: { startBeat: Number.NaN, endBeat: 8 } }).loop, null)
   })
 
-  await check('comando view.toggle_assistant: Ctrl+J global, se registra en forma canonica', () => {
+  await check('comando view.toggle_assistant: Alt+A global, se registra en forma canonica', () => {
     const spec = STUDIO_COMMAND_SPECS.find((c) => c.id === 'view.toggle_assistant')
     assert.ok(spec)
-    assert.deepEqual([spec.label, spec.category, spec.context, spec.defaultShortcuts, spec.assistantAllowed], ['Mostrar u ocultar el asistente', 'vista', 'global', ['Ctrl+J'], false])
+    assert.deepEqual([spec.label, spec.category, spec.context, spec.defaultShortcuts, spec.assistantAllowed], ['Mostrar u ocultar el asistente', 'vista', 'global', ['Alt+A'], false])
     const reg = createCommandRegistry<null>()
     reg.register({ ...spec, run: () => {} })
     assert.ok(reg.get('view.toggle_assistant'))

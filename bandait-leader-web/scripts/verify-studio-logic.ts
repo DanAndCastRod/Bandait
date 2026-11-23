@@ -17,6 +17,7 @@ import fixtureV2 from '../../bandait-protocol/fixtures/studio_session_v2.json' w
 import chatToolsFixture from '../../bandait-protocol/fixtures/studio_chat_tools_v2.json' with { type: 'json' }
 import {
   STUDIO_COMMAND_SPECS,
+  BROWSER_RESERVED_SHORTCUTS,
   KEYMAP_STORAGE_KEY,
   buildStudioCommands,
   createCommandRegistry,
@@ -3113,8 +3114,8 @@ async function verifyStudioV2() {
       ['Ctrl+K', 'view.command_palette', 'timeline'],
       ['Ctrl+S', 'file.save_cloud', 'timeline'],
       ['Ctrl+E', 'file.export', 'timeline'],
-      ['Ctrl+T', 'track.add_audio', 'timeline'],
-      ['Ctrl+Shift+T', 'track.add_instrument', 'timeline'],
+      ['Alt+N', 'track.add_audio', 'timeline'],
+      ['Alt+I', 'track.add_instrument', 'timeline'],
       ['?', 'view.shortcuts', 'timeline'],
     ]
     for (const [shortcut, id, context] of expected) {
@@ -3122,6 +3123,7 @@ async function verifyStudioV2() {
       assert.ok(p, shortcut)
       const event = keyEvent(/^[A-Z]$/.test(p.key) ? `Key${p.key}` : /^[0-9]$/.test(p.key) ? `Digit${p.key}` : '', p.key === 'Plus' ? '+' : p.key === 'Minus' ? '-' : p.key === 'Space' ? ' ' : p.key, {
         ctrlKey: p.ctrl,
+        altKey: p.alt,
         shiftKey: p.shift || p.key === '?',
       })
       assert.equal(matchEvent(event, context, false, specs, map, 'other'), id, `${shortcut} en ${context}`)
@@ -3137,7 +3139,7 @@ async function verifyStudioV2() {
       [keyEvent('KeyX', 'x', { ctrlKey: true }), 'timeline', 'edit.cut'],
       [keyEvent('KeyD', 'd', { ctrlKey: true }), 'timeline', 'edit.duplicate'],
       [keyEvent('KeyA', 'a', { ctrlKey: true }), 'timeline', 'edit.select_all'],
-      [keyEvent('KeyJ', 'J', { ctrlKey: true, shiftKey: true }), 'timeline', 'edit.join'],
+      [keyEvent('KeyJ', 'J', { shiftKey: true }), 'timeline', 'edit.join'],
       [keyEvent('Digit0', '0'), 'timeline', 'clip.toggle_mute'],
       [keyEvent('BracketLeft', '[', { altKey: true }), 'timeline', 'clip.trim_start'],
       [keyEvent('BracketRight', ']', { altKey: true }), 'timeline', 'clip.trim_end'],
@@ -3171,10 +3173,10 @@ async function verifyStudioV2() {
     // Los atajos de la linea de tiempo no se cuelan en el piano roll ni al reves.
     assert.equal(matchEvent(keyEvent('Digit0', '0'), 'piano_roll', false, specs, map, 'other'), null)
     assert.equal(matchEvent(keyEvent('ArrowRight', 'ArrowRight', { shiftKey: true }), 'timeline', false, specs, map, 'other'), null)
-    // Nunca Tab, y Ctrl+J queda para el asistente (view.toggle_assistant, si ya existe).
+    // Nunca Tab ni una tecla que el navegador se queda (Ctrl+J abria las descargas de Chrome).
     for (const c of specs) {
       assert.ok(!c.defaultShortcuts.some((s) => /(^|\+)Tab$/.test(s)), `${c.id} usa Tab`)
-      if (c.defaultShortcuts.includes('Ctrl+J')) assert.equal(c.id, 'view.toggle_assistant')
+      for (const s of c.defaultShortcuts) assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(s), `${c.id} usa ${s}, reservado por el navegador`)
     }
     // Ningun atajo nuevo es una letra sola de la fila del teclado musical (A..K, Z, X): serian notas.
     const newIds = cases.map(([, , id]) => id).filter((id) => !id.startsWith('edit.'))
@@ -3283,7 +3285,14 @@ async function verifyStudioV2() {
     const before = storage.data.get(KEYMAP_STORAGE_KEY)
     assert.throws(() => saveKeymap(storage, specs, { ...loaded, 'edit.split': ['Space'] }), /repetido/)
     assert.throws(() => saveKeymap(storage, specs, { ...loaded, 'edit.split': ['Ctrl+'] }), /no es válido/)
+    // Las teclas del navegador (Ctrl+J abre las descargas, Ctrl+T una pestana) no se guardan.
+    assert.throws(() => saveKeymap(storage, specs, { ...loaded, 'edit.split': ['ctrl+j'] }), /lo usa el navegador/)
+    assert.throws(() => saveKeymap(storage, specs, { ...loaded, 'track.add_audio': ['Ctrl+T'] }), /lo usa el navegador/)
     assert.equal(storage.data.get(KEYMAP_STORAGE_KEY), before)
+    // Un mapa guardado antes con una de ellas la pierde al leerse.
+    storage.data.set(KEYMAP_STORAGE_KEY, JSON.stringify({ 'view.toggle_assistant': ['Ctrl+J', 'Shift+A'] }))
+    assert.deepStrictEqual(loadKeymap(storage, specs)['view.toggle_assistant'], ['Shift+A'])
+    storage.data.set(KEYMAP_STORAGE_KEY, before ?? '')
     // Volver a los valores por defecto borra la clave; restaurar tambien.
     saveKeymap(storage, specs, defaultKeymap(specs))
     assert.equal(storage.data.has(KEYMAP_STORAGE_KEY), false)

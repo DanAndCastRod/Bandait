@@ -22,7 +22,7 @@
  *   - Atajos de DAW (2026-11-22, docs/PLAN_ESTUDIO_V2.md seccion 6): los comandos nuevos van al
  *     final de cada bloque. Las letras de la fila del teclado musical (A..K, Z, X) solas no se
  *     usan para comandos nuevos: con el teclado musical encendido serian notas. Por eso Shift+T,
- *     Shift+Z, Shift+M, etc. Ctrl+J queda reservado para el asistente.
+ *     Shift+Z, Shift+M, etc. Alt+A es del asistente; las teclas reservadas por el navegador (keymap.ts) no se usan.
  *
  * Modulo puro: sin DOM ni import.meta.env (se prueba en scripts/verify-studio-logic.ts).
  */
@@ -42,8 +42,10 @@ import {
 import type { AssistantToolName, CommandCategory, CommandContext, CommandRegistry, CommandsApi, StudioCommand } from './types.ts'
 
 export {
+  BROWSER_RESERVED_SHORTCUTS,
   KEYMAP_STORAGE_KEY,
   commandShortcuts,
+  isBrowserReserved,
   contextsOverlap,
   defaultKeymap,
   displayShortcut,
@@ -99,13 +101,13 @@ const SPECS = [
   spec('edit.select_all', 'Seleccionar todo', 'edicion', 'global', ['Ctrl+A']),
   spec('edit.split', 'Dividir en el cabezal', 'edicion', 'global', ['S']),
   spec('edit.quantize', 'Cuantizar la selección', 'edicion', 'global', ['Q']),
-  // Ctrl+J queda para el asistente; Ctrl+Shift+J es "unir" (Ctrl+J en Ableton y Logic).
-  spec('edit.join', 'Unir clips', 'edicion', 'timeline', ['Ctrl+Shift+J']),
+  // Shift+J y no Ctrl+Shift+J: Chrome abre la consola con Ctrl+Shift+J (BROWSER_RESERVED_SHORTCUTS).
+  spec('edit.join', 'Unir clips', 'edicion', 'timeline', ['Shift+J']),
   // Pistas
   spec('track.toggle_mute', 'Mute de la pista seleccionada', 'pistas', 'global', ['M']),
   spec('track.toggle_solo', 'Solo de la pista seleccionada', 'pistas', 'global', ['Shift+S']),
-  spec('track.add_audio', 'Pista de audio nueva', 'pistas', 'global', ['Ctrl+T'], 'add_audio_track'),
-  spec('track.add_instrument', 'Pista de instrumento nueva', 'pistas', 'global', ['Ctrl+Shift+T'], 'add_instrument_track'),
+  spec('track.add_audio', 'Pista de audio nueva', 'pistas', 'global', ['Alt+N'], 'add_audio_track'),
+  spec('track.add_instrument', 'Pista de instrumento nueva', 'pistas', 'global', ['Alt+I'], 'add_instrument_track'),
   spec('track.remove', 'Quitar una pista', 'pistas', 'global', [], 'remove_track'),
   spec('track.select_prev', 'Pista anterior', 'pistas', 'timeline', ['ArrowUp']),
   spec('track.select_next', 'Pista siguiente', 'pistas', 'timeline', ['ArrowDown']),
@@ -182,7 +184,7 @@ const SPECS = [
   spec('view.shortcuts', 'Hoja de atajos', 'vista', 'global', ['?']),
   spec('view.zoom_fit', 'Ver toda la sesión', 'vista', 'global', ['Shift+Z']),
   spec('view.center_playhead', 'Centrar la vista en el cabezal', 'vista', 'global', ['Shift+C']),
-  spec('view.toggle_assistant', 'Mostrar u ocultar el asistente', 'vista', 'global', ['Ctrl+J']),
+  spec('view.toggle_assistant', 'Mostrar u ocultar el asistente', 'vista', 'global', ['Alt+A']),
   // Archivo
   spec('file.save_cloud', 'Guardar en la nube', 'archivo', 'global', ['Ctrl+S']),
   spec('file.export', 'Exportar', 'archivo', 'global', ['Ctrl+E']),

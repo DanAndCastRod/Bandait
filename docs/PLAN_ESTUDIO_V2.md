@@ -134,7 +134,10 @@ costo estimado antes de confirmar, `job_id` elegido por el Hub, el trabajo no mo
 | Ctrl+K | Paleta de comandos |
 | Ctrl+S | Guardar en la nube |
 | Ctrl+E | Exportar |
-| Ctrl+T / Ctrl+Shift+T | Pista de audio nueva / pista de instrumento nueva |
+| Alt+N / Alt+I | Pista de audio nueva / pista de instrumento nueva |
+| Alt+A | Mostrar u ocultar el asistente (también escribiendo en él) |
+
+Los atajos funcionan con el foco dentro del Estudio. Ninguno usa teclas que el navegador se queda (`BROWSER_RESERVED_SHORTCUTS` en `keymap.ts`: Ctrl+T, Ctrl+N, Ctrl+W, Ctrl+J, Ctrl+Shift+J, F5, F12 y otras); un atajo editado con una de ellas no se guarda. Ctrl+J abría las descargas de Chrome y Ctrl+T una pestaña (2026-11-23).
 
 Atajos de DAW agregados el 2026-11-22 (pedido de Daniel Castaneda). Contexto: G = en todo el
 Estudio, LT = línea de tiempo, PR = piano roll.
@@ -146,7 +149,7 @@ Estudio, LT = línea de tiempo, PR = piano roll.
 | Shift + clic / Ctrl + clic | LT | Agregar o quitar un clip de la selección; arrastrar uno de los elegidos mueve todos |
 | Ctrl+A | LT | Elegir todos los clips que suenan (en el piano roll, todas las notas) |
 | Supr, Q, S, flechas | LT | Actúan sobre todos los clips elegidos. S sin clips elegidos divide los de la pista elegida bajo el cabezal |
-| Ctrl+Shift+J | LT | Unir clips MIDI de una pista (o trozos seguidos de un mismo audio). Ctrl+J es del asistente |
+| Shift+J | LT | Unir clips MIDI de una pista (o trozos seguidos de un mismo audio) |
 | 0 | LT | Silenciar o hacer sonar el clip de audio (`active`). Los clips MIDI no tienen silencio propio |
 | Alt+[ / Alt+] | LT | Recortar el inicio o el final del clip al cabezal |
 | (paleta) | LT | Fundido de entrada hasta el cabezal y de salida desde el cabezal (clips de audio) |

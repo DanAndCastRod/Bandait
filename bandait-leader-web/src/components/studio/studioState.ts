@@ -1338,7 +1338,7 @@ export class StudioController {
     if (this.apply(result.session, label, { selectedClipIds: result.clipIds, selectedClipId: result.clipIds[result.clipIds.length - 1] ?? null })) this.pasteCursor = cursor
   }
 
-  /** Unir (Ctrl+Shift+J): funde los clips MIDI elegidos de cada pista, o trozos seguidos de un mismo audio. */
+  /** Unir (Shift+J): funde los clips MIDI elegidos de cada pista, o trozos seguidos de un mismo audio. */
   joinSelected(): void {
     const ids = this.selectedClips()
     let result: ReturnType<typeof joinClips>
