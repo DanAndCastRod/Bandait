@@ -136,6 +136,41 @@ costo estimado antes de confirmar, `job_id` elegido por el Hub, el trabajo no mo
 | Ctrl+E | Exportar |
 | Ctrl+T / Ctrl+Shift+T | Pista de audio nueva / pista de instrumento nueva |
 
+Atajos de DAW agregados el 2026-11-22 (pedido de Daniel Castaneda). Contexto: G = en todo el
+Estudio, LT = línea de tiempo, PR = piano roll.
+
+| Atajo | Contexto | Comando |
+|---|---|---|
+| Ctrl+C / Ctrl+X / Ctrl+V | LT | Copiar, cortar y pegar clips. Pegar va a la misma pista del clip copiado (o a la pista elegida si todo salió de una sola pista y es compatible: audio en audio, MIDI en instrumento), en el cabezal si se movió desde que se copió; si no, justo detrás del original. Ctrl+V repetido encadena copias. Cortar y pegar sin mover el cabezal devuelve el clip a su lugar |
+| Ctrl+D | LT y PR | Duplicar la selección justo detrás (clips o notas) |
+| Shift + clic / Ctrl + clic | LT | Agregar o quitar un clip de la selección; arrastrar uno de los elegidos mueve todos |
+| Ctrl+A | LT | Elegir todos los clips que suenan (en el piano roll, todas las notas) |
+| Supr, Q, S, flechas | LT | Actúan sobre todos los clips elegidos. S sin clips elegidos divide los de la pista elegida bajo el cabezal |
+| Ctrl+Shift+J | LT | Unir clips MIDI de una pista (o trozos seguidos de un mismo audio). Ctrl+J es del asistente |
+| 0 | LT | Silenciar o hacer sonar el clip de audio (`active`). Los clips MIDI no tienen silencio propio |
+| Alt+[ / Alt+] | LT | Recortar el inicio o el final del clip al cabezal |
+| (paleta) | LT | Fundido de entrada hasta el cabezal y de salida desde el cabezal (clips de audio) |
+| Fin | G | Ir al final de la sesión |
+| , / . | G | Retroceder o avanzar un compás |
+| Ctrl+Izquierda / Ctrl+Derecha | G | Marca anterior o siguiente (marcas de la sesión e inicio de secciones) |
+| Ctrl+L | G | Loop con el rango de la selección (clips, o notas en el piano roll) |
+| Shift+T | G | Tap tempo (desde el tercer golpe; una pausa de 2 s cierra un paso de deshacer) |
+| Shift+K | G | Activar o quitar el conteo previo antes de grabar |
+| Shift+Z | G | Ver toda la sesión |
+| Shift+C | G | Centrar la vista en el cabezal |
+| Shift+M | G | Agregar una marca en el cabezal (M sigue siendo el mute de la pista) |
+| Shift+R | G | Armar o desarmar la pista elegida |
+| F2 | G | Renombrar la pista elegida |
+| Ctrl+Shift+D | G | Duplicar la pista elegida |
+| Alt+Arriba / Alt+Abajo | LT | Subir o bajar la pista elegida |
+| 1..9 | LT | Elegir la pista por su número (en el piano roll, 1..5 siguen siendo las herramientas) |
+| Ctrl+I | PR | Invertir la selección de notas |
+| Shift+L | PR | Legato |
+| Alt+Arriba / Alt+Abajo | PR | Subir o bajar la velocidad de las notas (de 5 en 5) |
+| Shift+Derecha / Shift+Izquierda | PR | Alargar o acortar las notas un paso de la rejilla |
+
+- Las letras solas de la fila del teclado musical (A..K, Z, X) no se usan para atajos nuevos: con
+  el teclado musical encendido son notas. Por eso los atajos nuevos con letra llevan Shift o Ctrl.
 - Editable por usuario (guardado por navegador), con detección de choques y botón de restaurar.
 - Nunca se dispara mientras se escribe en un campo.
 - Una hoja de atajos visible (`?`).

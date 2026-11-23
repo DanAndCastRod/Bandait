@@ -287,6 +287,63 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(tracks(page)).toHaveCount(1);
   });
 
+  test('atajos de DAW: copiar y pegar en la misma pista, Ctrl+D, selección múltiple y borrar', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+    await enterDemo(page);
+    await openStudioHome(page);
+    await createFreeSession(page, 'Atajos DAW e2e');
+    await page.getByTestId('studio-add-instrument').selectOption('synth');
+    await expect(tracks(page)).toHaveCount(1);
+    const track = tracks(page).first();
+    const selection = page.getByTestId('studio-selection');
+    const undo = page.getByTestId('studio-undo');
+
+    // Un clip MIDI de 4 compases en el compás 1 (120 BPM: 8 s), elegido.
+    await page.getByTestId('studio-add-midi-clip').click();
+    await expect(track).toHaveAttribute('data-clips', '1');
+    await expect(selection).toContainText('· 1.1 ·');
+
+    // Ctrl+C y Ctrl+V sin mover el cabezal: la copia va en la MISMA pista, justo detrás (compás 5).
+    await blur(page);
+    await page.keyboard.press('Control+c');
+    await page.keyboard.press('Control+v');
+    await expect(track).toHaveAttribute('data-clips', '2');
+    await expect(undo).toHaveAttribute('title', /Pegar clip MIDI/);
+    await expect(selection).toContainText('· 5.1 ·');
+    // Otro Ctrl+V encadena: compás 9.
+    await page.keyboard.press('Control+v');
+    await expect(track).toHaveAttribute('data-clips', '3');
+    await expect(selection).toContainText('· 9.1 ·');
+
+    // Ctrl+D duplica la copia elegida detrás de ella: compás 13.
+    await page.keyboard.press('Control+d');
+    await expect(track).toHaveAttribute('data-clips', '4');
+    await expect(undo).toHaveAttribute('title', /Duplicar clip MIDI/);
+    await expect(selection).toContainText('· 13.1 ·');
+
+    // Selección múltiple: clic en el primer clip y Shift + clic en el segundo (36 px por segundo).
+    const canvas = page.getByTestId('studio-canvas');
+    await canvas.click({ position: { x: 4 * 36, y: 100 } });
+    await expect(selection).toHaveAttribute('data-count', '1');
+    await canvas.click({ position: { x: 12 * 36, y: 100 }, modifiers: ['Shift'] });
+    await expect(selection).toHaveAttribute('data-count', '2');
+    await expect(selection).toContainText('2 CLIPS ELEGIDOS');
+
+    // Supr borra los dos en un solo paso de deshacer.
+    await page.keyboard.press('Delete');
+    await expect(track).toHaveAttribute('data-clips', '2');
+    await expect(undo).toHaveAttribute('title', /Borrar 2 clips/);
+    await expect(selection).toHaveAttribute('data-count', '0');
+
+    // Ctrl+A elige todos los que quedan; Ctrl+Z trae de vuelta los borrados.
+    await page.keyboard.press('Control+a');
+    await expect(selection).toHaveAttribute('data-count', '2');
+    await page.keyboard.press('Control+z');
+    await expect(track).toHaveAttribute('data-clips', '4');
+    expect(pageErrors).toEqual([]);
+  });
+
   test('COMPONER contra el Worker simulado: confirma el costo y el clip entra solo al aceptar', async ({ page }) => {
     const worker = new FakeStudioV2Worker();
     await enterCloudStudio(page, worker, 'Componer e2e');

@@ -50,6 +50,7 @@ import {
   STUDIO_MAX_NOTES_PER_CLIP,
   STUDIO_MAX_NOTES_PER_SESSION,
   STUDIO_MAX_SESSION_SECONDS,
+  STUDIO_MAX_TRACK_NAME,
   STUDIO_MAX_TRACKS,
   STUDIO_MIDI_MIN_CLIP_BEATS,
   STUDIO_MIDI_MIN_NOTE_BEATS,
@@ -932,3 +933,343 @@ void ({
   setFrozenAsset,
   setMarkers,
 } satisfies SessionOpsV2Api)
+
+// ###########################################################################
+// Edicion de DAW sobre varios clips: portapapeles, mover, unir, recortar, silenciar y pistas
+// ###########################################################################
+//
+// Decisiones (docs/PLAN_ESTUDIO_V2.md seccion 6; no cambian el formato de la sesion):
+//   - Las operaciones reciben ids de clips de audio y MIDI mezclados (los ids son unicos entre los
+//     dos). Un id que no existe se ignora: la seleccion de la interfaz puede quedar vieja un
+//     instante y eso no es un error del usuario.
+//   - El portapapeles guarda los clips con su posicion relativa al primero, EN SEGUNDOS (los
+//     clips de audio viven en segundos y los MIDI en beats; el segundo es la base comun).
+//   - Pegar pone cada clip en su pista de origen; si todo lo copiado salio de UNA pista y la pista
+//     destino es compatible (audio en audio, MIDI en instrumento), en la pista destino. Un clip de
+//     audio pegado es un clip nuevo: queda activo y sin grupo de tomas.
+//   - Unir: los clips MIDI de una misma pista se funden en uno que va del primero al ultimo (los
+//     huecos quedan en silencio y la repeticion se despliega). Los clips de audio solo se unen si
+//     son trozos contiguos del mismo audio (lo que deja dividir): no se renderiza audio nuevo.
+//   - Silenciar un clip de audio es `active: false` (STUDIO_V1.md: un clip inactivo no suena ni
+//     se exporta). Los clips MIDI no tienen ese campo en el contrato: no se silencian.
+
+/** Un clip copiado, con su pista de origen y su desplazamiento desde el inicio del bloque. */
+export type ClipboardItem =
+  | { kind: 'audio'; trackId: string; offsetS: number; clip: StudioClip }
+  | { kind: 'midi'; trackId: string; offsetS: number; clip: StudioMidiClip }
+
+/** Bloque de clips copiados: inicio y largo del bloque en la sesion de origen, en segundos. */
+export interface ClipClipboard {
+  items: readonly ClipboardItem[]
+  startS: number
+  spanS: number
+}
+
+/** Rango en segundos [inicio, fin) de un clip de audio o MIDI de la sesion. */
+function clipSpanS(session: StudioSession, clipId: string): { startS: number; endS: number } | null {
+  const audio = findClip(session, clipId)
+  if (audio) return { startS: audio.clip.startS, endS: clipEnd(audio.clip) }
+  const midi = findMidiClip(session, clipId)
+  if (midi) {
+    const startS = beatsToSeconds(midi.clip.startBeat, session.bpm)
+    return { startS, endS: startS + beatsToSeconds(midi.clip.lengthBeats, session.bpm) }
+  }
+  return null
+}
+
+/** Rango en segundos que cubren los clips (los ids que no existen se ignoran), o null. */
+export function clipsRangeS(session: StudioSession, clipIds: readonly string[]): { startS: number; endS: number } | null {
+  let startS = Infinity
+  let endS = -Infinity
+  for (const id of clipIds) {
+    const span = clipSpanS(session, id)
+    if (!span) continue
+    startS = Math.min(startS, span.startS)
+    endS = Math.max(endS, span.endS)
+  }
+  return Number.isFinite(startS) && Number.isFinite(endS) ? { startS, endS } : null
+}
+
+/** Copia los clips al portapapeles. null si ninguno existe. */
+export function copyClips(session: StudioSession, clipIds: readonly string[]): ClipClipboard | null {
+  const range = clipsRangeS(session, clipIds)
+  if (!range) return null
+  const items: ClipboardItem[] = []
+  const seen = new Set<string>()
+  for (const id of clipIds) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    const audio = findClip(session, id)
+    if (audio) {
+      items.push({ kind: 'audio', trackId: audio.track.id, offsetS: audio.clip.startS - range.startS, clip: audio.clip })
+      continue
+    }
+    const midi = findMidiClip(session, id)
+    if (midi) items.push({ kind: 'midi', trackId: midi.track.id, offsetS: beatsToSeconds(midi.clip.startBeat, session.bpm) - range.startS, clip: midi.clip })
+  }
+  // Orden estable por posicion: el pegado conserva el orden de los clips en cada pista.
+  items.sort((a, b) => a.offsetS - b.offsetS)
+  return { items, startS: range.startS, spanS: range.endS - range.startS }
+}
+
+export interface PasteClipsArgs {
+  /** Donde cae el inicio del bloque, en segundos. */
+  atS: number
+  /** Pista elegida: se usa si todo lo copiado salio de una sola pista y es compatible. */
+  trackId?: string | null
+  /** Id nuevo para cada clip pegado. */
+  newClipId: (kind: 'audio' | 'midi') => string
+}
+
+function trackAccepts(track: StudioTrack, kind: 'audio' | 'midi'): boolean {
+  return kind === 'audio' ? track.kind === 'audio' : track.kind === 'instrument'
+}
+
+/** Pega el bloque copiado (ver las decisiones arriba). Devuelve la sesion y los ids nuevos. */
+export function pasteClips(session: StudioSession, clipboard: ClipClipboard, args: PasteClipsArgs): { session: StudioSession; clipIds: string[] } {
+  const atS = clamp(args.atS, 0, STUDIO_MAX_SESSION_SECONDS, 'at_s')
+  const sources = new Set(clipboard.items.map((item) => item.trackId))
+  const picked = args.trackId ? session.tracks.find((t) => t.id === args.trackId) : undefined
+  const pickedFits = picked !== undefined && sources.size === 1 && clipboard.items.every((item) => trackAccepts(picked, item.kind))
+  let next = session
+  const clipIds: string[] = []
+  for (const item of clipboard.items) {
+    const source = next.tracks.find((t) => t.id === item.trackId)
+    const track = pickedFits ? picked : source && trackAccepts(source, item.kind) ? source : picked && trackAccepts(picked, item.kind) ? picked : undefined
+    if (!track) fail('bad_id', 'track_id', `La pista del clip copiado ya no existe: elige una pista ${item.kind === 'audio' ? 'de audio' : 'de instrumento'} para pegar`)
+    const id = args.newClipId(item.kind)
+    const startS = atS + item.offsetS
+    if (item.kind === 'audio') {
+      const lengthS = item.clip.lengthS
+      const clip: StudioClip = { ...item.clip, id, startS: Math.max(0, Math.min(startS, STUDIO_MAX_SESSION_SECONDS - lengthS)), takeGroup: null, active: true }
+      next = addClip(next, { trackId: track.id, clip })
+    } else {
+      next = addMidiClip(next, { trackId: track.id, clip: { ...item.clip, id, startBeat: secondsToBeats(startS, next.bpm) } })
+    }
+    clipIds.push(id)
+  }
+  return { session: next, clipIds }
+}
+
+/** Donde pegar y con que cursor seguir: el cabezal si se movio; si no, detras del ultimo pegado. */
+export interface PasteCursor {
+  /** Cabezal en el momento de copiar o del ultimo pegado. */
+  playheadS: number
+  /** Donde cae el siguiente pegado si el cabezal no se mueve. */
+  nextS: number
+}
+
+/** Cursor de pegado recien copiado: el primer pegado va justo despues del bloque original. */
+export function pasteCursorAfterCopy(clipboard: ClipClipboard, playheadS: number): PasteCursor {
+  return { playheadS, nextS: clipboard.startS + clipboard.spanS }
+}
+
+/**
+ * Posicion del pegado. Si el cabezal se movio desde que se copio (o desde el ultimo pegado) se
+ * pega en el cabezal; si no, detras del pegado anterior: Ctrl+V repetido encadena copias.
+ */
+export function pastePosition(clipboard: ClipClipboard, cursor: PasteCursor, playheadS: number): { atS: number; cursor: PasteCursor } {
+  const moved = Math.abs(playheadS - cursor.playheadS) > STUDIO_TIME_EPSILON_S
+  const atS = Math.max(0, moved ? playheadS : cursor.nextS)
+  return { atS, cursor: { playheadS, nextS: atS + clipboard.spanS } }
+}
+
+/** Borra los clips (audio y MIDI). */
+export function deleteClips(session: StudioSession, clipIds: readonly string[]): StudioSession {
+  const ids = new Set(clipIds)
+  let changed = false
+  const tracks = session.tracks.map((track) => {
+    const clips = track.clips.filter((c) => !ids.has(c.id))
+    const midiClips = track.midiClips.filter((c) => !ids.has(c.id))
+    if (clips.length === track.clips.length && midiClips.length === track.midiClips.length) return track
+    changed = true
+    return { ...track, clips, midiClips }
+  })
+  return changed ? { ...session, tracks } : session
+}
+
+/**
+ * Mueve los clips `deltaS` segundos en su misma pista. El desplazamiento se acota para que el
+ * bloque no salga de la sesion: los clips conservan su distancia entre si.
+ */
+export function moveClipsBy(session: StudioSession, clipIds: readonly string[], deltaS: number): StudioSession {
+  let delta = clamp(deltaS, -STUDIO_MAX_SESSION_SECONDS, STUDIO_MAX_SESSION_SECONDS, 'delta_s')
+  const range = clipsRangeS(session, clipIds)
+  if (!range) return session
+  delta = Math.max(delta, -range.startS)
+  delta = Math.min(delta, Math.max(0, STUDIO_MAX_SESSION_SECONDS - range.endS))
+  if (Math.abs(delta) < 1e-9) return session
+  let next = session
+  for (const id of new Set(clipIds)) {
+    const audio = findClip(next, id)
+    if (audio) {
+      next = moveClip(next, { clipId: id, startS: audio.clip.startS + delta })
+      continue
+    }
+    const midi = findMidiClip(next, id)
+    if (midi) next = moveMidiClip(next, { clipId: id, startBeat: midi.clip.startBeat + secondsToBeats(delta, next.bpm) })
+  }
+  return next
+}
+
+/** true si `b` sigue a `a` sin hueco dentro del mismo audio (dos mitades de una division). */
+function audioContinues(a: StudioClip, b: StudioClip): boolean {
+  return (
+    a.assetId === b.assetId &&
+    a.gainDb === b.gainDb &&
+    a.active === b.active &&
+    a.takeGroup === b.takeGroup &&
+    Math.abs(b.startS - clipEnd(a)) <= STUDIO_TIME_EPSILON_S &&
+    Math.abs(b.offsetS - (a.offsetS + a.lengthS)) <= STUDIO_TIME_EPSILON_S
+  )
+}
+
+/**
+ * Une los clips elegidos de cada pista (ver las decisiones arriba). Devuelve la sesion (la misma
+ * si no hubo nada que unir) y los ids de los clips que quedaron de la union.
+ */
+export function joinClips(session: StudioSession, clipIds: readonly string[]): { session: StudioSession; clipIds: string[] } {
+  const ids = new Set(clipIds)
+  let next = session
+  const joined: string[] = []
+  for (const track of session.tracks) {
+    if (track.kind === 'instrument') {
+      const picked = track.midiClips.filter((c) => ids.has(c.id)).sort((a, b) => a.startBeat - b.startBeat || (a.id < b.id ? -1 : 1))
+      if (picked.length < 2) continue
+      const first = picked[0]
+      const endBeat = Math.max(...picked.map((c) => c.startBeat + c.lengthBeats))
+      const lengthBeats = roundBeat(endBeat - first.startBeat)
+      const notes = normalizeNotes(
+        picked.flatMap((c) => expandMidiClipNotes(c).map((n) => ({ ...n, start: roundBeat(n.start + c.startBeat - first.startBeat) }))),
+        lengthBeats,
+      )
+      const before = picked.reduce((sum, c) => sum + c.notes.length, 0)
+      ensureNoteRoom(next, notes.length, notes.length - before)
+      const merged: StudioMidiClip = { id: first.id, startBeat: first.startBeat, lengthBeats, loop: false, loopBeats: lengthBeats, notes }
+      const drop = new Set(picked.slice(1).map((c) => c.id))
+      const index = next.tracks.findIndex((t) => t.id === track.id)
+      const current = next.tracks[index]
+      next = replaceTrack(next, index, { ...current, midiClips: current.midiClips.filter((c) => !drop.has(c.id)).map((c) => (c.id === first.id ? merged : c)) })
+      joined.push(first.id)
+      continue
+    }
+    const picked = track.clips.filter((c) => ids.has(c.id)).sort((a, b) => a.startS - b.startS)
+    if (picked.length < 2) continue
+    const index = next.tracks.findIndex((t) => t.id === track.id)
+    let clips = next.tracks[index].clips
+    let run: StudioClip = picked[0]
+    const flush = (merged: StudioClip, original: StudioClip) => {
+      if (merged === original) return
+      clips = clips.map((c) => (c.id === merged.id ? merged : c))
+      joined.push(merged.id)
+    }
+    let runStart = picked[0]
+    for (const clip of picked.slice(1)) {
+      if (audioContinues(run, clip)) {
+        run = { ...run, lengthS: run.lengthS + clip.lengthS, fadeOutS: clip.fadeOutS }
+        clips = clips.filter((c) => c.id !== clip.id)
+      } else {
+        flush(run, runStart)
+        run = clip
+        runStart = clip
+      }
+    }
+    flush(run, runStart)
+    if (clips !== next.tracks[index].clips) next = replaceTrack(next, index, { ...next.tracks[index], clips })
+  }
+  return { session: next === session ? session : checked(next), clipIds: joined }
+}
+
+/**
+ * Recorta el inicio (`edge: 'start'`) o el final de cada clip al tiempo `atS`. Solo los clips que
+ * el tiempo cruza (estrictamente dentro): el cabezal fuera del clip no lo toca.
+ */
+export function trimClipsAt(session: StudioSession, clipIds: readonly string[], edge: 'start' | 'end', atS: number): StudioSession {
+  const at = clamp(atS, 0, STUDIO_MAX_SESSION_SECONDS, 'at_s')
+  let next = session
+  for (const id of new Set(clipIds)) {
+    const audio = findClip(next, id)
+    if (audio) {
+      if (at > audio.clip.startS + STUDIO_MIN_CLIP_SECONDS && at < clipEnd(audio.clip) - STUDIO_MIN_CLIP_SECONDS) next = trimClip(next, { clipId: id, edge, toS: at })
+      continue
+    }
+    const midi = findMidiClip(next, id)
+    if (!midi) continue
+    const beat = secondsToBeats(at, next.bpm)
+    const { startBeat, lengthBeats } = midi.clip
+    if (beat > startBeat + STUDIO_MIDI_MIN_CLIP_BEATS && beat < startBeat + lengthBeats - STUDIO_MIDI_MIN_CLIP_BEATS) next = resizeMidiClip(next, { clipId: id, edge, toBeat: beat })
+  }
+  return next
+}
+
+/** Fundido de entrada (del inicio a `atS`) o de salida (de `atS` al final) en los clips de audio que `atS` cruza. */
+export function fadeClipsAt(session: StudioSession, clipIds: readonly string[], edge: 'in' | 'out', atS: number): StudioSession {
+  const at = clamp(atS, 0, STUDIO_MAX_SESSION_SECONDS, 'at_s')
+  let next = session
+  for (const id of new Set(clipIds)) {
+    const audio = findClip(next, id)
+    if (!audio || !(at > audio.clip.startS && at < clipEnd(audio.clip))) continue
+    next = edge === 'in' ? setClipFades(next, { clipId: id, fadeInS: at - audio.clip.startS }) : setClipFades(next, { clipId: id, fadeOutS: clipEnd(audio.clip) - at })
+  }
+  return next
+}
+
+/**
+ * Silencia o vuelve a hacer sonar los clips de audio: si alguno suena, todos se silencian; si
+ * ninguno suena, todos vuelven a sonar (con setActiveTake: en un grupo de tomas, la que vuelve
+ * apaga a las que se le solapan). Los clips MIDI se ignoran.
+ */
+export function toggleClipsActive(session: StudioSession, clipIds: readonly string[]): StudioSession {
+  const audio = [...new Set(clipIds)].map((id) => findClip(session, id)).filter((loc): loc is ClipLocation => loc !== null)
+  if (audio.length === 0) return session
+  const silence = audio.some((loc) => loc.clip.active)
+  let next = session
+  for (const { clip } of audio) {
+    if (silence) {
+      const loc = findClip(next, clip.id)
+      if (loc && loc.clip.active) next = replaceClip(next, loc, { ...loc.clip, active: false })
+    } else {
+      next = setActiveTake(next, { clipId: clip.id })
+    }
+  }
+  return next
+}
+
+export interface DuplicateTrackArgs {
+  trackId: string
+  newTrackId: string
+  /** Id nuevo para cada clip de la copia. */
+  newClipId: (kind: 'audio' | 'midi') => string
+}
+
+/** Copia la pista entera (instrumento, mezcla, efectos y clips con ids nuevos) justo debajo de ella. */
+export function duplicateTrack(session: StudioSession, args: DuplicateTrackArgs): StudioSession {
+  const index = trackIndexOf(session, args.trackId)
+  const track = session.tracks[index]
+  if (session.tracks.length >= STUDIO_MAX_TRACKS) fail('too_many', 'tracks', `Una sesión admite hasta ${STUDIO_MAX_TRACKS} pistas`)
+  if (session.tracks.some((t) => t.id === args.newTrackId)) fail('duplicate_id', 'id', `El id de pista "${args.newTrackId}" está repetido`)
+  ensureNoteRoom(session, 0, track.midiClips.reduce((n, c) => n + c.notes.length, 0))
+  const suffix = ' copia'
+  const copy: StudioTrack = {
+    ...track,
+    id: args.newTrackId,
+    name: `${track.name.slice(0, STUDIO_MAX_TRACK_NAME - suffix.length)}${suffix}`,
+    solo: false,
+    clips: track.clips.map((c) => ({ ...c, id: args.newClipId('audio') })),
+    midiClips: track.midiClips.map((c) => ({ ...c, id: args.newClipId('midi') })),
+  }
+  const tracks = session.tracks.slice()
+  tracks.splice(index + 1, 0, copy)
+  return checked({ ...session, tracks })
+}
+
+/** Mueve una pista a otra posicion (acotada a la lista). */
+export function moveTrack(session: StudioSession, args: { trackId: string; toIndex: number }): StudioSession {
+  const index = trackIndexOf(session, args.trackId)
+  const to = Math.round(clamp(args.toIndex, 0, session.tracks.length - 1, 'to_index'))
+  if (to === index) return session
+  const tracks = session.tracks.slice()
+  const [track] = tracks.splice(index, 1)
+  tracks.splice(to, 0, track)
+  return { ...session, tracks }
+}

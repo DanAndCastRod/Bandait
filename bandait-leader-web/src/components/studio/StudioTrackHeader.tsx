@@ -112,6 +112,23 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
     })
   }, [controller, track.id])
 
+  // F2 (registro de comandos): foco en el nombre, con el texto elegido para escribir encima. Se
+  // espera un fotograma: si el piano roll estaba abierto, la cabecera todavia esta oculta.
+  const nameRef = useRef<HTMLInputElement>(null)
+  useEffect(
+    () =>
+      controller.onViewCommand((command) => {
+        if (command.type !== 'rename_track' || command.trackId !== track.id) return
+        requestAnimationFrame(() => {
+          const input = nameRef.current
+          if (!input) return
+          input.focus()
+          input.select()
+        })
+      }),
+    [controller, track.id],
+  )
+
   const commitName = (raw: string) => {
     const name = raw.trim().slice(0, STUDIO_MAX_TRACK_NAME)
     if (name && name !== track.name) controller.updateTrack(track.id, { name }, 'Renombrar pista')
@@ -126,6 +143,7 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
       data-armed={armed !== null || midiArmed}
       data-selected={selected}
       data-kind={track.kind}
+      data-clips={clipCount}
       data-testid={`studio-track-${track.id}`}
       role="group"
       aria-label={`Pista ${index + 1}: ${track.name}${instrument ? ` (${STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type]})` : ''}`}
@@ -136,6 +154,7 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
         <div className="stu-head-row">
           <input
             key={`name-${track.name}`}
+            ref={nameRef}
             className="stu-field stu-head-name"
             data-size="mini"
             data-plain="true"

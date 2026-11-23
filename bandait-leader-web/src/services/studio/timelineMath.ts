@@ -155,3 +155,46 @@ export function maxTakeSeconds(input: MaxTakeInput): number {
   const bytesPerSecond = input.sampleRate * Math.max(1, input.channels) * (input.bitDepth / 8)
   return bytesPerSecond > 0 && input.maxBytes > 44 ? (input.maxBytes - 44) / bytesPerSecond : 0
 }
+
+// ---------------------------------------------------------------------------
+// Navegacion y tap tempo (atajos de DAW)
+// ---------------------------------------------------------------------------
+
+/** Una pausa mas larga que esto entre dos golpes empieza un tap tempo nuevo. */
+export const TAP_TEMPO_RESET_MS = 2000
+/** Golpes que se promedian (los ultimos). */
+export const TAP_TEMPO_MAX_TAPS = 8
+/** Golpes minimos para proponer un tempo. */
+export const TAP_TEMPO_MIN_TAPS = 3
+
+/**
+ * Golpes vigentes tras un golpe nuevo en `nowMs` (una pausa larga reinicia la cuenta) y el tempo
+ * que marcan, acotado a `minBpm`..`maxBpm` y redondeado a una decima. null mientras no haya
+ * golpes suficientes.
+ */
+export function tapTempo(previous: readonly number[], nowMs: number, minBpm: number, maxBpm: number): { taps: number[]; bpm: number | null } {
+  const last = previous[previous.length - 1]
+  const kept = last !== undefined && nowMs - last > 0 && nowMs - last <= TAP_TEMPO_RESET_MS ? previous.slice(-(TAP_TEMPO_MAX_TAPS - 1)) : []
+  const taps = [...kept, nowMs]
+  if (taps.length < TAP_TEMPO_MIN_TAPS) return { taps, bpm: null }
+  const avg = (taps[taps.length - 1] - taps[0]) / (taps.length - 1)
+  if (!(avg > 0)) return { taps, bpm: null }
+  const bpm = Math.round((60000 / avg) * 10) / 10
+  return { taps, bpm: Math.min(maxBpm, Math.max(minBpm, bpm)) }
+}
+
+/**
+ * Beat de la marca anterior (`direction` -1) o siguiente (+1) respecto de `beat`, o null si no
+ * hay. Una marca a menos de una centesima de beat cuenta como "aqui": se salta, para que pulsar
+ * dos veces avance de marca en marca.
+ */
+export function adjacentMarkerBeat(markers: readonly { beat: number }[], beat: number, direction: -1 | 1): number | null {
+  const EPS = 0.01
+  let best: number | null = null
+  for (const m of markers) {
+    if (direction > 0 ? m.beat > beat + EPS : m.beat < beat - EPS) {
+      if (best === null || (direction > 0 ? m.beat < best : m.beat > best)) best = m.beat
+    }
+  }
+  return best
+}
