@@ -2236,6 +2236,46 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Respuesta del asistente con formato (StudioChatMarkdown) */
+.stu-md {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.stu-chat-msg .stu-md p {
+  white-space: normal;
+}
+.stu-md strong,
+.stu-md .stu-md-heading {
+  color: var(--stu-text);
+  font-weight: 600;
+}
+.stu-md ul,
+.stu-md ol {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.stu-md code,
+.stu-md pre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--stu-raised);
+  border: 1px solid var(--stu-line-soft);
+  border-radius: 3px;
+}
+.stu-md code {
+  padding: 0 4px;
+}
+.stu-md pre {
+  margin: 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  white-space: pre;
+}
 .stu-chat-calls {
   display: flex;
   flex-direction: column;

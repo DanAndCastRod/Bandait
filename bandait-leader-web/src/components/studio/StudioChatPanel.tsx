@@ -26,6 +26,7 @@ import {
 } from '../../services/studio/jobs'
 import { secondsToBeats } from '../../services/studio/session'
 import type { ChatJobRequest, CommandContext, StudioChatMessage, StudioChatToolCall, StudioJobEstimateV2, StudioJobStateV2 } from '../../services/studio/types'
+import { StudioChatMarkdown } from './StudioChatMarkdown'
 import type { StudioRegistry } from './studioCommandHandlers'
 import { useStudio, type StudioController } from './studioState'
 
@@ -362,7 +363,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
                   <span className="stu-label">
                     <Sparkles size={10} aria-hidden="true" /> ASISTENTE
                   </span>
-                  {m.text && <p>{m.text}</p>}
+                  {m.text && <StudioChatMarkdown text={m.text} />}
                   {m.toolCalls.length > 0 && <ul className="stu-chat-calls">{m.toolCalls.map(renderCall)}</ul>}
                 </li>
               )
@@ -482,7 +483,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
         <form className="stu-chat-form" onSubmit={submit}>
           <label className="stu-form-row">
             <span className="stu-param-head">
-              <span className="stu-label">Mensaje</span>
+              <span className="stu-label">Mensaje · Enter envía, Shift+Enter salta de línea</span>
               <span className="stu-label">
                 {draft.length}/{CHAT_MAX_USER_TEXT}
               </span>
@@ -496,8 +497,9 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
               placeholder={waitingDecision ? 'Aplica o descarta los cambios propuestos antes de seguir.' : 'Qué quieres cambiar en la sesión'}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
-                // Ctrl+Enter envia; Enter solo hace salto de linea.
-                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                // Enter (o Ctrl+Enter) envia; Shift+Enter hace salto de linea. Mientras un metodo de
+                // entrada compone (acentos, IME) Enter confirma la letra y no envia.
+                if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
                   event.currentTarget.form?.requestSubmit()
                 }

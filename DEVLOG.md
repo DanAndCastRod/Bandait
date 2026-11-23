@@ -1541,3 +1541,12 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. El análisis de canciones (`.../songs/{song}/analysis`) no anota eventos: no es un trabajo del Estudio.
   3. Un sondeo de Music.AI que falla repetidamente anota un TRANSIENT por sondeo; la retención los limpia a los 30 días.
   4. MCP de URiT IA (sección 3 del plan): lo implementa la sesión de URiT, si Daniel Castaneda lo aprueba.
+
+### [2026-11-22] - Estudio: el chat muestra el Markdown del asistente y envía con Enter
+* **Sprint / Módulo:** `bandait-leader-web` (Estudio, chat). Reporte de Daniel Castaneda: las respuestas mostraban `**palabra**` literal y Enter no enviaba el mensaje. Agente: Claude Code (Opus 5.5).
+* **Estado encontrado:** `StudioChatPanel.tsx` pintaba el texto del modelo en un `<p>` plano (Gemini responde con Markdown); el `onKeyDown` del campo enviaba solo con Ctrl+Enter, por decisión del agente que lo escribió.
+* **Acción técnica realizada:**
+  - `src/services/studio/chatMarkdown.ts`: intérprete puro de un Markdown mínimo (párrafos, títulos, listas, bloques de código, negrita, cursiva, código en línea) que devuelve un árbol de datos. `StudioChatMarkdown.tsx` lo pinta con elementos de React: el texto del modelo nunca entra como HTML, así que no puede inyectar etiquetas ni enlaces. Lo que no se reconoce queda como texto.
+  - Enter envía; Shift+Enter hace salto de línea; Ctrl+Enter sigue enviando. Mientras un método de entrada compone (`isComposing`), Enter no envía.
+* **Verificación:** `npm run lint`, `npm run verify:logic` (3 pruebas nuevas del intérprete en `verify-studio-v2-input.ts`, 44 de 44) y `npm run build` limpios. Playwright `studio-v2 ... chat`: la respuesta simulada con `**el coro**` se ve en `<strong>` y sin asteriscos, y el mensaje sale con Enter. No verificado con una respuesta real de Gemini en el Hub publicado.
+* **Pendientes:** propuesta de asistente flotante o acoplable y de más contexto musical para el chat, en conversación con Daniel Castaneda.
