@@ -28,6 +28,8 @@ export class ProviderError extends Error {
   detail: string;
   /** Lo que se sabe de la respuesta del proveedor, para el registro de eventos. */
   meta: ProviderMeta;
+  /** Detalle publico y estable para el cliente (`listen_disabled`); null si no hay. */
+  publicDetail: string | null = null;
   constructor(status: number, code: string, detail = '', meta: ProviderMeta = {}) {
     super(code);
     this.status = status;
@@ -113,7 +115,12 @@ export interface AssistProvider {
 export type TextPart =
   | { text: string }
   | { tool_call: { name: string; arguments: Record<string, unknown>; signature?: string } }
-  | { tool_result: { name: string; response: Record<string, unknown> } };
+  | { tool_result: { name: string; response: Record<string, unknown> } }
+  /**
+   * Audio en linea (fragmento a escuchar, STUDIO_V2.md 4.3.5). URiT IA hoy solo acepta `inline`
+   * de imagen en /v1/vision: esta parte solo sale con STUDIO_CHAT_LISTEN = "1".
+   */
+  | { inline: { mime_type: string; data: string } };
 
 export interface TextMessage { role: 'user' | 'model' | 'tool'; parts: TextPart[] }
 

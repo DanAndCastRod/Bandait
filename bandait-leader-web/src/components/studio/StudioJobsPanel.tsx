@@ -4,12 +4,13 @@ import { slugify } from '../../services/download'
 import { StemCloudError } from '../../services/stemCloud'
 import { encodeWavPcm } from '../../services/wav'
 import { AUDIO_TO_MIDI_MAX_SECONDS, availability as audioToMidiAvailability, transcribe } from '../../services/studio/audioToMidi'
-import { bounceTrackIds, renderMix, soloTrackSession } from '../../services/studio/bounce'
+import { renderMix } from '../../services/studio/bounce'
 import { trackHasSound } from '../../services/studio/graph'
 import { normalizeNotes } from '../../services/studio/midiOps'
 import {
   analysisPlacementForClip,
   analysisSessionPatch,
+  analysisToChords,
   analysisToMarkers,
   rebeatMarkers,
   analyzeRequestForAsset,
@@ -20,7 +21,6 @@ import {
   composeResultToClip,
   type AnalysisPlacement,
   barsToSeconds,
-  buildMixMetrics,
   estimateV2,
   estimateText,
   formatUsd,
@@ -32,7 +32,6 @@ import {
   JOB_TARGET_LUFS_MIN,
   jobErrorMessage,
   jobStatusTextV2,
-  measureTrack,
   clearPendingJob,
   readPendingJobV2,
   resumeJobV2,
@@ -52,7 +51,6 @@ import {
   newStudioId,
   roundBeat,
   secondsToBeats,
-  sessionEndSeconds,
   STUDIO_MAX_MARKERS,
   STUDIO_MAX_NOTES_PER_CLIP,
   STUDIO_MAX_PROMPT,
@@ -60,11 +58,10 @@ import {
   STUDIO_MAX_TRACK_NAME,
   STUDIO_MAX_TRACKS,
   STUDIO_MIDI_MIN_CLIP_BEATS,
-  STUDIO_REVERB_SEND_DB_MIN,
   type StudioMidiNote,
   type StudioSession,
 } from '../../services/studio/session'
-import { addInstrumentTrack, addMidiClip, applyMixSuggestion, setMarkers, trimClip, updateSessionMeta, updateTrack } from '../../services/studio/sessionOps'
+import { addInstrumentTrack, addMidiClip, applyMixSuggestion, setChords, setMarkers, trimClip, updateSessionMeta, updateTrack } from '../../services/studio/sessionOps'
 import * as studioCloud from '../../services/studio/studioCloud'
 import type {
   CommandContext,
@@ -75,7 +72,6 @@ import type {
   StudioJobKindV2,
   StudioJobRequestV2,
   StudioJobStateV2,
-  TrackMetrics,
 } from '../../services/studio/types'
 import { StudioChatPanel } from './StudioChatPanel'
 import type { StudioRegistry } from './studioCommandHandlers'
@@ -1213,27 +1209,10 @@ const AssistSection: React.FC<{ controller: StudioController; session: StudioSes
 
   const start = () => {
     void quote(async ({ signal, progress }) => {
-      const current = controller.snapshot().session
-      const buffers = controller.engine.getBuffers()
-      const ids = bounceTrackIds(current)
-      const steps = ids.length + 1
-      progress('MIDIENDO LA MEZCLA...', 0)
-      const mix = await renderMix(current, buffers, { sampleRate: current.sampleRate, signal })
-      // La mezcla se mide y se suelta antes de seguir: nunca hay mas de un render en memoria.
-      const metrics = buildMixMetrics({ targetLufs: clampTarget(target), master: { channels: channelsOf(mix), sampleRate: mix.sampleRate }, tracks: [] })
-      const range = { startS: 0, endS: sessionEndSeconds(current) }
-      const tracks: TrackMetrics[] = []
-      for (let i = 0; i < ids.length; i++) {
-        const track = findTrack(current, ids[i])
-        const solo = soloTrackSession(current, ids[i])
-        if (!track || !solo) continue
-        progress(`MIDIENDO PISTA ${i + 1}/${ids.length}...`, (i + 1) / steps)
-        // La pista sola, despues de su fader y su paneo: sin reverb ni volumen del master.
-        const alone: StudioSession = { ...solo, tracks: [{ ...solo.tracks[0], reverbSendDb: STUDIO_REVERB_SEND_DB_MIN }], master: { ...solo.master, volumeDb: 0 } }
-        const rendered = await renderMix(alone, buffers, { sampleRate: current.sampleRate, range, signal })
-        tracks.push(measureTrack(track, channelsOf(rendered), rendered.sampleRate))
-      }
-      return { request: { kind: 'assist', metrics: { ...metrics, tracks } }, context: null }
+      // La misma medicion que MEDIR MEZCLA del chat: queda guardada en el controlador y el
+      // asistente del chat la recibe en el resumen (STUDIO_V2.md 4.3.2).
+      const measured = await controller.measureForChat({ targetLufs: clampTarget(target), signal, progress })
+      return { request: { kind: 'assist', metrics: measured.metrics }, context: null }
     })
   }
 
@@ -1636,13 +1615,15 @@ const ANALYZE_CODEC: ContextCodec<AnalyzeContext> = {
   },
 }
 
-type AnalysisItem = 'bpm' | 'key' | 'beatsPerBar' | 'markers'
+type AnalysisItem = 'bpm' | 'key' | 'beatsPerBar' | 'markers' | 'chords'
 
 const AnalyzeSection: React.FC<{ controller: StudioController; session: StudioSession; selectedClipId: string | null; canRun: boolean }> = ({ controller, session, selectedClipId, canRun }) => {
   const [picked, setPicked] = useState('')
   const [applied, setApplied] = useState<ReadonlySet<AnalysisItem>>(new Set())
   /** Marcas agregadas desde este analisis -> su instante en segundos (para el tempo aplicado despues). */
   const markerSecondsRef = useRef<Map<string, number>>(new Map())
+  /** Los acordes de la sesion vienen de este analisis: el tempo aplicado despues los recalcula. */
+  const chordsSavedRef = useRef(false)
   const { flow, quote, confirm, reset, resume, forget } = useJobFlow<AnalyzeContext>(controller, 'analyze', ANALYZE_CODEC)
   const idle = flow.kind === 'idle' || flow.kind === 'failed'
   const clips = session.tracks.flatMap((track) => track.clips.filter((clip) => clip.active).map((clip) => ({ track, clip })))
@@ -1667,18 +1648,42 @@ const AnalyzeSection: React.FC<{ controller: StudioController; session: StudioSe
 
   const mark = (item: AnalysisItem) => setApplied((current) => new Set([...current, item]))
 
-  const applyMeta = (item: Exclude<AnalysisItem, 'markers'>, label: string) => {
+  /** Donde esta AHORA el clip analizado: si se movio o cambio el tempo, todo sigue al audio. */
+  const placementIn = (current: StudioSession, context: AnalyzeContext): AnalysisPlacement => {
+    const loc = findClip(current, context.clipId)
+    return loc ? analysisPlacementForClip(current, loc.clip) : { ...context.placement, bpm: current.bpm }
+  }
+
+  const applyMeta = (item: Exclude<AnalysisItem, 'markers' | 'chords'>, label: string) => {
     if (!patch) return
     const value = patch[item]
     if (value === undefined) return
-    // Cada dato es un paso de deshacer propio. Con el tempo, las marcas del analisis ya agregadas
-    // se recalculan en el mismo paso: siguen al audio, no a los beats.
+    const context = flow.kind === 'done' ? flow.prepared.context : null
+    // Cada dato es un paso de deshacer propio. Con el tempo, las marcas y los acordes del analisis
+    // ya guardados se recalculan en el mismo paso: siguen al audio, no a los beats.
     const ok = controller.run(label, (current) => {
-      const next = updateSessionMeta(current, { patch: { [item]: value } })
-      if (item !== 'bpm' || markerSecondsRef.current.size === 0 || next.bpm === current.bpm) return next
-      return setMarkers(next, { markers: rebeatMarkers(next.markers, markerSecondsRef.current, next.bpm) })
+      let next = updateSessionMeta(current, { patch: { [item]: value } })
+      if (item !== 'bpm' || next.bpm === current.bpm) return next
+      if (markerSecondsRef.current.size > 0) next = setMarkers(next, { markers: rebeatMarkers(next.markers, markerSecondsRef.current, next.bpm) })
+      if (chordsSavedRef.current && analysis && context) next = setChords(next, { chords: analysisToChords(analysis, placementIn(next, context)) })
+      return next
     })
     if (ok) mark(item)
+  }
+
+  /** GUARDAR ACORDES: reemplaza los acordes de referencia de la sesion (STUDIO_V2.md 2.9). */
+  const applyChords = (context: AnalyzeContext) => {
+    if (!analysis) return
+    const current = controller.snapshot().session
+    const chords = analysisToChords(analysis, placementIn(current, context))
+    if (chords.length === 0) {
+      controller.notify('info', 'Ningún acorde del análisis cae dentro del clip analizado.')
+      return
+    }
+    if (controller.run('Guardar acordes del análisis', (s) => setChords(s, { chords }))) {
+      chordsSavedRef.current = true
+      mark('chords')
+    }
   }
 
   const applyMarkers = (context: AnalyzeContext) => {
@@ -1708,6 +1713,7 @@ const AnalyzeSection: React.FC<{ controller: StudioController; session: StudioSe
   const close = () => {
     setApplied(new Set())
     markerSecondsRef.current = new Map()
+    chordsSavedRef.current = false
     reset()
   }
 
@@ -1776,10 +1782,20 @@ const AnalyzeSection: React.FC<{ controller: StudioController; session: StudioSe
                 onApply={() => applyMarkers(flow.prepared.context)}
                 testId="studio-analyze-markers"
               />
+              {analysis.chords.length > 0 && (
+                <AnalysisRow
+                  title={analysis.chords.length === 1 ? '1 acorde' : `${analysis.chords.length} acordes`}
+                  detail="Se guardan en la sesión como referencia (no suenan). El asistente del chat los usa para no sugerir a ciegas."
+                  state={applied.has('chords') ? 'applied' : 'pending'}
+                  action="GUARDAR ACORDES"
+                  onApply={() => applyChords(flow.prepared.context)}
+                  testId="studio-analyze-chords-save"
+                />
+              )}
             </ul>
             {analysis.chords.length > 0 && (
               <div className="stu-form-row">
-                <span className="stu-label">Acordes ({analysis.chords.length}) · solo de referencia</span>
+                <span className="stu-label">Acordes ({analysis.chords.length}) · guía</span>
                 <p className="stu-chords stu-mono" data-testid="studio-analyze-chords">
                   {analysis.chords.slice(0, 48).map((c) => c.name).join('  ')}
                   {analysis.chords.length > 48 ? '  ...' : ''}

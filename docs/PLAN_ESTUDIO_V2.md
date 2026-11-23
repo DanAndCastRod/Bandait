@@ -155,6 +155,61 @@ costo estimado antes de confirmar, `job_id` elegido por el Hub, el trabajo no mo
 Todo lo que llega de un modelo es una **propuesta**: entra como clip nuevo, como sugerencia o como
 comando pendiente, y el usuario lo acepta. Cada aceptación es un paso de deshacer.
 
+### 7.1 El chat conoce la música (2026-11-23)
+
+El resumen que recibe el chat (`STUDIO_V2.md` 4.3.2) lleva, además de la estructura:
+
+- **Notas MIDI resumidas** por clip (`digest`): registro, clases de altura con peso por duración,
+  notas por compás, rejilla dominante, velocidad media y, en patrones de hasta 64 notas, las notas
+  literales `[pitch, start_beat, dur_beats, vel]`.
+- **Armonía conocida**: los acordes que ANALIZAR AUDIO encontró, si el usuario aceptó GUARDAR
+  ACORDES (campo `chords` del documento, `STUDIO_V2.md` 2.9), y la progresión por sección de la
+  canción ligada desde su ficha ChordPro (`song_chart`, nunca la letra).
+- **Mediciones de mezcla**: la última medición del ASISTENTE DE MEZCLA o del botón MEDIR MEZCLA
+  del chat (gratis, en el equipo), con `fresh` según la versión del documento.
+
+Antes de aplicar notas del asistente, el Hub avisa (sin bloquear) de notas fuera de la
+tonalidad, choques de registro con otra pista en el mismo tramo y notas fuera del rango útil del
+instrumento (`services/studio/noteReview.ts`).
+
+### 7.2 Anexo: Escuchar a pedido (lo que tiene que cambiar URiT IA)
+
+Bandait ya tiene listo ESCUCHAR FRAGMENTO del chat (`STUDIO_V2.md` 4.3.5), apagado con
+`STUDIO_CHAT_LISTEN` = `"0"` en el Worker. Hoy URiT IA rechaza audio en `/v1/text`
+(`workers/ai/src/validate.ts`: la parte `inline` solo existe en `/v1/vision` y solo con
+`IMAGE_TYPES`; el cuerpo de `/v1/text` tiene tope de 256 KB). Para prenderlo, URiT IA tiene que:
+
+1. **Aceptar `inline` de audio en `/v1/text`** en mensajes `user`, con `mime_type`
+   `audio/wav` o `audio/mpeg` (`{"inline": {"mime_type": "audio/wav", "data": "<base64>"}}`), igual
+   que la imagen en `/v1/vision`. Traducción a Gemini: `inlineData` con el mismo `mimeType`
+   (Gemini acepta audio en línea en `generateContent`). Las demás partes (texto, `tool_call`,
+   `tool_result`) y las herramientas no cambian: el chat del Estudio sigue usando herramientas en
+   la misma llamada.
+2. **Solo para consumidores autorizados**: un ajuste nuevo del consumidor, por ejemplo
+   `settings.allow_audio: true` en `PUT /v1/admin/consumers/<id>`. Sin él, la parte de audio
+   responde 400 `invalid_request` con `detail` la ruta del campo (como hoy). Se habilita para
+   `bandait`.
+3. **Límites**: hasta 1 parte de audio por llamada, hasta **1 MiB de audio decodificado** por
+   parte (30 s de WAV 16 kHz 16 bit mono son 960044 bytes; un MP3 de 30 s pesa menos) y
+   **duración máxima 30 s** si URiT puede leer la cabecera WAV; pasar el tope es 413
+   `payload_too_large`. El cuerpo de `/v1/text` con audio necesita un tope mayor que 256 KB: al
+   menos **1,5 MiB** (1 MiB en base64 son unos 1,34 MiB más la conversación de hasta 192 KB).
+   Propuesta: tope de 2 MiB solo cuando el consumidor tiene `allow_audio`.
+4. **Precio**: el audio de entrada se cobra como tokens de entrada de audio de Gemini (unos 32
+   tokens por segundo según la guía de Google, a confirmar contra la tabla vigente). URiT debe
+   sumar esos tokens a `usage.input_tokens` (o informar `usage.audio_tokens`) y reflejarlos en
+   `usage.estimated_usd`, con la tarifa de audio del modelo en `PRICES` si difiere de la de texto.
+   Bandait ajusta su gasto con `usage.estimated_usd` como hoy; su recargo de referencia por vuelta
+   que escucha es `STUDIO_RATE_CHAT_LISTEN_USD` (0,02 USD), que se corrige cuando URiT publique
+   el precio.
+5. **Registro**: el audio no se guarda ni se registra en URiT (igual que el texto); en
+   `/v1/admin/requests` basta con contar las partes de audio y sus bytes.
+
+Cuando URiT lo publique: verificar con una llamada real (un fragmento corto), cambiar
+`STUDIO_CHAT_LISTEN` a `"1"` en `bandait-stems-worker/wrangler.jsonc`, ajustar
+`STUDIO_RATE_CHAT_LISTEN_USD` al precio real y desplegar el Worker. El botón ESCUCHAR FRAGMENTO
+aparece solo cuando la estimación del chat responde `listen: true`.
+
 ## 8. VST
 
 | Opción | Veredicto |

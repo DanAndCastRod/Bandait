@@ -65,13 +65,19 @@
     // uuid de Supabase (separados por coma) de quienes pueden lanzar trabajos de IA y analisis.
     // Vacio: cualquier editor. RECOMENDADO llenarlo con el uuid de Daniel Castaneda (y de quien
     // el autorice) antes de desplegar: con URIT_AI_TOKEN cargado, Lyria y el asistente ya gastan.
-    "STUDIO_SPENDER_UIDS": ""
+    "STUDIO_SPENDER_UIDS": "",
+    // Escuchar a pedido en el chat (STUDIO_V2.md 4.3.5): "1" acepta fragmentos de audio y los
+    // manda a URiT IA como parte `inline`. Queda en "0" hasta que URiT IA acepte audio en
+    // /v1/text (hoy solo imagenes en /v1/vision; ver docs/PLAN_ESTUDIO_V2.md, anexo "Escuchar a
+    // pedido"). Con "0", un chat con audio responde 503 provider_unavailable (listen_disabled).
+    "STUDIO_CHAT_LISTEN": "0"
     // Opcionales, con valor por defecto en el codigo:
     //   LYRIA_CLIP_MODEL (lyria-3-clip-preview), LYRIA_SONG_MODEL (lyria-3.5)
     //   STUDIO_RATE_MASTER_USD_PER_MIN (0.20), STUDIO_RATE_SEPARATE_USD_PER_MIN (0.50),
     //   STUDIO_RATE_LYRIA_CLIP_USD (0.04 por clip de 30 s), STUDIO_RATE_LYRIA_SONG_USD (0.08 por cancion),
     //   STUDIO_RATE_ASSIST_USD (0.05)
     //   Estudio v2: STUDIO_RATE_COMPOSE_USD (0.05 por consulta), STUDIO_RATE_ANALYZE_USD_PER_MIN (0.80),
-    //   STUDIO_RATE_CHAT_USD (0.03 por vuelta) y STUDIO_RATE_CHAT_USD_PER_32KB (0.015), MUSICAI_ANALYZE_WORKFLOW
+    //   STUDIO_RATE_CHAT_USD (0.03 por vuelta) y STUDIO_RATE_CHAT_USD_PER_32KB (0.015), MUSICAI_ANALYZE_WORKFLOW,
+    //   STUDIO_RATE_CHAT_LISTEN_USD (0.02 por vuelta que escucha un fragmento)
   }
 }

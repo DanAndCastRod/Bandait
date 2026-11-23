@@ -156,6 +156,7 @@ function toGeminiPart(part: TextPart): Record<string, unknown> {
     if (part.tool_call.signature) out.thoughtSignature = part.tool_call.signature;
     return out;
   }
+  if ('inline' in part) return { inlineData: { mimeType: part.inline.mime_type, data: part.inline.data } };
   return { functionResponse: { name: part.tool_result.name, response: part.tool_result.response } };
 }
 

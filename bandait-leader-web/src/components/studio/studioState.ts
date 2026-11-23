@@ -137,6 +137,7 @@ import type {
   MidiInputDevice,
   MidiNoteEvent,
   MidiTake,
+  MixMetrics,
   NoteSelection,
   OrphanTake,
   PlayStart,
@@ -152,8 +153,12 @@ import type {
   StudioHistory,
   StudioInputDevice,
   StudioJobAsset,
+  StudioChatListen,
   TrackPatch,
 } from '../../services/studio/types'
+import type { ChatMixMeasurement, ChatSummaryExtras } from '../../services/studio/chatContext'
+import { measureMix, renderListenExcerpt, type MeasureMixOptions } from '../../services/studio/chatAudio'
+import type { Song } from '../../types/hub'
 
 // ---------------------------------------------------------------------------
 // Tipos de la foto
@@ -673,6 +678,10 @@ export class StudioController {
   private midiRec: { trackId: string; only: boolean; started: boolean } | null = null
   /** Notas copiadas del piano roll, con la primera en el beat 0. */
   private noteClipboard: StudioMidiNote[] | null = null
+  /** Ultima medicion de mezcla (asistente de mezcla o MEDIR MEZCLA), con la version del documento. */
+  private mixMeasurement: ChatMixMeasurement | null = null
+  /** Cancion del repertorio ligada a la sesion (la pone la vista, que tiene la libreria). */
+  private linkedSong: Song | null = null
 
   constructor(options: StudioControllerOptions) {
     this.band = options.band
@@ -2277,6 +2286,62 @@ export class StudioController {
     if (!blob) throw new Error('Ese audio no está en este equipo: no se puede subir.')
     await studioCloud.putAsset(cloud, this.sessionId, file, blob)
     this.markUploaded(file)
+  }
+
+  // -------------------------------------------------------------------------
+  // Contexto del asistente del chat (STUDIO_V2.md 4.3.2 y 4.3.5)
+  // -------------------------------------------------------------------------
+
+  /** Version del documento: sube con cada cambio de la sesion (tambien deshacer y rehacer). */
+  get docVersion(): number {
+    return this.editCount
+  }
+
+  /** La vista avisa que cancion del repertorio corresponde a la sesion (o null). */
+  setLinkedSong(song: Song | null): void {
+    this.linkedSong = song
+  }
+
+  /** Guarda una medicion de mezcla hecha sobre la version `version` del documento. */
+  rememberMixMeasurement(metrics: MixMetrics, version = this.editCount): void {
+    this.mixMeasurement = { metrics, version, measuredAt: Date.now() }
+  }
+
+  /** Ultima medicion de mezcla, o null. `fresh` lo decide la version (mixForSummary). */
+  lastMixMeasurement(): ChatMixMeasurement | null {
+    return this.mixMeasurement
+  }
+
+  /** Datos del resumen del chat que no estan en el documento: cancion ligada y medicion. */
+  chatExtras(): ChatSummaryExtras {
+    const songId = this.snap.session.songId
+    const song = songId && this.linkedSong?.id === songId ? this.linkedSong : null
+    return { song, mix: { measurement: this.mixMeasurement, version: this.editCount } }
+  }
+
+  /**
+   * MEDIR MEZCLA: mide la mezcla y cada pista en este equipo (la medicion del asistente de mezcla)
+   * y la deja guardada para el resumen del chat. Gratis: no sale audio ni se llama a la nube.
+   */
+  async measureForChat(options: MeasureMixOptions = {}): Promise<ChatMixMeasurement> {
+    const version = this.editCount
+    const metrics = await measureMix(this.snap.session, this.engine.getBuffers(), options)
+    this.rememberMixMeasurement(metrics, version)
+    return this.mixMeasurement!
+  }
+
+  /**
+   * ESCUCHAR FRAGMENTO: arma hasta 30 s de la mezcla desde `startS` (mono, 16 kHz) y lo sube a
+   * assets/ de la sesion en la nube, SIN agregarlo al documento (STUDIO_V2.md 4.3.5). Devuelve la
+   * referencia para el mensaje del chat. No cobra: el recargo va en el mensaje que lo lleva.
+   */
+  async prepareListenExcerpt(startS: number, signal?: AbortSignal): Promise<StudioChatListen> {
+    const cloud = this.cloud
+    if (!cloud) throw new Error('Necesitas una sesión de nube activa para que el asistente escuche.')
+    const excerpt = await renderListenExcerpt(this.snap.session, this.engine.getBuffers(), startS, { signal })
+    const assetId = newStudioId('ast')
+    await studioCloud.putAsset(cloud, this.sessionId, `${assetId}.wav`, excerpt.blob)
+    return { assetId, durationS: excerpt.durationS }
   }
 
   /**

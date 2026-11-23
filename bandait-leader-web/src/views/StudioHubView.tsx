@@ -125,6 +125,10 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
   useEffect(() => {
     controller.setSections(sections)
   }, [controller, sections])
+  // El asistente del chat manda la progresion de acordes de la cancion ligada (sin letra).
+  useEffect(() => {
+    controller.setLinkedSong(song ?? null)
+  }, [controller, song])
 
   // ---- comandos: un solo registro para el teclado, la paleta y el asistente ----
   // Lo que el registro lee de la vista va por un puente que se actualiza en un efecto: el
