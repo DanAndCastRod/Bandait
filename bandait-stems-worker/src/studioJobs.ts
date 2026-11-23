@@ -88,7 +88,7 @@ const HEADER_PROBE_BYTES = 64 * 1024;
  */
 export const DEFAULT_RATES = {
   masterPerMin: 0.2, separatePerMin: 0.5, lyriaClip: 0.04, lyriaSong: 0.08, assist: 0.05, compose: 0.05, analyzePerMin: 0.8,
-  chat: 0.03, chatPer32Kb: 0.015, chatListen: 0.02,
+  chat: 0.03, chatPer32Kb: 0.015, chatListen: 0.002,
 };
 
 /** STUDIO_V2.md 4.3.5: el chat solo escucha fragmentos con STUDIO_CHAT_LISTEN = "1". */

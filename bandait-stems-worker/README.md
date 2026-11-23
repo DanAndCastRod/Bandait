@@ -243,7 +243,7 @@ URiT IA, CONTRACT_V1.md 4A), `STUDIO_RATE_ASSIST_USD` (0.05 por consulta),
 `STUDIO_RATE_COMPOSE_USD` (0.05 por consulta), `STUDIO_RATE_ANALYZE_USD_PER_MIN` (0.80: el
 workflow por defecto separa y analiza; 0.30 no cubría la separación) y `STUDIO_RATE_CHAT_USD`
 (0.03 por vuelta) más `STUDIO_RATE_CHAT_USD_PER_32KB` (0.015 por cada 32 KB completos de
-conversación) y `STUDIO_RATE_CHAT_LISTEN_USD` (0.02 por vuelta que escucha un fragmento).
+conversación) y `STUDIO_RATE_CHAT_LISTEN_USD` (0.002 por vuelta que escucha un fragmento).
 `STUDIO_RATE_LYRIA_USD_PER_30S` ya no se lee.
 
 Escuchar a pedido en el chat (STUDIO_V2.md 4.3.5): `STUDIO_CHAT_LISTEN` (`"0"` en

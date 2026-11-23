@@ -135,7 +135,7 @@ test('documento: el fixture v2 valida y vuelve identico; el v1 se guarda como v1
   assert.equal(v1.version, 1);
   assert.ok(!('markers' in v1));
   assert.ok(!('kind' in v1.tracks[0]));
-  assert.equal(VERSION, '1.2.0');
+  assert.equal(VERSION, '1.3.0');
 
   // Tolerancias: markers ausente es [], parametros ausentes toman el valor de la tabla, las notas y
   // las marcas salen ordenadas.
@@ -838,7 +838,7 @@ test('chat: con STUDIO_CHAT_LISTEN=1 el fragmento llega a URiT como inline audio
 
   const estimate = await (await post('/ses_a/jobs?estimate=1', LISTEN_CHAT)).json();
   assert.equal(estimate.listen, true);
-  assert.equal(estimate.estimated_cost_usd, 0.05, '0.03 de la vuelta + 0.02 por escuchar');
+  assert.equal(estimate.estimated_cost_usd, 0.032, '0.03 de la vuelta + 0.002 por escuchar');
 
   // Turno 2: el fragmento del primer mensaje ya se escucho y va como nota; solo el ultimo se adjunta.
   const second = {
@@ -859,7 +859,7 @@ test('chat: con STUDIO_CHAT_LISTEN=1 el fragmento llega a URiT como inline audio
   ]);
   const done = await get('job_t1');
   assert.equal(done.reply, 'El bajo y la guitarra comparten registro.');
-  assert.equal(done.cost_usd, 0.05);
+  assert.equal(done.cost_usd, 0.032);
 
   // mp3 tambien sirve; un turno sin audio en el ultimo mensaje no adjunta ni cobra el recargo.
   bucket.seed(`${prefix}ses_a/assets/ast_mp3.mp3`, 4, new Uint8Array([0xff, 0xfb, 0x90, 0x00]));

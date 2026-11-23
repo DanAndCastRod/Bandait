@@ -30,7 +30,7 @@ import { purgeEvents } from './events.ts';
 import { handleMcp } from './mcp.ts';
 import type { Env, ExecutionContextLike, FetchLike, R2Bucket, ScheduledControllerLike, StudioDeps } from './types.ts';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SONG = /^[A-Za-z0-9_-]{1,80}$/;
 const FILE = /^[A-Za-z0-9 ._()-]{1,120}$/;
