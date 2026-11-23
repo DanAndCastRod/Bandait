@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Check, MessageSquare, RefreshCw, RotateCcw, Send, Sparkles, X } from 'lucide-react'
+import { Check, Headphones, MessageSquare, RefreshCw, RotateCcw, Send, Sparkles, Undo2, X } from 'lucide-react'
 import { StemCloudError } from '../../services/stemCloud'
 import {
   applyPendingCommand,
@@ -11,6 +11,17 @@ import {
   toolResultsMessage,
   type PendingAssistantCommand,
 } from '../../services/studio/assistantTools'
+import {
+  ASSISTANT_QUICK_ACTIONS,
+  assistantContextChips,
+  auditionZone,
+  barRangeText,
+  parseStoredAssistantChat,
+  quickActionText,
+  serializeAssistantChat,
+  type AssistantProposal,
+  type BeatRange,
+} from '../../services/studio/assistantWindow'
 import {
   appendModelReply,
   appendUserMessage,
@@ -24,8 +35,9 @@ import {
   resumeJobV2,
   runJobV2,
 } from '../../services/studio/jobs'
-import { secondsToBeats } from '../../services/studio/session'
-import type { ChatJobRequest, CommandContext, StudioChatMessage, StudioChatToolCall, StudioJobEstimateV2, StudioJobStateV2 } from '../../services/studio/types'
+import { beatsToSeconds, findTrack, secondsToBeats, type StudioSession } from '../../services/studio/session'
+import * as studioStore from '../../services/studio/studioStore'
+import type { ChatJobRequest, CommandContext, LoopRegionS, StudioChatMessage, StudioChatToolCall, StudioJobEstimateV2, StudioJobStateV2 } from '../../services/studio/types'
 import { StudioChatMarkdown } from './StudioChatMarkdown'
 import type { StudioRegistry } from './studioCommandHandlers'
 import { useStudio, type StudioController } from './studioState'
@@ -42,10 +54,27 @@ type Phase =
   /** El trabajo se lanzo (y se cobro) pero su respuesta no llego: se consulta, no se relanza. */
   | { kind: 'pending'; jobId: string; message: string; outgoing: StudioChatMessage[] }
 
-/** Llamadas de la ultima respuesta del asistente que esperan decision. */
-interface Proposal {
-  calls: StudioChatToolCall[]
-  pendings: PendingAssistantCommand[]
+/**
+ * Un cambio aplicado de forma provisional para escucharlo (un paso de deshacer). QUEDARSE lo deja
+ * aplicado; DESHACER vuelve a la sesion de antes con el historial y el cambio sigue propuesto.
+ */
+interface Audition {
+  callId: string
+  /** El cambio con su estado 'applied' y su mensaje, para QUEDARSE. */
+  decided: PendingAssistantCommand
+  before: StudioSession
+  after: StudioSession
+  zone: BeatRange
+  /** Transporte de antes: loop y cabezal. */
+  restore: { loop: LoopRegionS | null; positionS: number }
+}
+
+/** Lo que muestra la pastilla del asistente minimizado. */
+export interface StudioChatStatus {
+  thinking: boolean
+  pending: number
+  auditioning: boolean
+  spentUsd: number
 }
 
 const ASSISTANT_CTX = { source: 'assistant' } as const
@@ -68,38 +97,93 @@ const STATUS_TEXT: Record<PendingAssistantCommand['status'], string> = {
   failed: 'NO SE APLICÓ',
 }
 
+/** Loop activo del transporte en beats, o null. */
+function loopBeats(loop: LoopRegionS | null, bpm: number): BeatRange | null {
+  if (!loop || !(loop.endS > loop.startS)) return null
+  return { startBeat: secondsToBeats(loop.startS, bpm), endBeat: secondsToBeats(loop.endS, bpm) }
+}
+
 interface Props {
   controller: StudioController
   registry: StudioRegistry | null
   /** Contexto activo de los comandos (timeline, piano_roll, mixer), para el resumen. */
   commandContext: () => CommandContext
-  canRun: boolean
+  /** Cambia cuando cambia lo que muestra la pastilla del asistente minimizado. */
+  onStatus?: (status: StudioChatStatus) => void
 }
 
 /**
- * Chat del asistente del Estudio (STUDIO_V2.md 4.3). Manda la conversacion y un RESUMEN de la
- * sesion (nunca audio ni notas). Cada llamada a herramienta que devuelve el modelo se muestra
- * como cambio propuesto con su descripcion: el usuario lo aplica (un paso de deshacer, por el
- * registro de comandos) o lo descarta. Cuando todos estan decididos, los resultados viajan en el
- * turno siguiente. Nada se aplica sin que el usuario lo acepte.
+ * Chat del asistente del Estudio (STUDIO_V2.md 4.3), dentro de su ventana (StudioAssistant). Manda
+ * la conversacion y un RESUMEN de la sesion (nunca audio ni notas). Cada llamada a herramienta que
+ * devuelve el modelo se muestra como cambio propuesto con su descripcion: el usuario lo aplica (un
+ * paso de deshacer, por el registro de comandos), lo escucha antes en loop o lo descarta. Cuando
+ * todos estan decididos, los resultados viajan en el turno siguiente. Nada se aplica sin que el
+ * usuario lo acepte. La conversacion se guarda por sesion en este equipo (IndexedDB).
  */
-export const StudioChatPanel: React.FC<Props> = ({ controller, registry, commandContext, canRun }) => {
+export const StudioChatPanel: React.FC<Props> = ({ controller, registry, commandContext, onStatus }) => {
   const snap = useStudio(controller)
   const [messages, setMessages] = useState<StudioChatMessage[]>([])
-  const [proposal, setProposal] = useState<Proposal | null>(null)
+  const [proposal, setProposal] = useState<AssistantProposal | null>(null)
   /** Descripcion legible de cada llamada ya decidida, por call_id (para el historial). */
   const [descriptions, setDescriptions] = useState<Readonly<Record<string, string>>>({})
   const [draft, setDraft] = useState('')
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
-  /** El costo por mensaje se confirma una vez por conversacion. */
+  /** El costo por mensaje se confirma una vez por conversacion (y se conserva al restaurarla). */
   const [approved, setApproved] = useState<StudioJobEstimateV2 | null>(null)
   const [spentUsd, setSpentUsd] = useState(0)
   const [applying, setApplying] = useState(false)
+  const [audition, setAudition] = useState<Audition | null>(null)
+  /** La conversacion guardada ya se leyo (antes no se guarda nada: se pisaria). */
+  const [loaded, setLoaded] = useState(false)
+  const [restored, setRestored] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const logRef = useRef<HTMLOListElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const confirmCancelRef = useRef<HTMLButtonElement>(null)
+  /** El usuario ya empezo a conversar: lo que llegue del almacen no lo pisa. */
+  const touchedRef = useRef(false)
+
+  const canRun = snap.ready && snap.cloudAvailable && snap.canEditCloud && !snap.recording
+  const blocked = !snap.cloudAvailable
+    ? 'Sin nube configurada o sin sesión de nube: el asistente no está disponible. Entra con tu cuenta de nube.'
+    : !snap.canEditCloud
+      ? 'Solo el Owner o el Director musical de la banda pueden usar el asistente: gasta créditos de la banda.'
+      : null
 
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // Restaurar la conversacion de esta sesion.
+  useEffect(() => {
+    let alive = true
+    studioStore
+      .loadChat(controller.sessionId)
+      .then((raw) => {
+        if (!alive || touchedRef.current) return
+        const chat = parseStoredAssistantChat(raw)
+        if (!chat || (chat.messages.length === 0 && !chat.proposal)) return
+        setMessages(chat.messages)
+        setProposal(chat.proposal)
+        setDescriptions(chat.descriptions)
+        setApproved(chat.approved)
+        setSpentUsd(chat.spentUsd)
+        setRestored(true)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (alive) setLoaded(true)
+      })
+    return () => {
+      alive = false
+    }
+  }, [controller])
+
+  // Guardar en cada cambio (escrituras chicas; IndexedDB las aplica en orden).
+  useEffect(() => {
+    if (!loaded) return
+    const empty = messages.length === 0 && !proposal
+    const chat = empty ? null : serializeAssistantChat({ version: 1, messages, proposal, descriptions: { ...descriptions }, approved, spentUsd }, audition?.decided ?? null)
+    studioStore.saveChat(controller.sessionId, chat).catch(() => undefined)
+  }, [controller, loaded, messages, proposal, descriptions, approved, spentUsd, audition])
 
   useEffect(() => {
     const log = logRef.current
@@ -114,14 +198,32 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
   const waitingDecision = proposal !== null && !allSettled(proposal.pendings)
   const last = messages[messages.length - 1]
   const canContinue = last?.role === 'tool'
+  const pendingCount = proposal ? proposal.pendings.filter((p) => p.status === 'pending').length : 0
+
+  useEffect(() => {
+    onStatus?.({ thinking: busy, pending: pendingCount, auditioning: audition !== null, spentUsd })
+  }, [onStatus, busy, pendingCount, audition, spentUsd])
 
   const buildRequest = (outgoing: StudioChatMessage[]): ChatJobRequest => {
     const s = controller.snapshot()
     const summary = fitSessionSummary(s.session, {
       playheadBeat: secondsToBeats(controller.engine.position(), s.session.bpm),
       selection: { trackId: s.selectedTrackId, clipIds: s.selectedClipId ? [s.selectedClipId] : [], context: commandContext() },
+      loop: loopBeats(controller.engine.getState().loop, s.session.bpm),
     })
     return chatRequestForSession(outgoing, summary)
+  }
+
+  /** Cuando no queda ningun cambio por decidir, el mensaje `tool` entra a la conversacion. */
+  const settleIfDone = (current: StudioChatMessage[], next: AssistantProposal) => {
+    if (!allSettled(next.pendings)) return
+    setDescriptions((map) => {
+      const copy: Record<string, string> = { ...map }
+      for (const p of next.pendings) copy[p.callId] = p.description
+      return copy
+    })
+    setMessages([...current, toolResultsMessage(next.calls, next.pendings)])
+    setProposal(null)
   }
 
   const receive = (request: ChatJobRequest, final: StudioJobStateV2) => {
@@ -181,6 +283,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
   const send = async (outgoing: StudioChatMessage[]) => {
     const cloud = controller.cloud
     if (!cloud || !canRun) return
+    touchedRef.current = true
     if (approved) {
       await launch(outgoing)
       return
@@ -197,7 +300,7 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
     const text = draft.trim()
-    if (!text || busy || waitingDecision) return
+    if (!text || busy || waitingDecision || audition) return
     setDraft('')
     void send(appendUserMessage(messages, text))
   }
@@ -224,36 +327,28 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
     }
   }
 
-  /** Cuando no queda ningun cambio por decidir, el mensaje `tool` entra a la conversacion. */
-  const settleIfDone = (current: StudioChatMessage[], next: Proposal) => {
-    if (!allSettled(next.pendings)) return
-    setDescriptions((map) => {
-      const copy: Record<string, string> = { ...map }
-      for (const p of next.pendings) copy[p.callId] = p.description
-      return copy
-    })
-    setMessages([...current, toolResultsMessage(next.calls, next.pendings)])
-    setProposal(null)
+  const replacePending = (index: number, decided: PendingAssistantCommand) => {
+    if (!proposal) return
+    const pendings = proposal.pendings.map((p, i) => (i === index ? decided : p))
+    const next = { calls: proposal.calls, pendings }
+    setProposal(next)
+    settleIfDone(messages, next)
   }
 
   const decide = async (index: number, accept: boolean) => {
-    if (!proposal || !registry || applying) return
+    if (!proposal || !registry || applying || audition) return
     const target = proposal.pendings[index]
     if (!target || target.status !== 'pending') return
     setApplying(true)
     try {
-      const decided = accept ? await applyPendingCommand(target, registry, ASSISTANT_CTX) : rejectPendingCommand(target)
-      const pendings = proposal.pendings.map((p, i) => (i === index ? decided : p))
-      const next = { calls: proposal.calls, pendings }
-      setProposal(next)
-      settleIfDone(messages, next)
+      replacePending(index, accept ? await applyPendingCommand(target, registry, ASSISTANT_CTX) : rejectPendingCommand(target))
     } finally {
       setApplying(false)
     }
   }
 
   const decideAll = async (accept: boolean) => {
-    if (!proposal || !registry || applying) return
+    if (!proposal || !registry || applying || audition) return
     setApplying(true)
     try {
       const pendings: PendingAssistantCommand[] = []
@@ -273,38 +368,169 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
     }
   }
 
+  // ---- escuchar antes de aplicar ----
+
+  const restoreTransport = (restore: Audition['restore']) => {
+    controller.pause()
+    controller.setLoop(restore.loop)
+    controller.seek(restore.positionS)
+  }
+
+  /** Aplica el cambio de forma provisional y reproduce en loop la zona que toca. */
+  const listen = async (index: number) => {
+    if (!proposal || !registry || applying || audition) return
+    const target = proposal.pendings[index]
+    if (!target || target.status !== 'pending') return
+    setApplying(true)
+    try {
+      const before = controller.snapshot().session
+      const positionS = controller.engine.position()
+      const zone = auditionZone(target, before, secondsToBeats(positionS, before.bpm))
+      const restore = { loop: controller.engine.getState().loop, positionS }
+      const decided = await applyPendingCommand(target, registry, ASSISTANT_CTX)
+      if (decided.status !== 'applied') {
+        replacePending(index, decided)
+        return
+      }
+      const after = controller.snapshot().session
+      setAudition({ callId: target.callId, decided, before, after, zone, restore })
+      // El tempo puede haber cambiado con el cambio: la zona se pasa a segundos con el de ahora.
+      const startS = beatsToSeconds(zone.startBeat, after.bpm)
+      controller.pause()
+      controller.setLoop({ startS, endS: beatsToSeconds(zone.endBeat, after.bpm) })
+      controller.seek(startS)
+      controller.play()
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  /** QUEDARSE: el cambio queda aplicado (su paso de deshacer sigue en el historial). */
+  const keepAudition = () => {
+    if (!audition || !proposal) return
+    const index = proposal.pendings.findIndex((p) => p.callId === audition.callId)
+    restoreTransport(audition.restore)
+    setAudition(null)
+    // Deshecho a mano con Ctrl+Z mientras sonaba: no esta aplicado, sigue propuesto.
+    if (audition.after !== audition.before && controller.snapshot().session === audition.before) {
+      controller.notify('info', 'El cambio se deshizo con Ctrl+Z mientras lo escuchabas: sigue propuesto.')
+      return
+    }
+    if (index >= 0) replacePending(index, audition.decided)
+  }
+
+  /** DESHACER: la sesion vuelve a ser exactamente la de antes y el cambio sigue propuesto. */
+  const undoAudition = () => {
+    if (!audition || !proposal) return
+    controller.pause()
+    const current = controller.snapshot().session
+    // Si el usuario ya deshizo con Ctrl+Z (la sesion es la de antes), no hay nada que deshacer.
+    if (audition.after !== audition.before && current !== audition.before) {
+      if (current === audition.after) {
+        controller.undo()
+      } else {
+        // Se edito la sesion mientras se escuchaba: deshacer ahora quitaria esa edicion.
+        const index = proposal.pendings.findIndex((p) => p.callId === audition.callId)
+        if (index >= 0) replacePending(index, audition.decided)
+        controller.notify('warn', 'La sesión cambió mientras escuchabas: el cambio del asistente quedó aplicado. Usa Ctrl+Z para quitarlo.')
+      }
+    }
+    restoreTransport(audition.restore)
+    setAudition(null)
+  }
+
   const restart = () => {
     abortRef.current?.abort()
+    touchedRef.current = true
     setMessages([])
     setProposal(null)
     setDescriptions({})
     setPhase({ kind: 'idle' })
     setApproved(null)
     setSpentUsd(0)
+    setRestored(false)
+  }
+
+  // ---- contexto y pedidos rapidos ----
+
+  const loop = loopBeats(snap.engine.loop, snap.session.bpm)
+  const context = commandContext()
+  const chips = assistantContextChips({ session: snap.session, selectedTrackId: snap.selectedTrackId, selectedClipId: snap.selectedClipId, loop, context })
+  const selectedTrack = snap.selectedTrackId ? findTrack(snap.session, snap.selectedTrackId) : null
+  const composeLocked = !canRun || busy || waitingDecision || audition !== null
+
+  const quick = (id: (typeof ASSISTANT_QUICK_ACTIONS)[number]['id']) => {
+    setDraft(quickActionText(id, selectedTrack?.name ?? null, loop, snap.session.beatsPerBar).slice(0, CHAT_MAX_USER_TEXT))
+    requestAnimationFrame(() => {
+      const input = inputRef.current
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
   }
 
   // Resultado de cada llamada ya respondida, para el historial.
   const results = new Map<string, { status: PendingAssistantCommand['status']; message: string }>()
   for (const m of messages) if (m.role === 'tool') for (const r of m.toolResults) results.set(r.callId, { status: r.response.status, message: r.response.message })
   const live = new Map((proposal?.pendings ?? []).map((p, index) => [p.callId, { p, index }]))
+  const editLocked = applying || !snap.ready || snap.recording
 
   const renderCall = (call: StudioChatToolCall) => {
     const current = live.get(call.id)
     if (current) {
       const { p, index } = current
+      const listening = audition?.callId === p.callId
       return (
-        <li key={call.id} className="stu-chat-call" data-state={p.status} data-testid="studio-chat-call">
+        <li key={call.id} className="stu-chat-call" data-state={listening ? 'listening' : p.status} data-testid="studio-chat-call">
           <span className="stu-chat-call-text">
             <strong>{p.description}</strong>
+            {p.warnings && p.warnings.length > 0 && (
+              <span className="stu-chat-warnings" data-testid="studio-chat-warnings">
+                {p.warnings.map((w, i) => (
+                  <span key={i} className="stu-help" data-tone="warn">
+                    {w}
+                  </span>
+                ))}
+              </span>
+            )}
             {p.status !== 'pending' && <span className="stu-help">{p.message}</span>}
+            {listening && (
+              <span className="stu-help" data-testid="studio-chat-listening">
+                Escuchando en loop {barRangeText(audition.zone, snap.session.beatsPerBar)}. El cambio está aplicado de forma provisional.
+              </span>
+            )}
           </span>
-          {p.status === 'pending' ? (
+          {listening ? (
             <span className="stu-actions">
-              <button type="button" className="stu-btn" data-size="small" disabled={applying || !snap.ready || snap.recording} onClick={() => void decide(index, true)} aria-label={`Aplicar: ${p.description}`} data-testid="studio-chat-apply">
+              <button type="button" className="stu-btn" data-size="small" data-tone="primary" onClick={keepAudition} aria-label={`Quedarse con: ${p.description}`} data-testid="studio-chat-keep">
+                <Check size={12} />
+                QUEDARSE
+              </button>
+              <button type="button" className="stu-btn" data-size="small" onClick={undoAudition} aria-label={`Deshacer: ${p.description}`} data-testid="studio-chat-undo">
+                <Undo2 size={12} />
+                DESHACER
+              </button>
+            </span>
+          ) : p.status === 'pending' ? (
+            <span className="stu-actions">
+              <button type="button" className="stu-btn" data-size="small" disabled={editLocked || audition !== null} onClick={() => void decide(index, true)} aria-label={`Aplicar: ${p.description}`} data-testid="studio-chat-apply">
                 <Check size={12} />
                 APLICAR
               </button>
-              <button type="button" className="stu-btn" data-size="small" data-tone="ghost" disabled={applying} onClick={() => void decide(index, false)} aria-label={`Descartar: ${p.description}`} data-testid="studio-chat-reject">
+              <button
+                type="button"
+                className="stu-btn"
+                data-size="small"
+                disabled={editLocked || audition !== null}
+                onClick={() => void listen(index)}
+                aria-label={`Escuchar antes de aplicar: ${p.description}`}
+                title="Aplica el cambio de forma provisional y reproduce en loop la zona que toca"
+                data-testid="studio-chat-listen"
+              >
+                <Headphones size={12} />
+                ESCUCHAR
+              </button>
+              <button type="button" className="stu-btn" data-size="small" data-tone="ghost" disabled={applying || audition !== null} onClick={() => void decide(index, false)} aria-label={`Descartar: ${p.description}`} data-testid="studio-chat-reject">
                 DESCARTAR
               </button>
             </span>
@@ -331,203 +557,233 @@ export const StudioChatPanel: React.FC<Props> = ({ controller, registry, command
     )
   }
 
-  const pendingCount = proposal ? proposal.pendings.filter((p) => p.status === 'pending').length : 0
   const bulkCount = proposal ? bulkApplicable(proposal.pendings).filter(Boolean).length : 0
   const destructivePending = proposal ? proposal.pendings.some((p) => p.status === 'pending' && isDestructiveCommand(p)) : false
 
   return (
-    <details className="stu-job" open data-testid="studio-job-chat">
-      <summary>
-        <span>ASISTENTE (CHAT)</span>
-        <span className="stu-label">{spentUsd > 0 ? `${formatUsd(spentUsd)} EN ESTA CONVERSACIÓN` : 'Modelo de lenguaje'}</span>
-      </summary>
-      <div className="stu-job-body">
-        <p className="stu-help">
-          Pídele cambios en palabras: "baja la voz 3 dB", "agrega un bajo que siga los acordes", "marca el coro en el compás 17". Recibe un resumen de la sesión, nunca audio. Cada cambio que proponga lo apruebas tú, uno por uno.
-        </p>
+    <div className="stu-chat" data-testid="studio-job-chat">
+      {blocked && (
+        <div className="stu-notice" data-tone="info" role="status" data-testid="studio-chat-blocked">
+          <span>{blocked}</span>
+        </div>
+      )}
 
-        {(messages.length > 0 || proposal) && (
-          <ol ref={logRef} className="stu-chat-log" aria-live="polite" aria-label="Conversación con el asistente" data-testid="studio-chat-log">
-            {messages.map((m, i) => {
-              if (m.role === 'tool') return null
-              if (m.role === 'user') {
-                return (
-                  <li key={i} className="stu-chat-msg" data-role="user">
-                    <span className="stu-label">TÚ</span>
-                    <p>{m.text}</p>
-                  </li>
-                )
-              }
+      {messages.length === 0 && !proposal ? (
+        <p className="stu-help stu-chat-intro">
+          Pídele cambios en palabras: "baja la voz 3 dB", "agrega un bajo que siga los acordes", "marca el coro en el compás 17". Recibe un resumen de la sesión, nunca audio. Cada cambio que proponga lo apruebas tú, uno por uno, y puedes escucharlo antes.
+        </p>
+      ) : (
+        <ol ref={logRef} className="stu-chat-log" aria-live="polite" aria-label="Conversación con el asistente" data-testid="studio-chat-log">
+          {restored && (
+            <li className="stu-chat-restored" data-testid="studio-chat-restored">
+              <span className="stu-label">CONVERSACIÓN GUARDADA DE ESTA SESIÓN</span>
+            </li>
+          )}
+          {messages.map((m, i) => {
+            if (m.role === 'tool') return null
+            if (m.role === 'user') {
               return (
-                <li key={i} className="stu-chat-msg" data-role="model">
-                  <span className="stu-label">
-                    <Sparkles size={10} aria-hidden="true" /> ASISTENTE
-                  </span>
-                  {m.text && <StudioChatMarkdown text={m.text} />}
-                  {m.toolCalls.length > 0 && <ul className="stu-chat-calls">{m.toolCalls.map(renderCall)}</ul>}
+                <li key={i} className="stu-chat-msg" data-role="user">
+                  <span className="stu-label">TÚ</span>
+                  <p>{m.text}</p>
                 </li>
               )
-            })}
-          </ol>
-        )}
+            }
+            return (
+              <li key={i} className="stu-chat-msg" data-role="model">
+                <span className="stu-label">
+                  <Sparkles size={10} aria-hidden="true" /> ASISTENTE
+                </span>
+                {m.text && <StudioChatMarkdown text={m.text} />}
+                {m.toolCalls.length > 0 && <ul className="stu-chat-calls">{m.toolCalls.map(renderCall)}</ul>}
+              </li>
+            )
+          })}
+        </ol>
+      )}
 
-        {waitingDecision && (
-          <div className="stu-actions" data-testid="studio-chat-decide">
-            <span className="stu-label">{pendingCount === 1 ? '1 CAMBIO POR DECIDIR' : `${pendingCount} CAMBIOS POR DECIDIR`}</span>
-            <span className="stu-bar-spacer" />
-            <button type="button" className="stu-btn" data-size="small" disabled={applying || !snap.ready || snap.recording || bulkCount === 0} onClick={() => void decideAll(true)} data-testid="studio-chat-apply-all">
-              <Check size={12} />
-              APLICAR TODOS
-            </button>
-            <button type="button" className="stu-btn" data-size="small" data-tone="ghost" disabled={applying} onClick={() => void decideAll(false)}>
-              DESCARTAR TODOS
-            </button>
-            {destructivePending && (
-              <p className="stu-help" data-tone="warn" data-testid="studio-chat-destructive-note">
-                Los cambios que quitan o borran (pistas, clips, notas o marcas) no entran en APLICAR TODOS: decide cada uno por separado.
-              </p>
-            )}
-          </div>
-        )}
+      {waitingDecision && (
+        <div className="stu-actions stu-chat-decide" data-testid="studio-chat-decide">
+          <span className="stu-label">{audition ? 'ESCUCHANDO UN CAMBIO' : pendingCount === 1 ? '1 CAMBIO POR DECIDIR' : `${pendingCount} CAMBIOS POR DECIDIR`}</span>
+          <span className="stu-bar-spacer" />
+          <button type="button" className="stu-btn" data-size="small" disabled={editLocked || bulkCount === 0 || audition !== null} onClick={() => void decideAll(true)} data-testid="studio-chat-apply-all">
+            <Check size={12} />
+            APLICAR TODOS
+          </button>
+          <button type="button" className="stu-btn" data-size="small" data-tone="ghost" disabled={applying || audition !== null} onClick={() => void decideAll(false)}>
+            DESCARTAR TODOS
+          </button>
+          {destructivePending && (
+            <p className="stu-help" data-tone="warn" data-testid="studio-chat-destructive-note">
+              Los cambios que quitan o borran (pistas, clips, notas o marcas) no entran en APLICAR TODOS: decide cada uno por separado.
+            </p>
+          )}
+        </div>
+      )}
 
-        {phase.kind === 'quoting' && (
-          <div className="stu-form-row" aria-live="polite">
-            <span className="stu-label">CONSULTANDO EL COSTO...</span>
-            <div className="stu-progress" data-indeterminate="true" aria-hidden="true">
-              <div />
-            </div>
+      {phase.kind === 'quoting' && (
+        <div className="stu-form-row" aria-live="polite">
+          <span className="stu-label">CONSULTANDO EL COSTO...</span>
+          <div className="stu-progress" data-indeterminate="true" aria-hidden="true">
+            <div />
           </div>
-        )}
-        {phase.kind === 'running' && (
-          <div className="stu-form-row" aria-live="polite" data-testid="studio-chat-running">
-            <span className="stu-label">EL ASISTENTE ESTÁ PENSANDO...</span>
-            <div className="stu-progress" data-indeterminate="true" aria-hidden="true">
-              <div />
-            </div>
+        </div>
+      )}
+      {phase.kind === 'running' && (
+        <div className="stu-form-row" aria-live="polite" data-testid="studio-chat-running">
+          <span className="stu-label">EL ASISTENTE ESTÁ PENSANDO...</span>
+          <div className="stu-progress" data-indeterminate="true" aria-hidden="true">
+            <div />
+          </div>
+          <button
+            type="button"
+            className="stu-btn"
+            data-tone="ghost"
+            onClick={() => {
+              abortRef.current?.abort()
+              setPhase({ kind: 'idle' })
+            }}
+          >
+            DEJAR DE ESPERAR
+          </button>
+        </div>
+      )}
+      {phase.kind === 'confirm' && (
+        <div className="stu-confirm" role="alertdialog" aria-label="Confirmar el costo del asistente" data-testid="studio-chat-confirm">
+          <p>
+            <strong>{estimateText(phase.estimate)}</strong>
+          </p>
+          <p className="stu-help">Cada mensaje al asistente gasta créditos de la banda, aproximadamente lo mismo. Se confirma una vez por conversación; los cambios que proponga no tocan la sesión hasta que los apliques.</p>
+          <div className="stu-actions" data-align="end">
+            <button ref={confirmCancelRef} type="button" className="stu-btn" onClick={() => setPhase({ kind: 'idle' })} data-testid="studio-chat-cancel">
+              <X size={13} />
+              CANCELAR
+            </button>
             <button
               type="button"
               className="stu-btn"
-              data-tone="ghost"
+              data-tone="primary"
+              disabled={!phase.estimate.allowed}
+              title={phase.estimate.allowed ? undefined : 'Pasaría el tope mensual de la banda'}
               onClick={() => {
-                abortRef.current?.abort()
-                setPhase({ kind: 'idle' })
+                setApproved(phase.estimate)
+                void launch(phase.outgoing)
               }}
+              data-testid="studio-chat-launch"
             >
-              DEJAR DE ESPERAR
+              ENVIAR POR {formatUsd(phase.estimate.estimatedCostUsd)}
             </button>
           </div>
-        )}
-        {phase.kind === 'confirm' && (
-          <div className="stu-confirm" role="alertdialog" aria-label="Confirmar el costo del asistente" data-testid="studio-chat-confirm">
-            <p>
-              <strong>{estimateText(phase.estimate)}</strong>
-            </p>
-            <p className="stu-help">Cada mensaje al asistente gasta créditos de la banda, aproximadamente lo mismo. Se confirma una vez por conversación; los cambios que proponga no tocan la sesión hasta que los apliques.</p>
-            <div className="stu-actions" data-align="end">
-              <button ref={confirmCancelRef} type="button" className="stu-btn" onClick={() => setPhase({ kind: 'idle' })} data-testid="studio-chat-cancel">
-                <X size={13} />
-                CANCELAR
-              </button>
-              <button
-                type="button"
-                className="stu-btn"
-                data-tone="primary"
-                disabled={!phase.estimate.allowed}
-                title={phase.estimate.allowed ? undefined : 'Pasaría el tope mensual de la banda'}
-                onClick={() => {
-                  setApproved(phase.estimate)
-                  void launch(phase.outgoing)
-                }}
-                data-testid="studio-chat-launch"
-              >
-                ENVIAR POR {formatUsd(phase.estimate.estimatedCostUsd)}
-              </button>
-            </div>
+        </div>
+      )}
+      {phase.kind === 'pending' && (
+        <div className="stu-notice" data-tone="warn" role="alert" data-testid="studio-chat-pending">
+          <span>
+            <strong>RESPUESTA PENDIENTE.</strong> {phase.message}
+          </span>
+          <div className="stu-notice-actions">
+            <button type="button" className="stu-btn" data-tone="primary" onClick={() => void resume()} title="Consulta el mensaje ya enviado. No cobra de nuevo">
+              <RefreshCw size={12} />
+              CONSULTAR DE NUEVO
+            </button>
+            <button type="button" className="stu-btn" data-tone="ghost" onClick={() => setPhase({ kind: 'idle' })}>
+              OLVIDAR
+            </button>
           </div>
-        )}
-        {phase.kind === 'pending' && (
-          <div className="stu-notice" data-tone="warn" role="alert" data-testid="studio-chat-pending">
-            <span>
-              <strong>RESPUESTA PENDIENTE.</strong> {phase.message}
-            </span>
-            <div className="stu-notice-actions">
-              <button type="button" className="stu-btn" data-tone="primary" onClick={() => void resume()} title="Consulta el mensaje ya enviado. No cobra de nuevo">
+        </div>
+      )}
+      {phase.kind === 'failed' && (
+        <div className="stu-notice" data-tone="error" role="alert" data-testid="studio-chat-failed">
+          <span>
+            <strong>{phase.title}.</strong> {phase.message}
+          </span>
+          <div className="stu-notice-actions">
+            {phase.outgoing && (
+              <button type="button" className="stu-btn" disabled={!canRun} onClick={() => phase.outgoing && void send(phase.outgoing)}>
                 <RefreshCw size={12} />
-                CONSULTAR DE NUEVO
+                REINTENTAR
               </button>
-              <button type="button" className="stu-btn" data-tone="ghost" onClick={() => setPhase({ kind: 'idle' })}>
-                OLVIDAR
-              </button>
-            </div>
-          </div>
-        )}
-        {phase.kind === 'failed' && (
-          <div className="stu-notice" data-tone="error" role="alert" data-testid="studio-chat-failed">
-            <span>
-              <strong>{phase.title}.</strong> {phase.message}
-            </span>
-            <div className="stu-notice-actions">
-              {phase.outgoing && (
-                <button type="button" className="stu-btn" disabled={!canRun} onClick={() => phase.outgoing && void send(phase.outgoing)}>
-                  <RefreshCw size={12} />
-                  REINTENTAR
-                </button>
-              )}
-              <button type="button" className="stu-btn" data-tone="ghost" onClick={() => setPhase({ kind: 'idle' })}>
-                ENTENDIDO
-              </button>
-            </div>
-          </div>
-        )}
-
-        <form className="stu-chat-form" onSubmit={submit}>
-          <label className="stu-form-row">
-            <span className="stu-param-head">
-              <span className="stu-label">Mensaje · Enter envía, Shift+Enter salta de línea</span>
-              <span className="stu-label">
-                {draft.length}/{CHAT_MAX_USER_TEXT}
-              </span>
-            </span>
-            <textarea
-              className="stu-field stu-textarea"
-              rows={3}
-              value={draft}
-              maxLength={CHAT_MAX_USER_TEXT}
-              disabled={!canRun || busy}
-              placeholder={waitingDecision ? 'Aplica o descarta los cambios propuestos antes de seguir.' : 'Qué quieres cambiar en la sesión'}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                // Enter (o Ctrl+Enter) envia; Shift+Enter hace salto de linea. Mientras un metodo de
-                // entrada compone (acentos, IME) Enter confirma la letra y no envia.
-                if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  event.currentTarget.form?.requestSubmit()
-                }
-              }}
-              data-testid="studio-chat-input"
-            />
-          </label>
-          <div className="stu-actions">
-            <button type="submit" className="stu-btn" data-tone="primary" disabled={!canRun || busy || waitingDecision || draft.trim().length === 0 || !registry} data-testid="studio-chat-send">
-              <Send size={13} />
-              {approved ? `ENVIAR · ${formatUsd(approved.estimatedCostUsd)}` : 'ENVIAR...'}
+            )}
+            <button type="button" className="stu-btn" data-tone="ghost" onClick={() => setPhase({ kind: 'idle' })}>
+              ENTENDIDO
             </button>
-            {canContinue && !busy && (
-              <button type="button" className="stu-btn" disabled={!canRun} onClick={() => void send(messages)} title="El asistente ve qué cambios aplicaste o descartaste y sigue" data-testid="studio-chat-continue">
-                <MessageSquare size={13} />
-                CONTINUAR
-              </button>
-            )}
-            <span className="stu-bar-spacer" />
-            {messages.length > 0 && (
-              <button type="button" className="stu-btn" data-tone="ghost" disabled={busy || applying} onClick={restart} title="Empieza una conversación nueva; los cambios aplicados se quedan en la sesión" data-testid="studio-chat-restart">
-                <RotateCcw size={13} />
-                NUEVA
-              </button>
-            )}
           </div>
-        </form>
-      </div>
-    </details>
+        </div>
+      )}
+
+      <form className="stu-chat-form" onSubmit={submit}>
+        <div className="stu-chat-quick" role="group" aria-label="Pedidos rápidos">
+          {ASSISTANT_QUICK_ACTIONS.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              className="stu-btn"
+              data-size="small"
+              data-tone="ghost"
+              disabled={composeLocked || (action.needsTrack && !selectedTrack)}
+              title={action.needsTrack && !selectedTrack ? 'Elige una pista primero' : 'Llena el mensaje con un pedido que puedes editar antes de enviar'}
+              onClick={() => quick(action.id)}
+              data-testid={`studio-chat-quick-${action.id}`}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+        <ul className="stu-chat-chips" aria-label="Lo que el asistente sabe de dónde estás" data-testid="studio-chat-chips">
+          {chips.map((chip) => (
+            <li key={chip.id} className="stu-chip" data-chip={chip.id} data-testid={`studio-chat-chip-${chip.id}`}>
+              <span className="stu-chip-label">{chip.label}</span>
+              <span className="stu-chip-value">{chip.value}</span>
+            </li>
+          ))}
+        </ul>
+        <label className="stu-form-row">
+          <span className="stu-param-head">
+            <span className="stu-label">Mensaje · Enter envía, Shift+Enter salta de línea</span>
+            <span className="stu-label">
+              {draft.length}/{CHAT_MAX_USER_TEXT}
+            </span>
+          </span>
+          <textarea
+            ref={inputRef}
+            className="stu-field stu-textarea"
+            rows={3}
+            value={draft}
+            maxLength={CHAT_MAX_USER_TEXT}
+            disabled={!canRun || busy}
+            placeholder={audition ? 'Quédate con el cambio o deshazlo antes de seguir.' : waitingDecision ? 'Aplica o descarta los cambios propuestos antes de seguir.' : 'Qué quieres cambiar en la sesión'}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter (o Ctrl+Enter) envia; Shift+Enter hace salto de linea. Mientras un metodo de
+              // entrada compone (acentos, IME) Enter confirma la letra y no envia.
+              if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
+              }
+            }}
+            data-testid="studio-chat-input"
+          />
+        </label>
+        <div className="stu-actions">
+          <button type="submit" className="stu-btn" data-tone="primary" disabled={composeLocked || draft.trim().length === 0 || !registry} data-testid="studio-chat-send">
+            <Send size={13} />
+            {approved ? `ENVIAR · ${formatUsd(approved.estimatedCostUsd)}` : 'ENVIAR...'}
+          </button>
+          {canContinue && !busy && (
+            <button type="button" className="stu-btn" disabled={!canRun || audition !== null} onClick={() => void send(messages)} title="El asistente ve qué cambios aplicaste o descartaste y sigue" data-testid="studio-chat-continue">
+              <MessageSquare size={13} />
+              CONTINUAR
+            </button>
+          )}
+          <span className="stu-bar-spacer" />
+          {(messages.length > 0 || proposal) && (
+            <button type="button" className="stu-btn" data-tone="ghost" disabled={busy || applying || audition !== null} onClick={restart} title="Empieza una conversación nueva; los cambios aplicados se quedan en la sesión" data-testid="studio-chat-restart">
+              <RotateCcw size={13} />
+              NUEVA
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
   )
 }

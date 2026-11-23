@@ -87,6 +87,8 @@ export interface StudioCommandUi {
   openShortcuts: () => void
   openExport: () => void
   pickMidiFile: () => void
+  /** Muestra u oculta la ventana del asistente (Ctrl+J). */
+  toggleAssistant: () => void
 }
 
 export type StudioRegistry = CommandRegistry<StudioCommandCtx>
@@ -104,6 +106,7 @@ export class StudioUiBridge implements StudioCommandUi {
     openShortcuts: () => {},
     openExport: () => {},
     pickMidiFile: () => {},
+    toggleAssistant: () => {},
   }
 
   set(patch: Partial<StudioCommandUi>): void {
@@ -132,6 +135,10 @@ export class StudioUiBridge implements StudioCommandUi {
 
   pickMidiFile(): void {
     this.state.pickMidiFile()
+  }
+
+  toggleAssistant(): void {
+    this.state.toggleAssistant()
   }
 }
 
@@ -686,6 +693,7 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'view.toggle_editor': { run: () => controller.toggleEditor() },
     'view.command_palette': { run: () => ui.openPalette() },
     'view.shortcuts': { run: () => ui.openShortcuts() },
+    'view.toggle_assistant': { run: () => ui.toggleAssistant() },
 
     // ---- archivo ----
     'file.save_cloud': { run: () => void controller.saveToCloud() },

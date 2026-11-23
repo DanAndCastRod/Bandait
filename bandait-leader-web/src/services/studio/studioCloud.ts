@@ -682,6 +682,8 @@ export function sessionSummaryToWire(s: StudioSessionSummary): Record<string, un
     length_s: s.lengthS,
     playhead_beat: s.playheadBeat,
     selection: { track_id: s.selection.trackId, clip_ids: s.selection.clipIds, context: s.selection.context },
+    // Solo con loop activo: un Worker anterior a este campo rechaza claves desconocidas.
+    ...(s.loop ? { loop: { start_beat: s.loop.startBeat, end_beat: s.loop.endBeat } } : {}),
     tracks: s.tracks.map((t) => ({
       id: t.id,
       kind: t.kind,

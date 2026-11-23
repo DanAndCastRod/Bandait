@@ -182,6 +182,7 @@ const SPECS = [
   spec('view.shortcuts', 'Hoja de atajos', 'vista', 'global', ['?']),
   spec('view.zoom_fit', 'Ver toda la sesión', 'vista', 'global', ['Shift+Z']),
   spec('view.center_playhead', 'Centrar la vista en el cabezal', 'vista', 'global', ['Shift+C']),
+  spec('view.toggle_assistant', 'Mostrar u ocultar el asistente', 'vista', 'global', ['Ctrl+J']),
   // Archivo
   spec('file.save_cloud', 'Guardar en la nube', 'archivo', 'global', ['Ctrl+S']),
   spec('file.export', 'Exportar', 'archivo', 'global', ['Ctrl+E']),

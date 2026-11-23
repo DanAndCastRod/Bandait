@@ -236,7 +236,7 @@ function validateConversation(messages: ChatMessage[]): void {
 
 /** Forma de SessionSummary (STUDIO_V2.md 4.3.2): claves de la raiz y de cada pista, tipos y topes. */
 function validateSummary(raw: unknown): Record<string, unknown> {
-  const o = obj(raw, ['title', 'bpm', 'beats_per_bar', 'key', 'length_s', 'playhead_beat', 'selection', 'tracks', 'markers', 'master']);
+  const o = obj(raw, ['title', 'bpm', 'beats_per_bar', 'key', 'length_s', 'playhead_beat', 'selection', 'tracks', 'markers', 'master'], ['loop']);
   if (bytes(JSON.stringify(o)) > MAX_SUMMARY_BYTES) bad();
   str(o.title, 0, 400);
   num(o.bpm, 40, 260);
@@ -244,6 +244,11 @@ function validateSummary(raw: unknown): Record<string, unknown> {
   if (o.key !== null) str(o.key, 0, 12);
   num(o.length_s, 0, MAX_SESSION_SECONDS + 1);
   num(o.playhead_beat, 0, MAX_BEAT);
+  // Loop activo del transporte (opcional; el Hub lo omite sin loop): inicio antes del fin.
+  if (o.loop !== undefined && o.loop !== null) {
+    const loop = obj(o.loop, ['start_beat', 'end_beat']);
+    if (num(loop.start_beat, 0, MAX_BEAT) >= num(loop.end_beat, 0, MAX_BEAT)) bad();
+  }
   const selection = obj(o.selection, ['track_id', 'clip_ids', 'context']);
   if (selection.track_id !== null) str(selection.track_id, 1, 80);
   for (const clipId of arr(selection.clip_ids, 0, MAX_SUMMARY_CLIPS)) str(clipId, 1, 80);

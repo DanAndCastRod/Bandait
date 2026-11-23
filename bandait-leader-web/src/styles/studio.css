@@ -2346,3 +2346,353 @@
     animation: none;
   }
 }
+
+/* ---- Ventana del asistente (StudioAssistant) ---------------------------- */
+/* Tres modos: acoplado (columna de la rejilla .stu-main), flotante (fijo, posicion por transform)
+   y minimizado (pastilla). En pantallas angostas el flotante es una hoja inferior. */
+
+.stu-main[data-assist='true'] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.stu-main[data-dock='true'][data-assist='true'] {
+  grid-template-columns: minmax(0, 1fr) 328px auto;
+}
+.stu-assist {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--stu-line);
+  border-radius: 6px;
+  background: var(--stu-panel);
+  color: var(--stu-text);
+}
+.stu-assist[hidden] {
+  display: none;
+}
+.stu-assist[data-mode='docked'] {
+  position: sticky;
+  top: 10px;
+  width: 380px;
+  height: clamp(420px, calc(100dvh - 240px), 900px);
+  animation: stu-rise 220ms var(--stu-ease);
+}
+.stu-assist[data-mode='floating'] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 45;
+  width: 420px;
+  height: 560px;
+  border-color: #3a414b;
+  background: var(--stu-lane);
+  box-shadow:
+    0 0 0 1px #000,
+    0 18px 44px rgba(0, 0, 0, 0.6);
+  will-change: transform;
+  animation: stu-fade 160ms var(--stu-ease);
+}
+.stu-assist[data-sheet='true'] {
+  top: auto;
+  right: 0;
+  bottom: 0;
+  height: min(82dvh, 680px);
+  width: auto;
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  will-change: auto;
+  animation: stu-sheet-in 240ms var(--stu-ease);
+}
+@keyframes stu-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.stu-assist[data-dragging='true'] {
+  user-select: none;
+}
+.stu-assist-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 5px 6px 5px 12px;
+  border-bottom: 1px solid var(--stu-line);
+  color: var(--stu-play);
+}
+.stu-assist-bar[data-movable='true'] {
+  cursor: grab;
+  touch-action: none;
+}
+.stu-assist[data-dragging='true'] .stu-assist-bar[data-movable='true'] {
+  cursor: grabbing;
+}
+.stu-assist-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  color: var(--stu-text);
+}
+.stu-assist-title:focus-visible {
+  outline: 2px solid var(--stu-sel);
+  outline-offset: 2px;
+}
+.stu-assist-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.stu-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.stu-chat-intro {
+  margin: 0;
+}
+/* El campo del mensaje queda abajo aunque la conversacion este vacia. */
+.stu-assist .stu-chat-form {
+  margin-top: auto;
+}
+.stu-assist .stu-chat-log {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: none;
+}
+.stu-chat-restored {
+  padding: 2px 0;
+  text-align: center;
+}
+.stu-chat-call[data-state='listening'] {
+  border-left-color: var(--stu-play);
+}
+.stu-chat-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stu-chat-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.stu-chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stu-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--stu-line-soft);
+  border-radius: 3px;
+  background: var(--stu-well);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.stu-chip-label {
+  color: var(--stu-dim);
+  letter-spacing: 0.6px;
+}
+.stu-chip-value {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--stu-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stu-chip[data-chip='loop'] .stu-chip-value {
+  color: var(--stu-play);
+}
+/* Separador de la columna acoplada: se arrastra para cambiar el ancho. */
+.stu-assist-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -7px;
+  z-index: 2;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.stu-assist-edge::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 2px;
+  height: 44px;
+  margin-top: -22px;
+  border-radius: 1px;
+  background: var(--stu-sel);
+  opacity: 0;
+  transition: opacity 160ms var(--stu-ease);
+}
+.stu-assist-edge:hover::after,
+.stu-assist-edge:focus-visible::after,
+.stu-assist[data-dragging='true'] .stu-assist-edge::after {
+  opacity: 1;
+}
+.stu-assist-edge:focus-visible {
+  outline: 2px solid var(--stu-sel);
+  outline-offset: -4px;
+}
+/* Esquina para redimensionar la ventana flotante. */
+.stu-assist-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  border-bottom-right-radius: 6px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 52%, var(--stu-off) 52%, var(--stu-off) 60%, transparent 60%, transparent 70%, var(--stu-off) 70%, var(--stu-off) 78%, transparent 78%);
+}
+/* Pastilla del asistente minimizado. */
+.stu-assist-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--stu-line);
+  border-radius: 18px;
+  background: #000;
+  color: var(--stu-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  animation: stu-rise 220ms var(--stu-ease);
+  transition:
+    transform 140ms var(--stu-ease),
+    opacity 140ms var(--stu-ease);
+}
+.stu-assist-pill > svg {
+  color: var(--stu-play);
+}
+.stu-assist-pill:hover {
+  border-color: var(--stu-play);
+}
+.stu-assist-pill:active {
+  transform: scale(0.96);
+}
+.stu-assist-pill:focus-visible {
+  outline: 2px solid var(--stu-sel);
+  outline-offset: 2px;
+}
+.stu-assist-pill[data-state='pending'] {
+  border-color: var(--stu-warn);
+}
+.stu-assist-pill-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.stu-assist-pill[data-state='pending'] .stu-assist-pill-state {
+  color: var(--stu-warn);
+}
+.stu-assist-pill[data-state='thinking'] .stu-assist-pill-state {
+  color: var(--stu-sel);
+}
+.stu-assist-pill[data-state='listening'] .stu-assist-pill-state {
+  color: var(--stu-play);
+}
+.stu-assist-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: stu-assist-pulse 1.1s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+@keyframes stu-assist-pulse {
+  from {
+    opacity: 0.25;
+    transform: scale(0.75);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.stu-assist-kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--stu-line);
+  border-radius: 3px;
+  color: var(--stu-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.stu-job-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+}
+
+/* Hasta 768 px el Hub tiene su barra de pestanas fija abajo (56 px, HubNavbar): la hoja y la
+   pastilla quedan encima de ella, no tapadas. */
+@media (max-width: 768px) {
+  .stu-assist[data-sheet='true'] {
+    bottom: 56px;
+    height: min(calc(100dvh - 56px - 48px), 680px);
+  }
+  .stu-assist-pill {
+    bottom: 72px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .stu-main[data-assist='true'],
+  .stu-main[data-dock='true'][data-assist='true'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stu-assist[data-mode='docked'] {
+    position: relative;
+    top: auto;
+    width: auto !important;
+    height: min(72dvh, 640px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stu-assist,
+  .stu-assist-pill,
+  .stu-assist-dot {
+    animation: none;
+  }
+  .stu-assist-pill,
+  .stu-assist-edge::after {
+    transition: none;
+  }
+}
