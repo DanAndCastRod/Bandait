@@ -48,6 +48,7 @@ import {
   setVelocity,
   splitNotesAt,
   transpose,
+  invertSelection,
 } from '../src/services/studio/midiOps.ts'
 import { SMF_TICKS_PER_BEAT, midiClipExportNotes, parseSmf, writeSmf } from '../src/services/studio/smf.ts'
 import { StemCloudError, type CloudTarget } from '../src/services/stemCloud.ts'
@@ -70,6 +71,8 @@ import {
   maxTakeSeconds,
   referencedAssetFiles,
   takeClipWindows,
+  adjacentMarkerBeat,
+  tapTempo,
 } from '../src/services/studio/timelineMath.ts'
 import {
   JOB_DEFAULT_TARGET_LUFS,
@@ -170,6 +173,19 @@ import {
   updateMidiClip,
   updateSessionMeta,
   updateTrack,
+  clipsRangeS,
+  copyClips,
+  deleteClips,
+  duplicateTrack,
+  fadeClipsAt,
+  joinClips,
+  moveClipsBy,
+  moveTrack,
+  pasteClips,
+  pasteCursorAfterCopy,
+  pastePosition,
+  toggleClipsActive,
+  trimClipsAt,
 } from '../src/services/studio/sessionOps.ts'
 import {
   STUDIO_JOB_MAX_RETRIES,
@@ -2836,6 +2852,225 @@ async function verifyStudioV2() {
   })
 
   // =========================================================================
+  console.log('\nsessionOps.ts: atajos de DAW (portapapeles, seleccion multiple, unir, recortar)')
+
+  const idMaker = () => {
+    let n = 0
+    return (kind: 'audio' | 'midi') => `${kind === 'audio' ? 'clp' : 'mid'}_t${++n}`
+  }
+
+  await check('copiar y pegar un clip de audio: misma pista, justo despues del original, y Ctrl+V repetido encadena', () => {
+    const s = baseV2()
+    const board = copyClips(s, ['clp_1'])
+    assert.ok(board)
+    assert.equal(board.startS, 8)
+    assert.equal(board.spanS, 20)
+    // El cabezal no se movio desde que se copio: el pegado va detras del original.
+    const first = pastePosition(board, pasteCursorAfterCopy(board, 0), 0)
+    assert.equal(first.atS, 28)
+    const newId = idMaker()
+    const r1 = pasteClips(s, board, { atS: first.atS, trackId: 'trk_1', newClipId: newId })
+    assert.deepStrictEqual(r1.clipIds, ['clp_t1'])
+    const pasted = clip(r1.session, 'clp_t1')
+    assert.equal(findClip(r1.session, 'clp_t1')?.track.id, 'trk_1')
+    assert.equal(pasted.startS, 28)
+    assert.equal(pasted.lengthS, 20)
+    assert.equal(pasted.assetId, 'ast_v1')
+    assert.equal(pasted.active, true)
+    assert.equal(pasted.takeGroup, null)
+    // El original no cambia.
+    assert.equal(clip(r1.session, 'clp_1').startS, 8)
+    // Segundo Ctrl+V sin mover el cabezal: detras de la copia anterior.
+    const second = pastePosition(board, first.cursor, 0)
+    assert.equal(second.atS, 48)
+    const r2 = pasteClips(r1.session, board, { atS: second.atS, trackId: 'trk_1', newClipId: newId })
+    assert.deepStrictEqual(findTrack(r2.session, 'trk_1')?.clips.map((c) => c.startS), [8, 28, 48])
+    // Con el cabezal movido, el pegado va al cabezal.
+    assert.equal(pastePosition(board, second.cursor, 100).atS, 100)
+    assert.equal(pastePosition(board, pastePosition(board, second.cursor, 100).cursor, 100).atS, 120)
+  })
+
+  await check('pegar: en la pista elegida si es compatible; si no, en la de origen; pista borrada pide otra', () => {
+    const s = baseV2()
+    const newId = idMaker()
+    const board = copyClips(s, ['mid_p1'])
+    assert.ok(board)
+    // trk_3 es de instrumento: se pega ahi, en beats (8 s = beat 16 a 120 BPM).
+    const inOther = pasteClips(s, board, { atS: 40, trackId: 'trk_3', newClipId: newId })
+    assert.equal(findMidiClip(inOther.session, inOther.clipIds[0])?.track.id, 'trk_3')
+    assert.equal(midiClip(inOther.session, inOther.clipIds[0]).startBeat, 80)
+    assert.deepStrictEqual(midiClip(inOther.session, inOther.clipIds[0]).notes, midiClip(s, 'mid_p1').notes)
+    // trk_1 es de audio: no admite MIDI, el clip va a su pista de origen.
+    const inAudio = pasteClips(s, board, { atS: 40, trackId: 'trk_1', newClipId: newId })
+    assert.equal(findMidiClip(inAudio.session, inAudio.clipIds[0])?.track.id, 'trk_2')
+    // De dos pistas: cada clip a la suya aunque haya pista elegida, conservando la distancia.
+    const mixed = copyClips(s, ['clp_1', 'mid_d1'])
+    assert.ok(mixed)
+    assert.equal(mixed.startS, 0)
+    assert.equal(mixed.spanS, 28)
+    const both = pasteClips(s, mixed, { atS: 100, trackId: 'trk_3', newClipId: newId })
+    assert.equal(both.clipIds.length, 2)
+    const audioId = both.clipIds.find((id) => findClip(both.session, id))
+    const midiId = both.clipIds.find((id) => findMidiClip(both.session, id))
+    assert.ok(audioId && midiId)
+    assert.equal(findClip(both.session, audioId)?.track.id, 'trk_1')
+    assert.equal(clip(both.session, audioId).startS, 108)
+    assert.equal(findMidiClip(both.session, midiId)?.track.id, 'trk_3')
+    assert.equal(midiClip(both.session, midiId).startBeat, 200)
+    // La pista de origen ya no existe: con una pista compatible elegida va ahi; sin ella, error.
+    const gone = removeTrack(s, { trackId: 'trk_2' })
+    const rescued = pasteClips(gone, board, { atS: 0, trackId: 'trk_4', newClipId: newId })
+    assert.equal(findMidiClip(rescued.session, rescued.clipIds[0])?.track.id, 'trk_4')
+    sessionError(() => pasteClips(gone, board, { atS: 0, trackId: 'trk_1', newClipId: newId }), 'bad_id', 'track_id')
+  })
+
+  await check('cortar y pegar sin mover el cabezal devuelve el clip a su lugar', () => {
+    const s = baseV2()
+    const board = copyClips(s, ['clp_1'])
+    assert.ok(board)
+    const cut = deleteClips(s, ['clp_1'])
+    assert.equal(findClip(cut, 'clp_1'), null)
+    const at = pastePosition(board, { playheadS: 3, nextS: board.startS }, 3)
+    assert.equal(at.atS, 8)
+    const back = pasteClips(cut, board, { atS: at.atS, trackId: 'trk_1', newClipId: idMaker() })
+    assert.equal(clip(back.session, back.clipIds[0]).startS, 8)
+  })
+
+  await check('seleccion multiple: borrar, mover juntos (acotado al inicio) y rango de la seleccion', () => {
+    const s = baseV2()
+    const both = ['clp_1', 'mid_p1', 'no_existe']
+    assert.deepStrictEqual(clipsRangeS(s, ['clp_1', 'mid_d1']), { startS: 0, endS: 28 })
+    assert.equal(clipsRangeS(s, ['no_existe']), null)
+    const gone = deleteClips(s, both)
+    assert.equal(findClip(gone, 'clp_1'), null)
+    assert.equal(findMidiClip(gone, 'mid_p1'), null)
+    assert.ok(findMidiClip(gone, 'mid_d1'))
+    assert.equal(deleteClips(s, ['no_existe']), s)
+    // clp_1 empieza en 8 s y mid_p1 en el beat 16 (8 s): -10 s se acota a -8 s para los dos.
+    const left = moveClipsBy(s, both, -10)
+    assert.equal(clip(left, 'clp_1').startS, 0)
+    assert.equal(midiClip(left, 'mid_p1').startBeat, 0)
+    const right = moveClipsBy(s, both, 2)
+    assert.equal(clip(right, 'clp_1').startS, 10)
+    assert.equal(midiClip(right, 'mid_p1').startBeat, 20)
+    assert.equal(moveClipsBy(s, both, 0), s)
+    // Mover deja a cada clip en su pista.
+    assert.equal(findClip(right, 'clp_1')?.track.id, 'trk_1')
+  })
+
+  await check('unir clips MIDI: dividir y unir deja el clip como estaba; con hueco, el hueco queda en silencio', () => {
+    const s = baseV2()
+    const split = splitMidiClip(s, { clipId: 'mid_d1', atBeat: 4, newClipId: 'mid_half' })
+    assert.equal(findTrack(split, 'trk_3')?.midiClips.length, 2)
+    const joined = joinClips(split, ['mid_d1', 'mid_half'])
+    assert.deepStrictEqual(joined.clipIds, ['mid_d1'])
+    const back = midiClip(joined.session, 'mid_d1')
+    assert.equal(back.startBeat, 0)
+    assert.equal(back.lengthBeats, 8)
+    assert.deepStrictEqual(back.notes, midiClip(s, 'mid_d1').notes)
+    assert.equal(findTrack(joined.session, 'trk_3')?.midiClips.length, 1)
+    // Con un clip mas adelante: el unido va del primero al ultimo.
+    const later = addMidiClip(s, { trackId: 'trk_3', clip: { id: 'mid_late', startBeat: 12, lengthBeats: 4, loop: false, loopBeats: 4, notes: [note(40, 1, 1)] } })
+    const gap = joinClips(later, ['mid_d1', 'mid_late'])
+    const merged = midiClip(gap.session, 'mid_d1')
+    assert.equal(merged.lengthBeats, 16)
+    assert.equal(merged.notes.length, midiClip(s, 'mid_d1').notes.length + 1)
+    assert.ok(merged.notes.some((n) => n.pitch === 40 && n.start === 13))
+    // Un solo clip, o clips de pistas distintas: nada que unir.
+    assert.equal(joinClips(s, ['mid_d1']).session, s)
+    assert.equal(joinClips(s, ['mid_d1', 'mid_p1']).session, s)
+  })
+
+  await check('unir clips de audio: solo trozos seguidos del mismo audio (deshace una division)', () => {
+    const s = baseV2()
+    const split = splitClip(s, { clipId: 'clp_1', atS: 18, newClipId: 'clp_half' })
+    const joined = joinClips(split, ['clp_1', 'clp_half'])
+    assert.deepStrictEqual(joined.clipIds, ['clp_1'])
+    const back = clip(joined.session, 'clp_1')
+    assert.equal(back.startS, 8)
+    assert.equal(back.offsetS, 0)
+    assert.equal(back.lengthS, 20)
+    assert.equal(back.fadeOutS, 0.05)
+    assert.equal(findTrack(joined.session, 'trk_1')?.clips.length, 1)
+    // Separados por un hueco ya no son seguidos: no se unen.
+    const apart = moveClip(split, { clipId: 'clp_half', startS: 19 })
+    assert.equal(joinClips(apart, ['clp_1', 'clp_half']).session, apart)
+  })
+
+  await check('recortar inicio y final al cabezal; fundidos al cabezal; fuera del clip no cambia nada', () => {
+    const s = baseV2()
+    const start = trimClipsAt(s, ['clp_1', 'mid_p1'], 'start', 10)
+    assert.equal(clip(start, 'clp_1').startS, 10)
+    assert.equal(clip(start, 'clp_1').offsetS, 2)
+    assert.equal(clip(start, 'clp_1').lengthS, 18)
+    assert.equal(midiClip(start, 'mid_p1').startBeat, 20)
+    assert.equal(midiClip(start, 'mid_p1').lengthBeats, 12)
+    const end = trimClipsAt(s, ['clp_1'], 'end', 20)
+    assert.equal(clip(end, 'clp_1').startS, 8)
+    assert.equal(clip(end, 'clp_1').lengthS, 12)
+    assert.equal(trimClipsAt(s, ['clp_1'], 'start', 5), s)
+    assert.equal(trimClipsAt(s, ['clp_1'], 'end', 30), s)
+    assert.equal(clip(fadeClipsAt(s, ['clp_1'], 'in', 9), 'clp_1').fadeInS, 1)
+    close(clip(fadeClipsAt(s, ['clp_1'], 'out', 26), 'clp_1').fadeOutS, 2)
+    assert.equal(fadeClipsAt(s, ['mid_p1'], 'in', 10), s)
+  })
+
+  await check('silenciar clips de audio (active false) y volver a hacerlos sonar; los MIDI se ignoran', () => {
+    const s = baseV2()
+    const muted = toggleClipsActive(s, ['clp_1', 'mid_p1'])
+    assert.equal(clip(muted, 'clp_1').active, false)
+    assert.equal(midiClip(muted, 'mid_p1'), midiClip(s, 'mid_p1'))
+    const back = toggleClipsActive(muted, ['clp_1'])
+    assert.equal(clip(back, 'clp_1').active, true)
+    assert.equal(toggleClipsActive(s, ['mid_p1']), s)
+  })
+
+  await check('duplicar y mover pistas', () => {
+    const s = baseV2()
+    const dup = duplicateTrack(s, { trackId: 'trk_2', newTrackId: 'trk_dup', newClipId: idMaker() })
+    assert.deepStrictEqual(dup.tracks.map((t) => t.id), ['trk_1', 'trk_2', 'trk_dup', 'trk_3', 'trk_4'])
+    const copy = findTrack(dup, 'trk_dup')
+    const original = findTrack(s, 'trk_2')
+    assert.ok(copy && original)
+    assert.equal(copy.name, `${original.name} copia`)
+    assert.deepStrictEqual(copy.instrument, original.instrument)
+    assert.equal(copy.midiClips.length, original.midiClips.length)
+    assert.notEqual(copy.midiClips[0].id, original.midiClips[0].id)
+    assert.deepStrictEqual(copy.midiClips[0].notes, original.midiClips[0].notes)
+    sessionError(() => duplicateTrack(s, { trackId: 'trk_2', newTrackId: 'trk_1', newClipId: idMaker() }), 'duplicate_id')
+    assert.deepStrictEqual(moveTrack(s, { trackId: 'trk_1', toIndex: 2 }).tracks.map((t) => t.id), ['trk_2', 'trk_3', 'trk_1', 'trk_4'])
+    assert.deepStrictEqual(moveTrack(s, { trackId: 'trk_4', toIndex: 99 }).tracks.map((t) => t.id), ['trk_1', 'trk_2', 'trk_3', 'trk_4'])
+    assert.equal(moveTrack(s, { trackId: 'trk_1', toIndex: -1 }), s)
+  })
+
+  await check('piano roll: invertir la seleccion de notas', () => {
+    assert.deepStrictEqual(invertSelection(5, [0, 2]), [1, 3, 4])
+    assert.deepStrictEqual(invertSelection(3, []), [0, 1, 2])
+    assert.deepStrictEqual(invertSelection(3, [0, 1, 2, 7]), [])
+  })
+
+  await check('tap tempo y marca anterior o siguiente', () => {
+    let state = tapTempo([], 0, 40, 260)
+    assert.equal(state.bpm, null)
+    state = tapTempo(state.taps, 500, 40, 260)
+    assert.equal(state.bpm, null)
+    state = tapTempo(state.taps, 1000, 40, 260)
+    assert.equal(state.bpm, 120)
+    state = tapTempo(state.taps, 1480, 40, 260)
+    close(state.bpm ?? 0, 121.6, 0.05)
+    // Una pausa larga empieza de nuevo.
+    assert.deepStrictEqual(tapTempo(state.taps, 9000, 40, 260).taps, [9000])
+    // Acotado al rango de tempo de la sesion.
+    assert.equal(tapTempo([0, 100], 200, 40, 260).bpm, 260)
+    const marks = [{ beat: 0 }, { beat: 16 }, { beat: 48 }]
+    assert.equal(adjacentMarkerBeat(marks, 10, 1), 16)
+    assert.equal(adjacentMarkerBeat(marks, 16, 1), 48)
+    assert.equal(adjacentMarkerBeat(marks, 16, -1), 0)
+    assert.equal(adjacentMarkerBeat(marks, 48, 1), null)
+    assert.equal(adjacentMarkerBeat(marks, 0, -1), null)
+  })
+
+  // =========================================================================
   console.log('\ncommands.ts y keymap.ts (atajos y paleta)')
 
   const specs = STUDIO_COMMAND_SPECS
@@ -2890,6 +3125,63 @@ async function verifyStudioV2() {
         shiftKey: p.shift || p.key === '?',
       })
       assert.equal(matchEvent(event, context, false, specs, map, 'other'), id, `${shortcut} en ${context}`)
+    }
+  })
+
+  await check('atajos de DAW: cada atajo nuevo llega a su comando en su contexto, sin Tab ni Ctrl+J', () => {
+    const map = defaultKeymap(specs)
+    assert.deepStrictEqual(findConflicts(specs, map), [])
+    const cases: Array<[KeyEventLike, 'timeline' | 'piano_roll', string]> = [
+      [keyEvent('KeyC', 'c', { ctrlKey: true }), 'timeline', 'edit.copy'],
+      [keyEvent('KeyV', 'v', { ctrlKey: true }), 'timeline', 'edit.paste'],
+      [keyEvent('KeyX', 'x', { ctrlKey: true }), 'timeline', 'edit.cut'],
+      [keyEvent('KeyD', 'd', { ctrlKey: true }), 'timeline', 'edit.duplicate'],
+      [keyEvent('KeyA', 'a', { ctrlKey: true }), 'timeline', 'edit.select_all'],
+      [keyEvent('KeyJ', 'J', { ctrlKey: true, shiftKey: true }), 'timeline', 'edit.join'],
+      [keyEvent('Digit0', '0'), 'timeline', 'clip.toggle_mute'],
+      [keyEvent('BracketLeft', '[', { altKey: true }), 'timeline', 'clip.trim_start'],
+      [keyEvent('BracketRight', ']', { altKey: true }), 'timeline', 'clip.trim_end'],
+      [keyEvent('End', 'End'), 'timeline', 'transport.go_to_end'],
+      [keyEvent('Comma', ','), 'timeline', 'transport.bar_back'],
+      [keyEvent('Period', '.'), 'piano_roll', 'transport.bar_forward'],
+      [keyEvent('ArrowLeft', 'ArrowLeft', { ctrlKey: true }), 'timeline', 'transport.prev_marker'],
+      [keyEvent('ArrowRight', 'ArrowRight', { ctrlKey: true }), 'piano_roll', 'transport.next_marker'],
+      [keyEvent('KeyL', 'l', { ctrlKey: true }), 'timeline', 'transport.loop_selection'],
+      [keyEvent('KeyT', 'T', { shiftKey: true }), 'timeline', 'transport.tap_tempo'],
+      [keyEvent('KeyK', 'K', { shiftKey: true }), 'timeline', 'transport.toggle_count_in'],
+      [keyEvent('KeyZ', 'Z', { shiftKey: true }), 'timeline', 'view.zoom_fit'],
+      [keyEvent('KeyC', 'C', { shiftKey: true }), 'timeline', 'view.center_playhead'],
+      [keyEvent('KeyM', 'M', { shiftKey: true }), 'timeline', 'marker.add_here'],
+      [keyEvent('KeyR', 'R', { shiftKey: true }), 'timeline', 'track.toggle_arm'],
+      [keyEvent('F2', 'F2'), 'timeline', 'track.rename'],
+      [keyEvent('KeyD', 'D', { ctrlKey: true, shiftKey: true }), 'timeline', 'track.duplicate'],
+      [keyEvent('ArrowUp', 'ArrowUp', { altKey: true }), 'timeline', 'track.move_up'],
+      [keyEvent('ArrowDown', 'ArrowDown', { altKey: true }), 'timeline', 'track.move_down'],
+      [keyEvent('Digit9', '9'), 'timeline', 'track.select_9'],
+      [keyEvent('ArrowUp', 'ArrowUp', { altKey: true }), 'piano_roll', 'notes.velocity_up'],
+      [keyEvent('ArrowDown', 'ArrowDown', { altKey: true }), 'piano_roll', 'notes.velocity_down'],
+      [keyEvent('ArrowRight', 'ArrowRight', { shiftKey: true }), 'piano_roll', 'notes.lengthen'],
+      [keyEvent('ArrowLeft', 'ArrowLeft', { shiftKey: true }), 'piano_roll', 'notes.shorten'],
+      [keyEvent('KeyI', 'i', { ctrlKey: true }), 'piano_roll', 'notes.invert_selection'],
+      [keyEvent('KeyL', 'L', { shiftKey: true }), 'piano_roll', 'notes.legato'],
+      [keyEvent('KeyD', 'd', { ctrlKey: true }), 'piano_roll', 'edit.duplicate'],
+      [keyEvent('KeyA', 'a', { ctrlKey: true }), 'piano_roll', 'edit.select_all'],
+    ]
+    for (const [event, context, id] of cases) assert.equal(matchEvent(event, context, false, specs, map, 'other'), id, `${id} en ${context}`)
+    // Los atajos de la linea de tiempo no se cuelan en el piano roll ni al reves.
+    assert.equal(matchEvent(keyEvent('Digit0', '0'), 'piano_roll', false, specs, map, 'other'), null)
+    assert.equal(matchEvent(keyEvent('ArrowRight', 'ArrowRight', { shiftKey: true }), 'timeline', false, specs, map, 'other'), null)
+    // Nunca Tab, y Ctrl+J queda para el asistente (view.toggle_assistant, si ya existe).
+    for (const c of specs) {
+      assert.ok(!c.defaultShortcuts.some((s) => /(^|\+)Tab$/.test(s)), `${c.id} usa Tab`)
+      if (c.defaultShortcuts.includes('Ctrl+J')) assert.equal(c.id, 'view.toggle_assistant')
+    }
+    // Ningun atajo nuevo es una letra sola de la fila del teclado musical (A..K, Z, X): serian notas.
+    const newIds = cases.map(([, , id]) => id).filter((id) => !id.startsWith('edit.'))
+    for (const id of newIds) {
+      const c = specs.find((s) => s.id === id)
+      assert.ok(c, id)
+      for (const s of c.defaultShortcuts) assert.ok(!/^[ASDFGHJKWETYUZX]$/.test(s), `${id}: ${s}`)
     }
   })
 
@@ -2958,8 +3250,10 @@ async function verifyStudioV2() {
     assert.equal(matchEvent(up, 'piano_roll', false, specs, map, 'other'), 'notes.transpose_up')
     assert.equal(matchEvent(up, 'timeline', false, specs, map, 'other'), 'track.select_prev')
     assert.equal(matchEvent(up, 'mixer', false, specs, map, 'other'), null)
-    assert.equal(matchEvent(keyEvent('Digit2', '2'), 'timeline', false, specs, map, 'other'), null)
+    // 1..9 eligen pista en la linea de tiempo y son herramientas (1..5) en el piano roll.
+    assert.equal(matchEvent(keyEvent('Digit2', '2'), 'timeline', false, specs, map, 'other'), 'track.select_2')
     assert.equal(matchEvent(keyEvent('Digit2', '2'), 'piano_roll', false, specs, map, 'other'), 'tool.draw')
+    assert.equal(matchEvent(keyEvent('Digit2', '2'), 'mixer', false, specs, map, 'other'), null)
     assert.equal(matchEvent({ ...space, repeat: true }, 'timeline', false, specs, map, 'other'), null)
     assert.equal(matchEvent({ ...keyEvent('ArrowLeft', 'ArrowLeft'), repeat: true }, 'piano_roll', false, specs, map, 'other'), 'notes.nudge_left')
     assert.equal(matchEvent(keyEvent('KeyZ', 'z', { metaKey: true }), 'timeline', false, specs, map, 'mac'), 'edit.undo')

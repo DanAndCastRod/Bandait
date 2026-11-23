@@ -43,9 +43,12 @@ const DEFAULT_MAX_FILE_MB = 200;
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, code: string) {
+  /** Detalle publico y estable (`listen_disabled`); va como `detail` en el cuerpo del error. */
+  detail: string | null;
+  constructor(status: number, code: string, detail: string | null = null) {
     super(code);
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -533,7 +536,9 @@ export async function handle(
   try {
     res = await route(req, env, fetchFn, { ...defaultStudioDeps(), ...deps });
   } catch (err) {
-    res = err instanceof ApiError ? json(err.status, { error: err.message }) : json(500, { error: 'internal' });
+    res = err instanceof ApiError
+      ? json(err.status, err.detail ? { error: err.message, detail: err.detail } : { error: err.message })
+      : json(500, { error: 'internal' });
   }
   for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
   return res;

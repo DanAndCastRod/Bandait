@@ -8,6 +8,7 @@ import { StudioCommandPalette } from '../components/studio/StudioCommandPalette'
 import { createStudioCommandRegistry, StudioUiBridge, studioKeymapStorage, type StudioCommandCtx, type StudioRegistry } from '../components/studio/studioCommandHandlers'
 import { StudioExportDialog } from '../components/studio/StudioExportDialog'
 import { StudioShortcuts } from '../components/studio/StudioShortcuts'
+import { StudioAssistant } from '../components/studio/StudioAssistant'
 import { StudioInspector } from '../components/studio/StudioInspector'
 import { StudioJobsPanel } from '../components/studio/StudioJobsPanel'
 import { StudioMixer } from '../components/studio/StudioMixer'
@@ -26,6 +27,14 @@ import {
 } from '../components/studio/studioState'
 import { cloudBandKey, type CloudTarget } from '../services/stemCloud'
 import { stemCloudTarget } from '../services/stemCloudConfig'
+import {
+  ASSISTANT_LAYOUT_STORAGE_KEY,
+  parseAssistantLayout,
+  serializeAssistantLayout,
+  toggleAssistantLayout,
+  withAssistantMode,
+  type AssistantLayout,
+} from '../services/studio/assistantWindow'
 import { listStemSongs } from '../services/stemStore'
 import { sectionSpans, type SectionSpan } from '../services/stemTiming'
 import { commandShortcuts, displayShortcut, loadKeymap, matchEvent } from '../services/studio/commands'
@@ -125,6 +134,10 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
   useEffect(() => {
     controller.setSections(sections)
   }, [controller, sections])
+  // El asistente del chat manda la progresion de acordes de la cancion ligada (sin letra).
+  useEffect(() => {
+    controller.setLinkedSong(song ?? null)
+  }, [controller, song])
 
   // ---- comandos: un solo registro para el teclado, la paleta y el asistente ----
   // Lo que el registro lee de la vista va por un puente que se actualiza en un efecto: el
@@ -133,6 +146,17 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const midiFileRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // Ventana del asistente: modo, posicion y tamano se recuerdan en este navegador.
+  const [assistLayout, setAssistLayout] = useState<AssistantLayout>(() =>
+    parseAssistantLayout(studioKeymapStorage.getItem(ASSISTANT_LAYOUT_STORAGE_KEY), { width: window.innerWidth, height: window.innerHeight })
+  )
+  useEffect(() => {
+    studioKeymapStorage.setItem(ASSISTANT_LAYOUT_STORAGE_KEY, serializeAssistantLayout(assistLayout))
+  }, [assistLayout])
+  const toggleAssistant = useCallback(() => setAssistLayout(toggleAssistantLayout), [setAssistLayout])
+  const openAssistant = useCallback(() => setAssistLayout((layout) => (layout.mode === 'minimized' ? withAssistantMode(layout, layout.lastOpen) : layout)), [setAssistLayout])
+
   const [uiBridge] = useState(() => new StudioUiBridge())
   useEffect(() => {
     uiBridge.set({
@@ -142,8 +166,9 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
       openShortcuts: () => setShortcutsOpen(true),
       openExport,
       pickMidiFile: () => midiFileRef.current?.click(),
+      toggleAssistant,
     })
-  }, [uiBridge, recordAllowed, recordHint, openExport])
+  }, [uiBridge, recordAllowed, recordHint, openExport, toggleAssistant])
   const registry = useMemo(() => createStudioCommandRegistry(controller, uiBridge), [controller, uiBridge])
   const [keymap, setKeymap] = useState<Keymap>(() => loadKeymap(studioKeymapStorage, registry.list()))
 
@@ -180,6 +205,15 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
       const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
       if (plain && controller.snapshot().midi.keyboard && isComputerKeyboardCode(event.code)) return
       const inText = isTextFieldTarget(target)
+      // Escribiendo en el asistente, su atajo con modificador (Ctrl+J) lo sigue ocultando.
+      if (inText && (event.ctrlKey || event.metaKey || event.altKey) && target instanceof Element && target.closest('[data-studio-assistant]')) {
+        const toggle = registry.get('view.toggle_assistant')
+        if (toggle && matchEvent(event, commandContext(), false, [toggle], keymap, PLATFORM) === toggle.id) {
+          event.preventDefault()
+          runCommand(toggle.id, 'keyboard')
+        }
+        return
+      }
       if (target instanceof HTMLElement && !inText) {
         // En un control, espacio, Enter y Tab son del control (Tab sigue moviendo el foco). En un
         // deslizador, las flechas lo mueven.
@@ -324,6 +358,17 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
         >
           <Keyboard size={14} />
         </button>
+        <button
+          type="button"
+          className="stu-btn"
+          data-on={assistLayout.mode !== 'minimized'}
+          aria-pressed={assistLayout.mode !== 'minimized'}
+          onClick={toggleAssistant}
+          title={`Mostrar u ocultar el asistente (${shortcutLabel(registry, keymap, 'view.toggle_assistant')})`}
+          data-testid="studio-assistant-toggle"
+        >
+          ASISTENTE
+        </button>
         <button type="button" className="stu-btn" data-on={dockOpen} aria-pressed={dockOpen} onClick={() => setDockOpen((value) => !value)} title="Mostrar u ocultar los paneles laterales" data-testid="studio-dock-toggle">
           PANELES
         </button>
@@ -405,7 +450,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
 
       <StudioTransport controller={controller} recordAllowed={recordAllowed} recordHint={recordHint} />
 
-      <div className="stu-main" data-dock={dockOpen}>
+      <div className="stu-main" data-dock={dockOpen} data-assist={assistLayout.mode === 'docked'}>
         <StudioTimeline controller={controller} recordAllowed={recordAllowed} />
 
         {/* El panel lateral se oculta sin desmontarse: un trabajo de IA en curso no se pierde. */}
@@ -432,10 +477,20 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
               {dockTab === 'inspector' && <StudioInspector controller={controller} />}
               {/* El panel de IA queda montado al cambiar de pestana, por la misma razon. */}
               <div className="stu-dock-keep" hidden={dockTab !== 'jobs'}>
-                <StudioJobsPanel controller={controller} registry={registry} commandContext={commandContext} />
+                <StudioJobsPanel controller={controller} onOpenAssistant={openAssistant} assistantShortcut={shortcutLabel(registry, keymap, 'view.toggle_assistant')} />
               </div>
             </div>
           </aside>
+
+        {/* Montado siempre (tambien minimizado): una respuesta del asistente en camino no se pierde. */}
+        <StudioAssistant
+          controller={controller}
+          registry={registry}
+          commandContext={commandContext}
+          layout={assistLayout}
+          onLayout={setAssistLayout}
+          shortcut={shortcutLabel(registry, keymap, 'view.toggle_assistant')}
+        />
       </div>
 
       <StudioMixer controller={controller} onEditFx={showInspector} onExport={openExport} />

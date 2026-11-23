@@ -45,11 +45,13 @@ import {
   addNotes,
   duplicateNotes,
   gridBeats,
+  invertSelection,
   legato,
   moveNotes,
   normalizeNotes,
   quantize,
   removeNotes,
+  resizeNotes,
   setVelocity,
   splitNotesAt,
   transpose,
@@ -57,9 +59,13 @@ import {
 import { computePeaks, PEAKS_BASE_BUCKET } from '../../services/studio/peaks'
 import { StudioRecorder } from '../../services/studio/recorder'
 import { midiClipExportNotes, parseSmf, SMF_DRUM_CHANNEL, writeSmf } from '../../services/studio/smf'
-import { cloudHasOtherVersion, referencedAssetFiles, takeClipWindows, type ClipWindow } from '../../services/studio/timelineMath'
+import { adjacentMarkerBeat, cloudHasOtherVersion, referencedAssetFiles, takeClipWindows, tapTempo as computeTapTempo, TAP_TEMPO_RESET_MS, type ClipWindow } from '../../services/studio/timelineMath'
 import {
   assetFileName,
+  beatsToSeconds,
+  sessionEndSeconds,
+  STUDIO_MARKER_KIND_LABELS,
+  STUDIO_MAX_MARKERS,
   defaultInstrument,
   defaultInstrumentTrack,
   defaultMidiClip,
@@ -105,23 +111,34 @@ import {
   addInstrumentTrack,
   addMidiClip,
   addTrack,
-  deleteClip,
-  duplicateClip,
-  duplicateMidiClip,
-  moveMidiClip,
-  removeMidiClip,
+  clipsRangeS,
+  copyClips,
+  deleteClips,
+  duplicateTrack,
+  fadeClipsAt,
+  joinClips,
+  moveClipsBy,
+  moveTrack,
+  pasteClips,
+  pasteCursorAfterCopy,
+  pastePosition,
   removeTrack,
   removeUnusedAssets,
   setActiveTake,
   setFrozenAsset,
   setInstrument,
+  setMarkers,
   setTrackFx,
   snapTime,
   splitClip,
   splitMidiClip,
+  toggleClipsActive,
+  trimClipsAt,
   updateMidiClip,
   updateSessionMeta,
   updateTrack,
+  type ClipClipboard,
+  type PasteCursor,
 } from '../../services/studio/sessionOps'
 import * as studioCloud from '../../services/studio/studioCloud'
 import * as studioStore from '../../services/studio/studioStore'
@@ -137,6 +154,7 @@ import type {
   MidiInputDevice,
   MidiNoteEvent,
   MidiTake,
+  MixMetrics,
   NoteSelection,
   OrphanTake,
   PlayStart,
@@ -152,8 +170,12 @@ import type {
   StudioHistory,
   StudioInputDevice,
   StudioJobAsset,
+  StudioChatListen,
   TrackPatch,
 } from '../../services/studio/types'
+import type { ChatMixMeasurement, ChatSummaryExtras } from '../../services/studio/chatContext'
+import { measureMix, renderListenExcerpt, type MeasureMixOptions } from '../../services/studio/chatAudio'
+import type { Song } from '../../types/hub'
 
 // ---------------------------------------------------------------------------
 // Tipos de la foto
@@ -232,8 +254,15 @@ export interface StudioMidiState {
   quantizeOnStop: boolean
 }
 
-/** Pedidos de vista que el registro de comandos manda al editor activo (zoom). */
-export type StudioViewCommand = { type: 'zoom'; direction: 1 | -1 }
+/**
+ * Pedidos de vista que el registro de comandos manda a la interfaz: zoom, ver toda la sesion,
+ * centrar en el cabezal (los atiende el editor activo) y renombrar una pista (su cabecera).
+ */
+export type StudioViewCommand =
+  | { type: 'zoom'; direction: 1 | -1 }
+  | { type: 'fit' }
+  | { type: 'center' }
+  | { type: 'rename_track'; trackId: string }
 
 export interface StudioSnapshot {
   session: StudioSession
@@ -241,8 +270,14 @@ export interface StudioSnapshot {
   /** null mientras carga audios: { done, total }. */
   loading: EngineLoadProgress | null
   ready: boolean
-  /** Clip elegido: de audio o MIDI (los ids son unicos entre los dos). */
+  /** Clip elegido principal: de audio o MIDI (los ids son unicos entre los dos). */
   selectedClipId: string | null
+  /**
+   * Todos los clips elegidos (Shift o Ctrl + clic, Ctrl+A), con el principal incluido. Vacio si
+   * no hay clip elegido. Copiar, cortar, borrar, duplicar, mover, dividir y cuantizar actuan sobre
+   * todos; lo que trabaja con un solo clip (inspector, piano roll) usa `selectedClipId`.
+   */
+  selectedClipIds: readonly string[]
   /** Pista elegida (la del clip elegido o la que se toco en la cabecera). */
   selectedTrackId: string | null
   editor: StudioEditorView
@@ -673,6 +708,18 @@ export class StudioController {
   private midiRec: { trackId: string; only: boolean; started: boolean } | null = null
   /** Notas copiadas del piano roll, con la primera en el beat 0. */
   private noteClipboard: StudioMidiNote[] | null = null
+  /** Clips copiados en la linea de tiempo (sessionOps.copyClips) y donde cae el proximo pegado. */
+  private clipClipboard: ClipClipboard | null = null
+  private pasteCursor: PasteCursor | null = null
+  /** Golpes del tap tempo (ms de performance.now) y temporizador que cierra el paso de deshacer. */
+  private taps: number[] = []
+  private tapTimer: ReturnType<typeof setTimeout> | null = null
+  /** Compases de conteo que vuelven al reactivar el conteo previo. */
+  private lastCountInBars = 1
+  /** Ultima medicion de mezcla (asistente de mezcla o MEDIR MEZCLA), con la version del documento. */
+  private mixMeasurement: ChatMixMeasurement | null = null
+  /** Cancion del repertorio ligada a la sesion (la pone la vista, que tiene la libreria). */
+  private linkedSong: Song | null = null
 
   constructor(options: StudioControllerOptions) {
     this.band = options.band
@@ -685,6 +732,7 @@ export class StudioController {
       loading: { done: 0, total: 0 },
       ready: false,
       selectedClipId: null,
+      selectedClipIds: [],
       selectedTrackId: null,
       editor: 'timeline',
       pianoClipId: null,
@@ -733,6 +781,10 @@ export class StudioController {
 
   private emit(patch: Partial<StudioSnapshot>): void {
     if (this.disposed) return
+    // Elegir un clip sin decir cuales quedan elegidos es elegir solo ese (seleccion simple).
+    if (patch.selectedClipId !== undefined && patch.selectedClipIds === undefined) {
+      patch = { ...patch, selectedClipIds: patch.selectedClipId ? [patch.selectedClipId] : [] }
+    }
     this.snap = { ...this.snap, ...patch }
     for (const listener of [...this.listeners]) listener()
   }
@@ -779,6 +831,10 @@ export class StudioController {
       clearTimeout(this.saveTimer)
       this.saveTimer = null
       this.queueLocalSave()
+    }
+    if (this.tapTimer) {
+      clearTimeout(this.tapTimer)
+      this.tapTimer = null
     }
     this.disposed = true
     this.listeners.clear()
@@ -938,8 +994,16 @@ export class StudioController {
 
   private setSession(next: StudioSession, save = true, extra: Partial<StudioSnapshot> = {}): void {
     this.editCount++
+    const exists = (id: string) => findClip(next, id) !== null || findMidiClip(next, id) !== null
     const wantedClip = extra.selectedClipId !== undefined ? extra.selectedClipId : this.snap.selectedClipId
-    const selectedClipId = wantedClip && (findClip(next, wantedClip) || findMidiClip(next, wantedClip)) ? wantedClip : null
+    const wantedIds = extra.selectedClipIds ?? (extra.selectedClipId !== undefined ? (extra.selectedClipId ? [extra.selectedClipId] : []) : this.snap.selectedClipIds)
+    const keptIds = wantedIds.filter(exists)
+    let selectedClipId = wantedClip && exists(wantedClip) ? wantedClip : null
+    // Si el principal desaparecio pero quedan otros elegidos, el principal pasa al primero.
+    if (selectedClipId === null && keptIds.length > 0) selectedClipId = keptIds[0]
+    if (selectedClipId !== null && !keptIds.includes(selectedClipId)) keptIds.push(selectedClipId)
+    const current = this.snap.selectedClipIds
+    const selectedClipIds = keptIds.length === current.length && keptIds.every((id, i) => id === current[i]) ? current : keptIds
     const wantedTrack = extra.selectedTrackId !== undefined ? extra.selectedTrackId : this.snap.selectedTrackId
     const selectedTrackId = wantedTrack && findTrack(next, wantedTrack) ? wantedTrack : null
     let arms = this.snap.arms
@@ -958,6 +1022,7 @@ export class StudioController {
       ...extra,
       session: next,
       selectedClipId,
+      selectedClipIds,
       selectedTrackId,
       arms,
       pianoClipId: pianoLoc ? pianoLoc.clip.id : null,
@@ -982,12 +1047,52 @@ export class StudioController {
     if (next) this.setSession(next, true, { piano: { ...this.snap.piano, selection: [] } })
   }
 
-  /** Elige un clip (de audio o MIDI) y su pista. null quita la eleccion de clip. */
-  select(clipId: string | null): void {
-    if (clipId === this.snap.selectedClipId) return
+  /** Pista de un clip de audio o MIDI, o null. */
+  private trackOfClip(clipId: string): string | null {
     const session = this.snap.session
-    const trackId = clipId ? (findClip(session, clipId)?.track.id ?? findMidiClip(session, clipId)?.track.id ?? this.snap.selectedTrackId) : this.snap.selectedTrackId
+    return findClip(session, clipId)?.track.id ?? findMidiClip(session, clipId)?.track.id ?? null
+  }
+
+  /** Elige un clip (de audio o MIDI) y su pista, y solo ese. null quita la eleccion de clips. */
+  select(clipId: string | null): void {
+    if (clipId === this.snap.selectedClipId && this.snap.selectedClipIds.length <= 1) return
+    const trackId = clipId ? (this.trackOfClip(clipId) ?? this.snap.selectedTrackId) : this.snap.selectedTrackId
     this.emit({ selectedClipId: clipId, selectedTrackId: trackId })
+  }
+
+  /** Shift o Ctrl + clic: agrega el clip a la seleccion, o lo quita si ya estaba. */
+  toggleClipSelection(clipId: string): void {
+    const ids = this.snap.selectedClipIds
+    if (ids.includes(clipId)) {
+      const rest = ids.filter((id) => id !== clipId)
+      const primary = rest.length === 0 ? null : this.snap.selectedClipId === clipId ? rest[rest.length - 1] : this.snap.selectedClipId
+      this.emit({ selectedClipIds: rest, selectedClipId: primary })
+      return
+    }
+    const trackId = this.trackOfClip(clipId)
+    if (!trackId) return
+    this.emit({ selectedClipIds: [...ids, clipId], selectedClipId: clipId, selectedTrackId: trackId })
+  }
+
+  /** Hace principal un clip que ya esta elegido, sin soltar a los demas (arrastre de varios). */
+  focusSelectedClip(clipId: string): void {
+    if (!this.snap.selectedClipIds.includes(clipId) || this.snap.selectedClipId === clipId) return
+    this.emit({ selectedClipId: clipId, selectedClipIds: this.snap.selectedClipIds, selectedTrackId: this.trackOfClip(clipId) ?? this.snap.selectedTrackId })
+  }
+
+  /** Elige varios clips; el principal es `primary` o el primero. Los ids que no existen se ignoran. */
+  selectClips(clipIds: readonly string[], primary?: string): void {
+    const session = this.snap.session
+    const ids = [...new Set(clipIds)].filter((id) => findClip(session, id) || findMidiClip(session, id))
+    const main = primary && ids.includes(primary) ? primary : (ids[0] ?? null)
+    this.emit({ selectedClipIds: ids, selectedClipId: main, selectedTrackId: main ? (this.trackOfClip(main) ?? this.snap.selectedTrackId) : this.snap.selectedTrackId })
+  }
+
+  /** Ctrl+A en la linea de tiempo: todos los clips que suenan (las tomas alternativas no). */
+  selectAllClips(): void {
+    const ids = this.snap.session.tracks.flatMap((track) => [...track.clips.filter((clip) => clip.active).map((clip) => clip.id), ...track.midiClips.map((clip) => clip.id)])
+    const primary = this.snap.selectedClipId && ids.includes(this.snap.selectedClipId) ? this.snap.selectedClipId : undefined
+    this.selectClips(ids, primary)
   }
 
   /** Elige una pista (cabecera o fila vacia de la linea de tiempo). */
@@ -1026,6 +1131,27 @@ export class StudioController {
 
   zoomOut(): void {
     this.viewCommand({ type: 'zoom', direction: -1 })
+  }
+
+  /** Zoom para ver toda la sesion (Shift+Z). */
+  zoomToFit(): void {
+    this.viewCommand({ type: 'fit' })
+  }
+
+  /** Lleva la vista al cabezal (Shift+C). */
+  centerOnPlayhead(): void {
+    this.viewCommand({ type: 'center' })
+  }
+
+  /** F2: pone el foco en el nombre de la pista elegida para escribir uno nuevo. */
+  renameSelectedTrack(): void {
+    const trackId = this.snap.selectedTrackId
+    if (!trackId || !findTrack(this.snap.session, trackId)) {
+      this.notify('info', 'Elige una pista (clic en su cabecera o con las teclas 1 a 9) para renombrarla.')
+      return
+    }
+    if (this.snap.editor !== 'timeline') this.showTimeline()
+    this.viewCommand({ type: 'rename_track', trackId })
   }
 
   /** Abre un clip MIDI en el piano roll (por defecto el clip elegido). */
@@ -1089,45 +1215,194 @@ export class StudioController {
 
   // ---- clips ----
 
-  /** Divide en el cabezal el clip elegido; sin eleccion, todos los clips activos bajo el cabezal. */
+  /** Ids de los clips elegidos que todavia existen. */
+  selectedClips(): string[] {
+    const session = this.snap.session
+    return this.snap.selectedClipIds.filter((id) => findClip(session, id) || findMidiClip(session, id))
+  }
+
+  /**
+   * Nombre del paso de deshacer para una accion sobre clips: "Borrar clip", "Borrar clip MIDI" o
+   * "Borrar 3 clips".
+   */
+  private clipsLabel(verb: string, clipIds: readonly string[]): string {
+    if (clipIds.length !== 1) return `${verb} ${clipIds.length} clips`
+    return findMidiClip(this.snap.session, clipIds[0]) ? `${verb} clip MIDI` : `${verb} clip`
+  }
+
+  /**
+   * Clips sobre los que actuan dividir, recortar y los fundidos: los elegidos; sin eleccion, los
+   * de la pista elegida que el cabezal cruza; sin pista elegida, los de todas las pistas.
+   */
+  private clipsAtPlayhead(atS: number): string[] {
+    const chosen = this.selectedClips()
+    if (chosen.length > 0) return chosen
+    const session = this.snap.session
+    const atBeat = secondsToBeats(atS, session.bpm)
+    const track = this.snap.selectedTrackId ? findTrack(session, this.snap.selectedTrackId) : null
+    const tracks = track ? [track] : session.tracks
+    return tracks.flatMap((t) => [
+      ...t.clips.filter((clip) => clip.active && atS > clip.startS && atS < clip.startS + clip.lengthS).map((clip) => clip.id),
+      ...t.midiClips.filter((clip) => atBeat > clip.startBeat && atBeat < clip.startBeat + clip.lengthBeats).map((clip) => clip.id),
+    ])
+  }
+
+  /**
+   * S: divide en el cabezal los clips elegidos; sin eleccion, los de la pista elegida que cruza
+   * el cabezal (y sin pista elegida, los de todas las pistas).
+   */
   splitAtPlayhead(): void {
     const atS = this.engine.position()
+    const ids = this.clipsAtPlayhead(atS)
+    if (ids.length === 0) return
     this.run('Dividir clip', (session) => {
       const atBeat = secondsToBeats(atS, session.bpm)
-      const selected = this.snap.selectedClipId
-      const audioIds = selected
-        ? findClip(session, selected) ? [selected] : []
-        : session.tracks.flatMap((track) => track.clips.filter((clip) => clip.active && atS > clip.startS && atS < clip.startS + clip.lengthS).map((clip) => clip.id))
-      const midiIds = selected
-        ? findMidiClip(session, selected) ? [selected] : []
-        : session.tracks.flatMap((track) => track.midiClips.filter((clip) => atBeat > clip.startBeat && atBeat < clip.startBeat + clip.lengthBeats).map((clip) => clip.id))
       let next = session
-      for (const clipId of audioIds) next = splitClip(next, { clipId, atS, newClipId: newStudioId('clp') })
-      for (const clipId of midiIds) next = splitMidiClip(next, { clipId, atBeat, newClipId: newStudioId('mid') })
+      for (const clipId of ids) {
+        if (findClip(next, clipId)) next = splitClip(next, { clipId, atS, newClipId: newStudioId('clp') })
+        else if (findMidiClip(next, clipId)) next = splitMidiClip(next, { clipId, atBeat, newClipId: newStudioId('mid') })
+      }
       return next
     })
   }
 
+  /** Ctrl+D: copia los clips elegidos justo detras del bloque que forman; quedan elegidas las copias. */
   duplicateSelected(): void {
-    const clipId = this.snap.selectedClipId
-    if (!clipId) return
-    if (findMidiClip(this.snap.session, clipId)) {
-      const newClipId = newStudioId('mid')
-      if (this.run('Duplicar clip MIDI', (session) => duplicateMidiClip(session, { clipId, newClipId }))) this.select(newClipId)
+    const ids = this.selectedClips()
+    const session = this.snap.session
+    const board = copyClips(session, ids)
+    if (!board) return
+    let result: ReturnType<typeof pasteClips>
+    try {
+      result = pasteClips(session, board, { atS: board.startS + board.spanS, trackId: null, newClipId: (kind) => newStudioId(kind === 'audio' ? 'clp' : 'mid') })
+    } catch (err) {
+      this.fail(err)
       return
     }
-    const newClipId = newStudioId('clp')
-    if (this.run('Duplicar clip', (session) => duplicateClip(session, { clipId, newClipId }))) this.select(newClipId)
+    const primary = result.clipIds[result.clipIds.length - 1] ?? null
+    this.apply(result.session, this.clipsLabel('Duplicar', ids), { selectedClipIds: result.clipIds, selectedClipId: primary })
   }
 
+  /** Supr: borra todos los clips elegidos (un paso de deshacer). */
   deleteSelected(): void {
-    const clipId = this.snap.selectedClipId
-    if (!clipId) return
-    if (findMidiClip(this.snap.session, clipId)) {
-      this.run('Borrar clip MIDI', (session) => removeMidiClip(session, { clipId }))
+    const ids = this.selectedClips()
+    if (ids.length === 0) return
+    this.run(this.clipsLabel('Borrar', ids), (session) => deleteClips(session, ids))
+  }
+
+  // ---- portapapeles de clips (linea de tiempo) ----
+
+  /** Hay clips copiados para pegar. */
+  hasClipClipboard(): boolean {
+    return this.clipClipboard !== null && this.clipClipboard.items.length > 0
+  }
+
+  /** Ctrl+C en la linea de tiempo: copia los clips elegidos. false si no habia ninguno. */
+  copyClips(): boolean {
+    const board = copyClips(this.snap.session, this.selectedClips())
+    if (!board || board.items.length === 0) return false
+    this.clipClipboard = board
+    this.pasteCursor = pasteCursorAfterCopy(board, this.engine.position())
+    return true
+  }
+
+  /**
+   * Ctrl+X: copia y borra. Pegar sin mover el cabezal devuelve los clips a su lugar; con el cabezal
+   * en otro sitio, los pone ahi (cortar y pegar = mover).
+   */
+  cutClips(): void {
+    const ids = this.selectedClips()
+    if (!this.copyClips() || !this.clipClipboard) return
+    this.pasteCursor = { playheadS: this.engine.position(), nextS: this.clipClipboard.startS }
+    this.run(this.clipsLabel('Cortar', ids), (session) => deleteClips(session, ids))
+  }
+
+  /**
+   * Ctrl+V: pega en la misma pista de lo copiado (o en la pista elegida si todo salio de una sola
+   * y es compatible), en el cabezal si se movio desde que se copio; si no, justo detras del
+   * original. Pegar otra vez sin mover el cabezal pone la copia detras de la anterior.
+   */
+  pasteClips(): void {
+    const board = this.clipClipboard
+    if (!board || board.items.length === 0) return
+    const playhead = this.engine.position()
+    const { atS, cursor } = pastePosition(board, this.pasteCursor ?? pasteCursorAfterCopy(board, playhead), playhead)
+    let result: ReturnType<typeof pasteClips>
+    try {
+      result = pasteClips(this.snap.session, board, { atS, trackId: this.snap.selectedTrackId, newClipId: (kind) => newStudioId(kind === 'audio' ? 'clp' : 'mid') })
+    } catch (err) {
+      this.fail(err)
       return
     }
-    this.run('Borrar clip', (session) => deleteClip(session, { clipId }))
+    const label = board.items.length === 1 ? (board.items[0].kind === 'midi' ? 'Pegar clip MIDI' : 'Pegar clip') : `Pegar ${board.items.length} clips`
+    if (this.apply(result.session, label, { selectedClipIds: result.clipIds, selectedClipId: result.clipIds[result.clipIds.length - 1] ?? null })) this.pasteCursor = cursor
+  }
+
+  /** Unir (Ctrl+Shift+J): funde los clips MIDI elegidos de cada pista, o trozos seguidos de un mismo audio. */
+  joinSelected(): void {
+    const ids = this.selectedClips()
+    let result: ReturnType<typeof joinClips>
+    try {
+      result = joinClips(this.snap.session, ids)
+    } catch (err) {
+      this.fail(err)
+      return
+    }
+    if (result.session === this.snap.session) {
+      this.notify('info', 'Para unir, elige dos o más clips MIDI de una misma pista (Shift + clic), o trozos seguidos de un mismo audio.')
+      return
+    }
+    this.apply(result.session, 'Unir clips', { selectedClipIds: result.clipIds, selectedClipId: result.clipIds[0] ?? null })
+  }
+
+  /** Alt+[ y Alt+]: recorta el inicio o el final de los clips al cabezal. */
+  trimSelectedToPlayhead(edge: 'start' | 'end'): void {
+    const atS = this.engine.position()
+    const ids = this.clipsAtPlayhead(atS)
+    const before = this.snap.session
+    this.run(edge === 'start' ? 'Recortar inicio al cabezal' : 'Recortar final al cabezal', (session) => trimClipsAt(session, ids, edge, atS))
+    if (this.snap.session === before) this.notify('info', 'El cabezal tiene que estar dentro del clip para recortarlo ahí.')
+  }
+
+  /** Fundido de entrada (del inicio al cabezal) o de salida (del cabezal al final) en los clips de audio. */
+  fadeSelectedToPlayhead(edge: 'in' | 'out'): void {
+    const atS = this.engine.position()
+    const ids = this.clipsAtPlayhead(atS)
+    const before = this.snap.session
+    this.run(edge === 'in' ? 'Fundido de entrada' : 'Fundido de salida', (session) => fadeClipsAt(session, ids, edge, atS))
+    if (this.snap.session === before) this.notify('info', 'Pon el cabezal dentro de un clip de audio: el fundido va del borde del clip al cabezal.')
+  }
+
+  /** 0: silencia los clips de audio elegidos, o los vuelve a hacer sonar. */
+  toggleSelectedClipsMute(): void {
+    const ids = this.selectedClips()
+    const audio = ids.filter((id) => findClip(this.snap.session, id))
+    if (audio.length === 0) {
+      this.notify('info', 'Silenciar es para clips de audio: elige uno. Un clip MIDI no tiene silencio propio (usa el mute de la pista, M).')
+      return
+    }
+    const silence = audio.some((id) => findClip(this.snap.session, id)?.clip.active)
+    this.run(silence ? 'Silenciar clip' : 'Hacer sonar clip', (session) => toggleClipsActive(session, audio))
+  }
+
+  /** Ctrl+L: loop con el rango de la seleccion (clips elegidos, o notas elegidas en el piano roll). */
+  loopSelection(): void {
+    const session = this.snap.session
+    let range: { startS: number; endS: number } | null
+    const loc = this.snap.editor === 'piano_roll' ? this.pianoClip() : null
+    if (loc) {
+      const picked = this.snap.piano.selection.map((index) => loc.clip.notes[index]).filter(Boolean)
+      const from = picked.length > 0 ? Math.min(...picked.map((n) => n.start)) : 0
+      const to = picked.length > 0 ? Math.max(...picked.map((n) => n.start + n.length)) : loc.clip.lengthBeats
+      range = { startS: beatsToSeconds(loc.clip.startBeat + from, session.bpm), endS: beatsToSeconds(loc.clip.startBeat + Math.min(to, loc.clip.lengthBeats), session.bpm) }
+    } else {
+      range = clipsRangeS(session, this.selectedClips())
+    }
+    if (!range || range.endS - range.startS < 0.05) {
+      this.notify('info', 'Elige uno o más clips (o notas en el piano roll) para hacer loop con su rango.')
+      return
+    }
+    this.setLoop({ startS: range.startS, endS: range.endS })
   }
 
   /** Clip MIDI nuevo y vacio en una pista de instrumento. Devuelve su id, o null si no se pudo. */
@@ -1168,34 +1443,27 @@ export class StudioController {
     this.run('Elegir toma', (session) => setActiveTake(session, { clipId }))
   }
 
-  /** Mueve el clip elegido un paso de la rejilla (o 10 ms sin rejilla). Alternativa de teclado al arrastre. */
+  /**
+   * Mueve los clips elegidos un paso de la rejilla (o 10 ms sin rejilla; un cuarto de beat si el
+   * principal es MIDI). El principal cae en la rejilla y los demas lo acompanan con la misma
+   * distancia. Alternativa de teclado al arrastre.
+   */
   nudgeSelected(direction: -1 | 1): void {
-    const clipId = this.snap.selectedClipId
-    if (!clipId) return
-    const midi = findMidiClip(this.snap.session, clipId)
-    if (midi) {
-      const session = this.snap.session
-      const mode = this.snap.snap
-      const step = mode === 'bar' ? session.beatsPerBar : mode === 'beat' ? 1 : 0.25
-      const target = Math.max(0, Math.round((midi.clip.startBeat + direction * step) / step) * step)
-      this.run('Mover clip MIDI', (current) => moveMidiClip(current, { clipId, startBeat: target }))
-      return
-    }
-    this.run('Mover clip', (session) => {
-      const loc = findClip(session, clipId)
-      if (!loc) return session
-      const mode = this.snap.snap
-      const beatS = 60 / session.bpm
-      const step = mode === 'bar' ? beatS * session.beatsPerBar : mode === 'beat' ? beatS : 0.01
-      const target = snapTime(session, { timeS: Math.max(0, loc.clip.startS + direction * step), mode })
-      const startS = Math.max(0, Math.min(target, STUDIO_MAX_SESSION_SECONDS - loc.clip.lengthS))
-      if (startS === loc.clip.startS) return session
-      const tracks = session.tracks.slice()
-      const clips = loc.track.clips.slice()
-      clips[loc.clipIndex] = { ...loc.clip, startS }
-      tracks[loc.trackIndex] = { ...loc.track, clips }
-      return { ...session, tracks }
-    })
+    const ids = this.selectedClips()
+    const primary = this.snap.selectedClipId
+    if (ids.length === 0 || !primary) return
+    const session = this.snap.session
+    const range = clipsRangeS(session, [primary])
+    if (!range) return
+    const mode = this.snap.snap
+    const beatS = 60 / session.bpm
+    const isMidi = findMidiClip(session, primary) !== null
+    const step = mode === 'bar' ? beatS * session.beatsPerBar : mode === 'beat' ? beatS : isMidi ? beatS / 4 : 0.01
+    let target = Math.max(0, range.startS + direction * step)
+    if (mode !== 'off') target = snapTime(session, { timeS: target, mode })
+    else if (isMidi) target = Math.round(target / step) * step
+    const delta = target - range.startS
+    this.run(this.clipsLabel('Mover', ids), (current) => moveClipsBy(current, ids, delta))
   }
 
   // ---- piano roll ----
@@ -1378,27 +1646,199 @@ export class StudioController {
     else this.splitAtPlayhead()
   }
 
-  /** Q: cuantiza las notas del piano roll, o el clip MIDI elegido entero en la linea de tiempo. */
+  /** Q: cuantiza las notas del piano roll, o los clips MIDI elegidos enteros en la linea de tiempo. */
   quantizeSelection(): void {
     if (this.snap.editor === 'piano_roll') {
       this.quantizeNotes()
       return
     }
-    const clipId = this.snap.selectedClipId
-    const loc = clipId ? findMidiClip(this.snap.session, clipId) : null
-    if (!loc) {
-      this.notify('info', 'Cuantizar actúa sobre un clip MIDI: elígelo en la línea de tiempo o ábrelo en el piano roll.')
+    const midiIds = this.selectedClips().filter((id) => findMidiClip(this.snap.session, id))
+    if (midiIds.length === 0) {
+      this.notify('info', 'Cuantizar actúa sobre clips MIDI: elígelos en la línea de tiempo o abre uno en el piano roll.')
       return
     }
     const { grid, triplets, quantizeStrength } = this.snap.piano
-    this.run('Cuantizar clip MIDI', (session) =>
-      updateMidiClip(session, { clipId: loc.clip.id, patch: { notes: quantize(loc.clip.notes, null, { grid, triplets, strength: quantizeStrength }, loc.clip.lengthBeats).notes } }),
+    this.run(midiIds.length === 1 ? 'Cuantizar clip MIDI' : `Cuantizar ${midiIds.length} clips MIDI`, (session) => {
+      let next = session
+      for (const clipId of midiIds) {
+        const loc = findMidiClip(next, clipId)
+        if (!loc) continue
+        next = updateMidiClip(next, { clipId, patch: { notes: quantize(loc.clip.notes, null, { grid, triplets, strength: quantizeStrength }, loc.clip.lengthBeats).notes } })
+      }
+      return next
+    })
+  }
+
+  /** Ctrl+A: todas las notas en el piano roll; todos los clips en la linea de tiempo. */
+  selectAll(): void {
+    if (this.snap.editor === 'piano_roll') this.selectAllNotes()
+    else this.selectAllClips()
+  }
+
+  /** Ctrl+C: notas en el piano roll, clips en la linea de tiempo. */
+  copySelection(): void {
+    if (this.snap.editor === 'piano_roll') this.copyNotes()
+    else this.copyClips()
+  }
+
+  cutSelection(): void {
+    if (this.snap.editor === 'piano_roll') this.cutNotes()
+    else this.cutClips()
+  }
+
+  pasteSelection(): void {
+    if (this.snap.editor === 'piano_roll') this.pasteNotes()
+    else this.pasteClips()
+  }
+
+  // ---- piano roll: atajos de DAW ----
+
+  /** Ctrl+I: elige las notas que no estaban elegidas. */
+  invertNoteSelection(): void {
+    const loc = this.pianoClip()
+    if (loc) this.selectNotes(invertSelection(loc.clip.notes.length, this.snap.piano.selection))
+  }
+
+  /** Alt+Arriba y Alt+Abajo: suben o bajan la velocidad de las notas elegidas (o de todas). */
+  nudgeNotesVelocity(delta: number): void {
+    const selection = this.selectionOrAll()
+    this.editNotes('Velocidad de notas', (notes) => (notes.length === 0 ? null : setVelocity(notes, selection, delta, 'add')))
+  }
+
+  /** Shift+Derecha y Shift+Izquierda: alargan o acortan las notas elegidas un paso de la rejilla. */
+  resizeSelectedNotes(direction: -1 | 1): void {
+    const step = this.pianoGridBeats()
+    this.editNotes(direction > 0 ? 'Alargar notas' : 'Acortar notas', (notes, length, selection) =>
+      selection.length === 0 ? null : resizeNotes(notes, selection, 'end', direction * step, length),
     )
   }
 
-  /** Ctrl+A: todas las notas en el piano roll. En la linea de tiempo no hay seleccion multiple. */
-  selectAll(): void {
-    if (this.snap.editor === 'piano_roll') this.selectAllNotes()
+  // ---- navegacion y transporte ----
+
+  /** Fin de la sesion (Fin). */
+  goToEnd(): void {
+    this.seek(sessionEndSeconds(this.snap.session))
+  }
+
+  /** Coma y punto: el cabezal va a la linea de compas anterior o siguiente. */
+  stepBar(direction: -1 | 1): void {
+    const session = this.snap.session
+    const barS = (60 / session.bpm) * session.beatsPerBar
+    const at = this.engine.position() / barS
+    const target = direction > 0 ? (Math.floor(at + 1e-6) + 1) * barS : (Math.ceil(at - 1e-6) - 1) * barS
+    this.seek(Math.max(0, Math.min(STUDIO_MAX_SESSION_SECONDS, target)))
+  }
+
+  /**
+   * Ctrl+Izquierda y Ctrl+Derecha: marca anterior o siguiente (las marcas de la sesion y el
+   * inicio de las secciones de la cancion). Sin marca anterior, va al inicio.
+   */
+  goToMarker(direction: -1 | 1): void {
+    const session = this.snap.session
+    const points = [...session.markers.map((m) => ({ beat: m.beat })), ...this.snap.sections.map((s) => ({ beat: secondsToBeats(s.startSec, session.bpm) }))]
+    const beat = adjacentMarkerBeat(points, secondsToBeats(this.engine.position(), session.bpm), direction)
+    if (beat === null) {
+      if (direction < 0) this.seek(0)
+      else this.notify('info', 'No hay más marcas después del cabezal. Agrega una con Shift+M.')
+      return
+    }
+    this.seek(beatsToSeconds(beat, session.bpm))
+  }
+
+  /** Shift+M: marca nueva en el cabezal (un paso de deshacer). */
+  addMarkerAtPlayhead(): void {
+    if (this.snap.recording) return
+    const session = this.snap.session
+    const beat = roundBeat(secondsToBeats(this.engine.position(), session.bpm))
+    if (session.markers.some((m) => Math.abs(m.beat - beat) < 0.01)) {
+      this.notify('info', 'Ya hay una marca en el cabezal.')
+      return
+    }
+    const label = `${STUDIO_MARKER_KIND_LABELS.marker} ${session.markers.length + 1}`
+    this.run(`Agregar marca ${label}`, (current) => {
+      if (current.markers.length >= STUDIO_MAX_MARKERS) throw new Error(`La sesión admite hasta ${STUDIO_MAX_MARKERS} marcas.`)
+      return setMarkers(current, { markers: [...current.markers, { id: newStudioId('mk'), beat, label, kind: 'marker' }] })
+    })
+  }
+
+  /**
+   * Shift+T: tap tempo. Desde el tercer golpe el tempo cambia en vivo; una pausa de 2 s cierra la
+   * serie como un solo paso de deshacer.
+   */
+  tapTempo(): void {
+    if (this.snap.recording) return
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    const { taps, bpm } = computeTapTempo(this.taps, now, STUDIO_BPM_MIN, STUDIO_BPM_MAX)
+    this.taps = taps
+    if (this.tapTimer) clearTimeout(this.tapTimer)
+    this.tapTimer = setTimeout(() => {
+      this.tapTimer = null
+      this.taps = []
+      this.commitLive('Tap tempo')
+    }, TAP_TEMPO_RESET_MS)
+    if (bpm === null) {
+      this.notify('info', `Tap tempo: sigue marcando el pulso (${taps.length} de 3).`)
+      return
+    }
+    try {
+      this.applyLive(updateSessionMeta(this.snap.session, { patch: { bpm } }))
+      this.notify('info', `Tap tempo: ${bpm} BPM.`)
+    } catch (err) {
+      this.fail(err)
+    }
+  }
+
+  /** Shift+K: activa o quita el conteo previo antes de grabar (los compases de ClickSettings). */
+  toggleCountIn(): void {
+    const bars = this.engine.getState().click.countInBars
+    if (bars > 0) this.lastCountInBars = bars
+    const next = bars > 0 ? 0 : this.lastCountInBars
+    this.setClick({ countInBars: next })
+    this.notify('info', next > 0 ? `Conteo previo: ${next === 1 ? '1 compás' : `${next} compases`} antes de grabar.` : 'Conteo previo apagado: la grabación arranca de inmediato.')
+  }
+
+  // ---- pistas: atajos de DAW ----
+
+  /** Shift+R: arma o desarma la pista elegida (audio en la Entrada 1; instrumento para MIDI). */
+  toggleArmSelectedTrack(): void {
+    const track = this.snap.selectedTrackId ? findTrack(this.snap.session, this.snap.selectedTrackId) : null
+    if (!track) {
+      this.notify('info', 'Elige una pista para armarla.')
+      return
+    }
+    if (track.kind === 'instrument') this.armMidiTrack(this.snap.midi.armedTrackId === track.id ? null : track.id)
+    else this.setArm(track.id, this.snap.arms[track.id] !== undefined ? null : 0)
+  }
+
+  /** Ctrl+Shift+D: copia la pista elegida debajo de ella. */
+  duplicateSelectedTrack(): void {
+    const trackId = this.snap.selectedTrackId
+    if (!trackId) {
+      this.notify('info', 'Elige una pista para duplicarla.')
+      return
+    }
+    const newTrackId = newStudioId('trk')
+    this.run(
+      'Duplicar pista',
+      (session) => duplicateTrack(session, { trackId, newTrackId, newClipId: (kind) => newStudioId(kind === 'audio' ? 'clp' : 'mid') }),
+      { selectedTrackId: newTrackId, selectedClipId: null },
+    )
+  }
+
+  /** Alt+Arriba y Alt+Abajo en la linea de tiempo: sube o baja la pista elegida. */
+  moveSelectedTrack(direction: -1 | 1): void {
+    const tracks = this.snap.session.tracks
+    const index = tracks.findIndex((t) => t.id === this.snap.selectedTrackId)
+    if (index < 0) return
+    const trackId = tracks[index].id
+    this.run(direction < 0 ? 'Subir pista' : 'Bajar pista', (session) => moveTrack(session, { trackId, toIndex: index + direction }))
+  }
+
+  /** 1..9 en la linea de tiempo: elige la pista por su numero (y suelta los clips elegidos). */
+  selectTrackByNumber(position: number): void {
+    const track = this.snap.session.tracks[position - 1]
+    if (!track) return
+    this.emit({ selectedTrackId: track.id, selectedClipId: null })
   }
 
   // ---- pistas ----
@@ -2277,6 +2717,62 @@ export class StudioController {
     if (!blob) throw new Error('Ese audio no está en este equipo: no se puede subir.')
     await studioCloud.putAsset(cloud, this.sessionId, file, blob)
     this.markUploaded(file)
+  }
+
+  // -------------------------------------------------------------------------
+  // Contexto del asistente del chat (STUDIO_V2.md 4.3.2 y 4.3.5)
+  // -------------------------------------------------------------------------
+
+  /** Version del documento: sube con cada cambio de la sesion (tambien deshacer y rehacer). */
+  get docVersion(): number {
+    return this.editCount
+  }
+
+  /** La vista avisa que cancion del repertorio corresponde a la sesion (o null). */
+  setLinkedSong(song: Song | null): void {
+    this.linkedSong = song
+  }
+
+  /** Guarda una medicion de mezcla hecha sobre la version `version` del documento. */
+  rememberMixMeasurement(metrics: MixMetrics, version = this.editCount): void {
+    this.mixMeasurement = { metrics, version, measuredAt: Date.now() }
+  }
+
+  /** Ultima medicion de mezcla, o null. `fresh` lo decide la version (mixForSummary). */
+  lastMixMeasurement(): ChatMixMeasurement | null {
+    return this.mixMeasurement
+  }
+
+  /** Datos del resumen del chat que no estan en el documento: cancion ligada y medicion. */
+  chatExtras(): ChatSummaryExtras {
+    const songId = this.snap.session.songId
+    const song = songId && this.linkedSong?.id === songId ? this.linkedSong : null
+    return { song, mix: { measurement: this.mixMeasurement, version: this.editCount } }
+  }
+
+  /**
+   * MEDIR MEZCLA: mide la mezcla y cada pista en este equipo (la medicion del asistente de mezcla)
+   * y la deja guardada para el resumen del chat. Gratis: no sale audio ni se llama a la nube.
+   */
+  async measureForChat(options: MeasureMixOptions = {}): Promise<ChatMixMeasurement> {
+    const version = this.editCount
+    const metrics = await measureMix(this.snap.session, this.engine.getBuffers(), options)
+    this.rememberMixMeasurement(metrics, version)
+    return this.mixMeasurement!
+  }
+
+  /**
+   * ESCUCHAR FRAGMENTO: arma hasta 30 s de la mezcla desde `startS` (mono, 16 kHz) y lo sube a
+   * assets/ de la sesion en la nube, SIN agregarlo al documento (STUDIO_V2.md 4.3.5). Devuelve la
+   * referencia para el mensaje del chat. No cobra: el recargo va en el mensaje que lo lleva.
+   */
+  async prepareListenExcerpt(startS: number, signal?: AbortSignal): Promise<StudioChatListen> {
+    const cloud = this.cloud
+    if (!cloud) throw new Error('Necesitas una sesión de nube activa para que el asistente escuche.')
+    const excerpt = await renderListenExcerpt(this.snap.session, this.engine.getBuffers(), startS, { signal })
+    const assetId = newStudioId('ast')
+    await studioCloud.putAsset(cloud, this.sessionId, `${assetId}.wav`, excerpt.blob)
+    return { assetId, durationS: excerpt.durationS }
   }
 
   /**

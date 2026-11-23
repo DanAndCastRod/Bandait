@@ -34,6 +34,7 @@ import type {
   DrumVoice,
   StudioAsset,
   StudioAssetSource,
+  StudioChord,
   StudioClip,
   StudioFx,
   StudioFxParamsByType,
@@ -1265,6 +1266,11 @@ export interface SetMarkersArgs {
   markers: StudioMarker[]
 }
 
+export interface SetChordsArgs {
+  /** Lista completa que reemplaza a la anterior (se ordena por beat y nombre); [] quita los acordes. */
+  chords: StudioChord[]
+}
+
 export interface SessionOpsV2Api {
   /** Lanza `too_many` si ya hay 16 pistas, `duplicate_id` si el id existe, `bad_value` si kind no es 'instrument'. */
   addInstrumentTrack(session: StudioSession, args: AddInstrumentTrackArgs): StudioSession
@@ -1281,6 +1287,8 @@ export interface SessionOpsV2Api {
   setFrozenAsset(session: StudioSession, args: SetFrozenAssetArgs): StudioSession
   /** Lanza `duplicate_id`, `too_many` o `session_too_long` como parseSession. */
   setMarkers(session: StudioSession, args: SetMarkersArgs): StudioSession
+  /** Acordes de referencia (STUDIO_V2.md 2.9). Lanza `too_many`, `out_of_range` o `session_too_long`. */
+  setChords(session: StudioSession, args: SetChordsArgs): StudioSession
 }
 
 // ===========================================================================
@@ -1892,8 +1900,19 @@ export interface StudioChatToolResult {
   }
 }
 
+/**
+ * Fragmento de audio para que el asistente lo escuche (STUDIO_V2.md 4.3.5): un audio ya subido a
+ * assets/ de la sesion (WAV mono 16 kHz, hasta 30 s). Solo con `listen` en la estimacion.
+ */
+export interface StudioChatListen {
+  /** Id sin extension. */
+  assetId: string
+  /** > 0 y <= 30. */
+  durationS: number
+}
+
 export type StudioChatMessage =
-  | { role: 'user'; text: string }
+  | { role: 'user'; text: string; audio?: StudioChatListen }
   | { role: 'model'; text: string | null; toolCalls: StudioChatToolCall[] }
   | { role: 'tool'; toolResults: StudioChatToolResult[] }
 
@@ -1911,11 +1930,61 @@ export interface StudioTrackSummary {
   instrument: { type: StudioInstrumentType; preset: string | null; pluginId: string | null } | null
   /** 0..64 clips de audio (los mas cercanos al cabezal si hay mas). */
   clips: Array<{ id: string; startS: number; lengthS: number; active: boolean }>
-  /** 0..64 clips MIDI. pitchMin y pitchMax son null sin notas. */
-  midiClips: Array<{ id: string; startBeat: number; lengthBeats: number; loop: boolean; noteCount: number; pitchMin: number | null; pitchMax: number | null }>
+  /** 0..64 clips MIDI. pitchMin y pitchMax son null sin notas (el registro del clip). */
+  midiClips: Array<{
+    id: string
+    startBeat: number
+    lengthBeats: number
+    loop: boolean
+    noteCount: number
+    pitchMin: number | null
+    pitchMax: number | null
+    /** Resumen de las notas (opcional; chatContext.midiClipDigest). */
+    digest?: MidiClipDigest
+  }>
+  /** Medicion de la pista sola (opcional; solo con `mixMeasured` en el resumen). */
+  mix?: TrackMixSummary
 }
 
-/** Lo que el asistente sabe de la sesion (STUDIO_V2.md 4.3.2). Nunca audio ni notas. */
+/** Resumen de las notas de un clip MIDI para el asistente (STUDIO_V2.md 4.3.2, MidiDigest). */
+export interface MidiClipDigest {
+  /** Largo resumido: loopBeats con loop, si no lengthBeats. */
+  spanBeats: number
+  /** [nombre, peso por duracion] de mayor a menor; vacio en bateria. */
+  pitchClasses: Array<[string, number]>
+  /** Solo bateria: [pitch GM, golpes]. */
+  hits?: Array<[number, number]>
+  notesPerBar: number
+  grid: MidiGridName
+  /** Entero, o null sin notas. */
+  velocityMean: number | null
+  /** [pitch, start_beat, dur_beats, velocity] con start relativo al clip; solo patrones de hasta 64 notas. */
+  notes?: Array<[number, number, number, number]>
+}
+
+export type MidiGridName = '1/4' | '1/8' | '1/8t' | '1/16' | '1/16t' | '1/32' | 'libre'
+
+export interface TrackMixSummary {
+  lufs: number | null
+  truePeakDb: number | null
+  bands: BandEnergies | null
+  /** Fader de la pista al medir. */
+  volumeDb: number
+}
+
+/** Progresion de acordes de la cancion del repertorio (STUDIO_V2.md 4.3.2, SongChart). Sin letra. */
+export interface SongChartSummary {
+  title: string
+  key: string | null
+  bpm: number
+  beatsPerBar: number
+  sections: Array<{ label: string; kind: string; startBar: number; bars: number; chords: string }>
+}
+
+/**
+ * Lo que el asistente sabe de la sesion (STUDIO_V2.md 4.3.2). Nunca audio ni letras. Los campos
+ * opcionales se omiten si el Hub no tiene el dato.
+ */
 export interface StudioSessionSummary {
   title: string
   bpm: number
@@ -1925,8 +1994,14 @@ export interface StudioSessionSummary {
   lengthS: number
   playheadBeat: number
   selection: { trackId: string | null; clipIds: string[]; context: CommandContext }
+  /** Loop activo del transporte, en beats; null u omitido si no hay loop (cable `loop`, opcional). */
+  loop?: { startBeat: number; endBeat: number } | null
   tracks: StudioTrackSummary[]
   markers: StudioMarker[]
+  /** Acordes de la sesion mas cercanos al cabezal, [beat, lengthBeats, nombre] (1..256). */
+  chords?: Array<[number, number, string]>
+  songChart?: SongChartSummary
+  mixMeasured?: { fresh: boolean; masterLufs: number | null; masterTruePeakDb: number | null }
   master: { volumeDb: number; fx: StudioFx[]; reverb: StudioReverb }
 }
 
@@ -1987,6 +2062,8 @@ export type StudioJobStateV2 =
 
 export interface StudioJobEstimateV2 extends Omit<StudioJobEstimate, 'kind'> {
   kind: StudioJobKindV2
+  /** Solo chat: el Worker escucha fragmentos de audio (STUDIO_CHAT_LISTEN, STUDIO_V2.md 4.3.5). */
+  listen?: boolean
 }
 
 export interface StudioCloudJobsV2Api {

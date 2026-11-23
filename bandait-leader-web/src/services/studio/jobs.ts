@@ -27,6 +27,8 @@ import {
   STUDIO_MAX_MARKER_LABEL,
   STUDIO_MAX_NOTES_PER_CLIP,
   STUDIO_MAX_PROMPT,
+  STUDIO_MAX_SESSION_CHORDS,
+  STUDIO_MAX_SESSION_CHORD_NAME,
   STUDIO_MAX_SESSION_SECONDS,
   STUDIO_MAX_TRACK_NAME,
   STUDIO_MAX_TRACKS,
@@ -42,6 +44,7 @@ import {
   secondsToBeats,
   sessionEndSeconds,
   type StudioAsset,
+  type StudioChord,
   type StudioClip,
   type StudioFxType,
   type StudioMarker,
@@ -51,6 +54,17 @@ import {
   type StudioTrack,
 } from './session.ts'
 import { normalizeNotes } from './midiOps.ts'
+import {
+  CHAT_SUMMARY_LITERAL_NOTES,
+  CHAT_SUMMARY_MAX_CHORDS,
+  isDrumTrack,
+  midiClipDigest,
+  mixForSummary,
+  sessionChordsForSummary,
+  songChordChart,
+  type ChatSummaryExtras,
+  type MixForSummary,
+} from './chatContext.ts'
 import {
   STUDIO_CHAT_BODY_MAX_BYTES,
   STUDIO_JOB_MAX_RETRIES,
@@ -92,6 +106,7 @@ import type {
   StudioJobRequestV2,
   StudioJobState,
   StudioJobStateV2,
+  StudioChatListen,
   StudioSessionSummary,
   StudioTrackSummary,
   TrackMetrics,
@@ -542,6 +557,9 @@ export const CHAT_SUMMARY_MAX_BYTES = 32768
 export const CHAT_SUMMARY_MAX_CLIPS = 64
 /** Vueltas seguidas con herramientas, sin mensaje del usuario, antes de mandar tool_mode 'none'. */
 export const CHAT_MAX_TOOL_ROUNDS = 8
+/** Fragmento para escuchar (STUDIO_V2.md 4.3.5): hasta 30 s, WAV mono de 16 kHz. */
+export const CHAT_LISTEN_MAX_SECONDS = 30
+export const CHAT_LISTEN_SAMPLE_RATE = 16000
 
 const COMPOSE_CONTEXT_ROLES: readonly (ComposeRole | 'other')[] = [...COMPOSE_ROLES, 'other']
 
@@ -672,6 +690,10 @@ export function chatRequestProblem(req: ChatJobRequest): string | null {
       const text = typeof m.text === 'string' ? m.text : ''
       if (text.trim().length < 1) return 'Escribe un mensaje para el asistente.'
       if (text.length > CHAT_MAX_USER_TEXT) return `Cada mensaje admite hasta ${CHAT_MAX_USER_TEXT} caracteres.`
+      if (m.audio !== undefined) {
+        if (!isStudioId(m.audio.assetId)) return bad('un fragmento de audio no tiene un id válido.')
+        if (!(m.audio.durationS > 0) || m.audio.durationS > CHAT_LISTEN_MAX_SECONDS) return `Un fragmento para escuchar dura hasta ${CHAT_LISTEN_MAX_SECONDS} s.`
+      }
       continue
     }
     if (m.role === 'model') {
@@ -945,9 +967,31 @@ export function analysisToMarkers(analysis: StudioAnalysis, placement: AnalysisP
 }
 
 /**
- * Datos de la sesion que el analisis propone cambiar (solo los que difieren). La interfaz ofrece
- * cada uno como un paso de deshacer aparte (sessionOps.updateSessionMeta).
+ * Acordes del analisis para guardar en la sesion (STUDIO_V2.md 2.9 y 4.2): los que caen dentro de
+ * la ventana del clip, recortados a ella, en beats de la sesion con la posicion del clip y el bpm
+ * de `placement`; hasta 2048, sin pasar de los 1200 s.
  */
+export function analysisToChords(analysis: StudioAnalysis, placement: AnalysisPlacement): StudioChord[] {
+  const out: StudioChord[] = []
+  const windowEnd = placement.clipLengthS ?? Infinity
+  for (const c of analysis.chords) {
+    if (out.length >= STUDIO_MAX_SESSION_CHORDS) break
+    const name = c.name.trim().slice(0, STUDIO_MAX_SESSION_CHORD_NAME)
+    if (!name) continue
+    const from = Math.max(0, c.startS - placement.clipOffsetS)
+    const to = Math.min(windowEnd, c.endS - placement.clipOffsetS)
+    if (!(to > from + STUDIO_TIME_EPSILON_S)) continue
+    const startS = placement.clipStartS + from
+    const endS = Math.min(STUDIO_MAX_SESSION_SECONDS, placement.clipStartS + to)
+    if (!(endS > startS)) continue
+    const beat = roundBeat(secondsToBeats(startS, placement.bpm))
+    const lengthBeats = roundBeat(secondsToBeats(endS, placement.bpm) - beat)
+    if (!(lengthBeats > 0)) continue
+    out.push({ beat, lengthBeats, name })
+  }
+  return out
+}
+
 /**
  * Marcas del analisis ya agregadas, vueltas a ubicar en beats con un tempo nuevo. Las marcas viven
  * en beats, pero las del analisis senalan instantes del AUDIO, que no se mueve al cambiar el tempo:
@@ -961,6 +1005,10 @@ export function rebeatMarkers(markers: readonly StudioMarker[], secondsById: Rea
   })
 }
 
+/**
+ * Datos de la sesion que el analisis propone cambiar (solo los que difieren). La interfaz ofrece
+ * cada uno como un paso de deshacer aparte (sessionOps.updateSessionMeta).
+ */
 export function analysisSessionPatch(session: StudioSession, analysis: StudioAnalysis): SessionMetaPatch {
   const patch: SessionMetaPatch = {}
   if (analysis.bpm !== null) {
@@ -980,6 +1028,15 @@ export function analysisSessionPatch(session: StudioSession, analysis: StudioAna
 export interface ChatView {
   playheadBeat: number
   selection: { trackId: string | null; clipIds: readonly string[]; context: CommandContext }
+  /** Loop activo del transporte, en beats (opcional). */
+  loop?: { startBeat: number; endBeat: number } | null
+}
+
+/** Loop valido para el resumen (inicio antes del fin, beats >= 0), o null. */
+function summaryLoop(loop: ChatView['loop']): { startBeat: number; endBeat: number } | null {
+  if (!loop || !Number.isFinite(loop.startBeat) || !Number.isFinite(loop.endBeat)) return null
+  const startBeat = Math.max(0, loop.startBeat)
+  return loop.endBeat > startBeat ? { startBeat, endBeat: loop.endBeat } : null
 }
 
 function distanceTo(point: number, start: number, end: number): number {
@@ -996,8 +1053,16 @@ function nearest<T>(items: readonly T[], max: number, distance: (item: T) => num
     .map((r) => r.item)
 }
 
-function trackSummary(track: StudioTrack, playheadBeat: number, bpm: number, maxClips: number): StudioTrackSummary {
-  const playheadS = beatsToSeconds(playheadBeat, bpm)
+function trackSummary(
+  track: StudioTrack,
+  playheadBeat: number,
+  session: Pick<StudioSession, 'bpm' | 'beatsPerBar'>,
+  maxClips: number,
+  literalNotes: number,
+  mix: MixForSummary | null,
+): StudioTrackSummary {
+  const playheadS = beatsToSeconds(playheadBeat, session.bpm)
+  const drums = isDrumTrack(track)
   const instrument = track.instrument
     ? {
         type: track.instrument.type,
@@ -1018,9 +1083,20 @@ function trackSummary(track: StudioTrack, playheadBeat: number, bpm: number, max
       if (pitchMin === null || n.pitch < pitchMin) pitchMin = n.pitch
       if (pitchMax === null || n.pitch > pitchMax) pitchMax = n.pitch
     }
-    return { id: c.id, startBeat: c.startBeat, lengthBeats: c.lengthBeats, loop: c.loop, noteCount: c.notes.length, pitchMin, pitchMax }
+    return {
+      id: c.id,
+      startBeat: c.startBeat,
+      lengthBeats: c.lengthBeats,
+      loop: c.loop,
+      noteCount: c.notes.length,
+      pitchMin,
+      pitchMax,
+      digest: midiClipDigest(c, session.beatsPerBar, drums, literalNotes),
+    }
   })
+  const measured = mix?.byTrack.get(track.id)
   return {
+    ...(measured ? { mix: measured } : {}),
     id: track.id,
     kind: track.kind,
     name: track.name,
@@ -1037,10 +1113,30 @@ function trackSummary(track: StudioTrack, playheadBeat: number, bpm: number, max
   }
 }
 
-/** Resumen de la sesion para el asistente (STUDIO_V2.md 4.3.2): nunca audio ni notas. */
-export function buildSessionSummary(session: StudioSession, view: ChatView, maxClipsPerTrack = CHAT_SUMMARY_MAX_CLIPS): StudioSessionSummary {
+/** Cuanto lleva el resumen; fitSessionSummary lo baja paso a paso para caber en 32 KB. */
+export interface SummaryOptions {
+  /** Notas literales por clip MIDI (0 = ninguna). Por defecto 64. */
+  literalNotes?: number
+  /** Acordes de la sesion (0 = ninguno). Por defecto 256. */
+  maxChords?: number
+  /** false = sin la progresion de la cancion. */
+  songChart?: boolean
+  /** Cancion del repertorio y medicion de mezcla (no estan en el documento). */
+  extras?: ChatSummaryExtras
+}
+
+/**
+ * Resumen de la sesion para el asistente (STUDIO_V2.md 4.3.2): estructura, notas MIDI resumidas
+ * (digest), acordes guardados, progresion de la cancion (sin letra) y medicion de mezcla. Nunca
+ * audio ni letras.
+ */
+export function buildSessionSummary(session: StudioSession, view: ChatView, maxClipsPerTrack = CHAT_SUMMARY_MAX_CLIPS, options: SummaryOptions = {}): StudioSessionSummary {
   const playheadBeat = Number.isFinite(view.playheadBeat) ? Math.max(0, view.playheadBeat) : 0
   const max = Math.max(0, Math.min(CHAT_SUMMARY_MAX_CLIPS, Math.floor(maxClipsPerTrack)))
+  const literalNotes = Math.max(0, Math.floor(options.literalNotes ?? CHAT_SUMMARY_LITERAL_NOTES))
+  const mix = options.extras?.mix ? mixForSummary(options.extras.mix.measurement, options.extras.mix.version) : null
+  const chords = sessionChordsForSummary(session.chords, playheadBeat, Math.max(0, Math.min(CHAT_SUMMARY_MAX_CHORDS, options.maxChords ?? CHAT_SUMMARY_MAX_CHORDS)))
+  const songChart = options.songChart === false ? null : songChordChart(options.extras?.song)
   return {
     title: session.title,
     bpm: session.bpm,
@@ -1053,8 +1149,12 @@ export function buildSessionSummary(session: StudioSession, view: ChatView, maxC
       clipIds: view.selection.clipIds.slice(0, CHAT_SUMMARY_MAX_CLIPS),
       context: view.selection.context,
     },
-    tracks: session.tracks.slice(0, STUDIO_MAX_TRACKS).map((t) => trackSummary(t, playheadBeat, session.bpm, max)),
+    loop: summaryLoop(view.loop),
+    tracks: session.tracks.slice(0, STUDIO_MAX_TRACKS).map((t) => trackSummary(t, playheadBeat, session, max, literalNotes, mix)),
     markers: (session.markers ?? []).slice(0, STUDIO_MAX_MARKERS),
+    ...(chords.length > 0 ? { chords } : {}),
+    ...(songChart ? { songChart } : {}),
+    ...(mix ? { mixMeasured: mix.mixMeasured } : {}),
     master: { volumeDb: session.master.volumeDb, fx: session.master.fx, reverb: session.master.reverb },
   }
 }
@@ -1064,15 +1164,24 @@ export function sessionSummaryBytes(summary: StudioSessionSummary): number {
 }
 
 /**
- * Resumen que cabe en 32 KB: si no cabe con 64 clips por pista, baja a 32, 16, 8, 4 y 0 (los mas
- * cercanos al cabezal se conservan). Si ni sin clips cabe, devuelve ese ultimo (chatRequestProblem
- * lo informa).
+ * Resumen que cabe en 32 KB (STUDIO_V2.md 4.3.2). Degrada en este orden y se detiene en cuanto
+ * cabe: (1) sin notas literales; (2) clips por pista 32, 16, 8, 4 y 0 (quedan los cercanos al
+ * cabezal); (3) acordes de la sesion 64 y despues ninguno; (4) sin la progresion de la cancion.
+ * Si ni asi cabe, devuelve el ultimo (chatRequestProblem lo informa).
  */
-export function fitSessionSummary(session: StudioSession, view: ChatView): StudioSessionSummary {
-  let summary = buildSessionSummary(session, view, CHAT_SUMMARY_MAX_CLIPS)
-  for (const max of [32, 16, 8, 4, 0]) {
+export function fitSessionSummary(session: StudioSession, view: ChatView, extras: ChatSummaryExtras = {}): StudioSessionSummary {
+  const steps: Array<[number, SummaryOptions]> = [
+    [CHAT_SUMMARY_MAX_CLIPS, { extras }],
+    [CHAT_SUMMARY_MAX_CLIPS, { extras, literalNotes: 0 }],
+    ...[32, 16, 8, 4, 0].map((clips): [number, SummaryOptions] => [clips, { extras, literalNotes: 0 }]),
+    [0, { extras, literalNotes: 0, maxChords: 64 }],
+    [0, { extras, literalNotes: 0, maxChords: 0 }],
+    [0, { extras, literalNotes: 0, maxChords: 0, songChart: false }],
+  ]
+  let summary = buildSessionSummary(session, view, steps[0][0], steps[0][1])
+  for (const [clips, options] of steps.slice(1)) {
     if (sessionSummaryBytes(summary) <= CHAT_SUMMARY_MAX_BYTES) return summary
-    summary = buildSessionSummary(session, view, max)
+    summary = buildSessionSummary(session, view, clips, options)
   }
   return summary
 }
@@ -1091,8 +1200,10 @@ export function chatToolMode(messages: readonly StudioChatMessage[]): 'auto' | '
   return rounds >= CHAT_MAX_TOOL_ROUNDS ? 'none' : 'auto'
 }
 
-export function appendUserMessage(messages: readonly StudioChatMessage[], text: string): StudioChatMessage[] {
-  return [...messages, { role: 'user', text: text.trim().slice(0, CHAT_MAX_USER_TEXT) }]
+/** Agrega el mensaje del usuario; `audio` es el fragmento ya subido que el asistente escuchara. */
+export function appendUserMessage(messages: readonly StudioChatMessage[], text: string, audio?: StudioChatListen | null): StudioChatMessage[] {
+  const body = text.trim().slice(0, CHAT_MAX_USER_TEXT)
+  return [...messages, audio ? { role: 'user', text: body, audio: { ...audio } } : { role: 'user', text: body }]
 }
 
 type ChatSucceeded = Extract<StudioJobStateV2, { status: 'SUCCEEDED'; kind: 'chat' }>

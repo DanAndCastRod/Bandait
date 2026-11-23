@@ -45,9 +45,10 @@ import {
 } from './studioSession.ts';
 import type { AssetExtension, FxType, SessionFx, SessionNote } from './studioSession.ts';
 import {
-  CHAT_BODY_LIMIT, COMPOSE_EMPTY, buildAnalysis, chatCall, classifyToolCall, composeCall, composeDescription,
-  finishChat, normalizeComposeNotes, validateV2JobRequest,
+  CHAT_BODY_LIMIT, COMPOSE_EMPTY, MAX_LISTEN_BYTES, buildAnalysis, bytesToBase64, chatCall, chatHasListen, classifyToolCall,
+  composeCall, composeDescription, finishChat, lastUserListen, normalizeComposeNotes, validateV2JobRequest,
 } from './studioV2.ts';
+import type { ListenAudio } from './studioV2.ts';
 import type { ChatToolCall, StudioAnalysis, V2JobRequest } from './studioV2.ts';
 import type { Env } from './types.ts';
 
@@ -87,8 +88,13 @@ const HEADER_PROBE_BYTES = 64 * 1024;
  */
 export const DEFAULT_RATES = {
   masterPerMin: 0.2, separatePerMin: 0.5, lyriaClip: 0.04, lyriaSong: 0.08, assist: 0.05, compose: 0.05, analyzePerMin: 0.8,
-  chat: 0.03, chatPer32Kb: 0.015,
+  chat: 0.03, chatPer32Kb: 0.015, chatListen: 0.02,
 };
+
+/** STUDIO_V2.md 4.3.5: el chat solo escucha fragmentos con STUDIO_CHAT_LISTEN = "1". */
+export function listenEnabled(env: Env): boolean {
+  return (env.STUDIO_CHAT_LISTEN || '').trim() === '1';
+}
 
 export type JobKind = 'master' | 'separate' | 'generate' | 'assist' | 'compose' | 'analyze' | 'chat';
 
@@ -350,8 +356,10 @@ export function estimateCost(env: Env, request: JobRequest): { cost: number; sec
   if (request.kind === 'chat') {
     const bytes = new TextEncoder().encode(JSON.stringify([request.messages, request.session_summary])).byteLength;
     const blocks = Math.floor(bytes / 32768);
+    // Recargo por vuelta que escucha un fragmento (solo el del ultimo mensaje se adjunta).
+    const listen = lastUserListen(request) ? rate(env.STUDIO_RATE_CHAT_LISTEN_USD, DEFAULT_RATES.chatListen) : 0;
     return {
-      cost: round4(rate(env.STUDIO_RATE_CHAT_USD, DEFAULT_RATES.chat) + blocks * rate(env.STUDIO_RATE_CHAT_USD_PER_32KB, DEFAULT_RATES.chatPer32Kb)),
+      cost: round4(rate(env.STUDIO_RATE_CHAT_USD, DEFAULT_RATES.chat) + blocks * rate(env.STUDIO_RATE_CHAT_USD_PER_32KB, DEFAULT_RATES.chatPer32Kb) + listen),
       seconds: 0,
     };
   }
@@ -520,7 +528,7 @@ async function assetSeconds(ctx: StudioContext, input: { file: string; size: num
 function providerFailure(err: unknown): never {
   if (err instanceof ProviderError) {
     if (err.detail) console.warn(`studio provider: ${err.detail}`);
-    throw new ApiError(err.status, err.code);
+    throw new ApiError(err.status, err.code, err.publicDetail);
   }
   // musicAi() de index.ts habla con los codigos del analisis: aqui todo fallo suyo es del proveedor.
   if (err instanceof ApiError) throw new ApiError(502, 'provider_failed');
@@ -566,8 +574,40 @@ function isMusicAiKind(kind: JobKind): kind is MusicAiKind {
 function assertAvailable(env: Env, request: JobRequest): void {
   if (isMusicAiKind(request.kind)) musicAiWorkflow(env, request.kind);
   else if (request.kind === 'generate') GENERATE_PROVIDERS[request.provider].assertAvailable(env);
-  else if (request.kind === 'compose' || request.kind === 'chat') textProvider(env).assertAvailable(env);
-  else assistProvider(env).assertAvailable(env);
+  else if (request.kind === 'compose' || request.kind === 'chat') {
+    if (request.kind === 'chat' && chatHasListen(request) && !listenEnabled(env)) {
+      const err = new ProviderError(503, 'provider_unavailable', 'chat con audio y STUDIO_CHAT_LISTEN distinto de "1"');
+      err.publicDetail = 'listen_disabled';
+      throw err;
+    }
+    textProvider(env).assertAvailable(env);
+  } else assistProvider(env).assertAvailable(env);
+}
+
+/**
+ * Fragmento a escuchar del ultimo mensaje `user` (STUDIO_V2.md 4.3.5): `assets/<id>.wav` o `.mp3`.
+ * 404 no_asset si no esta; 400 bad_job si pesa mas de 1 MiB. null si el chat no escucha.
+ */
+async function findListenAsset(ctx: StudioContext, request: JobRequest): Promise<{ file: string; size: number } | null> {
+  if (request.kind !== 'chat') return null;
+  const listen = lastUserListen(request);
+  if (!listen) return null;
+  for (const ext of ['wav', 'mp3'] as const) {
+    const head = await ctx.env.STEMS.head(`${ctx.sessionPrefix}assets/${listen.asset_id}.${ext}`);
+    if (!head) continue;
+    if (head.size > MAX_LISTEN_BYTES || head.size < 1) bad();
+    return { file: `${listen.asset_id}.${ext}`, size: head.size };
+  }
+  throw new ApiError(404, 'no_asset');
+}
+
+/** Lee el fragmento de R2 y lo deja listo como parte `inline` (base64). */
+async function readListenAudio(ctx: StudioContext, input: { file: string; size: number }): Promise<ListenAudio> {
+  const obj = await ctx.env.STEMS.get(`${ctx.sessionPrefix}assets/${input.file}`);
+  if (!obj) throw new ApiError(404, 'no_asset');
+  const bytes = new Uint8Array(await new Response(obj.body).arrayBuffer());
+  if (bytes.byteLength > MAX_LISTEN_BYTES || bytes.byteLength < 1) bad();
+  return { mime_type: input.file.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav', data: bytesToBase64(bytes) };
 }
 
 function providerName(env: Env, request: JobRequest): string {
@@ -747,7 +787,8 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
     }
     providerFailure(err);
   }
-  const input = isMusicAiKind(parsed.kind) ? await findAsset(ctx, (parsed as { asset_id: string }).asset_id) : null;
+  // `input`: el audio de assets/ que usa el trabajo (Music AI) o el fragmento que escucha el chat.
+  const input = isMusicAiKind(parsed.kind) ? await findAsset(ctx, (parsed as { asset_id: string }).asset_id) : await findListenAsset(ctx, parsed);
   // master, separate y analyze se cobran por la duracion real del audio en R2, no por la que
   // declara el cliente: se toma la mayor de las dos (un cliente que declara de menos no baja el costo).
   const request: JobRequest = input && (parsed.kind === 'master' || parsed.kind === 'separate' || parsed.kind === 'analyze')
@@ -759,7 +800,9 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
   if (estimate) {
     const [band, global] = await Promise.all([readUsage(ctx, slots.band), readUsage(ctx, slots.global)]);
     const allowed = fits(band.file.total_usd, cost, slots.band.budget) && fits(global.file.total_usd, cost, slots.global.budget);
-    return json(200, { kind: request.kind, estimated_cost_usd: cost, spent_usd: band.file.total_usd, budget_usd: slots.band.budget, allowed });
+    // `listen` (solo chat, STUDIO_V2.md 4.3): el Hub muestra ESCUCHAR FRAGMENTO solo si es true.
+    const extra = request.kind === 'chat' ? { listen: listenEnabled(env) } : {};
+    return json(200, { kind: request.kind, estimated_cost_usd: cost, spent_usd: band.file.total_usd, budget_usd: slots.band.budget, allowed, ...extra });
   }
 
   const jobId = clientJobId ?? ctx.deps.newId('job');
@@ -886,7 +929,9 @@ async function runProvider(
         }
       }
     } else if (request.kind === 'chat') {
-      const result = await textProvider(env).chat(env, ctx.fetchFn, chatCall(request));
+      // Fragmento a escuchar (4.3.5): ya se comprobo en startJob que existe y que la variable lo permite.
+      const listen = input ? await readListenAudio(ctx, input) : null;
+      const result = await textProvider(env).chat(env, ctx.fetchFn, chatCall(request, listen));
       keep(result.meta);
       await settle(result.costUsd);
       const done = result.failure !== null ? { failure: result.failure } : finishChat(result.value, request.tool_mode);

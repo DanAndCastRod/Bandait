@@ -151,6 +151,14 @@ export interface Env {
   STUDIO_RATE_CHAT_USD?: string;
   /** Recargo del chat por cada 32 KB completos de cuerpo. */
   STUDIO_RATE_CHAT_USD_PER_32KB?: string;
+  /**
+   * "1": el chat acepta fragmentos de audio para escuchar (STUDIO_V2.md 4.3.5). Cualquier otro
+   * valor (wrangler.jsonc trae "0"): un `audio` en el chat es 503 provider_unavailable. Se prende
+   * solo cuando URiT IA acepte audio en /v1/text.
+   */
+  STUDIO_CHAT_LISTEN?: string;
+  /** Recargo del chat por vuelta que escucha un fragmento (por defecto 0.02). */
+  STUDIO_RATE_CHAT_LISTEN_USD?: string;
 
   // ---- MCP de operador (docs/PLAN_MCP_BANDAIT_URIT.md, seccion 2; src/mcp.ts) ----
   /**

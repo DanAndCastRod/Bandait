@@ -101,6 +101,9 @@ export interface SessionMidiClip {
 
 export interface SessionMarker { id: string; beat: number; label: string; kind: string }
 
+/** Acorde de referencia (STUDIO_V2.md 2.9): no suena, lo usa el asistente. */
+export interface SessionChord { beat: number; length_beats: number; name: string }
+
 /**
  * Pista. En v1 no hay `kind` y siempre hay `clips`. En v2, `kind` va despues de `id`; una pista de
  * audio lleva `clips` y una de instrumento `instrument`, `midi_clips` y `frozen_asset_id`.
@@ -117,6 +120,8 @@ export interface SessionDocument {
   updated_by: string | null; assets: SessionAsset[]; tracks: SessionTrack[];
   /** Solo en v2 (siempre presente en lo que devuelve validateSession para un v2). */
   markers?: SessionMarker[];
+  /** Solo en v2 y solo si no esta vacio (STUDIO_V2.md 2.9). */
+  chords?: SessionChord[];
   master: { volume_db: number; fx: SessionFx[]; reverb: { decay_s: number; return_db: number } };
 }
 
@@ -132,6 +137,9 @@ export const MAX_SAMPLER_ZONES = 64;
 export const MAX_WAM_STATE_BYTES = 16384;
 export const MAX_MARKERS = 256;
 export const MAX_MARKER_LABEL = 60;
+/** Acordes de referencia del documento (STUDIO_V2.md 2.9). */
+export const MAX_SESSION_CHORDS = 2048;
+export const MAX_SESSION_CHORD_NAME = 16;
 /** 1200 s a 260 BPM. */
 export const MAX_BEAT = 5200;
 export const MIDI_MIN_CLIP_BEATS = 0.0625;
@@ -561,6 +569,26 @@ function validateMarkers(raw: unknown, bpm: number): SessionMarker[] {
   return markers.sort((a, b) => a.beat - b.beat || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+/**
+ * Acordes de referencia (STUDIO_V2.md 2.9): beat y fin dentro de los 1200 s, nombre de 1 a 16
+ * caracteres, ordenados por beat y nombre. Sin ids: se reemplazan de una vez.
+ */
+function validateChords(raw: unknown, bpm: number): SessionChord[] {
+  const container: Raw = { chords: raw };
+  const chords = list(container, 'chords', '', MAX_SESSION_CHORDS).map((item, i): SessionChord => {
+    const path = `chords[${i}]`;
+    const o = asObject(item, path);
+    checkKeys(o, path, ['beat', 'length_beats', 'name']);
+    const beat = num(o, 'beat', path, 0, MAX_BEAT);
+    const lengthBeats = num(o, 'length_beats', path, 0, MAX_BEAT);
+    if (!(lengthBeats > 0)) fail('out_of_range', join(path, 'length_beats'));
+    const name = text(o, 'name', path, 1, MAX_SESSION_CHORD_NAME);
+    if (((beat + lengthBeats) * 60) / bpm > MAX_SESSION_SECONDS + TIME_EPSILON_S) fail('session_too_long', join(path, 'length_beats'));
+    return { beat, length_beats: lengthBeats, name };
+  });
+  return chords.sort((a, b) => a.beat - b.beat || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
 const ROOT_KEYS = ['version', 'id', 'title', 'song_id', 'bpm', 'beats_per_bar', 'key', 'sample_rate',
   'latency_offset_ms', 'updated_at', 'updated_by', 'assets', 'tracks', 'master'] as const;
 
@@ -575,7 +603,7 @@ export function validateSession(raw: unknown): SessionDocument {
   if (o.version === undefined) fail('missing_field', 'version');
   if (o.version !== 1 && o.version !== 2) fail('unsupported_version', 'version');
   const version = o.version;
-  checkKeys(o, '', ROOT_KEYS, version === 2 ? ['markers'] : []);
+  checkKeys(o, '', ROOT_KEYS, version === 2 ? ['markers', 'chords'] : []);
 
   const title = text(o, 'title', '', 1, 400).trim();
   if (title.length < 1 || title.length > 120) fail('out_of_range', 'title');
@@ -602,6 +630,8 @@ export function validateSession(raw: unknown): SessionDocument {
     return track;
   });
   const markers = version === 2 ? (o.markers === undefined ? [] : validateMarkers(o.markers, bpm)) : null;
+  // `chords` vacio o ausente no se devuelve: un documento sin acordes queda igual que antes.
+  const chords = version === 2 && o.chords !== undefined ? validateChords(o.chords, bpm) : [];
 
   const m = asObject(o.master, 'master');
   checkKeys(m, 'master', ['volume_db', 'fx', 'reverb']);
@@ -623,6 +653,7 @@ export function validateSession(raw: unknown): SessionDocument {
     assets: [...assets.values()],
     tracks,
     ...(markers ? { markers } : {}),
+    ...(chords.length ? { chords } : {}),
     master: {
       volume_db: num(m, 'volume_db', 'master', VOLUME_DB_MIN, VOLUME_DB_MAX),
       fx: validateFxChain(list(m, 'fx', 'master', 3), 'master.fx', 'master'),

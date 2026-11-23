@@ -26,6 +26,7 @@
  * Modulo puro: sin DOM ni import.meta.env.
  */
 import { stemRoleLabel, isStemRole } from '../stemNames.ts'
+import { reviewNoteCall } from './noteReview.ts'
 import {
   STUDIO_DRUMS_PRESETS,
   STUDIO_INSTRUMENT_TYPE_LABELS,
@@ -756,6 +757,11 @@ export interface PendingAssistantCommand {
   adjusted: string[]
   /** Campos que el esquema no tiene y se ignoraron. */
   ignored: string[]
+  /**
+   * Avisos de la revision local de notas (noteReview.ts), en espanol: fuera de tonalidad, choque
+   * de registro, fuera del rango del instrumento. No impiden aplicar. Ausente o [] = sin avisos.
+   */
+  warnings?: string[]
 }
 
 function clip500(text: string): string {
@@ -782,7 +788,9 @@ export function prepareToolCall<Ctx>(call: StudioChatToolCall, registry: Command
   }
   const problem = toolSessionProblem(call.name, check.args, session)
   if (problem) return { ...failedCommand(call, description, problem, command.id), args: check.args, adjusted: check.adjusted, ignored: check.ignored }
-  return { callId: call.id, name: call.name, commandId: command.id, args: check.args, description, status: 'pending', message: '', adjusted: check.adjusted, ignored: check.ignored }
+  const pending: PendingAssistantCommand = { callId: call.id, name: call.name, commandId: command.id, args: check.args, description, status: 'pending', message: '', adjusted: check.adjusted, ignored: check.ignored }
+  const warnings = reviewNoteCall(call.name, check.args, session)
+  return warnings.length > 0 ? { ...pending, warnings } : pending
 }
 
 /** Todas las llamadas de una respuesta, en el mismo orden. */
@@ -794,6 +802,8 @@ function notesFor(pending: PendingAssistantCommand): string {
   const notes: string[] = []
   if (pending.adjusted.length) notes.push(`Se acotaron al rango permitido: ${pending.adjusted.slice(0, 8).join(', ')}${pending.adjusted.length > 8 ? '...' : ''}.`)
   if (pending.ignored.length) notes.push(`Se ignoraron campos desconocidos: ${pending.ignored.slice(0, 8).join(', ')}${pending.ignored.length > 8 ? '...' : ''}.`)
+  // El modelo tambien ve los avisos de la revision local: puede corregir en la vuelta siguiente.
+  if (pending.warnings?.length) notes.push(`Avisos de la revisión: ${pending.warnings.join(' ')}`)
   return notes.length ? ` ${notes.join(' ')}` : ''
 }
 

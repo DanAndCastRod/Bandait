@@ -167,6 +167,14 @@ class FakeStudioV2Worker {
   }
 }
 
+/** Muestra la ventana del asistente con Ctrl+J (arranca minimizado: solo la pastilla). */
+async function openAssistant(page: Page) {
+  await expect(page.getByTestId('studio-assistant-pill')).toBeVisible();
+  await blur(page);
+  await page.keyboard.press('Control+j');
+  await expect(page.getByTestId('studio-assistant')).toBeVisible();
+}
+
 async function enterCloudStudio(page: Page, worker: FakeStudioV2Worker, title: string) {
   const fake = new FakeSupabase();
   fake.workspaces.push({ user_id: USER.id, workspace: workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']), updated_at: fake.now() });
@@ -287,6 +295,63 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(tracks(page)).toHaveCount(1);
   });
 
+  test('atajos de DAW: copiar y pegar en la misma pista, Ctrl+D, selección múltiple y borrar', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+    await enterDemo(page);
+    await openStudioHome(page);
+    await createFreeSession(page, 'Atajos DAW e2e');
+    await page.getByTestId('studio-add-instrument').selectOption('synth');
+    await expect(tracks(page)).toHaveCount(1);
+    const track = tracks(page).first();
+    const selection = page.getByTestId('studio-selection');
+    const undo = page.getByTestId('studio-undo');
+
+    // Un clip MIDI de 4 compases en el compás 1 (120 BPM: 8 s), elegido.
+    await page.getByTestId('studio-add-midi-clip').click();
+    await expect(track).toHaveAttribute('data-clips', '1');
+    await expect(selection).toContainText('· 1.1 ·');
+
+    // Ctrl+C y Ctrl+V sin mover el cabezal: la copia va en la MISMA pista, justo detrás (compás 5).
+    await blur(page);
+    await page.keyboard.press('Control+c');
+    await page.keyboard.press('Control+v');
+    await expect(track).toHaveAttribute('data-clips', '2');
+    await expect(undo).toHaveAttribute('title', /Pegar clip MIDI/);
+    await expect(selection).toContainText('· 5.1 ·');
+    // Otro Ctrl+V encadena: compás 9.
+    await page.keyboard.press('Control+v');
+    await expect(track).toHaveAttribute('data-clips', '3');
+    await expect(selection).toContainText('· 9.1 ·');
+
+    // Ctrl+D duplica la copia elegida detrás de ella: compás 13.
+    await page.keyboard.press('Control+d');
+    await expect(track).toHaveAttribute('data-clips', '4');
+    await expect(undo).toHaveAttribute('title', /Duplicar clip MIDI/);
+    await expect(selection).toContainText('· 13.1 ·');
+
+    // Selección múltiple: clic en el primer clip y Shift + clic en el segundo (36 px por segundo).
+    const canvas = page.getByTestId('studio-canvas');
+    await canvas.click({ position: { x: 4 * 36, y: 100 } });
+    await expect(selection).toHaveAttribute('data-count', '1');
+    await canvas.click({ position: { x: 12 * 36, y: 100 }, modifiers: ['Shift'] });
+    await expect(selection).toHaveAttribute('data-count', '2');
+    await expect(selection).toContainText('2 CLIPS ELEGIDOS');
+
+    // Supr borra los dos en un solo paso de deshacer.
+    await page.keyboard.press('Delete');
+    await expect(track).toHaveAttribute('data-clips', '2');
+    await expect(undo).toHaveAttribute('title', /Borrar 2 clips/);
+    await expect(selection).toHaveAttribute('data-count', '0');
+
+    // Ctrl+A elige todos los que quedan; Ctrl+Z trae de vuelta los borrados.
+    await page.keyboard.press('Control+a');
+    await expect(selection).toHaveAttribute('data-count', '2');
+    await page.keyboard.press('Control+z');
+    await expect(track).toHaveAttribute('data-clips', '4');
+    expect(pageErrors).toEqual([]);
+  });
+
   test('COMPONER contra el Worker simulado: confirma el costo y el clip entra solo al aceptar', async ({ page }) => {
     const worker = new FakeStudioV2Worker();
     await enterCloudStudio(page, worker, 'Componer e2e');
@@ -311,6 +376,7 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
   test('chat: el comando propuesto queda pendiente y solo se aplica al aceptarlo', async ({ page }) => {
     const worker = new FakeStudioV2Worker();
     await enterCloudStudio(page, worker, 'Chat e2e');
+    await openAssistant(page);
     const undo = page.getByTestId('studio-undo');
     const before = await undo.getAttribute('title');
     await page.getByTestId('studio-chat-input').fill('Marca el coro en el compás 2');
@@ -334,5 +400,120 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(call).toHaveAttribute('data-state', 'applied');
     await expect(undo).not.toHaveAttribute('title', before ?? '');
     await expect(page.getByTestId('studio-chat-continue')).toBeVisible();
+  });
+
+  test('asistente: Ctrl+J lo muestra y lo oculta, pasa a flotante, se arrastra sin salir de la ventana y recuerda el modo', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await enterDemo(page);
+    await openStudioHome(page);
+    await createFreeSession(page, 'Ventana e2e');
+    const assistant = page.getByTestId('studio-assistant');
+    const pill = page.getByTestId('studio-assistant-pill');
+    await expect(pill).toBeVisible();
+    await expect(assistant).toBeHidden();
+
+    await blur(page);
+    await page.keyboard.press('Control+j');
+    await expect(assistant).toBeVisible();
+    await expect(assistant).toHaveAttribute('data-mode', 'docked');
+    await expect(pill).toHaveCount(0);
+    // Sin nube el asistente lo dice en su ventana, y los pedidos rapidos quedan bloqueados.
+    await expect(page.getByTestId('studio-chat-blocked')).toBeVisible();
+    await expect(page.getByTestId('studio-chat-quick-mix')).toBeDisabled();
+    await expect(page.getByTestId('studio-chat-chip-view')).toContainText('LÍNEA DE TIEMPO');
+
+    // Con el foco adentro del asistente, Ctrl+J lo oculta y el foco pasa a la pastilla.
+    await page.keyboard.press('Control+j');
+    await expect(assistant).toBeHidden();
+    await expect(pill).toBeFocused();
+    await pill.click();
+    await expect(assistant).toHaveAttribute('data-mode', 'docked');
+
+    await page.getByTestId('studio-assistant-float').click();
+    await expect(assistant).toHaveAttribute('data-mode', 'floating');
+    // Arrastrada por la barra muy afuera arriba a la izquierda: queda pegada al borde, entera.
+    const bar = page.getByTestId('studio-assistant-bar');
+    const box = (await bar.boundingBox())!;
+    await page.mouse.move(box.x + 90, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 2500, box.y - 2500, { steps: 6 });
+    await page.mouse.up();
+    const moved = (await assistant.boundingBox())!;
+    expect(moved.x).toBeGreaterThanOrEqual(0);
+    expect(moved.y).toBeGreaterThanOrEqual(0);
+    expect(moved.x).toBeLessThan(20);
+    expect(moved.y).toBeLessThan(20);
+    // Y hacia abajo a la derecha tampoco se sale.
+    await page.mouse.move(moved.x + 90, moved.y + 18);
+    await page.mouse.down();
+    await page.mouse.move(5000, 5000, { steps: 6 });
+    await page.mouse.up();
+    const corner = (await assistant.boundingBox())!;
+    expect(corner.x + corner.width).toBeLessThanOrEqual(1440);
+    expect(corner.y + corner.height).toBeLessThanOrEqual(900);
+
+    // Esc minimiza el flotante (sin texto escrito en el mensaje).
+    await page.getByTestId('studio-assistant-dock').focus();
+    await page.keyboard.press('Escape');
+    await expect(pill).toBeVisible();
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bandait_studio_assistant') ?? 'null'));
+    expect(saved).toMatchObject({ mode: 'minimized', lastOpen: 'floating' });
+    expect(saved.float.x + saved.float.w).toBeLessThanOrEqual(1440);
+    // La pastilla lo devuelve flotante, en la misma esquina.
+    await pill.click();
+    await expect(assistant).toHaveAttribute('data-mode', 'floating');
+    const again = (await assistant.boundingBox())!;
+    expect(Math.abs(again.x - corner.x)).toBeLessThan(2);
+  });
+
+  test('chat: ESCUCHAR aplica de forma provisional y DESHACER deja la sesion como estaba; la conversacion vuelve tras recargar', async ({ page }) => {
+    const worker = new FakeStudioV2Worker();
+    await enterCloudStudio(page, worker, 'Escuchar e2e');
+    await openAssistant(page);
+    const undo = page.getByTestId('studio-undo');
+    const before = await undo.getAttribute('title');
+    await page.getByTestId('studio-chat-input').fill('Marca el coro en el compás 2');
+    await page.getByTestId('studio-chat-input').press('Enter');
+    await page.getByTestId('studio-chat-launch').click();
+    const call = page.getByTestId('studio-chat-call');
+    await expect(call).toHaveAttribute('data-state', 'pending', { timeout: 15_000 });
+
+    // ESCUCHAR: el cambio entra como un paso de deshacer y suena en loop la zona de la marca.
+    await page.getByTestId('studio-chat-listen').click();
+    await expect(page.getByTestId('studio-chat-keep')).toBeVisible();
+    await expect(call).toHaveAttribute('data-state', 'listening');
+    await expect(page.getByTestId('studio-chat-listening')).toContainText('c. 2-9');
+    await expect(undo).not.toHaveAttribute('title', before ?? '');
+    await expect(page.getByTestId('studio-loop')).toHaveAttribute('aria-pressed', 'true');
+    // Mientras se escucha no se puede mandar otro mensaje ni empezar otra conversacion.
+    await expect(page.getByTestId('studio-chat-restart')).toBeDisabled();
+
+    // DESHACER: la sesion vuelve a la de antes, sin loop, y el cambio sigue propuesto.
+    await page.getByTestId('studio-chat-undo').click();
+    await expect(call).toHaveAttribute('data-state', 'pending');
+    expect(await undo.getAttribute('title')).toBe(before);
+    await expect(page.getByTestId('studio-loop')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('studio-status')).toHaveText('DETENIDO');
+
+    // Recargar: la conversacion de esta sesion vuelve, con el cambio todavia por decidir y el
+    // costo ya confirmado (el boton dice cuanto cuesta, sin volver a pedir confirmacion).
+    await page.reload();
+    await openStudioHome(page);
+    await page.getByTestId('studio-open').first().click();
+    await expect(page.getByTestId('studio-workspace')).toBeVisible();
+    // La ventana tambien se recuerda: vuelve acoplada, como estaba.
+    await expect(page.getByTestId('studio-assistant')).toHaveAttribute('data-mode', 'docked');
+    await expect(page.getByTestId('studio-chat-restored')).toBeVisible();
+    await expect(page.getByTestId('studio-chat-log')).toContainText('Propongo marcar el coro');
+    await expect(call).toHaveAttribute('data-state', 'pending');
+    await expect(page.getByTestId('studio-assistant-pill')).toHaveCount(0);
+    await expect(page.getByTestId('studio-chat-send')).toContainText('ENVIAR ·');
+    await page.getByTestId('studio-chat-apply').click();
+    await expect(call).toHaveAttribute('data-state', 'applied');
+
+    // NUEVA empieza de cero, y eso tambien queda guardado.
+    await page.getByTestId('studio-chat-restart').click();
+    await expect(page.getByTestId('studio-chat-log')).toHaveCount(0);
+    await expect(page.getByTestId('studio-chat-send')).toContainText('ENVIAR...');
   });
 });

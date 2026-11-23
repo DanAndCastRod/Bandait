@@ -290,6 +290,12 @@
     {"id": "mk_2", "beat": 16, "label": "Estrofa", "kind": "verse"},
     {"id": "mk_3", "beat": 48, "label": "Coro", "kind": "chorus"}
   ],
+  "chords": [
+    {"beat": 0, "length_beats": 4, "name": "C#m"},
+    {"beat": 4, "length_beats": 4, "name": "A"},
+    {"beat": 8, "length_beats": 4, "name": "E"},
+    {"beat": 12, "length_beats": 4, "name": "B"}
+  ],
   "master": {
     "volume_db": 0,
     "fx": [

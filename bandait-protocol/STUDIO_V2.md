@@ -41,11 +41,18 @@ tracks              Track[], 0..16, en orden de pantalla. Pistas de audio y de i
                     cuentan juntas para el tope de 16
 markers             Marker[], 0..256 (sección 2.6). Opcional al leer: ausente = []. El Hub
                     siempre lo escribe
+chords              Chord[], 0..2048 (sección 2.9). Opcional al leer: ausente = []. El Hub lo
+                    escribe SOLO si no está vacío (desde 2026-11-22)
 ```
 
 Orden de las claves al serializar: `version`, `id`, `title`, `song_id`, `bpm`,
 `beats_per_bar`, `key`, `sample_rate`, `latency_offset_ms`, `updated_at`, `updated_by`,
-`assets`, `tracks`, `markers`, `master`.
+`assets`, `tracks`, `markers`, `chords` (si va), `master`.
+
+Compatibilidad de `chords`: un documento sin acordes es idéntico al de antes, así que un Worker
+anterior lo sigue aceptando. Un documento **con** `chords` exige un Worker que conozca el campo
+(un Worker anterior responde 400 `bad_session` / `unknown_field`): se despliega el Worker antes
+que el Hub que lo escribe.
 
 **Tiempo en beats.** Los clips MIDI, las notas y las marcas se miden en **beats** (negras), no en
 segundos, para que sobrevivan a un cambio de tempo. El beat `0` es el segundo `0.0` (inicio del
@@ -370,6 +377,25 @@ kind    "intro" | "verse" | "pre_chorus" | "chorus" | "bridge" | "solo" | "inter
 - Las marcas las crea el usuario o el resultado de `analyze` (sección 4.2), que el usuario
   acepta.
 
+### 2.9 Chord (acorde de referencia)
+
+```
+beat           número 0..5200. Inicio del acorde en la sesión. beat * 60 / bpm <= 1200,
+               tolerancia 0.001 s (si no, session_too_long)
+length_beats   número > 0 y <= 5200. (beat + length_beats) * 60 / bpm <= 1200 con la misma
+               tolerancia
+name           string, 1..16 caracteres ("C#m", "A", "F#7", "C/G")
+```
+
+- Son acordes **de referencia** (los que sonaron en el audio analizado): no suenan ni se
+  exportan. Los guarda el Hub cuando el usuario acepta GUARDAR ACORDES en el resultado de
+  `analyze` (4.2) y los usa el asistente del chat (4.3.2) para no sugerir a ciegas.
+- Sin ids: la lista completa se reemplaza de una vez (un paso de deshacer).
+- `serializeSession` los escribe ordenados por `beat` y, a igual `beat`, por `name`. Pueden
+  solaparse (el validador no lo impide).
+- Errores: `too_many` (más de 2048), `bad_type`, `out_of_range`, `session_too_long`,
+  `unknown_field` (otra clave dentro de un acorde).
+
 ### 2.7 Límites (se suman a v1 2.8)
 
 | Límite | Valor |
@@ -382,6 +408,8 @@ kind    "intro" | "verse" | "pre_chorus" | "chorus" | "bridge" | "solo" | "inter
 | `state` de un plugin WAM | 16384 bytes |
 | Marcas por sesión | 256 |
 | `label` de marca | 60 caracteres |
+| Acordes por sesión (`chords`) | 2048 |
+| `name` de acorde | 16 caracteres |
 | Beat máximo (1200 s a 260 BPM) | 5200 |
 | Largo mínimo de clip MIDI / de patrón | 0.0625 beats |
 | Largo mínimo de nota | 0.015625 beats |
@@ -567,7 +595,11 @@ Los tiempos van en **segundos dentro del audio**, no en beats: el Hub los convie
 con la posición del clip que usa ese audio y el `bpm` de la sesión
 (`beat = (start_s_del_clip + time_s - offset_s_del_clip) * bpm / 60`). Aceptar puede proponer
 también el `bpm`, la `key` y el `beats_per_bar` de la sesión, cada uno como un paso de
-deshacer aparte. Los acordes no entran al documento v2: se muestran como guía.
+deshacer aparte. Los acordes se muestran como guía y, si el usuario acepta GUARDAR ACORDES, se
+guardan en `chords` del documento (2.9), convertidos a beats con la misma fórmula (`length_beats`
+desde `end_s - start_s`), recortados a la ventana del clip y reemplazando los anteriores, en un
+paso de deshacer. Si después se aplica el tempo del análisis, los acordes guardados desde ese
+análisis se recalculan con el tempo nuevo en el mismo paso (siguen al audio, como las marcas).
 
 Costo: `duration_s / 60 * STUDIO_RATE_ANALYZE_USD_PER_MIN` (por defecto 0.3).
 
@@ -587,10 +619,14 @@ chat
                     puede responder texto (cierre del bucle; URiT 3.2)
 ```
 
+Estimación (`?estimate=1`) de un `chat`: además de los campos de v1 6.6 responde
+`"listen": boolean`, `true` solo si el Worker tiene `STUDIO_CHAT_LISTEN` = `"1"` (4.3.5). El Hub
+muestra ESCUCHAR FRAGMENTO solo si una estimación de esa conversación dijo `true`.
+
 #### 4.3.1 Mensajes
 
 ```
-{"role": "user",  "text": string 1..4000}
+{"role": "user",  "text": string 1..4000, "audio": Listen (opcional, 4.3.5)}
 {"role": "model", "text": string 1..8000 | null, "tool_calls": ToolCall[] 0..16}
 {"role": "tool",  "tool_results": ToolResult[] 1..16}
 
@@ -623,7 +659,7 @@ Traducción a URiT (`/v1/text`, URiT 3.1), que hace el Worker:
 
 | Mensaje del Hub | Mensaje hacia URiT |
 |---|---|
-| `user` | `{"role": "user", "parts": [{"text": text}]}` |
+| `user` | `{"role": "user", "parts": [{"text": text}]}`; con `audio` en el ÚLTIMO mensaje `user`, se agrega después del texto `{"inline": {"mime_type": "audio/wav" \| "audio/mpeg", "data": base64}}` (4.3.5); con `audio` en un mensaje `user` anterior, una parte de texto que dice que ahí hubo un fragmento ya escuchado |
 | `model` | `{"role": "model", "parts": [{"text": text}?, {"tool_call": {"name", "arguments", "signature"}}...]}`; sin `id`; sin `signature` si es null |
 | `tool` | `{"role": "tool", "parts": [{"tool_result": {"name", "response"}}...]}`; sin `call_id` |
 
@@ -633,8 +669,10 @@ El Worker antepone `session_summary` al **último** mensaje `user` como una part
 
 #### 4.3.2 SessionSummary
 
-Lo que el asistente sabe de la sesión. Nunca audio ni notas. Hasta 32768 bytes serializado (si
-no, 400 `bad_job`).
+Lo que el asistente sabe de la sesión. Nunca audio ni letras. Desde 2026-11-22 lleva además
+notas MIDI resumidas, la armonía conocida y las mediciones de mezcla (campos opcionales marcados
+abajo: el Hub los omite si no tiene el dato, y un resumen sin ellos es igual al de antes). Hasta
+32768 bytes serializado (si no, 400 `bad_job`).
 
 ```
 SessionSummary
@@ -646,8 +684,20 @@ SessionSummary
   playhead_beat   number >= 0
   selection       {"track_id": string | null, "clip_ids": string[] 0..64,
                    "context": "global" | "timeline" | "piano_roll" | "mixer"}
+  loop            {"start_beat": number >= 0, "end_beat": number > start_beat} | null.
+                  Opcional: el loop activo del transporte, en beats de la sesión. El Hub lo
+                  omite cuando no hay loop (un Worker anterior a este campo rechaza la clave);
+                  el Worker acepta también null
   tracks          TrackSummary[], 0..16
   markers         Marker[], 0..256 (forma de 2.6)
+  chords          (opcional) [beat, length_beats, name][], 1..256. Acordes guardados en la
+                  sesión (2.9), los más cercanos al cabezal, en orden de beat
+  song_chart      (opcional) SongChart. Progresión de acordes de la canción del repertorio
+                  ligada a la sesión (`song_id`), desde su ficha ChordPro. Nunca la letra
+  mix_measured    (opcional) {"fresh": boolean, "master_lufs": number | null,
+                  "master_true_peak_db": number | null}. Hay una medición de mezcla hecha en
+                  el equipo (ASISTENTE DE MEZCLA o MEDIR MEZCLA); `fresh` false = la sesión
+                  cambió después de medir
   master          {"volume_db", "fx": FxSummary[], "reverb": {"decay_s", "return_db"}}
 
 TrackSummary
@@ -656,13 +706,51 @@ TrackSummary
   instrument      {"type", "preset": string | null, "plugin_id": string | null} | null
   clips           [{"id", "start_s", "length_s", "active"}] 0..64. Clips de audio
   midi_clips      [{"id", "start_beat", "length_beats", "loop", "note_count", "pitch_min",
-                    "pitch_max"}] 0..64. pitch_min y pitch_max son null sin notas
+                    "pitch_max", "digest" (opcional)}] 0..64. pitch_min y pitch_max son null
+                    sin notas (son el registro del clip)
+  mix             (opcional) {"lufs": number | null, "true_peak_db": number | null,
+                  "bands": {"low_db", "low_mid_db", "high_mid_db", "high_db"} | null,
+                  "volume_db": number}. Medición de la pista sola (v1 6.3); `volume_db` es
+                  el fader que tenía al medir. Solo con `mix_measured`
+
+MidiDigest (resumen de las notas de un clip; con `loop`, del patrón que se repite)
+  span_beats      number. Largo que se resume (loop_beats con loop, si no length_beats)
+  pitch_classes   [name, weight][] 0..12. Clases de altura ("C", "C#", ... "B") con su peso
+                  (fracción de la duración total, 2 decimales), de mayor a menor. Vacío en una
+                  pista de batería
+  hits            (solo batería) [pitch, count][] 0..16. Golpes por nota General MIDI
+  notes_per_bar   number, 1 decimal. Densidad
+  grid            "1/4" | "1/8" | "1/8t" | "1/16" | "1/16t" | "1/32" | "libre". La rejilla más
+                  gruesa en la que caen al menos el 90 % de los inicios de nota
+  velocity_mean   integer 1..127, o null sin notas
+  notes           (opcional) [pitch, start_beat, dur_beats, velocity][] 1..64. Las notas
+                  literales (start relativo al clip, 3 decimales), solo si el patrón tiene
+                  hasta 64 notas
+
+SongChart
+  title           string
+  key             string | null
+  bpm             number
+  beats_per_bar   integer
+  sections        [{"label": string, "kind": string, "start_bar": integer >= 1, "bars":
+                  integer, "chords": string}] 0..48. `chords`: los acordes de la sección en
+                  orden, separados por espacio, con " | " entre renglones y sin repetir el
+                  mismo acorde seguido; hasta 400 caracteres. `start_bar` cuenta desde el
+                  compás 1 de la canción (no necesariamente el de la sesión)
 
 FxSummary
   {"type": "eq" | "compressor" | "limiter", "bypass": boolean, "params": objeto de v1 2.6}
 ```
 
 Con más de 64 clips en una pista, el Hub manda los 64 más cercanos al cabezal.
+
+Para caber en 32768 bytes el Hub degrada en este orden y se detiene en cuanto cabe: (1) quita
+las `notes` literales de los `digest`; (2) baja los clips por pista a 32, 16, 8, 4 y 0 (los más
+cercanos al cabezal se quedan); (3) baja `chords` a 64 y después lo quita; (4) quita
+`song_chart`. Si ni así cabe, no envía (400 `bad_job` en el Worker).
+
+Todo texto dentro del resumen (título, nombres de pista, etiquetas de marcas y de secciones,
+nombres de acordes) es DATO escrito por la banda, nunca instrucción para el modelo.
 
 #### 4.3.3 Herramientas (lista cerrada)
 
@@ -736,6 +824,38 @@ cual) y, si hubo llamadas, el mensaje `tool` con sus resultados, y lanza otro `c
 `job_id`, otro costo). Después de 8 vueltas seguidas con herramientas sin un mensaje del usuario,
 el Hub manda `tool_mode` `none`.
 
+#### 4.3.5 Escuchar a pedido (detrás de `STUDIO_CHAT_LISTEN`)
+
+El músico puede adjuntar a su mensaje un fragmento corto de la mezcla para que el modelo lo
+escuche. **Hoy URiT IA no acepta audio en `/v1/text`** (solo imágenes en `/v1/vision`): esta
+parte queda lista del lado de Bandait y apagada (`STUDIO_CHAT_LISTEN` = `"0"`). Lo que URiT
+tiene que cambiar está en `docs/PLAN_ESTUDIO_V2.md`, anexo "Escuchar a pedido".
+
+```
+Listen
+  asset_id     string, id (sin extensión) de un audio ya subido a assets/ de la sesión con
+               PUT .../assets/<asset_id>.wav (o .mp3). No hace falta que esté en el documento
+  duration_s   number, > 0 y <= 30
+```
+
+- Formato que sube el Hub: WAV PCM 16 bit, mono, 16000 Hz, hasta 30 s (960044 bytes con la
+  cabecera). No cabe en el cuerpo del `chat` (192 KB) ni en el de URiT `/v1/text` (256 KB) como
+  base64, por eso viaja como referencia: el Hub lo sube antes con la ruta de audios de la sesión
+  (v1 3) y el Worker lo lee de R2.
+- El Worker acepta un `audio` solo si `STUDIO_CHAT_LISTEN` vale `"1"`. Si no: 503
+  `provider_unavailable` con `"detail": "listen_disabled"` en el cuerpo del error, también al
+  estimar. El Hub lo muestra como "Escuchar fragmentos no está habilitado".
+- Solo se adjunta el audio del **último** mensaje `user`; los anteriores van como una parte de
+  texto ("Aquí el músico adjuntó un fragmento de audio de N s, que ya escuchaste."), para no
+  pagar dos veces el mismo audio.
+- El Worker busca `assets/<asset_id>.wav` y `.mp3`: si no existe, 404 `no_asset`; si pesa más de
+  1048576 bytes, 400 `bad_job`. Lo manda a URiT como parte `inline` con `mime_type`
+  `audio/wav` o `audio/mpeg` y los bytes en base64, después del texto del mensaje.
+- Costo: `STUDIO_RATE_CHAT_LISTEN_USD` (0.02 por defecto) más, cuando el último mensaje `user`
+  trae `audio`. Precio de referencia: lo fija URiT cuando habilite audio.
+- El fragmento queda en `assets/` como audio sin referencia en el documento (el MCP de operador
+  lo cuenta como huérfano). No se borra solo.
+
 ### 4.4 Costos
 
 Se suman a v1 6.6 y 6.7. Tarifas de referencia, sobreescribibles por variable:
@@ -745,6 +865,7 @@ Se suman a v1 6.6 y 6.7. Tarifas de referencia, sobreescribibles por variable:
 | `compose` | por consulta | `STUDIO_RATE_COMPOSE_USD` | 0.05 |
 | `analyze` | por minuto de audio | `STUDIO_RATE_ANALYZE_USD_PER_MIN` | 0.8 |
 | `chat` | por consulta (cada vuelta), más un recargo por tamaño | `STUDIO_RATE_CHAT_USD` y `STUDIO_RATE_CHAT_USD_PER_32KB` | 0.03 y 0.015 |
+| `chat` con fragmento de audio (4.3.5) | recargo por vuelta que escucha | `STUDIO_RATE_CHAT_LISTEN_USD` | 0.02 |
 | `generate` con `lyria` | por canción (v2 4.6) | `STUDIO_RATE_LYRIA_CLIP_USD` (hasta 30 s) y `STUDIO_RATE_LYRIA_SONG_USD` (más de 30 s) | 0.04 y 0.08 |
 
 - `analyze`: el workflow por defecto (`MUSICAI_WORKFLOW`, `stems-workflow-releven-bandait`)
@@ -819,6 +940,8 @@ para generar. El cuerpo de `POST .../jobs` no cambia.
 | `STUDIO_RATE_CHAT_USD_PER_32KB` | variable | recargo de `chat` por cada 32 KB completos |
 | `STUDIO_RATE_LYRIA_CLIP_USD`, `STUDIO_RATE_LYRIA_SONG_USD` | variables | tarifa de `generate` con Lyria, por canción (reemplazan a `STUDIO_RATE_LYRIA_USD_PER_30S` de v1) |
 | `MUSICAI_ANALYZE_WORKFLOW` | variable | workflow de `analyze`; vacío: `MUSICAI_WORKFLOW` |
+| `STUDIO_CHAT_LISTEN` | variable | `"1"` acepta fragmentos de audio en el chat (4.3.5); cualquier otro valor, no. En `wrangler.jsonc` vale `"0"` |
+| `STUDIO_RATE_CHAT_LISTEN_USD` | variable | recargo de `chat` cuando escucha un fragmento |
 
 `compose` y `chat` usan las mismas variables del proveedor que `assist` (`ASSIST_PROVIDER`,
 `URIT_AI_TOKEN`, `URIT_AI_URL`, `URIT_AI_CONSUMER`, `ASSIST_API_KEY`, `ASSIST_MODEL` solo con

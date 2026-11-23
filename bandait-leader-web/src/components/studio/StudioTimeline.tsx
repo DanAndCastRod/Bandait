@@ -21,7 +21,7 @@ import {
   type StudioSession,
   type StudioTrack,
 } from '../../services/studio/session'
-import { expandMidiClipNotes, moveClip, moveMidiClip, resizeMidiClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
+import { expandMidiClipNotes, moveClip, moveClipsBy, moveMidiClip, resizeMidiClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
 import type { AssetPeaks, LoopRegionS, PeakColumns, SnapMode } from '../../services/studio/types'
 import { StudioPianoRoll } from './StudioPianoRoll'
 import { StudioTrackHeader } from './StudioTrackHeader'
@@ -81,6 +81,8 @@ interface Scene {
   session: StudioSession
   rows: readonly TrackRowLayout[]
   selectedClipId: string | null
+  /** Todos los clips elegidos (seleccion multiple), con el principal. */
+  selectedIds: ReadonlySet<string>
   hoverClipId: string | null
   sections: readonly SectionSpan[]
   loop: LoopRegionS | null
@@ -169,7 +171,7 @@ function paintWave(ctx: CanvasRenderingContext2D, clip: StudioClip, peaks: Asset
 function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip, row: TrackRowLayout, color: string, view: View, buffers: PeakBuffers): void {
   const box = clipBox(clip, row, view)
   if (box.x > view.width || box.x + box.w < 0) return
-  const selected = clip.id === scene.selectedClipId
+  const selected = scene.selectedIds.has(clip.id)
   const hovered = clip.id === scene.hoverClipId
   const asset = findAsset(scene.session, clip.assetId)
   const missing = scene.missing.has(clip.assetId)
@@ -238,7 +240,9 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
   if (w > 34) {
     const generated = asset?.kind === 'generated'
     const name = missing ? 'FALTA EL AUDIO' : (asset?.label || 'Audio')
-    const text = `${generated ? 'IA  ' : ''}${clip.active ? '' : 'TOMA  '}${name}`
+    // Un clip inactivo sin grupo de tomas es un clip silenciado (tecla 0), no una toma alternativa.
+    const state = clip.active ? '' : clip.takeGroup === null ? 'SILENCIO  ' : 'TOMA  '
+    const text = `${generated ? 'IA  ' : ''}${state}${name}`
     ctx.font = FONT
     ctx.textBaseline = 'top'
     const tx = Math.max(box.x, 0) + 6
@@ -294,7 +298,7 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
   const bpm = scene.session.bpm
   const box = midiClipBox(clip, bpm, row, view)
   if (box.x > view.width || box.x + box.w < 0) return
-  const selected = clip.id === scene.selectedClipId
+  const selected = scene.selectedIds.has(clip.id)
   const x = Math.max(box.x, -2)
   const w = Math.min(box.x + box.w, view.width + 2) - x
   const beatPx = beatsToSeconds(1, bpm) * view.zoom
@@ -525,6 +529,27 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
   ctx.fillStyle = '#2E343D'
   ctx.fillRect(0, ry + RULER_H - 1, width, 1)
   ctx.fillRect(0, ry + SECTION_BAND_H, width, 1)
+
+  // Marcas de la sesion (Shift+M; Ctrl+flechas va de una a otra): linea fina y nombre en la regla.
+  for (const marker of session.markers) {
+    const ms = beatsToSeconds(marker.beat, session.bpm)
+    if (ms < t0 - 1 || ms > t1) continue
+    const mx = Math.round(ms * zoom - scrollX)
+    ctx.fillStyle = 'rgba(217, 162, 78, 0.35)'
+    ctx.fillRect(mx, ry + RULER_H, 1, rowsBottom - RULER_H)
+    ctx.fillStyle = '#D9A24E'
+    ctx.beginPath()
+    ctx.moveTo(mx, ry + RULER_H - 1)
+    ctx.lineTo(mx + 6, ry + RULER_H - 7)
+    ctx.lineTo(mx, ry + RULER_H - 13)
+    ctx.closePath()
+    ctx.fill()
+    if (marker.label) {
+      ctx.font = FONT
+      ctx.textBaseline = 'middle'
+      ctx.fillText(marker.label.toUpperCase(), mx + 9, ry + RULER_H - 7)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -610,10 +635,14 @@ const PART_LABEL: Record<ClipPart, string> = { body: 'Mover clip', start: 'Recor
 const MIDI_CURSOR: Record<MidiPart, string> = { body: 'grab', start: 'ew-resize', end: 'ew-resize' }
 const MIDI_LABEL: Record<MidiPart, string> = { body: 'Mover clip MIDI', start: 'Recortar clip MIDI', end: 'Recortar clip MIDI' }
 
+/**
+ * Arrastre en curso. `group`: con varios clips elegidos, arrastrar el cuerpo de uno los mueve a
+ * todos la misma distancia, en sus pistas (null = un solo clip, que si puede cambiar de pista).
+ */
 type Drag =
   | { kind: 'ruler'; startPx: number; startS: number; moved: boolean }
-  | { kind: 'clip'; part: ClipPart; clipId: string; base: StudioSession; grabS: number; startPx: number; startPy: number; moved: boolean }
-  | { kind: 'midi'; part: MidiPart; clipId: string; base: StudioSession; grabBeat: number; startPx: number; startPy: number; moved: boolean }
+  | { kind: 'clip'; part: ClipPart; clipId: string; base: StudioSession; grabS: number; startPx: number; startPy: number; moved: boolean; group: readonly string[] | null }
+  | { kind: 'midi'; part: MidiPart; clipId: string; base: StudioSession; grabBeat: number; startPx: number; startPy: number; moved: boolean; group: readonly string[] | null }
 
 /** Ancho visible de los carriles: el del cuerpo menos la columna fija de cabeceras (su primer hijo). */
 function laneWidth(body: HTMLElement): number {
@@ -671,6 +700,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   }, [
     session,
     snap.selectedClipId,
+    snap.selectedClipIds,
     snap.selectedTrackId,
     snap.midi.armedTrackId,
     snap.peaksVersion,
@@ -707,6 +737,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       session: shown,
       rows: layoutTracks(shown),
       selectedClipId: current.selectedClipId,
+      selectedIds: new Set(current.selectedClipIds),
       hoverClipId: hoverRef.current,
       sections: current.sections,
       loop: loopDraftRef.current ?? current.engine.loop,
@@ -806,25 +837,35 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     return () => scroller.removeEventListener('wheel', onWheel)
   }, [changeZoom])
 
-  // Zoom pedido por el registro de comandos (+ y -) mientras la linea de tiempo es el editor activo.
-  useEffect(
-    () =>
-      controller.onViewCommand((command) => {
-        if (command.type !== 'zoom' || controller.snapshot().editor !== 'timeline') return
-        changeZoom(zoomRef.current * (command.direction > 0 ? 1.5 : 1 / 1.5))
-      }),
-    [controller, changeZoom],
-  )
-
-  const fitZoom = () => {
+  const fitZoom = useCallback(() => {
     const scroller = bodyRef.current
     if (!scroller) return
-    const end = Math.max(8, sessionEndSeconds(session) + 2)
+    const end = Math.max(8, sessionEndSeconds(controller.snapshot().session) + 2)
     anchorRef.current = { timeS: 0, px: 0 }
     const target = clampZoom(laneWidth(scroller) / end)
     if (target === zoomRef.current) scroller.scrollLeft = 0
     else setZoom(target)
-  }
+  }, [controller])
+
+  /** Deja el cabezal en el centro de la vista (Shift+C). */
+  const centerPlayhead = useCallback(() => {
+    const scroller = bodyRef.current
+    if (!scroller) return
+    scroller.scrollLeft = Math.max(0, controller.engine.position() * zoomRef.current - laneWidth(scroller) / 2)
+    dirtyRef.current = true
+  }, [controller])
+
+  // Pedidos del registro de comandos (+, -, Shift+Z, Shift+C) mientras la linea de tiempo es el editor activo.
+  useEffect(
+    () =>
+      controller.onViewCommand((command) => {
+        if (controller.snapshot().editor !== 'timeline') return
+        if (command.type === 'zoom') changeZoom(zoomRef.current * (command.direction > 0 ? 1.5 : 1 / 1.5))
+        else if (command.type === 'fit') fitZoom()
+        else if (command.type === 'center') centerPlayhead()
+      }),
+    [controller, changeZoom, fitZoom, centerPlayhead],
+  )
 
   // ---- puntero ----
 
@@ -854,20 +895,28 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
-    if (hit.kind === 'clip') {
-      controller.select(hit.clipId)
-      const loc = findClip(scene.session, hit.clipId)
-      if (!loc || recording) return
-      dragRef.current = { kind: 'clip', part: hit.part, clipId: hit.clipId, base: scene.session, grabS: timeS - loc.clip.startS, startPx: at.px, startPy: at.py, moved: false }
-      event.currentTarget.setPointerCapture(event.pointerId)
-      return
-    }
-    if (hit.kind === 'midi') {
-      controller.select(hit.clipId)
-      const loc = findMidiClip(scene.session, hit.clipId)
-      if (!loc || recording) return
-      const beat = secondsToBeats(timeS, scene.session.bpm)
-      dragRef.current = { kind: 'midi', part: hit.part, clipId: hit.clipId, base: scene.session, grabBeat: beat - loc.clip.startBeat, startPx: at.px, startPy: at.py, moved: false }
+    if (hit.kind === 'clip' || hit.kind === 'midi') {
+      // Shift o Ctrl (Cmd) + clic: agrega o quita el clip de la seleccion, sin arrastrar.
+      if (event.shiftKey || event.ctrlKey || event.metaKey) {
+        controller.toggleClipSelection(hit.clipId)
+        return
+      }
+      // Clic sobre un clip que ya forma parte de una seleccion multiple: se arrastran todos.
+      const current = controller.snapshot().selectedClipIds
+      const inGroup = current.length > 1 && current.includes(hit.clipId)
+      if (inGroup) controller.focusSelectedClip(hit.clipId)
+      else controller.select(hit.clipId)
+      const group = inGroup && hit.part === 'body' ? current : null
+      if (hit.kind === 'clip') {
+        const loc = findClip(scene.session, hit.clipId)
+        if (!loc || recording) return
+        dragRef.current = { kind: 'clip', part: hit.part, clipId: hit.clipId, base: scene.session, grabS: timeS - loc.clip.startS, startPx: at.px, startPy: at.py, moved: false, group }
+      } else {
+        const loc = findMidiClip(scene.session, hit.clipId)
+        if (!loc || recording) return
+        const beat = secondsToBeats(timeS, scene.session.bpm)
+        dragRef.current = { kind: 'midi', part: hit.part, clipId: hit.clipId, base: scene.session, grabBeat: beat - loc.clip.startBeat, startPx: at.px, startPy: at.py, moved: false, group }
+      }
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
@@ -915,6 +964,26 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     }
     if (!drag.moved && Math.hypot(at.px - drag.startPx, at.py - drag.startPy) < DRAG_THRESHOLD_PX) return
     drag.moved = true
+    if (drag.group && drag.part === 'body') {
+      // Varios clips: el que se agarro cae en la rejilla y los demas lo siguen la misma distancia.
+      const span = drag.kind === 'clip' ? findClip(drag.base, drag.clipId)?.clip : null
+      const midi = drag.kind === 'midi' ? findMidiClip(drag.base, drag.clipId)?.clip : null
+      try {
+        let deltaS = 0
+        if (span && drag.kind === 'clip') {
+          deltaS = snapTime(drag.base, { timeS: Math.max(0, timeS - drag.grabS), mode }) - span.startS
+        } else if (midi && drag.kind === 'midi') {
+          const startBeat = snapBeat(Math.max(0, secondsToBeats(timeS, drag.base.bpm) - drag.grabBeat), mode, drag.base.beatsPerBar)
+          deltaS = beatsToSeconds(startBeat - midi.startBeat, drag.base.bpm)
+        }
+        draftRef.current = moveClipsBy(drag.base, drag.group, deltaS)
+        event.currentTarget.style.cursor = 'grabbing'
+      } catch {
+        // Un destino invalido deja el borrador como estaba.
+      }
+      dirtyRef.current = true
+      return
+    }
     if (drag.kind === 'midi') {
       const beat = secondsToBeats(timeS, drag.base.bpm)
       try {
@@ -970,9 +1039,11 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     }
     const draft = draftRef.current
     draftRef.current = null
+    // Clic sin arrastre sobre un clip de una seleccion multiple: queda elegido solo ese.
+    if (commit && !drag.moved && drag.group) controller.select(drag.clipId)
     if (commit && draft && draft !== drag.base) {
       // Si la sesion cambio durante el arrastre (deshacer con el teclado), el borrador ya no vale.
-      const label = drag.kind === 'midi' ? MIDI_LABEL[drag.part] : PART_LABEL[drag.part]
+      const label = drag.group ? `Mover ${drag.group.length} clips` : drag.kind === 'midi' ? MIDI_LABEL[drag.part] : PART_LABEL[drag.part]
       if (controller.snapshot().session === drag.base) controller.apply(draft, label)
     }
   }
@@ -1084,10 +1155,10 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
           <button type="button" className="stu-btn" data-size="icon" disabled={recording || !ready} onClick={() => controller.splitAtPlayhead()} aria-label="Dividir en el cabezal (S)" title="Dividir en el cabezal (S)" data-testid="studio-split">
             <Scissors size={14} />
           </button>
-          <button type="button" className="stu-btn" data-size="icon" disabled={(!selected && !selectedMidi) || recording} onClick={() => controller.duplicateSelected()} aria-label="Duplicar el clip (Ctrl+D)" title="Duplicar el clip (Ctrl+D)" data-testid="studio-duplicate">
+          <button type="button" className="stu-btn" data-size="icon" disabled={(!selected && !selectedMidi) || recording} onClick={() => controller.duplicateSelected()} aria-label="Duplicar los clips elegidos (Ctrl+D)" title="Duplicar los clips elegidos detrás de ellos (Ctrl+D)" data-testid="studio-duplicate">
             <Copy size={14} />
           </button>
-          <button type="button" className="stu-btn" data-size="icon" disabled={(!selected && !selectedMidi) || recording} onClick={() => controller.deleteSelected()} aria-label="Borrar el clip (Supr)" title="Borrar el clip (Supr)" data-testid="studio-delete">
+          <button type="button" className="stu-btn" data-size="icon" disabled={(!selected && !selectedMidi) || recording} onClick={() => controller.deleteSelected()} aria-label="Borrar los clips elegidos (Supr)" title="Borrar los clips elegidos (Supr). Shift o Ctrl + clic elige varios." data-testid="studio-delete">
             <Trash2 size={14} />
           </button>
           {selected && !selected.clip.active && (
@@ -1143,9 +1214,17 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
           </div>
         </div>
 
-        <span className="stu-label stu-mono" style={{ flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} aria-live="polite" data-testid="studio-selection">
-          {selected
-            ? `${selected.clip.active ? 'CLIP' : 'TOMA'} ${selected.track.name} · ${formatTimecode(selected.clip.startS)} · ${selected.clip.lengthS.toFixed(2)} s`
+        <span
+          className="stu-label stu-mono"
+          style={{ flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          aria-live="polite"
+          data-testid="studio-selection"
+          data-count={snap.selectedClipIds.length}
+        >
+          {snap.selectedClipIds.length > 1
+            ? `${snap.selectedClipIds.length} CLIPS ELEGIDOS`
+            : selected
+            ? `${selected.clip.active ? 'CLIP' : selected.clip.takeGroup === null ? 'SILENCIADO' : 'TOMA'} ${selected.track.name} · ${formatTimecode(selected.clip.startS)} · ${selected.clip.lengthS.toFixed(2)} s`
             : selectedMidi
               ? `MIDI ${selectedMidi.track.name} · ${formatBarBeat(selectedMidi.clip.startBeat, session.beatsPerBar)} · ${(selectedMidi.clip.lengthBeats / session.beatsPerBar).toFixed(2)} compases · ${selectedMidi.clip.notes.length} notas`
               : 'Sin clip elegido'}

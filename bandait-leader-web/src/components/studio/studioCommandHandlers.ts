@@ -87,6 +87,8 @@ export interface StudioCommandUi {
   openShortcuts: () => void
   openExport: () => void
   pickMidiFile: () => void
+  /** Muestra u oculta la ventana del asistente (Ctrl+J). */
+  toggleAssistant: () => void
 }
 
 export type StudioRegistry = CommandRegistry<StudioCommandCtx>
@@ -104,6 +106,7 @@ export class StudioUiBridge implements StudioCommandUi {
     openShortcuts: () => {},
     openExport: () => {},
     pickMidiFile: () => {},
+    toggleAssistant: () => {},
   }
 
   set(patch: Partial<StudioCommandUi>): void {
@@ -133,10 +136,17 @@ export class StudioUiBridge implements StudioCommandUi {
   pickMidiFile(): void {
     this.state.pickMidiFile()
   }
+
+  toggleAssistant(): void {
+    this.state.toggleAssistant()
+  }
 }
 
 /** Compases del loop cuando el cabezal no esta en una seccion (igual que el boton LOOP). */
 const DEFAULT_LOOP_BARS = 4
+
+/** Lo que sube o baja la velocidad de las notas cada Alt+Arriba o Alt+Abajo (1..127). */
+const NOTE_VELOCITY_STEP = 5
 
 /**
  * Comandos que solo tienen sentido con argumentos (los usa el asistente): no salen en la paleta
@@ -248,7 +258,11 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
   const snap = () => controller.snapshot()
   const notRecording = () => !snap().recording
   const inPiano = () => snap().editor === 'piano_roll' && snap().pianoClipId !== null
-  const label = (ctx: StudioCommandCtx, text: string) => (ctx.source === 'assistant' ? `Asistente: ${text}` : text)
+  const inTimeline = () => snap().editor === 'timeline'
+  /** Hay clips elegidos en la linea de tiempo. */
+  const hasClips = () => inTimeline() && controller.selectedClips().length > 0
+  const sessionHasClips = () => snap().session.tracks.some((track) => track.clips.length > 0 || track.midiClips.length > 0)
+  const label =(ctx: StudioCommandCtx, text: string) => (ctx.source === 'assistant' ? `Asistente: ${text}` : text)
 
   /**
    * Aplica una operacion como un paso de deshacer. A diferencia de controller.run, el error se
@@ -296,16 +310,25 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'transport.go_to_start': { run: () => controller.seek(0) },
     'transport.toggle_loop': { run: toggleLoop },
     'transport.toggle_click': { run: () => controller.setClick({ enabled: !snap().engine.click.enabled }) },
+    'transport.go_to_end': { run: () => controller.goToEnd() },
+    'transport.bar_back': { run: () => controller.stepBar(-1) },
+    'transport.bar_forward': { run: () => controller.stepBar(1) },
+    'transport.prev_marker': { run: () => controller.goToMarker(-1) },
+    'transport.next_marker': { run: () => controller.goToMarker(1) },
+    'transport.loop_selection': { run: () => controller.loopSelection(), isEnabled: notRecording },
+    'transport.tap_tempo': { run: () => controller.tapTempo(), ...editing },
+    'transport.toggle_count_in': { run: () => controller.toggleCountIn() },
 
     // ---- edicion ----
     'edit.undo': { run: () => controller.undo(), isEnabled: () => notRecording() && snap().canUndo },
     'edit.redo': { run: () => controller.redo(), isEnabled: () => notRecording() && snap().canRedo },
-    // En la linea de tiempo no hay portapapeles de clips: copiar, cortar, pegar y seleccionar
-    // todo quedan para el navegador (isEnabled false no consume la tecla).
-    'edit.copy': { run: () => void controller.copyNotes(), isEnabled: inPiano },
-    'edit.cut': { run: () => controller.cutNotes(), isEnabled: () => inPiano() && notRecording() },
-    'edit.paste': { run: () => controller.pasteNotes(), isEnabled: () => inPiano() && notRecording() },
-    'edit.select_all': { run: () => controller.selectAll(), isEnabled: inPiano },
+    // Notas en el piano roll; clips en la linea de tiempo. Sin nada que copiar o pegar, la tecla
+    // queda para el navegador (isEnabled false no la consume: StudioHubView BROWSER_PASSTHROUGH).
+    'edit.copy': { run: () => controller.copySelection(), isEnabled: () => inPiano() || hasClips() },
+    'edit.cut': { run: () => controller.cutSelection(), isEnabled: () => notRecording() && (inPiano() || hasClips()) },
+    'edit.paste': { run: () => controller.pasteSelection(), isEnabled: () => notRecording() && (inPiano() || (inTimeline() && controller.hasClipClipboard())) },
+    'edit.select_all': { run: () => controller.selectAll(), isEnabled: () => inPiano() || (inTimeline() && sessionHasClips()) },
+    'edit.join': { run: () => controller.joinSelected(), isEnabled: () => notRecording() && inTimeline() },
     'edit.duplicate': { run: () => controller.duplicateSelection(), ...editing },
     'edit.delete': { run: () => controller.deleteSelection(), ...editing },
     'edit.split': { run: () => controller.splitSelection(), ...editing },
@@ -359,6 +382,26 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     },
     'track.select_prev': { run: () => controller.selectAdjacentTrack(-1) },
     'track.select_next': { run: () => controller.selectAdjacentTrack(1) },
+    'track.toggle_arm': {
+      ...editing,
+      run: () => {
+        if (ui.recordAllowed()) controller.toggleArmSelectedTrack()
+        else controller.notify('warn', ui.recordHint() ?? 'La grabación no está disponible aquí.')
+      },
+    },
+    'track.rename': { run: () => controller.renameSelectedTrack(), ...editing },
+    'track.duplicate': { run: () => controller.duplicateSelectedTrack(), ...editing },
+    'track.move_up': { run: () => controller.moveSelectedTrack(-1), ...editing },
+    'track.move_down': { run: () => controller.moveSelectedTrack(1), ...editing },
+    'track.select_1': { run: () => controller.selectTrackByNumber(1) },
+    'track.select_2': { run: () => controller.selectTrackByNumber(2) },
+    'track.select_3': { run: () => controller.selectTrackByNumber(3) },
+    'track.select_4': { run: () => controller.selectTrackByNumber(4) },
+    'track.select_5': { run: () => controller.selectTrackByNumber(5) },
+    'track.select_6': { run: () => controller.selectTrackByNumber(6) },
+    'track.select_7': { run: () => controller.selectTrackByNumber(7) },
+    'track.select_8': { run: () => controller.selectTrackByNumber(8) },
+    'track.select_9': { run: () => controller.selectTrackByNumber(9) },
     'track.set_mix': {
       ...editing,
       run: (ctx, args) => {
@@ -483,6 +526,11 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
         commit(ctx, 'ganancia de clip', (s) => setClipGain(s, { clipId, gainDb }))
       },
     },
+    'clip.toggle_mute': { run: () => controller.toggleSelectedClipsMute(), isEnabled: () => notRecording() && inTimeline() },
+    'clip.trim_start': { run: () => controller.trimSelectedToPlayhead('start'), isEnabled: () => notRecording() && inTimeline() },
+    'clip.trim_end': { run: () => controller.trimSelectedToPlayhead('end'), isEnabled: () => notRecording() && inTimeline() },
+    'clip.fade_in': { run: () => controller.fadeSelectedToPlayhead('in'), isEnabled: () => notRecording() && inTimeline() },
+    'clip.fade_out': { run: () => controller.fadeSelectedToPlayhead('out'), isEnabled: () => notRecording() && inTimeline() },
 
     // ---- piano roll ----
     'notes.transpose_up': { run: () => controller.transposeNotes(1), ...editing },
@@ -497,6 +545,11 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'tool.erase': { run: () => controller.setPianoTool('erase') },
     'tool.cut': { run: () => controller.setPianoTool('cut') },
     'tool.velocity': { run: () => controller.setPianoTool('velocity') },
+    'notes.invert_selection': { run: () => controller.invertNoteSelection(), isEnabled: inPiano },
+    'notes.velocity_up': { run: () => controller.nudgeNotesVelocity(NOTE_VELOCITY_STEP), isEnabled: () => inPiano() && notRecording() },
+    'notes.velocity_down': { run: () => controller.nudgeNotesVelocity(-NOTE_VELOCITY_STEP), isEnabled: () => inPiano() && notRecording() },
+    'notes.lengthen': { run: () => controller.resizeSelectedNotes(1), isEnabled: () => inPiano() && notRecording() },
+    'notes.shorten': { run: () => controller.resizeSelectedNotes(-1), isEnabled: () => inPiano() && notRecording() },
 
     // ---- MIDI e instrumentos ----
     'midi.add_clip': {
@@ -630,12 +683,17 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
       },
     },
 
+    'marker.add_here': { run: () => controller.addMarkerAtPlayhead(), ...editing },
+
     // ---- vista ----
+    'view.zoom_fit': { run: () => controller.zoomToFit() },
+    'view.center_playhead': { run: () => controller.centerOnPlayhead() },
     'view.zoom_in': { run: () => controller.zoomIn() },
     'view.zoom_out': { run: () => controller.zoomOut() },
     'view.toggle_editor': { run: () => controller.toggleEditor() },
     'view.command_palette': { run: () => ui.openPalette() },
     'view.shortcuts': { run: () => ui.openShortcuts() },
+    'view.toggle_assistant': { run: () => ui.toggleAssistant() },
 
     // ---- archivo ----
     'file.save_cloud': { run: () => void controller.saveToCloud() },

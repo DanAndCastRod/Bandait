@@ -78,6 +78,28 @@ import {
   toolResultsMessage,
 } from '../src/services/studio/assistantTools.ts'
 import { STUDIO_COMMAND_SPECS, createCommandRegistry } from '../src/services/studio/commands.ts'
+import {
+  ASSISTANT_CHAT_MAX_STORED,
+  ASSISTANT_DOCK_MAX_W,
+  ASSISTANT_DOCK_MIN_W,
+  ASSISTANT_EDGE_PX,
+  ASSISTANT_FLOAT_MIN_H,
+  ASSISTANT_FLOAT_MIN_W,
+  assistantContextChips,
+  auditionZone,
+  barRangeText,
+  clampDockWidth,
+  clampFloatRect,
+  defaultAssistantLayout,
+  parseAssistantLayout,
+  parseStoredAssistantChat,
+  quickActionText,
+  serializeAssistantChat,
+  serializeAssistantLayout,
+  toggleAssistantLayout,
+  withAssistantMode,
+  type StoredAssistantChat,
+} from '../src/services/studio/assistantWindow.ts'
 import type {
   ChatJobRequest,
   ComposeJobRequest,
@@ -491,7 +513,8 @@ async function main() {
     assert.deepEqual(wire.messages[1], { role: 'model', text: null, tool_calls: [{ id: 'call_1', name: 'set_track_mix', arguments: { track_id: 'trk_1', volume_db: -3, extraCamel: { keepMe: true } }, signature: 'firma-opaca==' }] })
     assert.deepEqual(wire.messages[2], { role: 'tool', tool_results: [{ call_id: 'call_1', name: 'set_track_mix', response: { status: 'applied', message: 'ok' } }] })
     assert.equal(wire.tool_mode, 'auto')
-    assert.deepEqual(Object.keys(wire.session_summary), ['title', 'bpm', 'beats_per_bar', 'key', 'length_s', 'playhead_beat', 'selection', 'tracks', 'markers', 'master'])
+    // El fixture trae acordes guardados: `chords` (opcional, 4.3.2) va antes de master.
+    assert.deepEqual(Object.keys(wire.session_summary), ['title', 'bpm', 'beats_per_bar', 'key', 'length_s', 'playhead_beat', 'selection', 'tracks', 'markers', 'chords', 'master'])
     const v1 = jobRequestV2ToWire({ kind: 'separate', assetId: 'ast_1', durationS: 10 })
     assert.deepEqual(v1, { kind: 'separate', asset_id: 'ast_1', duration_s: 10 })
   })
@@ -501,7 +524,11 @@ async function main() {
     const pad = wire.tracks.find((t) => t.id === 'trk_2')
     assert.ok(pad)
     assert.deepEqual(pad.instrument, { type: 'synth', preset: 'pad_calido', plugin_id: null })
-    assert.deepEqual(pad.midi_clips, [{ id: 'mid_p1', start_beat: 16, length_beats: 16, loop: false, note_count: 6, pitch_min: 57, pitch_max: 68 }])
+    const [padClip] = pad.midi_clips as Array<Record<string, unknown>>
+    const { digest, ...padClipRest } = padClip
+    assert.deepEqual(padClipRest, { id: 'mid_p1', start_beat: 16, length_beats: 16, loop: false, note_count: 6, pitch_min: 57, pitch_max: 68 })
+    assert.deepEqual(Object.keys(digest as object), ['span_beats', 'pitch_classes', 'notes_per_bar', 'grid', 'velocity_mean', 'notes'])
+    assert.equal(((digest as { notes: unknown[] }).notes).length, 6, 'clip corto: van las notas literales')
     assert.deepEqual(Object.keys(pad), ['id', 'kind', 'name', 'role', 'volume_db', 'pan', 'mute', 'solo', 'reverb_send_db', 'fx', 'instrument', 'clips', 'midi_clips'])
     assert.deepEqual(Object.keys(wire.master.reverb as object), ['decay_s', 'return_db'])
     const voz = wire.tracks.find((t) => t.id === 'trk_1')
@@ -582,7 +609,7 @@ async function main() {
     const done = await getJobV2(target, 'ses_1', 'job_x')
     assert.ok(done.status === 'SUCCEEDED' && done.kind === 'chat' && done.reply === 'Hecho')
     const est = await estimateJobV2(target, 'ses_1', req)
-    assert.deepEqual(est, { kind: 'chat', estimatedCostUsd: 0.03, spentUsd: 1, budgetUsd: 10, allowed: true })
+    assert.deepEqual(est, { kind: 'chat', estimatedCostUsd: 0.03, spentUsd: 1, budgetUsd: 10, allowed: true, listen: false })
     const before = calls.length
     const huge = chatRequest([{ role: 'user', text: 'x'.repeat(STUDIO_CHAT_BODY_MAX_BYTES) }])
     await assert.rejects(startJobV2(target, 'ses_1', huge, 'job_y'), (e: unknown) => e instanceof StemCloudError && e.code === 'job_too_large')
@@ -974,6 +1001,174 @@ async function main() {
     assert.ok(numbered.kind === 'list' && numbered.ordered && numbered.items.length === 2)
     assert.deepEqual(blocks[4], { kind: 'code', text: 'a  b' })
     assert.deepEqual(parseChatMarkdown(''), [])
+  })
+
+  // -------------------------------------------------------------------------
+  // Ventana del asistente (assistantWindow.ts)
+  // -------------------------------------------------------------------------
+
+  const VP = { width: 1440, height: 900 }
+
+  await check('ventana flotante: queda entera dentro del navegador, con tamano minimo y margen', () => {
+    // Arrastrada fuera por la derecha y abajo: se pega al borde con margen.
+    assert.deepEqual(clampFloatRect({ x: 2000, y: 1200, w: 420, h: 560 }, VP), { x: 1440 - ASSISTANT_EDGE_PX - 420, y: 900 - ASSISTANT_EDGE_PX - 560, w: 420, h: 560 })
+    // Por la izquierda y arriba, igual.
+    assert.deepEqual(clampFloatRect({ x: -300, y: -50, w: 420, h: 560 }, VP), { x: ASSISTANT_EDGE_PX, y: ASSISTANT_EDGE_PX, w: 420, h: 560 })
+    // Achicada de mas: el minimo. Agrandada de mas: lo que cabe.
+    const tiny = clampFloatRect({ x: 100, y: 100, w: 20, h: 10 }, VP)
+    assert.deepEqual([tiny.w, tiny.h], [ASSISTANT_FLOAT_MIN_W, ASSISTANT_FLOAT_MIN_H])
+    const huge = clampFloatRect({ x: 0, y: 0, w: 5000, h: 5000 }, VP)
+    assert.deepEqual(huge, { x: ASSISTANT_EDGE_PX, y: ASSISTANT_EDGE_PX, w: 1440 - 2 * ASSISTANT_EDGE_PX, h: 900 - 2 * ASSISTANT_EDGE_PX })
+    // Navegador mas chico que el minimo: ocupa lo que hay, sin salirse.
+    const small = clampFloatRect({ x: 50, y: 50, w: 420, h: 560 }, { width: 280, height: 240 })
+    assert.ok(small.x >= 0 && small.y >= 0 && small.x + small.w <= 280 && small.y + small.h <= 240, JSON.stringify(small))
+    // NaN o basura no rompen: toma valores por defecto acotados.
+    const junk = clampFloatRect({ x: Number.NaN, y: Number.POSITIVE_INFINITY, w: Number.NaN, h: -1 }, VP)
+    assert.ok([junk.x, junk.y, junk.w, junk.h].every(Number.isFinite))
+  })
+
+  await check('columna acoplada: ancho entre el minimo y el 60 % del navegador', () => {
+    assert.equal(clampDockWidth(100, VP), ASSISTANT_DOCK_MIN_W)
+    assert.equal(clampDockWidth(9999, VP), ASSISTANT_DOCK_MAX_W)
+    assert.equal(clampDockWidth(9999, { width: 800, height: 600 }), 480)
+    assert.equal(clampDockWidth(410.6, VP), 411)
+  })
+
+  await check('layout del asistente: se guarda, se restaura saneado y Ctrl+J alterna con el ultimo modo', () => {
+    const base = defaultAssistantLayout(VP)
+    assert.equal(base.mode, 'minimized')
+    const floating = withAssistantMode({ ...base, float: { x: 200, y: 100, w: 500, h: 600 } }, 'floating')
+    assert.equal(floating.lastOpen, 'floating')
+    const restored = parseAssistantLayout(serializeAssistantLayout(floating), VP)
+    assert.deepEqual(restored, floating)
+    // Ctrl+J: minimiza y vuelve al flotante, no al acoplado.
+    const hidden = toggleAssistantLayout(floating)
+    assert.deepEqual([hidden.mode, hidden.lastOpen], ['minimized', 'floating'])
+    assert.equal(toggleAssistantLayout(hidden).mode, 'floating')
+    // Restaurar en un navegador mas chico acota la ventana.
+    const shrunk = parseAssistantLayout(serializeAssistantLayout({ ...floating, float: { x: 1300, y: 800, w: 500, h: 600 } }), { width: 800, height: 600 })
+    assert.ok(shrunk.float.x + shrunk.float.w <= 800 - ASSISTANT_EDGE_PX && shrunk.float.y + shrunk.float.h <= 600 - ASSISTANT_EDGE_PX)
+    // Basura: valores por defecto.
+    assert.deepEqual(parseAssistantLayout('{no es json', VP), base)
+    assert.deepEqual(parseAssistantLayout(null, VP), base)
+    assert.equal(parseAssistantLayout(JSON.stringify({ mode: 'gigante', dockWidth: 'x' }), VP).mode, 'minimized')
+  })
+
+  const toolCall = (id: string, name: string, args: Record<string, unknown>): StudioChatToolCall => ({ id, name, arguments: args, signature: 'firma' })
+  const storedChat = (): StoredAssistantChat => {
+    const calls = [toolCall('call_1', 'add_marker', { beat: 16, kind: 'chorus', label: 'Coro' }), toolCall('call_2', 'set_track_mix', { track_id: 'trk_1', volume_db: -3 })]
+    return {
+      version: 1,
+      messages: [
+        { role: 'user', text: 'Marca el coro y baja la voz' },
+        { role: 'model', text: 'Listo, **dos cambios**.', toolCalls: calls },
+      ],
+      proposal: {
+        calls,
+        pendings: [
+          { callId: 'call_1', name: 'add_marker', commandId: 'marker.add', args: calls[0].arguments, description: 'Marca Coro en el compás 5', status: 'pending', message: '', adjusted: [], ignored: [], warnings: ['Nota fuera de la tonalidad'] },
+          { callId: 'call_2', name: 'set_track_mix', commandId: 'track.set_mix', args: calls[1].arguments, description: 'Voz a -3 dB', status: 'rejected', message: 'El usuario rechazó el cambio.', adjusted: [], ignored: [] },
+        ],
+      },
+      descriptions: { call_0: 'Antes' },
+      approved: { kind: 'chat', estimatedCostUsd: 0.03, spentUsd: 0, budgetUsd: 20, allowed: true } as unknown as StoredAssistantChat['approved'],
+      spentUsd: 0.06,
+    }
+  }
+
+  await check('conversacion guardada: ida y vuelta por structured clone, con propuesta, avisos y costo confirmado', () => {
+    const chat = storedChat()
+    const back = parseStoredAssistantChat(structuredClone(serializeAssistantChat(chat)))
+    assert.deepEqual(back, chat)
+    assert.deepEqual(back?.proposal?.pendings[0].warnings, ['Nota fuera de la tonalidad'])
+    assert.equal(back?.approved?.estimatedCostUsd, 0.03)
+    // La conversacion restaurada sigue siendo valida para el Worker.
+    assert.equal(chatRequestProblem(chatRequest([...(back?.messages ?? []), { role: 'tool', toolResults: [{ callId: 'call_1', name: 'add_marker', response: { status: 'applied', message: 'ok' } }, { callId: 'call_2', name: 'set_track_mix', response: { status: 'rejected', message: 'no' } }] }])), null)
+  })
+
+  await check('conversacion guardada: un cambio que se esta escuchando se guarda como aplicado', () => {
+    const chat = storedChat()
+    const decided = { ...chat.proposal!.pendings[0], status: 'applied' as const, message: 'Aplicado: Marca Coro.' }
+    const saved = serializeAssistantChat(chat, decided)
+    assert.equal(saved.proposal?.pendings[0].status, 'applied')
+    assert.equal(chat.proposal?.pendings[0].status, 'pending', 'no muta la conversacion en memoria')
+  })
+
+  await check('conversacion guardada: lo danado se descarta y la propuesta huerfana no se restaura', () => {
+    assert.equal(parseStoredAssistantChat(null), null)
+    assert.equal(parseStoredAssistantChat({ version: 2, messages: [] }), null)
+    assert.equal(parseStoredAssistantChat({ version: 1, messages: [{ role: 'system', text: 'x' }] }), null)
+    assert.equal(parseStoredAssistantChat({ ...storedChat(), messages: [{ role: 'model', text: 'x', toolCalls: [{ id: 1 }] }] }), null)
+    const orphan = parseStoredAssistantChat({ ...storedChat(), messages: [{ role: 'user', text: 'hola' }] })
+    assert.equal(orphan?.proposal, null)
+    const negative = parseStoredAssistantChat({ ...storedChat(), spentUsd: -4, approved: { kind: 'compose' } })
+    assert.deepEqual([negative?.spentUsd, negative?.approved], [0, null])
+    const long = { ...storedChat(), proposal: null, messages: Array.from({ length: ASSISTANT_CHAT_MAX_STORED + 10 }, (_, i) => ({ role: 'user' as const, text: `m${i}` })) }
+    assert.equal(serializeAssistantChat(long).messages.length, ASSISTANT_CHAT_MAX_STORED)
+  })
+
+  await check('zona a escuchar: la del clip, la pista o la marca, en compases enteros de 1 a 16', () => {
+    const s = fixtureSession() // 120 BPM, 4/4; clp_1 en 8 s (beat 16) de 20 s (40 beats); mid_p1 beats 16-32
+    const z = (name: string, args: Record<string, unknown>, playhead = 0) => auditionZone({ name, args }, s, playhead)
+    assert.deepEqual(z('set_clip_gain', { clip_id: 'clp_1', gain_db: -3 }), { startBeat: 16, endBeat: 56 })
+    assert.deepEqual(z('transpose_midi_clip', { clip_id: 'mid_p1', semitones: 2 }), { startBeat: 16, endBeat: 32 })
+    // Mover: la zona de donde sale y a donde llega.
+    assert.deepEqual(z('move_clip', { clip_id: 'mid_p1', start_beat: 48 }), { startBeat: 16, endBeat: 64 })
+    // Duplicar sin destino: el original y la copia justo despues.
+    assert.deepEqual(z('duplicate_clip', { clip_id: 'mid_p1' }), { startBeat: 16, endBeat: 48 })
+    // Clip nuevo fuera de compas: se ajusta a compases enteros.
+    assert.deepEqual(z('add_midi_clip', { track_id: 'trk_2', start_beat: 2.5, length_beats: 3, notes: [] }), { startBeat: 0, endBeat: 8 })
+    // Marca: 8 compases desde ella.
+    assert.deepEqual(z('add_marker', { beat: 48, kind: 'chorus' }), { startBeat: 48, endBeat: 80 })
+    assert.deepEqual(z('remove_marker', { marker_id: 'mk_2' }), { startBeat: 16, endBeat: 48 })
+    // Pista: el clip que tiene el cabezal, desde el compas del cabezal.
+    assert.deepEqual(z('set_track_mix', { track_id: 'trk_2', volume_db: -2 }, 21), { startBeat: 20, endBeat: 32 })
+    assert.deepEqual(z('set_instrument', { track_id: 'trk_4', preset: 'basico' }, 0), { startBeat: 32, endBeat: 36 })
+    // Sin zona deducible (master, tempo, clip inexistente): 8 compases desde el compas del cabezal.
+    assert.deepEqual(z('set_master', { volume_db: -1 }, 18), { startBeat: 16, endBeat: 48 })
+    assert.deepEqual(z('set_session_meta', { bpm: 100 }, 0), { startBeat: 0, endBeat: 32 })
+    assert.deepEqual(z('delete_clip', { clip_id: 'clp_nada' }, 5), { startBeat: 4, endBeat: 36 })
+    // Un clip larguisimo se escucha solo sus primeros 16 compases.
+    const long = { ...s, tracks: s.tracks.map((t) => (t.id === 'trk_2' ? { ...t, midiClips: t.midiClips.map((c) => ({ ...c, lengthBeats: 400 })) } : t)) }
+    assert.deepEqual(auditionZone({ name: 'quantize_midi_clip', args: { clip_id: 'mid_p1', grid: '1/16' } }, long, 0), { startBeat: 16, endBeat: 80 })
+  })
+
+  await check('chips de contexto y pedidos rapidos: pista, clip, loop y vista en espanol', () => {
+    const s = fixtureSession()
+    assert.equal(barRangeText({ startBeat: 16, endBeat: 32 }, 4), 'c. 5-8')
+    assert.equal(barRangeText({ startBeat: 0, endBeat: 4 }, 4), 'c. 1')
+    assert.equal(barRangeText({ startBeat: 2, endBeat: 3 }, 4), 'c. 1')
+    const chips = assistantContextChips({ session: s, selectedTrackId: 'trk_2', selectedClipId: 'mid_p1', loop: { startBeat: 32, endBeat: 48 }, context: 'piano_roll' })
+    assert.deepEqual(chips.map((c) => [c.id, c.label, c.value]), [
+      ['track', 'PISTA', 'Pad'],
+      ['clip', 'CLIP', 'c. 5-8'],
+      ['loop', 'LOOP', 'c. 9-12'],
+      ['view', 'VISTA', 'PIANO ROLL'],
+    ])
+    assert.deepEqual(assistantContextChips({ session: s, selectedTrackId: null, selectedClipId: 'clp_nada', loop: null, context: 'timeline' }).map((c) => c.id), ['view'])
+    assert.match(quickActionText('mix', null, { startBeat: 32, endBeat: 48 }, 4), /^Revisa la mezcla en la zona del loop \(c\. 9-12\)/)
+    assert.match(quickActionText('track', 'Pad', null, 4), /"Pad"/)
+    assert.match(quickActionText('arrangement', null, null, 4), /^Sugiere un arreglo:/)
+  })
+
+  await check('resumen de sesion: el loop activo viaja como `loop` en beats; sin loop no se manda la clave', () => {
+    const s = fixtureSession()
+    const withLoop = buildSessionSummary(s, { ...VIEW, loop: { startBeat: 32, endBeat: 48 } })
+    assert.deepEqual(withLoop.loop, { startBeat: 32, endBeat: 48 })
+    assert.deepEqual((sessionSummaryToWire(withLoop) as { loop?: unknown }).loop, { start_beat: 32, end_beat: 48 })
+    const without = sessionSummaryToWire(buildSessionSummary(s, VIEW))
+    assert.ok(!('loop' in without), 'un Worker anterior rechaza claves desconocidas')
+    assert.equal(buildSessionSummary(s, { ...VIEW, loop: { startBeat: 8, endBeat: 8 } }).loop, null)
+    assert.equal(buildSessionSummary(s, { ...VIEW, loop: { startBeat: Number.NaN, endBeat: 8 } }).loop, null)
+  })
+
+  await check('comando view.toggle_assistant: Ctrl+J global, se registra en forma canonica', () => {
+    const spec = STUDIO_COMMAND_SPECS.find((c) => c.id === 'view.toggle_assistant')
+    assert.ok(spec)
+    assert.deepEqual([spec.label, spec.category, spec.context, spec.defaultShortcuts, spec.assistantAllowed], ['Mostrar u ocultar el asistente', 'vista', 'global', ['Ctrl+J'], false])
+    const reg = createCommandRegistry<null>()
+    reg.register({ ...spec, run: () => {} })
+    assert.ok(reg.get('view.toggle_assistant'))
   })
 
   console.log(`\n${passed} ok, ${failures.length} con falla`)

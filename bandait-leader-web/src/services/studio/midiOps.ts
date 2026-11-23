@@ -338,6 +338,14 @@ export function notesInRange(notes: readonly StudioMidiNote[], range: NoteRange)
   return out
 }
 
+/** Seleccion invertida: los indices de las notas que no estaban elegidas (atajo Ctrl+I). */
+export function invertSelection(noteCount: number, selection: NoteSelection): number[] {
+  const set = selectedSet(Math.max(0, Math.floor(noteCount)), selection)
+  const out: number[] = []
+  for (let i = 0; i < noteCount; i++) if (!set.has(i)) out.push(i)
+  return out
+}
+
 void ({
   gridBeats,
   normalizeNotes,
