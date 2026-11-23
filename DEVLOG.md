@@ -1612,3 +1612,10 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   2. Pasar el anexo 7.2 a la sesión de URiT IA; cuando acepte audio en `/v1/text`, probar con una llamada real, poner `STUDIO_CHAT_LISTEN` en `"1"` y ajustar `STUDIO_RATE_CHAT_LISTEN_USD`.
   3. Los fragmentos de escucha quedan en `assets/` sin referencia (el MCP los cuenta como huérfanos): falta una limpieza.
   4. Probar MEDIR MEZCLA y GUARDAR ACORDES en el Hub publicado con una sesión real.
+
+### [2026-11-23] - Integración y despliegue: asistente flotante, contexto musical y atajos de DAW
+* **Sprint / Módulo:** `bandait-leader-web`, `bandait-stems-worker`. Integración de las tres ramas de agentes de las entradas anteriores. Agente: Claude Code (Opus 5.5).
+* **Acción técnica realizada:** rama `feat/estudio-asistente-daw` con las tres ramas; conflictos resueltos a mano en `StudioChatPanel.tsx` (la ventana nueva conserva MEDIR MEZCLA, ESCUCHAR FRAGMENTO y los avisos; la función de escuchar un cambio se renombró `startAudition` porque chocaba con el estado `listen` del fragmento), `studioState.ts`, `jobs.ts` (resumen con `loop` y con notas/mezcla), `assistantTools.ts` y `studioV2.ts` del Worker (opcionales `loop`, `chords`, `song_chart`, `mix_measured`).
+* **Verificación:** Hub lint, `tsc -b`, `verify:logic` (8 suites), build; Worker `npm test` 78/78; Playwright `--project=leader-web` 64/64; CI del PR #52 en verde.
+* **Despliegue:** Worker desplegado por ClipVault (versión de Cloudflare `c8c2b66a-8681-487b-89be-f6bb7772b954`, `STUDIO_CHAT_LISTEN` = "0") ANTES de fusionar el PR #52; después el Hub publicado sirve `index-BV8USf1x.js`. La constante `VERSION` del Worker sigue en 1.2.0: no se subió.
+* **Pendientes:** el anexo 7.2 se envió a la sesión `console_implementation` el 2026-11-23; esperar su respuesta para encender la escucha. Los demás pendientes de las tres entradas anteriores siguen abiertos.
