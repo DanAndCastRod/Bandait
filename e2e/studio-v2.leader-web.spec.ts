@@ -167,6 +167,14 @@ class FakeStudioV2Worker {
   }
 }
 
+/** Muestra la ventana del asistente con Ctrl+J (arranca minimizado: solo la pastilla). */
+async function openAssistant(page: Page) {
+  await expect(page.getByTestId('studio-assistant-pill')).toBeVisible();
+  await blur(page);
+  await page.keyboard.press('Control+j');
+  await expect(page.getByTestId('studio-assistant')).toBeVisible();
+}
+
 async function enterCloudStudio(page: Page, worker: FakeStudioV2Worker, title: string) {
   const fake = new FakeSupabase();
   fake.workspaces.push({ user_id: USER.id, workspace: workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']), updated_at: fake.now() });
@@ -311,6 +319,7 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
   test('chat: el comando propuesto queda pendiente y solo se aplica al aceptarlo', async ({ page }) => {
     const worker = new FakeStudioV2Worker();
     await enterCloudStudio(page, worker, 'Chat e2e');
+    await openAssistant(page);
     const undo = page.getByTestId('studio-undo');
     const before = await undo.getAttribute('title');
     await page.getByTestId('studio-chat-input').fill('Marca el coro en el compás 2');
@@ -334,5 +343,120 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(call).toHaveAttribute('data-state', 'applied');
     await expect(undo).not.toHaveAttribute('title', before ?? '');
     await expect(page.getByTestId('studio-chat-continue')).toBeVisible();
+  });
+
+  test('asistente: Ctrl+J lo muestra y lo oculta, pasa a flotante, se arrastra sin salir de la ventana y recuerda el modo', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await enterDemo(page);
+    await openStudioHome(page);
+    await createFreeSession(page, 'Ventana e2e');
+    const assistant = page.getByTestId('studio-assistant');
+    const pill = page.getByTestId('studio-assistant-pill');
+    await expect(pill).toBeVisible();
+    await expect(assistant).toBeHidden();
+
+    await blur(page);
+    await page.keyboard.press('Control+j');
+    await expect(assistant).toBeVisible();
+    await expect(assistant).toHaveAttribute('data-mode', 'docked');
+    await expect(pill).toHaveCount(0);
+    // Sin nube el asistente lo dice en su ventana, y los pedidos rapidos quedan bloqueados.
+    await expect(page.getByTestId('studio-chat-blocked')).toBeVisible();
+    await expect(page.getByTestId('studio-chat-quick-mix')).toBeDisabled();
+    await expect(page.getByTestId('studio-chat-chip-view')).toContainText('LÍNEA DE TIEMPO');
+
+    // Con el foco adentro del asistente, Ctrl+J lo oculta y el foco pasa a la pastilla.
+    await page.keyboard.press('Control+j');
+    await expect(assistant).toBeHidden();
+    await expect(pill).toBeFocused();
+    await pill.click();
+    await expect(assistant).toHaveAttribute('data-mode', 'docked');
+
+    await page.getByTestId('studio-assistant-float').click();
+    await expect(assistant).toHaveAttribute('data-mode', 'floating');
+    // Arrastrada por la barra muy afuera arriba a la izquierda: queda pegada al borde, entera.
+    const bar = page.getByTestId('studio-assistant-bar');
+    const box = (await bar.boundingBox())!;
+    await page.mouse.move(box.x + 90, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 2500, box.y - 2500, { steps: 6 });
+    await page.mouse.up();
+    const moved = (await assistant.boundingBox())!;
+    expect(moved.x).toBeGreaterThanOrEqual(0);
+    expect(moved.y).toBeGreaterThanOrEqual(0);
+    expect(moved.x).toBeLessThan(20);
+    expect(moved.y).toBeLessThan(20);
+    // Y hacia abajo a la derecha tampoco se sale.
+    await page.mouse.move(moved.x + 90, moved.y + 18);
+    await page.mouse.down();
+    await page.mouse.move(5000, 5000, { steps: 6 });
+    await page.mouse.up();
+    const corner = (await assistant.boundingBox())!;
+    expect(corner.x + corner.width).toBeLessThanOrEqual(1440);
+    expect(corner.y + corner.height).toBeLessThanOrEqual(900);
+
+    // Esc minimiza el flotante (sin texto escrito en el mensaje).
+    await page.getByTestId('studio-assistant-dock').focus();
+    await page.keyboard.press('Escape');
+    await expect(pill).toBeVisible();
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bandait_studio_assistant') ?? 'null'));
+    expect(saved).toMatchObject({ mode: 'minimized', lastOpen: 'floating' });
+    expect(saved.float.x + saved.float.w).toBeLessThanOrEqual(1440);
+    // La pastilla lo devuelve flotante, en la misma esquina.
+    await pill.click();
+    await expect(assistant).toHaveAttribute('data-mode', 'floating');
+    const again = (await assistant.boundingBox())!;
+    expect(Math.abs(again.x - corner.x)).toBeLessThan(2);
+  });
+
+  test('chat: ESCUCHAR aplica de forma provisional y DESHACER deja la sesion como estaba; la conversacion vuelve tras recargar', async ({ page }) => {
+    const worker = new FakeStudioV2Worker();
+    await enterCloudStudio(page, worker, 'Escuchar e2e');
+    await openAssistant(page);
+    const undo = page.getByTestId('studio-undo');
+    const before = await undo.getAttribute('title');
+    await page.getByTestId('studio-chat-input').fill('Marca el coro en el compás 2');
+    await page.getByTestId('studio-chat-input').press('Enter');
+    await page.getByTestId('studio-chat-launch').click();
+    const call = page.getByTestId('studio-chat-call');
+    await expect(call).toHaveAttribute('data-state', 'pending', { timeout: 15_000 });
+
+    // ESCUCHAR: el cambio entra como un paso de deshacer y suena en loop la zona de la marca.
+    await page.getByTestId('studio-chat-listen').click();
+    await expect(page.getByTestId('studio-chat-keep')).toBeVisible();
+    await expect(call).toHaveAttribute('data-state', 'listening');
+    await expect(page.getByTestId('studio-chat-listening')).toContainText('c. 2-9');
+    await expect(undo).not.toHaveAttribute('title', before ?? '');
+    await expect(page.getByTestId('studio-loop')).toHaveAttribute('aria-pressed', 'true');
+    // Mientras se escucha no se puede mandar otro mensaje ni empezar otra conversacion.
+    await expect(page.getByTestId('studio-chat-restart')).toBeDisabled();
+
+    // DESHACER: la sesion vuelve a la de antes, sin loop, y el cambio sigue propuesto.
+    await page.getByTestId('studio-chat-undo').click();
+    await expect(call).toHaveAttribute('data-state', 'pending');
+    expect(await undo.getAttribute('title')).toBe(before);
+    await expect(page.getByTestId('studio-loop')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('studio-status')).toHaveText('DETENIDO');
+
+    // Recargar: la conversacion de esta sesion vuelve, con el cambio todavia por decidir y el
+    // costo ya confirmado (el boton dice cuanto cuesta, sin volver a pedir confirmacion).
+    await page.reload();
+    await openStudioHome(page);
+    await page.getByTestId('studio-open').first().click();
+    await expect(page.getByTestId('studio-workspace')).toBeVisible();
+    // La ventana tambien se recuerda: vuelve acoplada, como estaba.
+    await expect(page.getByTestId('studio-assistant')).toHaveAttribute('data-mode', 'docked');
+    await expect(page.getByTestId('studio-chat-restored')).toBeVisible();
+    await expect(page.getByTestId('studio-chat-log')).toContainText('Propongo marcar el coro');
+    await expect(call).toHaveAttribute('data-state', 'pending');
+    await expect(page.getByTestId('studio-assistant-pill')).toHaveCount(0);
+    await expect(page.getByTestId('studio-chat-send')).toContainText('ENVIAR ·');
+    await page.getByTestId('studio-chat-apply').click();
+    await expect(call).toHaveAttribute('data-state', 'applied');
+
+    // NUEVA empieza de cero, y eso tambien queda guardado.
+    await page.getByTestId('studio-chat-restart').click();
+    await expect(page.getByTestId('studio-chat-log')).toHaveCount(0);
+    await expect(page.getByTestId('studio-chat-send')).toContainText('ENVIAR...');
   });
 });

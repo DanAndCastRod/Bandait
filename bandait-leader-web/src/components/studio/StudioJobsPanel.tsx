@@ -67,7 +67,6 @@ import {
 import { addInstrumentTrack, addMidiClip, applyMixSuggestion, setMarkers, trimClip, updateSessionMeta, updateTrack } from '../../services/studio/sessionOps'
 import * as studioCloud from '../../services/studio/studioCloud'
 import type {
-  CommandContext,
   ComposeRole,
   MixSuggestion,
   StudioJobAsset,
@@ -77,8 +76,6 @@ import type {
   StudioJobStateV2,
   TrackMetrics,
 } from '../../services/studio/types'
-import { StudioChatPanel } from './StudioChatPanel'
-import type { StudioRegistry } from './studioCommandHandlers'
 import { errorText, formatTimecode, useStudio, type StudioController, type StudioPanelProps } from './studioState'
 
 // ---------------------------------------------------------------------------
@@ -1822,22 +1819,21 @@ const AnalysisRow: React.FC<{ title: string; detail: string; state: 'pending' | 
 // ---------------------------------------------------------------------------
 
 interface JobsPanelProps extends StudioPanelProps {
-  /** Registro de comandos del Estudio (el chat aplica sus cambios por aqui). */
-  registry?: StudioRegistry | null
-  /** Contexto activo de los comandos, para el resumen que recibe el asistente. */
-  commandContext?: () => CommandContext
+  /** Abre la ventana del asistente (el chat vive en StudioAssistant, no en este panel). */
+  onOpenAssistant?: () => void
+  /** Atajo vigente para mostrar u ocultar el asistente, para el texto del boton. */
+  assistantShortcut?: string
 }
 
-const timelineContext = (): CommandContext => 'timeline'
-
 /**
- * Trabajos de IA del Estudio: chat del asistente, componer MIDI y asistente de mezcla (modelo de
- * lenguaje), masterizar, separar y analizar (Music AI), generar (Lyria), y audio a MIDI en este
- * equipo. Solo Owner y Director musical lanzan los de pago; antes de cada uno se muestra el
- * costo estimado y se pide confirmacion, y ningun resultado entra a la sesion sin que el usuario
- * lo acepte. La normalizacion y el audio a MIDI corren en este equipo, sin nube ni costo.
+ * Trabajos de IA del Estudio: componer MIDI y asistente de mezcla (modelo de lenguaje),
+ * masterizar, separar y analizar (Music AI), generar (Lyria), y audio a MIDI en este equipo. El
+ * chat del asistente tiene su propia ventana (StudioAssistant); aqui queda un acceso. Solo Owner
+ * y Director musical lanzan los de pago; antes de cada uno se muestra el costo estimado y se pide
+ * confirmacion, y ningun resultado entra a la sesion sin que el usuario lo acepte. La
+ * normalizacion y el audio a MIDI corren en este equipo, sin nube ni costo.
  */
-export const StudioJobsPanel: React.FC<JobsPanelProps> = ({ controller, registry = null, commandContext = timelineContext }) => {
+export const StudioJobsPanel: React.FC<JobsPanelProps> = ({ controller, onOpenAssistant, assistantShortcut = 'Ctrl+J' }) => {
   const snap = useStudio(controller)
   const { session } = snap
   // Con audios sin cargar la mezcla saldria incompleta (el motor salta los clips sin audio):
@@ -1865,7 +1861,18 @@ export const StudioJobsPanel: React.FC<JobsPanelProps> = ({ controller, registry
           </span>
         </div>
       )}
-      <StudioChatPanel controller={controller} registry={registry} commandContext={commandContext} canRun={canRun} />
+      {onOpenAssistant && (
+        <div className="stu-job stu-job-link" data-testid="studio-jobs-assistant">
+          <span className="stu-chat-call-text">
+            <strong>ASISTENTE (CHAT)</strong>
+            <span className="stu-help">Tiene su propia ventana: acoplada a la derecha, flotante o minimizada ({assistantShortcut}).</span>
+          </span>
+          <button type="button" className="stu-btn" data-size="small" onClick={onOpenAssistant} data-testid="studio-jobs-open-assistant">
+            <Sparkles size={12} />
+            ABRIR
+          </button>
+        </div>
+      )}
       <ComposeSection controller={controller} session={session} canRun={canRun} />
       <AudioToMidiSection controller={controller} session={session} selectedClipId={snap.selectedClipId} recording={snap.recording} />
       <AnalyzeSection controller={controller} session={session} selectedClipId={snap.selectedClipId} canRun={canRun} />

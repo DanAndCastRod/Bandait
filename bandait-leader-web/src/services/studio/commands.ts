@@ -138,6 +138,7 @@ const SPECS = [
   spec('view.toggle_editor', 'Alternar línea de tiempo y piano roll', 'vista', 'global', ['E']),
   spec('view.command_palette', 'Paleta de comandos', 'vista', 'global', ['Ctrl+K']),
   spec('view.shortcuts', 'Hoja de atajos', 'vista', 'global', ['?']),
+  spec('view.toggle_assistant', 'Mostrar u ocultar el asistente', 'vista', 'global', ['Ctrl+J']),
   // Archivo
   spec('file.save_cloud', 'Guardar en la nube', 'archivo', 'global', ['Ctrl+S']),
   spec('file.export', 'Exportar', 'archivo', 'global', ['Ctrl+E']),

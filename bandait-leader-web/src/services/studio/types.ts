@@ -1925,6 +1925,8 @@ export interface StudioSessionSummary {
   lengthS: number
   playheadBeat: number
   selection: { trackId: string | null; clipIds: string[]; context: CommandContext }
+  /** Loop activo del transporte, en beats; null u omitido si no hay loop (cable `loop`, opcional). */
+  loop?: { startBeat: number; endBeat: number } | null
   tracks: StudioTrackSummary[]
   markers: StudioMarker[]
   master: { volumeDb: number; fx: StudioFx[]; reverb: StudioReverb }

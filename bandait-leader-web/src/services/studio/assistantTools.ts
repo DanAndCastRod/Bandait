@@ -756,6 +756,8 @@ export interface PendingAssistantCommand {
   adjusted: string[]
   /** Campos que el esquema no tiene y se ignoraron. */
   ignored: string[]
+  /** Avisos de la revision local (notas fuera de tonalidad, choques de registro). Opcional. */
+  warnings?: string[]
 }
 
 function clip500(text: string): string {

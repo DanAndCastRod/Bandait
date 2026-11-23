@@ -646,6 +646,10 @@ SessionSummary
   playhead_beat   number >= 0
   selection       {"track_id": string | null, "clip_ids": string[] 0..64,
                    "context": "global" | "timeline" | "piano_roll" | "mixer"}
+  loop            {"start_beat": number >= 0, "end_beat": number > start_beat} | null.
+                  Opcional: el loop activo del transporte, en beats de la sesión. El Hub lo
+                  omite cuando no hay loop (un Worker anterior a este campo rechaza la clave);
+                  el Worker acepta también null
   tracks          TrackSummary[], 0..16
   markers         Marker[], 0..256 (forma de 2.6)
   master          {"volume_db", "fx": FxSummary[], "reverb": {"decay_s", "return_db"}}

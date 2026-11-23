@@ -980,6 +980,15 @@ export function analysisSessionPatch(session: StudioSession, analysis: StudioAna
 export interface ChatView {
   playheadBeat: number
   selection: { trackId: string | null; clipIds: readonly string[]; context: CommandContext }
+  /** Loop activo del transporte, en beats (opcional). */
+  loop?: { startBeat: number; endBeat: number } | null
+}
+
+/** Loop valido para el resumen (inicio antes del fin, beats >= 0), o null. */
+function summaryLoop(loop: ChatView['loop']): { startBeat: number; endBeat: number } | null {
+  if (!loop || !Number.isFinite(loop.startBeat) || !Number.isFinite(loop.endBeat)) return null
+  const startBeat = Math.max(0, loop.startBeat)
+  return loop.endBeat > startBeat ? { startBeat, endBeat: loop.endBeat } : null
 }
 
 function distanceTo(point: number, start: number, end: number): number {
@@ -1053,6 +1062,7 @@ export function buildSessionSummary(session: StudioSession, view: ChatView, maxC
       clipIds: view.selection.clipIds.slice(0, CHAT_SUMMARY_MAX_CLIPS),
       context: view.selection.context,
     },
+    loop: summaryLoop(view.loop),
     tracks: session.tracks.slice(0, STUDIO_MAX_TRACKS).map((t) => trackSummary(t, playheadBeat, session.bpm, max)),
     markers: (session.markers ?? []).slice(0, STUDIO_MAX_MARKERS),
     master: { volumeDb: session.master.volumeDb, fx: session.master.fx, reverb: session.master.reverb },

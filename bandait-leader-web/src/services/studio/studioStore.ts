@@ -2,12 +2,15 @@
  * Almacen local del Estudio Bandait: sesiones y picos en IndexedDB, audio en OPFS. Mismo patron y
  * manejo de errores que services/stemStore.ts. Usa APIs del navegador: no es un modulo puro.
  *
- * IndexedDB `bandait_studio` v1:
+ * IndexedDB `bandait_studio` v2:
  *   - sessions: { id, band, title, songId, updatedAt, savedAt, etag, dirty, doc }   clave `id`
  *               (`doc` es el documento del cable, snake_case: serializeSession)
  *   - peaks:    { key: "<sessionId>/<assetId>", sessionId, peaks }                  indice sessionId
  *   - files:    { key: "<sessionId>/<file>", sessionId, file, size, savedAt, blob } indice sessionId
  *               (respaldo: SOLO se usa para el audio cuando el navegador no tiene OPFS)
+ *   - chats:    { sessionId, savedAt, chat }                                       clave `sessionId`
+ *               (v2: conversacion del asistente, services/studio/assistantWindow.ts. Pasar de
+ *               v1 a v2 solo crea este almacen; los demas quedan intactos)
  *
  * OPFS: bandait_studio/<sessionId>/<file>     (`file` = asset.file, "<assetId>.<ext>")
  *   El escritor de tomas (opfsWriter.worker.ts) escribe directo en esa ruta, con cabecera WAV
@@ -42,10 +45,11 @@ import type {
 } from './types.ts'
 
 const DB_NAME = 'bandait_studio'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const SESSIONS = 'sessions'
 const PEAKS = 'peaks'
 const FILES = 'files'
+const CHATS = 'chats'
 
 /** Carpeta raiz del Estudio en OPFS. El escritor de tomas la recibe de recorder.ts. */
 export const STUDIO_OPFS_ROOT = 'bandait_studio'
@@ -112,6 +116,8 @@ function openDb(): Promise<IDBDatabase> {
         const files = db.createObjectStore(FILES, { keyPath: 'key' })
         files.createIndex('sessionId', 'sessionId', { unique: false })
       }
+      // v2: cada almacen se crea solo si falta, asi una base v1 sube sin perder nada.
+      if (!db.objectStoreNames.contains(CHATS)) db.createObjectStore(CHATS, { keyPath: 'sessionId' })
     }
     req.onsuccess = () => {
       const db = req.result
@@ -339,9 +345,10 @@ export async function deleteSession(sessionId: string): Promise<void> {
   try {
     checkSessionId(sessionId)
     const db = await openDb()
-    const tx = db.transaction([SESSIONS, PEAKS, FILES], 'readwrite')
+    const tx = db.transaction([SESSIONS, PEAKS, FILES, CHATS], 'readwrite')
     const done = txDone(tx)
     tx.objectStore(SESSIONS).delete(sessionId)
+    tx.objectStore(CHATS).delete(sessionId)
     const peaks = tx.objectStore(PEAKS)
     const files = tx.objectStore(FILES)
     const peakKeys = requestValue(peaks.index('sessionId').getAllKeys(sessionId))
@@ -636,6 +643,41 @@ export async function loadPeaks(sessionId: string, assetId: string): Promise<Ass
     const tx = db.transaction(PEAKS, 'readonly')
     const row = (await requestValue(tx.objectStore(PEAKS).get(fileKey(sessionId, assetId)))) as Partial<PeaksRow> | undefined
     return row ? sanitizePeaks(row.peaks, assetId) : null
+  } catch (err) {
+    throw friendlyError(err)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Conversacion del asistente
+// ---------------------------------------------------------------------------
+
+/**
+ * Guarda la conversacion del asistente de una sesion (objeto plano de
+ * assistantWindow.serializeAssistantChat). null la borra.
+ */
+export async function saveChat(sessionId: string, chat: unknown | null): Promise<void> {
+  try {
+    checkSessionId(sessionId)
+    const db = await openDb()
+    const tx = db.transaction(CHATS, 'readwrite')
+    const done = txDone(tx)
+    if (chat === null) tx.objectStore(CHATS).delete(sessionId)
+    else tx.objectStore(CHATS).put({ sessionId, savedAt: new Date().toISOString(), chat })
+    await done
+  } catch (err) {
+    throw friendlyError(err)
+  }
+}
+
+/** La conversacion guardada, sin validar (la valida assistantWindow.parseStoredAssistantChat), o null. */
+export async function loadChat(sessionId: string): Promise<unknown> {
+  try {
+    checkSessionId(sessionId)
+    const db = await openDb()
+    const tx = db.transaction(CHATS, 'readonly')
+    const row = (await requestValue(tx.objectStore(CHATS).get(sessionId))) as { chat?: unknown } | undefined
+    return row?.chat ?? null
   } catch (err) {
     throw friendlyError(err)
   }

@@ -481,6 +481,11 @@ test('chat: conversacion o estado invalidos son 400 bad_job; el cuerpo admite ha
     { ...CHAT, session_summary: { ...SUMMARY, title: 'x'.repeat(33000) } },
     { ...CHAT, session_summary: { ...SUMMARY, selection: { ...SUMMARY.selection, context: 'cocina' } } },
     { ...CHAT, session_summary: { ...SUMMARY, tracks: [{ ...SUMMARY.tracks[0], notes: [] }] } },
+    { ...CHAT, session_summary: { ...SUMMARY, loop: { start_beat: 8, end_beat: 8 } } },
+    { ...CHAT, session_summary: { ...SUMMARY, loop: { start_beat: -1, end_beat: 8 } } },
+    { ...CHAT, session_summary: { ...SUMMARY, loop: { start_beat: 0, end_beat: 8, extra: 1 } } },
+    { ...CHAT, session_summary: { ...SUMMARY, loop: { start_beat: 0 } } },
+    { ...CHAT, session_summary: { ...SUMMARY, loop: 'c. 1-4' } },
     { kind: 'compose', ...{ prompt: '   ', bpm: 96, key: null, beats_per_bar: 4, length_bars: 2, role: 'bass', context: [] } },
     { ...COMPOSE, length_bars: 65 }, { ...COMPOSE, role: 'pad' }, { ...COMPOSE, key: '' }, { ...COMPOSE, beats_per_bar: 2.5 },
     { ...COMPOSE, context: [{ role: 'bass', name: 'Bajo', notes: [{ pitch: 40, start: 0, length: 1, velocity: 0 }] }] },
@@ -496,6 +501,9 @@ test('chat: conversacion o estado invalidos son 400 bad_job; el cuerpo admite ha
   const ok = { ...CHAT, messages: [...long, user] };
   assert.ok(JSON.stringify(ok).length > 64 * 1024);
   assert.equal((await post('/ses_a/jobs', ok)).status, 202);
+  // El loop del transporte es opcional: con rango valido o null, el resumen pasa.
+  assert.equal((await post('/ses_a/jobs', { ...CHAT, session_summary: { ...SUMMARY, loop: { start_beat: 16, end_beat: 32 } } })).status, 202);
+  assert.equal((await post('/ses_a/jobs', { ...CHAT, session_summary: { ...SUMMARY, loop: null } })).status, 202);
   const huge = await call('POST', '/ses_a/jobs', { token: OWNER, body: JSON.stringify({ ...CHAT, pad: 'x'.repeat(200 * 1024) }) });
   assert.deepEqual(await errorOf(huge), [400, 'bad_job']);
   const bigCompose = await post('/ses_a/jobs', { ...COMPOSE, prompt: 'x'.repeat(70 * 1024) });
