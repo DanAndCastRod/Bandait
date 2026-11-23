@@ -1849,7 +1849,7 @@ interface JobsPanelProps extends StudioPanelProps {
  * confirmacion, y ningun resultado entra a la sesion sin que el usuario lo acepte. La
  * normalizacion y el audio a MIDI corren en este equipo, sin nube ni costo.
  */
-export const StudioJobsPanel: React.FC<JobsPanelProps> = ({ controller, onOpenAssistant, assistantShortcut = 'Ctrl+J' }) => {
+export const StudioJobsPanel: React.FC<JobsPanelProps> = ({ controller, onOpenAssistant, assistantShortcut = 'Alt+A' }) => {
   const snap = useStudio(controller)
   const { session } = snap
   // Con audios sin cargar la mezcla saldria incompleta (el motor salta los clips sin audio):

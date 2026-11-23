@@ -1626,3 +1626,13 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Acción técnica realizada:** `STUDIO_CHAT_LISTEN` = "1" en `wrangler.jsonc`; `DEFAULT_RATES.chatListen` de 0.02 a 0.002 (contrato 4.3.5 y tabla de tarifas, README); `VERSION` 1.3.0; pruebas actualizadas (versión y cotización 0.032). `max_output_tokens` del chat ya es 8192, con margen para el razonamiento (URiT advirtió que con 300 se corta la llamada a herramienta).
 * **Verificación:** `npm test` 78/78.
 * **Pendientes:** probar ESCUCHAR FRAGMENTO desde el Hub publicado (render a 16 kHz, subida a R2, botón visible); limpieza de fragmentos huérfanos en `assets/`.
+
+### [2026-11-23] - Estudio: atajos que el navegador se quedaba (Ctrl+J, Ctrl+T, Ctrl+Shift+J)
+* **Sprint / Módulo:** `bandait-leader-web` (atajos). Reporte de Daniel Castaneda: "ctrl + j en el navegador abre la ventana de descargas". Agente: Claude Code (Opus 5.5).
+* **Estado encontrado:** `view.toggle_assistant` usaba Ctrl+J, `edit.join` Ctrl+Shift+J y las pistas nuevas Ctrl+T / Ctrl+Shift+T (estas desde el Estudio v2). `StudioHubView` solo atiende el teclado con el foco dentro del Estudio (o en el body), así que con el foco en otra parte del Hub Ctrl+J le llegaba a Chrome. Chrome además no deja que una página use Ctrl+T, Ctrl+N, Ctrl+W y sus variantes, y Ctrl+Shift+J abre la consola. Las pruebas de Playwright pasaban porque `keyboard.press` entrega la tecla a la página: no detectan teclas que el navegador intercepta.
+* **Acción técnica realizada:**
+  - Nuevos atajos: Alt+A asistente (funciona también escribiendo en él), Shift+J unir, Alt+N pista de audio, Alt+I pista de instrumento.
+  - `BROWSER_RESERVED_SHORTCUTS` e `isBrowserReserved` en `keymap.ts`: `saveKeymap` rechaza un atajo editado con una de esas teclas ("lo usa el navegador") y `loadKeymap` las descarta de un mapa ya guardado.
+  - Prueba: ningún atajo por defecto usa una tecla reservada; guardar Ctrl+J o Ctrl+T falla; un mapa viejo con Ctrl+J la pierde al leerse.
+* **Verificación:** lint, `tsc -b`, `verify:logic` (8 suites, `verify-studio-logic` 190/190), build; Playwright Estudio v1 y v2 14/14. No verificado en un Chrome real a mano: Alt+A, Alt+N, Alt+I y Shift+J con el foco dentro del Estudio.
+* **Decisiones:** Alt y no Ctrl+Alt (en distribuciones españolas Ctrl+Alt es AltGr); no Alt+Shift (cambia el idioma del teclado en Windows); letras con Shift o Alt para no chocar con el teclado musical (A..K).

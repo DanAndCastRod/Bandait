@@ -25,7 +25,7 @@ export interface AssistantRect {
 
 export interface AssistantLayout {
   mode: AssistantMode
-  /** Modo al que vuelve al mostrarse (Ctrl+J o la pastilla). */
+  /** Modo al que vuelve al mostrarse (Alt+A o la pastilla). */
   lastOpen: 'docked' | 'floating'
   /** Ancho de la columna acoplada, en px. */
   dockWidth: number
@@ -120,7 +120,7 @@ export function withAssistantMode(layout: AssistantLayout, mode: AssistantMode):
   return { ...layout, mode, lastOpen: mode === 'minimized' ? layout.lastOpen : mode }
 }
 
-/** Ctrl+J: minimizado vuelve al ultimo modo abierto; abierto se minimiza. */
+/** Alt+A: minimizado vuelve al ultimo modo abierto; abierto se minimiza. */
 export function toggleAssistantLayout(layout: AssistantLayout): AssistantLayout {
   return withAssistantMode(layout, layout.mode === 'minimized' ? layout.lastOpen : 'minimized')
 }

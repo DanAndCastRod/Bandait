@@ -295,6 +295,44 @@ export function findConflicts(commands: readonly KeymapCommand[], keymap: Keymap
   return out.sort((a, b) => (a.shortcut < b.shortcut ? -1 : a.shortcut > b.shortcut ? 1 : 0))
 }
 
+/**
+ * Atajos que el navegador se queda (la pagina no los puede usar, o los recibe solo con el foco
+ * dentro del Estudio y si no abren otra cosa): pestanas y ventanas (Ctrl+T, Ctrl+N, Ctrl+W y sus
+ * variantes con Shift, Ctrl+Tab), descargas (Ctrl+J), herramientas de desarrollo (Ctrl+Shift+J,
+ * Ctrl+Shift+I, Ctrl+Shift+C, F12), recargar (F5, Ctrl+R, Ctrl+Shift+R), menu y barra de
+ * direcciones (Alt+F, Alt+E, Alt+D), atras y adelante (Alt+Izquierda, Alt+Derecha). En Chrome
+ * Ctrl+J abria las descargas en vez del asistente (reporte de Daniel Castaneda, 2026-11-23).
+ * Ni el mapa por defecto ni uno editado los usan: al guardar es un error; al leer se ignoran.
+ */
+export const BROWSER_RESERVED_SHORTCUTS: ReadonlySet<string> = new Set([
+  'Ctrl+T',
+  'Ctrl+Shift+T',
+  'Ctrl+N',
+  'Ctrl+Shift+N',
+  'Ctrl+W',
+  'Ctrl+Shift+W',
+  'Ctrl+Tab',
+  'Ctrl+Shift+Tab',
+  'Ctrl+J',
+  'Ctrl+Shift+J',
+  'Ctrl+Shift+I',
+  'Ctrl+Shift+C',
+  'Ctrl+R',
+  'Ctrl+Shift+R',
+  'F5',
+  'F12',
+  'Alt+F',
+  'Alt+E',
+  'Alt+D',
+  'Alt+ArrowLeft',
+  'Alt+ArrowRight',
+])
+
+export function isBrowserReserved(shortcut: string): boolean {
+  const n = normalizeShortcut(shortcut)
+  return n !== null && BROWSER_RESERVED_SHORTCUTS.has(n)
+}
+
 export function loadKeymap(storage: KeyValueStorage, commands: readonly KeymapCommand[]): Keymap {
   const map = defaultKeymap(commands) as Record<string, string[]>
   let raw: string | null
@@ -314,7 +352,7 @@ export function loadKeymap(storage: KeyValueStorage, commands: readonly KeymapCo
   for (const [id, value] of Object.entries(saved as Record<string, unknown>)) {
     // Un id que ya no existe (o un valor que no es lista) se ignora.
     if (!Object.prototype.hasOwnProperty.call(map, id) || !Array.isArray(value)) continue
-    map[id] = canonicalList(value)
+    map[id] = canonicalList(value).filter((s) => !BROWSER_RESERVED_SHORTCUTS.has(s))
   }
   return map
 }
@@ -329,6 +367,7 @@ export function saveKeymap(storage: KeyValueStorage, commands: readonly KeymapCo
     for (const s of list) {
       const n = normalizeShortcut(s)
       if (n === null) throw new Error(`El atajo "${s}" de "${c.label}" no es válido`)
+      if (BROWSER_RESERVED_SHORTCUTS.has(n)) throw new Error(`El atajo ${n} lo usa el navegador: elige otro para "${c.label}"`)
       if (!canonical.includes(n)) canonical.push(n)
     }
     full[c.id] = canonical

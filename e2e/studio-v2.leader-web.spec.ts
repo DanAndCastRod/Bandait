@@ -167,11 +167,11 @@ class FakeStudioV2Worker {
   }
 }
 
-/** Muestra la ventana del asistente con Ctrl+J (arranca minimizado: solo la pastilla). */
+/** Muestra la ventana del asistente con Alt+A (arranca minimizado: solo la pastilla). */
 async function openAssistant(page: Page) {
   await expect(page.getByTestId('studio-assistant-pill')).toBeVisible();
   await blur(page);
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Alt+a');
   await expect(page.getByTestId('studio-assistant')).toBeVisible();
 }
 
@@ -402,7 +402,7 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(page.getByTestId('studio-chat-continue')).toBeVisible();
   });
 
-  test('asistente: Ctrl+J lo muestra y lo oculta, pasa a flotante, se arrastra sin salir de la ventana y recuerda el modo', async ({ page }) => {
+  test('asistente: Alt+A lo muestra y lo oculta, pasa a flotante, se arrastra sin salir de la ventana y recuerda el modo', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await enterDemo(page);
     await openStudioHome(page);
@@ -413,7 +413,7 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(assistant).toBeHidden();
 
     await blur(page);
-    await page.keyboard.press('Control+j');
+    await page.keyboard.press('Alt+a');
     await expect(assistant).toBeVisible();
     await expect(assistant).toHaveAttribute('data-mode', 'docked');
     await expect(pill).toHaveCount(0);
@@ -422,8 +422,8 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(page.getByTestId('studio-chat-quick-mix')).toBeDisabled();
     await expect(page.getByTestId('studio-chat-chip-view')).toContainText('LÍNEA DE TIEMPO');
 
-    // Con el foco adentro del asistente, Ctrl+J lo oculta y el foco pasa a la pastilla.
-    await page.keyboard.press('Control+j');
+    // Con el foco adentro del asistente, Alt+A lo oculta y el foco pasa a la pastilla.
+    await page.keyboard.press('Alt+a');
     await expect(assistant).toBeHidden();
     await expect(pill).toBeFocused();
     await pill.click();
