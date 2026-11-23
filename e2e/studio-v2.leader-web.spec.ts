@@ -119,7 +119,7 @@ class FakeStudioV2Worker {
   });
   chatReply: (jobId: string, body: any) => unknown = (jobId) => ({
     job_id: jobId, kind: 'chat', status: 'SUCCEEDED', cost_usd: 0.03,
-    reply: 'Propongo marcar el coro en el compás 2.',
+    reply: 'Propongo marcar **el coro** en el compás 2.',
     tool_calls: [{ id: 'call_1', name: 'add_marker', arguments: { beat: 4, label: 'Coro', kind: 'chorus' }, signature: 'firma-e2e' }],
   });
 
@@ -314,13 +314,16 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     const undo = page.getByTestId('studio-undo');
     const before = await undo.getAttribute('title');
     await page.getByTestId('studio-chat-input').fill('Marca el coro en el compás 2');
-    await page.getByTestId('studio-chat-send').click();
+    await page.getByTestId('studio-chat-input').press('Enter');
     await expect(page.getByTestId('studio-chat-confirm')).toBeVisible();
     await page.getByTestId('studio-chat-launch').click();
     const call = page.getByTestId('studio-chat-call');
     await expect(call).toHaveCount(1, { timeout: 15_000 });
     await expect(call).toHaveAttribute('data-state', 'pending');
     await expect(page.getByTestId('studio-chat-log')).toContainText('Propongo marcar el coro');
+    // El Markdown del modelo se pinta con formato, sin asteriscos.
+    await expect(page.getByTestId('studio-chat-log').locator('.stu-md strong', { hasText: 'el coro' })).toBeVisible();
+    await expect(page.getByTestId('studio-chat-log')).not.toContainText('**');
     const sent = worker.posts.find((p) => !p.estimate)!;
     expect(sent.body.kind).toBe('chat');
     expect(sent.body.messages.at(-1)).toMatchObject({ role: 'user', text: 'Marca el coro en el compás 2' });

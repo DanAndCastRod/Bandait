@@ -29,6 +29,7 @@ import {
   type MidiInputPortLike,
   type MidiTakeOptions,
 } from '../src/services/studio/midiInput.ts'
+import { parseChatMarkdown, parseInline } from '../src/services/studio/chatMarkdown.ts'
 import { amplitudeToVelocity, availability, minNoteFrames, noteEventsToStudioNotes, transcribe } from '../src/services/studio/audioToMidi.ts'
 import {
   STUDIO_CHAT_BODY_MAX_BYTES,
@@ -934,6 +935,45 @@ async function main() {
     assert.ok(message.toolResults.every((r) => r.response.message.length <= 500))
     const convo: StudioChatMessage[] = [{ role: 'user', text: 'Arregla la mezcla' }, { role: 'model', text: null, toolCalls: calls }, message]
     assert.equal(chatRequestProblem(chatRequest(convo, session)), null, 'el turno siguiente es valido')
+  })
+
+  console.log('chatMarkdown.ts: formato de las respuestas del asistente')
+
+  await check('parseInline: negrita, cursiva, codigo y anidado', () => {
+    assert.deepEqual(parseInline('Sube **el bajo** y *la voz* con `comp`'), [
+      { kind: 'text', text: 'Sube ' },
+      { kind: 'strong', children: [{ kind: 'text', text: 'el bajo' }] },
+      { kind: 'text', text: ' y ' },
+      { kind: 'em', children: [{ kind: 'text', text: 'la voz' }] },
+      { kind: 'text', text: ' con ' },
+      { kind: 'code', text: 'comp' },
+    ])
+    assert.deepEqual(parseInline('**fader *+3 dB***'), [
+      { kind: 'strong', children: [{ kind: 'text', text: 'fader ' }, { kind: 'em', children: [{ kind: 'text', text: '+3 dB' }] }] },
+    ])
+    assert.deepEqual(parseInline('__Coro__'), [{ kind: 'strong', children: [{ kind: 'text', text: 'Coro' }] }])
+  })
+
+  await check('parseInline: lo que no cierra o va pegado a espacios queda como texto', () => {
+    assert.deepEqual(parseInline('2 * 3 = 6'), [{ kind: 'text', text: '2 * 3 = 6' }])
+    assert.deepEqual(parseInline('**sin cierre'), [{ kind: 'text', text: '**sin cierre' }])
+    assert.deepEqual(parseInline('pista_de_voz'), [{ kind: 'text', text: 'pista_de_voz' }])
+    assert.deepEqual(parseInline('<script>x</script>'), [{ kind: 'text', text: '<script>x</script>' }])
+  })
+
+  await check('parseChatMarkdown: parrafos, titulos, listas y bloque de codigo', () => {
+    const blocks = parseChatMarkdown('## Propuesta\nPrimero:\nla mezcla\n\n- **Bajo**: -2 dB\n- Voz\n  sigue igual\n1. uno\n2) dos\n\n```\na  b\n```\nfin')
+    assert.deepEqual(blocks.map((b) => b.kind), ['heading', 'paragraph', 'list', 'list', 'code', 'paragraph'])
+    const para = blocks[1]
+    assert.ok(para.kind === 'paragraph' && para.lines.length === 2)
+    const bullets = blocks[2]
+    assert.ok(bullets.kind === 'list' && !bullets.ordered && bullets.items.length === 2)
+    assert.deepEqual(bullets.items[0][0], { kind: 'strong', children: [{ kind: 'text', text: 'Bajo' }] })
+    assert.deepEqual(bullets.items[1], [{ kind: 'text', text: 'Voz sigue igual' }])
+    const numbered = blocks[3]
+    assert.ok(numbered.kind === 'list' && numbered.ordered && numbered.items.length === 2)
+    assert.deepEqual(blocks[4], { kind: 'code', text: 'a  b' })
+    assert.deepEqual(parseChatMarkdown(''), [])
   })
 
   console.log(`\n${passed} ok, ${failures.length} con falla`)
