@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E del Estudio Bandait (pestana ESTUDIO del hub, detras del interruptor `bandait_studio`).
@@ -98,7 +99,7 @@ async function enterDemo(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
 }
 
 /** Enciende el interruptor del Estudio en este navegador, antes de que cargue el hub. */
@@ -107,7 +108,7 @@ async function enableStudio(page: Page) {
 }
 
 async function openStudioHome(page: Page) {
-  await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+  await openView(page, 'studio');
   await expect(page.getByTestId('studio-home')).toBeVisible();
 }
 
@@ -205,15 +206,15 @@ class FakeStudioWorker {
 test.describe('Web Admin Hub - Estudio Bandait', () => {
   test('el Estudio aparece por defecto, sin tocar el interruptor', async ({ page }) => {
     await enterDemo(page);
-    await expect(page.getByRole('button', { name: 'PISTAS', exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'ESTUDIO', exact: true }).first()).toBeVisible();
+    await expect(page.getByTestId('tab-songs')).toBeVisible();
+    await expect(page.getByTestId('tab-studio')).toBeVisible();
   });
 
   test('con el apagado local (bandait_studio = 0) el Estudio no aparece en el hub', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('bandait_studio', '0'));
     await enterDemo(page);
-    await expect(page.getByRole('button', { name: 'PISTAS', exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'ESTUDIO', exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('tab-songs')).toBeVisible();
+    await expect(page.getByTestId('tab-studio')).toHaveCount(0);
     await expect(page.getByTestId('studio-home')).toHaveCount(0);
   });
 

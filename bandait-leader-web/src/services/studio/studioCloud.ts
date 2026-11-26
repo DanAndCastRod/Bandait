@@ -795,6 +795,7 @@ export function sessionSummaryToWire(s: StudioSessionSummary): Record<string, un
         pitch_min: c.pitchMin,
         pitch_max: c.pitchMax,
         ...(c.digest ? { digest: digestToWire(c.digest) } : {}),
+        ...(c.muted === true ? { muted: true } : {}),
       })),
       ...(t.mix
         ? {

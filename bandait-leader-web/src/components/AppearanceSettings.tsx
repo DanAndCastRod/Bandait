@@ -22,6 +22,7 @@ import {
   type UiPreferences,
 } from '../services/appearance'
 import { cardStyle, colors, headerBarStyle, labelStyle, mono, radius, viewStyle } from './hubStyles'
+import { WaveformSettings } from './WaveformSettings'
 
 const sectionTitle: React.CSSProperties = {
   margin: 0,
@@ -131,7 +132,7 @@ export const AppearanceSettings: React.FC = () => {
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>Apariencia</h2>
           </div>
           <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: colors.muted }}>
-            Tema, acento y redondez del Hub y del Estudio.{' '}
+            Tema, acento, redondez y forma de onda del Hub y del Estudio.{' '}
             {user ? 'Es tuya: se guarda en tu cuenta y no cambia nada de la banda.' : 'Sin sesión se guarda solo en este navegador.'}
           </p>
         </div>
@@ -400,6 +401,17 @@ export const AppearanceSettings: React.FC = () => {
               </span>
             </span>
           </div>
+        </section>
+
+        {/* FORMA DE ONDA */}
+        <section style={sectionStyle} aria-labelledby="appearance-waveform-title" data-testid="appearance-waveform-section">
+          <h3 id="appearance-waveform-title" style={sectionTitle}>
+            FORMA DE ONDA
+          </h3>
+          <p style={{ margin: 0, fontSize: '12px', lineHeight: 1.5, color: colors.muted }}>
+            Cómo se dibujan los clips de audio en el Estudio. También se cambia desde la línea de tiempo.
+          </p>
+          <WaveformSettings value={prefs.waveform} onChange={(waveform) => update({ waveform })} testIdPrefix="appearance-waveform" />
         </section>
       </div>
     </div>

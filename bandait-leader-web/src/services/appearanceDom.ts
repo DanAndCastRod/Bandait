@@ -6,6 +6,7 @@ import {
   serializeAppearanceCache,
   type UiPreferences,
 } from './appearance'
+import { defaultWaveformPreferences, normalizeWaveformPreferences, waveformPreferencesEqual, type WaveformPreferences } from './waveform'
 
 /**
  * Evento en `window` cuando cambian el tema o el acento aplicados (no la redondez). Lo escuchan
@@ -44,6 +45,36 @@ export function applyAppearance(prefs: UiPreferences, doc: Document = document):
     localStorage.setItem(APPEARANCE_CACHE_KEY, serializeAppearanceCache(prefs))
   } catch {
     // sin almacenamiento (modo privado o bloqueado) la apariencia igual queda aplicada
+  }
+  setWaveformPreferences(prefs.waveform)
+}
+
+// ---------------------------------------------------------------------------
+// Forma de onda vigente: un almacen pequeno para los lienzos (useWaveformPreferences). Los
+// bucles de pintado guardan el objeto en una ref y repintan solo cuando cambia.
+// ---------------------------------------------------------------------------
+
+let currentWaveform: WaveformPreferences | null = null
+const waveformListeners = new Set<() => void>()
+
+function setWaveformPreferences(next: WaveformPreferences | undefined): void {
+  const clean = normalizeWaveformPreferences(next)
+  if (currentWaveform && waveformPreferencesEqual(currentWaveform, clean)) return
+  currentWaveform = clean
+  for (const listener of [...waveformListeners]) listener()
+}
+
+/** Forma de onda vigente (el mismo objeto mientras no cambie). */
+export function getWaveformPreferences(): WaveformPreferences {
+  if (!currentWaveform) currentWaveform = readCachedPreferences()?.waveform ?? defaultWaveformPreferences()
+  return currentWaveform
+}
+
+/** Avisa cuando cambia la forma de onda. Devuelve la funcion para dejar de escuchar. */
+export function subscribeWaveformPreferences(listener: () => void): () => void {
+  waveformListeners.add(listener)
+  return () => {
+    waveformListeners.delete(listener)
   }
 }
 

@@ -1881,7 +1881,7 @@ export const StudioJobsPanel: React.FC<JobsPanelProps> = ({ controller, onOpenAs
         <div className="stu-job stu-job-link" data-testid="studio-jobs-assistant">
           <span className="stu-chat-call-text">
             <strong>ASISTENTE (CHAT)</strong>
-            <span className="stu-help">Tiene su propia ventana: acoplada a la derecha, flotante o minimizada ({assistantShortcut}).</span>
+            <span className="stu-help">Tiene su propia ventana flotante, que se minimiza a una píldora ({assistantShortcut}).</span>
           </span>
           <button type="button" className="stu-btn" data-size="small" onClick={onOpenAssistant} data-testid="studio-jobs-open-assistant">
             <Sparkles size={12} />

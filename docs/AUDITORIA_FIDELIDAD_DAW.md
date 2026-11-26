@@ -83,10 +83,13 @@ leer los tokens (pendiente abajo).
 1. Canvas y temas: la línea de tiempo, el piano roll y los medidores pintan con colores fijos del
    tema oscuro. Para Light Estudio hay que leer los `--stu-*` con `getComputedStyle` al cambiar de
    tema y pasarlos a las funciones de pintado.
-2. El resumen de sesión del chat (`STUDIO_V2.md` 4.3.2) no dice que un clip MIDI está silenciado:
-   sus notas ya no cuentan como "que suenan" (`soundingClipNotes`), pero el clip aparece en la lista
-   como uno más. Agregar `muted` al resumen exige cambiar el contrato y `validateSummary` del Worker.
+2. **Resuelto (2026-11-26, ola 2 de Web 3.0).** El resumen de sesión del chat marca el clip MIDI
+   silenciado con `"muted": true` (solo en true; `chatContext.midiClipMutedFlag`, `jobs.ts`,
+   `studioCloud.sessionSummaryToWire`, contrato `STUDIO_V2.md` 4.3.2). `validateSummary` del Worker
+   ya aceptaba claves extra en cada clip, así que no cambió; su prompt dice qué significa.
 3. Selector de instrumento en la cabecera para sampler y plugins web (hoy llevan al inspector).
-4. Rectángulo de selección: no desplaza la vista sola al llegar al borde del carril.
-5. Medidores LED en la cabecera de pista: siguen como barra continua (escala lineal de -60 a +6);
-   los LED están solo en el mezclador.
+4. **Resuelto (2026-11-26).** El rectángulo de selección desplaza la vista sola cerca de los bordes
+   del carril (horizontal y vertical), aunque el puntero no se mueva (`timelineMath.edgeScrollSpeed`,
+   bucle de `StudioTimeline`).
+5. **Resuelto (2026-11-26).** Las cabeceras de pista usan los mismos medidores LED de pico y RMS que
+   la consola (`components/studio/ledMeter.ts`, escala del fader).

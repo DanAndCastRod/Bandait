@@ -185,6 +185,14 @@ const SPECS = [
   spec('view.zoom_fit', 'Ver toda la sesión', 'vista', 'global', ['Shift+Z']),
   spec('view.center_playhead', 'Centrar la vista en el cabezal', 'vista', 'global', ['Shift+C']),
   spec('view.toggle_assistant', 'Mostrar u ocultar el asistente', 'vista', 'global', ['Alt+A']),
+  // Ola 2 de Web 3.0 (2026-11-26): consola y panel lateral plegables a un clic. Alt+M y Alt+P no
+  // los reserva el navegador (BROWSER_RESERVED_SHORTCUTS) ni abren menus de Firefox.
+  spec('view.toggle_mixer', 'Mostrar u ocultar la consola de mezcla', 'vista', 'global', ['Alt+M']),
+  spec('view.toggle_side_panel', 'Mostrar u ocultar el panel lateral', 'vista', 'global', ['Alt+P']),
+  spec('view.show_inspector', 'Abrir el inspector', 'vista', 'global', []),
+  spec('view.show_device', 'Abrir el panel del dispositivo de audio', 'vista', 'global', []),
+  spec('view.show_jobs', 'Abrir los trabajos de IA', 'vista', 'global', []),
+  spec('view.waveform', 'Forma de onda: estilo, datos, escala y color', 'vista', 'global', []),
   // Archivo
   spec('file.save_cloud', 'Guardar en la nube', 'archivo', 'global', ['Ctrl+S']),
   spec('file.export', 'Exportar', 'archivo', 'global', ['Ctrl+E']),

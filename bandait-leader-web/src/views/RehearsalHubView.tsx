@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AArrowDown, AArrowUp, ArrowRight, CloudDownload, Keyboard, Maximize2, Minimize2, Minus, Music, Pause, Pencil, Play, Plus, Repeat, SkipBack, SkipForward, Sliders } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
+import { useGlobalAudioEngine } from '../context/globalAudioContextCore'
+import { useSplitLocalSaved } from '../context/splitQueueContextCore'
 import { StemStudio } from '../components/StemStudio'
 import { useStudioApi } from '../components/studioApi'
 import { ChordProPreview } from '../components/ChordProPreview'
@@ -23,11 +25,13 @@ import { listStemSongs, StemStoreError, type StemSongRecord } from '../services/
 import { downloadStems, getManifest, isCloudSongId, StemCloudError, type CloudManifest } from '../services/stemCloud'
 import { formatBytes } from '../services/stemImport'
 import type { StemPlayer } from '../services/stemPlayer'
+import { stemSessionKey } from '../services/globalAudioCore'
 import { barAtTime, sectionIndexAtBar, sectionSpans, type SectionSpan } from '../services/stemTiming'
 import { useStemCloudTarget } from '../hooks/useStemCloudTarget'
 import { onCloudStemsChanged } from '../services/stemCloudEvents'
 import type { Song } from '../types/hub'
 import { cardStyle, colors, labelStyle, mono, primaryButton, smallInputStyle, viewStyle } from '../components/hubStyles'
+import '../styles/audio.css'
 
 type PrompterMode = 'chords' | 'lyrics'
 
@@ -49,9 +53,11 @@ const MANIFEST_CONCURRENCY = 4
 export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) => {
   const { songs } = useHub()
   const { target, bandKey } = useStemCloudTarget()
+  const audio = useGlobalAudioEngine()
   const [records, setRecords] = useState<Map<string, StemSongRecord> | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [pickedId, setPickedId] = useState<string | null>(null)
+  // Por defecto, la cancion que suena (o sono) en el reproductor global: volver a ENSAYO la retoma.
+  const [pickedId, setPickedId] = useState<string | null>(() => audio.currentStemSongId())
   /** Manifiestos de la nube por `${bandKey}:${songId}` (null = sin stems en la nube). */
   const [cloud, setCloud] = useState<Map<string, CloudManifest | null>>(() => new Map())
   const [cloudError, setCloudError] = useState<string | null>(null)
@@ -152,6 +158,8 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
       return map
     })
 
+  useSplitLocalSaved(bandKey, (event) => setRecord(event.songId, event.record))
+
   const downloadSong = async (songId: string) => {
     if (!target || download) return
     setDownloadError(null)
@@ -205,7 +213,7 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
       </div>
 
       {loadError && (
-        <div role="alert" style={{ ...cardStyle, padding: '10px 12px', color: colors.danger, fontSize: '12px', borderColor: colors.danger }}>
+        <div role="alert" className="ga-alert">
           {loadError}
         </div>
       )}
@@ -221,16 +229,17 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
       {records !== null && !checkingCloud && options.length === 0 && (
         <div
           data-testid="rehearsal-empty"
-          style={{ ...cardStyle, padding: '32px 16px', textAlign: 'center', color: colors.muted, fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}
+          className="ga-panel"
+          style={{ padding: '32px 16px', textAlign: 'center', color: colors.muted, fontSize: '13px', alignItems: 'center', gap: '14px' }}
         >
           <Music size={28} style={{ color: colors.disabled }} aria-hidden="true" />
           <span style={{ maxWidth: '52ch' }}>
             {target
-              ? 'Ninguna canción de esta banda tiene stems en este equipo ni en la nube. Cárgalos en PISTAS y vuelve a ensayar.'
-              : 'Ninguna canción de esta banda tiene stems en este equipo. Cárgalos en PISTAS y vuelve a ensayar.'}
+              ? 'Ninguna canción de esta banda tiene stems en este equipo ni en la nube. Cárgalos en Canciones y Stems y vuelve a ensayar.'
+              : 'Ninguna canción de esta banda tiene stems en este equipo. Cárgalos en Canciones y Stems y vuelve a ensayar.'}
           </span>
-          <button type="button" className="stx-btn" onClick={onOpenTracks} style={{ ...primaryButton(colors.cobalt), color: colors.onAccent }}>
-            <Sliders size={13} /> IR A PISTAS
+          <button type="button" className="ga-pill" data-tone="accent" onClick={onOpenTracks}>
+            <Sliders size={13} /> IR A STEMS Y PISTAS
           </button>
         </div>
       )}
@@ -238,7 +247,8 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
       {song && !record && manifest && (
         <div
           data-testid="rehearsal-cloud-only"
-          style={{ ...cardStyle, padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, maxWidth: '720px' }}
+          className="ga-panel"
+          style={{ padding: '20px', maxWidth: '720px' }}
         >
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '18px', fontWeight: 800, color: colors.text }}>{song.title}</span>
@@ -251,11 +261,11 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <button
               type="button"
-              className="stx-btn"
+              className="ga-pill"
+              data-tone="accent"
               data-testid="rehearsal-download"
               disabled={!!download}
               onClick={() => void downloadSong(song.id)}
-              style={{ ...primaryButton(colors.cyan), color: colors.onAccent }}
             >
               <CloudDownload size={14} /> DESCARGAR PARA ENSAYAR
             </button>
@@ -355,12 +365,20 @@ type TransposeUpdate = number | ((current: number) => number)
  * pintar al cambiar de seccion o al entrar en los 2 ultimos compases de una.
  */
 const RehearsalSession: React.FC<SessionProps> = ({ song, record, origin, onRecordChange, onEditSong, onOpenTracks }) => {
-  const [mode, setMode] = useState<PrompterMode>('chords')
+  const audio = useGlobalAudioEngine()
+  const stemKey = stemSessionKey(song.id, record.tracks.map((t) => t.id))
+  const [mode, setMode] = useState<PrompterMode>(() => audio.readStemView<PrompterMode>(stemKey, 'mode') ?? 'chords')
   const [current, setCurrent] = useState(-1)
   const [warn, setWarn] = useState(0)
   // Tono del audio y transposicion de acordes, vinculados (stemPractice.ts: fuera de +-6 el audio
   // va a la octava equivalente y se avisa).
-  const [tone, setTone] = useState<ToneState>(INITIAL_TONE)
+  const [tone, setTone] = useState<ToneState>(() => audio.readStemView<ToneState>(stemKey, 'tone') ?? INITIAL_TONE)
+  useEffect(() => {
+    audio.writeStemView(stemKey, 'tone', tone)
+  }, [audio, stemKey, tone])
+  useEffect(() => {
+    audio.writeStemView(stemKey, 'mode', mode)
+  }, [audio, stemKey, mode])
   const transpose = tone.transpose
   const onTranspose = useCallback((next: TransposeUpdate) => setTone((s) => applyTranspose(s, typeof next === 'function' ? next(s.transpose) : next)), [])
   const onPitch = useCallback((semitones: number) => setTone((s) => applyPitch(s, semitones)), [])
@@ -992,7 +1010,7 @@ const RehearsalPrompter: React.FC<PrompterProps> = ({
 
       {!focus && (
         <div style={{ fontSize: '11px', color: colors.disabled, fontFamily: mono }}>
-          Pulsa ? para ver los atajos. Tempo de práctica: todavía no; cambiar la velocidad en Web Audio también cambia el tono.
+          Pulsa ? para ver los atajos. La velocidad y el tono del audio están arriba, junto al transporte.
         </div>
       )}
 

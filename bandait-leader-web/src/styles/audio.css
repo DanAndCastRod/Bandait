@@ -1,0 +1,470 @@
+/*
+ * Audio global: PISTAS (StemStudio, StemsHubView), ENSAYO, SUBIR Y SEPARAR y la cola Drop & Split.
+ * Estilo de la maqueta aprobada de Web 3.0: superficies sin borde, pildoras, transporte 9999px y
+ * radios nunca menores a 8px. Solo tokens --b-* (global.css), asi sigue el tema y el acento.
+ * Las transiciones solo tocan transform, opacity y colores (nada que cause reflow).
+ */
+
+/* ---- superficies ---- */
+.ga-panel {
+  background: var(--b-surface);
+  border-radius: var(--b-radius-card);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.ga-panel[data-tight='true'] {
+  padding: 12px 14px;
+  gap: 10px;
+}
+.ga-alert {
+  border-radius: var(--b-radius-field);
+  padding: 10px 14px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--b-danger) 12%, transparent);
+  color: var(--b-danger-text);
+}
+.ga-alert[data-tone='warning'] {
+  background: color-mix(in srgb, var(--b-warning) 12%, transparent);
+  color: var(--b-warning-text);
+}
+
+/* ---- transporte ---- */
+.ga-transport-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 14px 6px 6px;
+  border-radius: var(--b-radius-transport);
+  background: var(--b-elevated);
+  min-width: 0;
+}
+.ga-play {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: var(--b-radius-transport);
+  background: var(--b-accent);
+  color: var(--b-on-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 160ms ease-out, opacity 160ms ease-out;
+}
+.ga-play:hover:not(:disabled) {
+  background: var(--b-accent-hover);
+}
+.ga-play:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.ga-play:focus-visible,
+.ga-round:focus-visible,
+.ga-pill:focus-visible {
+  outline: 2px solid var(--b-accent);
+  outline-offset: 2px;
+}
+.ga-play:disabled,
+.ga-round:disabled,
+.ga-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ga-round {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--b-radius-transport);
+  background: var(--b-hover);
+  color: var(--b-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 160ms ease-out;
+}
+.ga-round:hover:not(:disabled) {
+  background: var(--b-border-strong);
+}
+.ga-round:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.ga-clock {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--b-text);
+  font-variant-numeric: tabular-nums;
+}
+.ga-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--b-radius-transport);
+  background: var(--b-hover);
+  color: var(--b-text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ga-chip[data-tone='success'] {
+  background: var(--b-success);
+  color: var(--b-on-strong);
+}
+.ga-chip:empty {
+  display: none;
+}
+
+/* ---- botones pildora ---- */
+.ga-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--b-radius-control);
+  background: var(--b-elevated);
+  color: var(--b-text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 160ms ease-out, color 160ms ease-out;
+}
+.ga-pill:hover:not(:disabled) {
+  background: var(--b-hover);
+}
+.ga-pill:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.ga-pill[data-size='sm'] {
+  height: 28px;
+  padding: 0 10px;
+}
+.ga-pill[data-tone='accent'] {
+  background: var(--b-accent);
+  color: var(--b-on-accent);
+}
+.ga-pill[data-tone='accent']:hover:not(:disabled) {
+  background: var(--b-accent-hover);
+}
+.ga-pill[data-tone='violet'] {
+  background: var(--b-violet);
+  color: var(--b-on-strong);
+}
+.ga-pill[data-tone='danger'] {
+  background: var(--b-danger);
+  color: var(--b-on-strong);
+}
+.ga-pill[data-tone='warning'] {
+  background: var(--b-warning);
+  color: var(--b-on-strong);
+}
+.ga-pill[data-tone='ghost'] {
+  background: transparent;
+  color: var(--b-muted);
+}
+.ga-pill[data-tone='ghost']:hover:not(:disabled) {
+  background: var(--b-elevated);
+  color: var(--b-text);
+}
+.ga-pill[data-tone='danger-ghost'] {
+  background: transparent;
+  color: var(--b-danger-text);
+}
+.ga-pill[data-tone='danger-ghost']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--b-danger) 14%, transparent);
+}
+
+/* ---- pistas ---- */
+.ga-track {
+  background: var(--b-surface);
+  border-radius: var(--b-radius-card);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ga-track[data-status='error'] {
+  background: color-mix(in srgb, var(--b-danger) 10%, var(--b-surface));
+}
+.ga-track.rh-track {
+  border: 0;
+  background: var(--b-bg);
+  border-radius: var(--b-radius-field);
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+}
+.ga-track.rh-track[data-status='error'] {
+  background: color-mix(in srgb, var(--b-danger) 10%, var(--b-bg));
+}
+.ga-code {
+  flex: none;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--b-radius-transport);
+  background: var(--b-hover);
+  color: var(--b-text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ga-toggle {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--b-radius-transport);
+  background: var(--b-elevated);
+  color: var(--b-muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out, transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ga-toggle:hover:not(:disabled) {
+  color: var(--b-text);
+}
+.ga-toggle:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.ga-toggle:focus-visible {
+  outline: 2px solid var(--b-accent);
+  outline-offset: 2px;
+}
+.ga-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ga-toggle[aria-pressed='true'][data-kind='mute'] {
+  background: var(--b-danger);
+  color: var(--b-on-strong);
+}
+.ga-toggle[aria-pressed='true'][data-kind='solo'] {
+  background: var(--b-warning);
+  color: var(--b-on-strong);
+}
+
+/* La practica y la rampa sin lineas divisorias: aire en lugar de bordes. */
+.ga-panel .sp-practice,
+.ga-panel .sp-ramp {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+/* ---- SUBIR Y SEPARAR ---- */
+.ga-split .split-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--b-hover);
+}
+.ga-split .split-progress-fill {
+  border-radius: 999px;
+  background: var(--b-accent);
+}
+.ga-split .split-confirm {
+  border: 0;
+  border-radius: var(--b-radius-card);
+  background: color-mix(in srgb, var(--b-warning) 10%, var(--b-elevated));
+}
+.ga-icon-dot {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--b-elevated);
+  color: var(--b-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---- cola Drop & Split (SplitQueueIndicator) ---- */
+.ga-queue {
+  position: relative;
+  display: inline-flex;
+}
+.ga-queue-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: var(--b-radius-transport);
+  background: var(--b-elevated);
+  color: var(--b-text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 150ms ease-out, transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ga-queue-pill:hover {
+  background: var(--b-hover);
+}
+.ga-queue-pill:active {
+  transform: scale(0.97);
+}
+.ga-queue-pill:focus-visible {
+  outline: 2px solid var(--b-accent);
+  outline-offset: 2px;
+}
+.ga-queue-count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--b-accent);
+  color: var(--b-on-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ga-queue-count[data-idle='true'] {
+  background: var(--b-hover);
+  color: var(--b-muted);
+}
+.ga-queue-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--b-accent);
+  animation: ga-pulse 1.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+@keyframes ga-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.ga-queue-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 10px;
+  border-radius: var(--b-radius-card);
+  background: var(--b-modal);
+  box-shadow: var(--b-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transform-origin: top left;
+  animation: ga-pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes ga-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+/* Pegada al borde derecho (p. ej. en una barra superior alineada a la derecha). */
+.ga-queue[data-align='end'] .ga-queue-panel {
+  left: auto;
+  right: 0;
+  transform-origin: top right;
+}
+.ga-queue-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--b-radius-field);
+  background: var(--b-surface);
+  min-width: 0;
+}
+.ga-queue-status {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--b-hover);
+  color: var(--b-muted);
+  white-space: nowrap;
+}
+.ga-queue-status[data-status='done'] {
+  background: color-mix(in srgb, var(--b-success) 22%, transparent);
+  color: var(--b-success-text);
+}
+.ga-queue-status[data-status='error'],
+.ga-queue-status[data-status='interrupted'] {
+  background: color-mix(in srgb, var(--b-danger) 18%, transparent);
+  color: var(--b-danger-text);
+}
+.ga-queue-status[data-status='uploading'],
+.ga-queue-status[data-status='separating'],
+.ga-queue-status[data-status='importing'] {
+  background: var(--b-accent-soft);
+  color: var(--b-text);
+}
+.ga-queue-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--b-hover);
+  overflow: hidden;
+}
+.ga-queue-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--b-accent);
+  transform-origin: left center;
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ga-queue-bar[data-indeterminate='true'] > span {
+  transition: none;
+  animation: split-indeterminate 1.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ga-play,
+  .ga-round,
+  .ga-pill,
+  .ga-toggle,
+  .ga-queue-pill,
+  .ga-queue-bar > span {
+    transition: none;
+  }
+  .ga-queue-pulse,
+  .ga-queue-panel,
+  .ga-queue-bar[data-indeterminate='true'] > span {
+    animation: none;
+  }
+}

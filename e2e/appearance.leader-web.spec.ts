@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E de APARIENCIA (docs/REQUERIMIENTOS_WEB_3.0.md, seccion 1): temas Dark Grafito / Light
@@ -28,15 +29,18 @@ function wav(seconds: number, freq: number, rate = 8000): Buffer {
   return Buffer.concat([h, data]);
 }
 
+/** uiPreferences.waveform por defecto (WORKSPACE_V2.md seccion 8): el aspecto de siempre. */
+const DEFAULT_WAVEFORM = { version: 1, style: 'filled', layout: 'mirrored', data: 'peak', scale: 'linear', color: 'track', gain: 1, barWidth: 2, barGap: 1 };
+
 async function enterDemo(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
 }
 
 async function openAppearance(page: Page) {
-  await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'AJUSTES' }).click();
+  await openView(page, 'settings');
   await page.getByRole('tab', { name: 'APARIENCIA' }).click();
   await expect(page.getByTestId('appearance-settings')).toBeVisible();
 }
@@ -127,7 +131,7 @@ test.describe('Web Admin Hub - apariencia', () => {
     // Recargar: todo sigue igual y el tema llega antes del primer render
     await page.reload();
     expect(await theme(page)).toBe('light-estudio');
-    await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+    await expect(page.getByTestId('hub-logo')).toBeVisible();
     expect(await rootVar(page, '--b-accent')).toBe('#E06C9F');
     expect(await rootVar(page, '--b-radius')).toBe('16px');
     await openAppearance(page);
@@ -137,7 +141,7 @@ test.describe('Web Admin Hub - apariencia', () => {
       const key = Object.keys(localStorage).find((k) => k.startsWith('bandait_workspace_'));
       return key ? JSON.parse(localStorage.getItem(key) || '{}').uiPreferences : null;
     });
-    expect(stored).toEqual({ version: 1, theme: 'light-estudio', accent: '#E06C9F', radius: 16 });
+    expect(stored).toEqual({ version: 2, theme: 'light-estudio', accent: '#E06C9F', radius: 16, waveform: DEFAULT_WAVEFORM });
 
     // Sin el bundle (main.tsx bloqueado) el script de index.html ya aplico tema, acento y redondez.
     await page.route('**/src/main.tsx*', (route) => route.abort());
@@ -162,19 +166,22 @@ test.describe('Web Admin Hub - apariencia', () => {
     await openAppearance(page);
     const radius = page.getByTestId('appearance-radius-input');
 
-    // Estudio: Stop, Play y Grabar (.stu-key). Al salir del Estudio se vuelve a su inicio, asi que
-    // cada pasada abre una maqueta nueva.
+    // Estudio: Stop, Play y Grabar (.stu-key).
     const keys = page.locator('[data-testid="studio-transport"] .stu-key');
     for (const r of ['8', '999']) {
-      await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'AJUSTES' }).click();
+      await openView(page, 'settings');
       await page.getByRole('tab', { name: 'APARIENCIA' }).click();
       await radius.fill(r);
       await radius.press('Enter');
-      await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
-      await expect(page.getByTestId('studio-home')).toBeVisible();
-      await expect(page.getByTestId('studio-create')).toBeEnabled();
-      await page.getByTestId('studio-new-title').fill(`Apariencia ${r}`);
-      await page.getByTestId('studio-create').click();
+      await openView(page, 'studio');
+      // Con el audio global la sesion sigue abierta fuera del Estudio: la primera pasada la crea y
+      // la segunda vuelve a ella con la redondez nueva.
+      if (r === '8') {
+        await expect(page.getByTestId('studio-home')).toBeVisible();
+        await expect(page.getByTestId('studio-create')).toBeEnabled();
+        await page.getByTestId('studio-new-title').fill(`Apariencia ${r}`);
+        await page.getByTestId('studio-create').click();
+      }
       await expect(page.getByTestId('studio-workspace')).toBeVisible();
       await expect(keys).toHaveCount(3);
       const shapes = await keys.evaluateAll((els) =>
@@ -192,11 +199,11 @@ test.describe('Web Admin Hub - apariencia', () => {
     }
 
     // Reproductor de stems (PISTAS): REPRODUCIR / STOP con forma de pildora (9999px) aunque la redondez sea 8.
-    await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'AJUSTES' }).click();
+    await openView(page, 'settings');
     await page.getByRole('tab', { name: 'APARIENCIA' }).click();
     await radius.fill('8');
     await radius.press('Enter');
-    await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'PISTAS', exact: true }).click();
+    await openView(page, 'tracks');
     await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
     await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
     await page.getByTestId('stem-file-input').setInputFiles([{ name: 'Medianoche en Pereira_drums.wav', mimeType: 'audio/wav', buffer: wav(1, 110) }]);
@@ -207,6 +214,48 @@ test.describe('Web Admin Hub - apariencia', () => {
     expect(await radiusOf(page, 'stem-stop')).toBe('9999px');
   });
 
+  test('forma de onda: se elige en APARIENCIA con vista previa, se guarda en uiPreferences y se restablece', async ({ page }) => {
+    await enterDemo(page);
+    await openAppearance(page);
+    const section = page.getByTestId('appearance-waveform-section');
+    await expect(section).toBeVisible();
+    await expect(page.getByTestId('appearance-waveform-preview')).toBeVisible();
+    // Por defecto: relleno, espejo, pico, lineal, color de pista; ancho y separacion solo valen con barras.
+    await expect(page.getByTestId('appearance-waveform-style-filled')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('appearance-waveform-bar-width')).toBeDisabled();
+    const before = await page.getByTestId('appearance-waveform-preview').evaluate((c: HTMLCanvasElement) => c.toDataURL());
+
+    await page.getByTestId('appearance-waveform-style-bars').click();
+    await page.getByTestId('appearance-waveform-data-peak-rms').click();
+    await page.getByTestId('appearance-waveform-scale-db').click();
+    await page.getByTestId('appearance-waveform-color-accent').click();
+    await page.getByTestId('appearance-waveform-layout-bottom').click();
+    await expect(page.getByTestId('appearance-waveform-bar-width')).toBeEnabled();
+    await page.getByTestId('appearance-waveform-bar-width').fill('4');
+    await page.getByTestId('appearance-waveform-gain').fill('2');
+    // La vista previa se repinta con lo elegido.
+    await expect.poll(() => page.getByTestId('appearance-waveform-preview').evaluate((c: HTMLCanvasElement) => c.toDataURL())).not.toBe(before);
+
+    const stored = () =>
+      page.evaluate(() => {
+        const key = Object.keys(localStorage).find((k) => k.startsWith('bandait_workspace_'));
+        return key ? JSON.parse(localStorage.getItem(key) || '{}').uiPreferences?.waveform : null;
+      });
+    await expect
+      .poll(stored)
+      .toEqual({ version: 1, style: 'bars', layout: 'bottom', data: 'peak-rms', scale: 'db', color: 'accent', gain: 2, barWidth: 4, barGap: 1 });
+
+    // Sigue igual al recargar.
+    await page.reload();
+    await openAppearance(page);
+    await expect(page.getByTestId('appearance-waveform-style-bars')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('appearance-waveform-scale-db')).toHaveAttribute('aria-checked', 'true');
+
+    await page.getByTestId('appearance-waveform-reset').click();
+    await expect.poll(stored).toEqual(DEFAULT_WAVEFORM);
+    await expect(page.getByTestId('appearance-waveform-reset')).toBeDisabled();
+  });
+
   test('lienzos del Estudio con Light Estudio: carriles y regla claros; repinta al cambiar el tema', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('bandait_studio', '1'));
     await enterDemo(page);
@@ -214,7 +263,7 @@ test.describe('Web Admin Hub - apariencia', () => {
     await page.getByTestId('appearance-theme-light-estudio').click();
     expect(await theme(page)).toBe('light-estudio');
 
-    await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+    await openView(page, 'studio');
     await expect(page.getByTestId('studio-create')).toBeEnabled();
     await page.getByTestId('studio-new-title').fill('Lienzo claro');
     await page.getByTestId('studio-create').click();
@@ -286,7 +335,7 @@ test.describe('Web Admin Hub - apariencia', () => {
 
     await expect
       .poll(() => fake.workspaces[0].workspace.uiPreferences, { timeout: 10000 })
-      .toEqual({ version: 1, theme: 'light-estudio', accent: null, radius: 24 });
+      .toEqual({ version: 2, theme: 'light-estudio', accent: null, radius: 24, waveform: DEFAULT_WAVEFORM });
     expect(JSON.stringify(fake.bands[0].content)).toBe(bandBefore);
     expect(fake.bands[0].content.uiPreferences).toBeUndefined();
     expect(patches.filter((p) => p.endsWith('/bandait_bands'))).toEqual([]);

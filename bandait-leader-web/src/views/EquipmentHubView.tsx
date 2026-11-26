@@ -136,7 +136,7 @@ export const EquipmentHubView: React.FC = () => {
             <div
               style={{
                 background: colors.input,
-                border: `1px solid ${colors.border}`,
+                border: '1px solid transparent',
                 borderRadius: 'var(--b-radius-field)',
                 padding: '10px 12px',
                 display: 'flex',

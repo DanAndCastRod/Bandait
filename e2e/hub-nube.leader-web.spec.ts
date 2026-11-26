@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E de la correccion de 2.3: el hub usa los stems y el borrador de analisis que estan en la
@@ -130,7 +131,7 @@ async function signInOwner(page: Page, worker: FakeWorker) {
 }
 
 async function openEditor(page: Page, title: string) {
-  await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+  await openView(page, 'songs');
   await page.getByTestId('song-card').filter({ hasText: title }).getByRole('button', { name: 'EDITAR' }).click();
   return page.getByTestId('song-editor');
 }
@@ -222,7 +223,7 @@ test.describe('Web Admin Hub - stems y borrador en la nube sin copia local', () 
       updated_at: '2026-10-31T23:30:00.000Z',
     };
     await signInOwner(page, worker);
-    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+    await openView(page, 'tracks');
     const cloudStatus = page.getByTestId('stem-cloud-status');
     await expect(cloudStatus).toContainText('2 STEMS');
     // Primero los stems viejos en este equipo: al terminar, el hub avisa que los de la nube son nuevos.
@@ -276,7 +277,7 @@ test.describe('Web Admin Hub - stems y borrador en la nube sin copia local', () 
     ]);
     await signInOwner(page, worker);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('.hub-mobile-nav').getByRole('button', { name: /PISTAS/ }).click();
+    await openView(page, 'tracks');
     const panel = page.getByTestId('split-upload');
     await expect(panel).toBeVisible();
     // La pagina arriba del todo: el panel queda bajo el borde y la confirmacion tiene que subir sola.
@@ -335,7 +336,7 @@ test.describe('Web Admin Hub - stems y borrador en la nube sin copia local', () 
       { file: 'Tema A - Bass.wav', role: 'bass', label: 'Bajo', data: wav(4, 82) },
     ]);
     await signInOwner(page, worker);
-    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await openView(page, 'rehearsal');
     await expect(page.getByTestId('rehearsal-context')).toContainText('Ensayo individual, en casa');
     await expect(page.getByTestId('rehearsal-song-select')).toContainText('Tema A · 100 BPM · en la nube');
     const cloudOnly = page.getByTestId('rehearsal-cloud-only');

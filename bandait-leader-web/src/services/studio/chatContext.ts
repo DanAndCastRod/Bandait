@@ -97,6 +97,16 @@ function patternOf(clip: StudioMidiClip): { span: number; notes: StudioMidiNote[
   return { span, notes: clip.notes.filter((n) => n.start < span) }
 }
 
+/**
+ * Marca de silencio de un clip MIDI para el resumen del chat (STUDIO_V2.md 4.3.2): `{ muted: true }`
+ * si el clip esta silenciado (tecla 0) y `{}` si suena, igual que el contrato de la sesion (la
+ * clave solo viaja en true). Asi el asistente sabe que ese clip se ve pero no suena, y no propone
+ * cambios sobre notas que nadie escucha sin decirlo. El Worker acepta claves extra en `midi_clips`.
+ */
+export function midiClipMutedFlag(clip: Pick<StudioMidiClip, 'muted'>): { muted?: true } {
+  return clip.muted === true ? { muted: true } : {}
+}
+
 /** true si la pista toca bateria (caja de ritmos o rol de bateria). */
 export function isDrumTrack(track: Pick<StudioTrack, 'role' | 'instrument'>): boolean {
   return track.instrument?.type === 'drums' || track.role === 'drums'

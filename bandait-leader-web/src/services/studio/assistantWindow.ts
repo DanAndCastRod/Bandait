@@ -13,8 +13,12 @@ import type { CommandContext, StudioChatMessage, StudioChatToolCall, StudioChatT
 // Ventana: modos, posicion y tamano
 // ---------------------------------------------------------------------------
 
-/** ACOPLADO (columna a la derecha), FLOTANTE (ventana libre) o MINIMIZADO (pastilla). */
-export type AssistantMode = 'docked' | 'floating' | 'minimized'
+/**
+ * FLOTANTE (ventana libre) o MINIMIZADO (pastilla). El modo ACOPLADO (columna a la derecha) se
+ * retiro en la ola 2 de Web 3.0 (2026-11-26): la linea de tiempo y el piano roll ocupan el area
+ * central. Un layout guardado como 'docked' se lee como flotante (parseAssistantLayout).
+ */
+export type AssistantMode = 'floating' | 'minimized'
 
 export interface AssistantRect {
   x: number
@@ -25,10 +29,6 @@ export interface AssistantRect {
 
 export interface AssistantLayout {
   mode: AssistantMode
-  /** Modo al que vuelve al mostrarse (Alt+A o la pastilla). */
-  lastOpen: 'docked' | 'floating'
-  /** Ancho de la columna acoplada, en px. */
-  dockWidth: number
   /** Posicion y tamano de la ventana flotante, en px de la ventana del navegador. */
   float: AssistantRect
 }
@@ -41,9 +41,6 @@ export interface Viewport {
 export const ASSISTANT_LAYOUT_STORAGE_KEY = 'bandait_studio_assistant'
 /** Por debajo de este ancho la ventana flotante es una hoja inferior. */
 export const ASSISTANT_NARROW_PX = 760
-export const ASSISTANT_DOCK_MIN_W = 300
-export const ASSISTANT_DOCK_MAX_W = 640
-export const ASSISTANT_DOCK_DEFAULT_W = 380
 export const ASSISTANT_FLOAT_MIN_W = 300
 export const ASSISTANT_FLOAT_MIN_H = 280
 /** Margen que la ventana flotante deja con los bordes del navegador. */
@@ -55,12 +52,6 @@ function finite(value: unknown, fallback: number): number {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max))
-}
-
-/** Ancho de la columna acoplada: entre el minimo y el 60 % de la ventana (sin pasar el maximo). */
-export function clampDockWidth(width: number, viewport: Viewport): number {
-  const max = Math.min(ASSISTANT_DOCK_MAX_W, Math.floor(viewport.width * 0.6))
-  return Math.round(clampNumber(finite(width, ASSISTANT_DOCK_DEFAULT_W), ASSISTANT_DOCK_MIN_W, max))
 }
 
 /**
@@ -85,10 +76,14 @@ export function defaultFloatRect(viewport: Viewport): AssistantRect {
 }
 
 export function defaultAssistantLayout(viewport: Viewport): AssistantLayout {
-  return { mode: 'minimized', lastOpen: 'docked', dockWidth: clampDockWidth(ASSISTANT_DOCK_DEFAULT_W, viewport), float: defaultFloatRect(viewport) }
+  return { mode: 'minimized', float: defaultFloatRect(viewport) }
 }
 
-/** Layout guardado (JSON de localStorage) saneado y acotado a la ventana; lo invalido toma el valor por defecto. */
+/**
+ * Layout guardado (JSON de localStorage) saneado y acotado a la ventana; lo invalido toma el valor
+ * por defecto. Migracion: 'docked' (modo retirado) se lee como 'floating', abierto como estaba;
+ * `lastOpen` y `dockWidth` de la version anterior se ignoran.
+ */
 export function parseAssistantLayout(raw: string | null, viewport: Viewport): AssistantLayout {
   const fallback = defaultAssistantLayout(viewport)
   if (!raw) return fallback
@@ -100,29 +95,28 @@ export function parseAssistantLayout(raw: string | null, viewport: Viewport): As
   }
   if (typeof data !== 'object' || data === null) return fallback
   const v = data as Record<string, unknown>
-  const mode: AssistantMode = v.mode === 'docked' || v.mode === 'floating' || v.mode === 'minimized' ? v.mode : fallback.mode
-  const lastOpen = v.lastOpen === 'floating' || v.lastOpen === 'docked' ? v.lastOpen : mode === 'floating' ? 'floating' : 'docked'
+  const mode: AssistantMode = v.mode === 'docked' || v.mode === 'floating' ? 'floating' : v.mode === 'minimized' ? 'minimized' : fallback.mode
   const f = typeof v.float === 'object' && v.float !== null ? (v.float as Record<string, unknown>) : {}
   const float = clampFloatRect(
     { x: finite(f.x, fallback.float.x), y: finite(f.y, fallback.float.y), w: finite(f.w, fallback.float.w), h: finite(f.h, fallback.float.h) },
     viewport,
   )
-  return { mode, lastOpen, dockWidth: clampDockWidth(finite(v.dockWidth, fallback.dockWidth), viewport), float }
+  return { mode, float }
 }
 
 export function serializeAssistantLayout(layout: AssistantLayout): string {
-  return JSON.stringify({ mode: layout.mode, lastOpen: layout.lastOpen, dockWidth: layout.dockWidth, float: layout.float })
+  return JSON.stringify({ mode: layout.mode, float: layout.float })
 }
 
-/** Cambia de modo recordando a cual volver. */
+/** Cambia de modo (el mismo objeto si no cambia). */
 export function withAssistantMode(layout: AssistantLayout, mode: AssistantMode): AssistantLayout {
   if (mode === layout.mode) return layout
-  return { ...layout, mode, lastOpen: mode === 'minimized' ? layout.lastOpen : mode }
+  return { ...layout, mode }
 }
 
-/** Alt+A: minimizado vuelve al ultimo modo abierto; abierto se minimiza. */
+/** Alt+A: minimizado se abre flotante; flotante se minimiza. */
 export function toggleAssistantLayout(layout: AssistantLayout): AssistantLayout {
-  return withAssistantMode(layout, layout.mode === 'minimized' ? layout.lastOpen : 'minimized')
+  return withAssistantMode(layout, layout.mode === 'minimized' ? 'floating' : 'minimized')
 }
 
 // ---------------------------------------------------------------------------

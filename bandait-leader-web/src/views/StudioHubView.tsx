@@ -1,6 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ArrowLeft, Check, CloudUpload, Command, Keyboard, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  Check,
+  CloudUpload,
+  Command,
+  Keyboard,
+  Mic,
+  PanelBottom,
+  PanelRight,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  Plus,
+  RefreshCw,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
+import { useGlobalAudioEngine } from '../context/globalAudioContextCore'
 import { HubModal } from '../components/HubModal'
 import { StudioDevicePanel } from '../components/studio/StudioDevicePanel'
 import { StudioDeviceProbe } from '../components/studio/StudioDeviceProbe'
@@ -36,6 +55,19 @@ import {
   withAssistantMode,
   type AssistantLayout,
 } from '../services/studio/assistantWindow'
+import {
+  LEGACY_MIXER_STORAGE_KEY,
+  PANEL_LAYOUT_STORAGE_KEY,
+  STUDIO_SIDE_TAB_LABELS,
+  STUDIO_SIDE_TABS,
+  parsePanelLayout,
+  serializePanelLayout,
+  showSideTab,
+  toggleMixer,
+  toggleSidePanel,
+  type StudioPanelLayout,
+  type StudioSideTab,
+} from '../services/studio/panelLayout'
 import { listStemSongs } from '../services/stemStore'
 import { sectionSpans, type SectionSpan } from '../services/stemTiming'
 import { commandShortcuts, displayShortcut, loadKeymap, matchEvent } from '../services/studio/commands'
@@ -94,13 +126,17 @@ function sectionsFor(songs: readonly Song[], songId: string | null, bpm: number,
 // Sesion abierta
 // ---------------------------------------------------------------------------
 
-type DockTab = 'device' | 'inspector' | 'jobs'
+/** Iconos del riel del panel lateral, en el orden de la maqueta (Inspector, Dispositivo, IA). */
+const SIDE_TAB_ICONS: Readonly<Record<StudioSideTab, React.ComponentType<{ size?: number }>>> = {
+  inspector: SlidersHorizontal,
+  device: Mic,
+  jobs: Sparkles,
+}
 
-const DOCK_TABS: readonly { id: DockTab; label: string }[] = [
-  { id: 'device', label: 'DISPOSITIVO' },
-  { id: 'inspector', label: 'INSPECTOR' },
-  { id: 'jobs', label: 'IA' },
-]
+/** Disposicion de paneles guardada en este navegador (con la clave vieja del mezclador como respaldo). */
+function readPanelLayout(): StudioPanelLayout {
+  return parsePanelLayout(studioKeymapStorage.getItem(PANEL_LAYOUT_STORAGE_KEY), studioKeymapStorage.getItem(LEGACY_MIXER_STORAGE_KEY))
+}
 
 interface WorkspaceProps {
   controller: StudioController
@@ -112,16 +148,25 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
   const snap = useStudio(controller)
   const { session, save, recording } = snap
   const wide = useWideScreen()
-  const [dockOpen, setDockOpen] = useState(true)
-  const [dockTab, setDockTab] = useState<DockTab>('device')
+  // Consola y panel lateral plegables a un clic (services/studio/panelLayout.ts), recordados aqui.
+  const [panels, setPanels] = useState<StudioPanelLayout>(readPanelLayout)
+  useEffect(() => {
+    studioKeymapStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, serializePanelLayout(panels))
+  }, [panels])
+  const [waveformOpen, setWaveformOpen] = useState(false)
   const [probeOpen, setProbeOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
 
+  const showPanel = useCallback((tab: StudioSideTab) => setPanels((current) => showSideTab(current, tab)), [])
+  const toggleSide = useCallback(() => setPanels(toggleSidePanel), [])
+  const toggleConsole = useCallback(() => setPanels(toggleMixer), [])
   // El mezclador elige un efecto: se muestra el inspector, que es donde se edita.
-  const showInspector = useCallback(() => {
-    setDockOpen(true)
-    setDockTab('inspector')
-  }, [])
+  const showInspector = useCallback(() => showPanel('inspector'), [showPanel])
+  const openWaveform = useCallback(() => {
+    // El acceso rapido vive en la barra de la linea de tiempo: con el piano roll abierto se vuelve a ella.
+    if (controller.snapshot().editor === 'piano_roll') controller.toggleEditor()
+    setWaveformOpen(true)
+  }, [controller])
   const openExport = useCallback(() => {
     controller.pause()
     setExportOpen(true)
@@ -156,7 +201,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
     studioKeymapStorage.setItem(ASSISTANT_LAYOUT_STORAGE_KEY, serializeAssistantLayout(assistLayout))
   }, [assistLayout])
   const toggleAssistant = useCallback(() => setAssistLayout(toggleAssistantLayout), [setAssistLayout])
-  const openAssistant = useCallback(() => setAssistLayout((layout) => (layout.mode === 'minimized' ? withAssistantMode(layout, layout.lastOpen) : layout)), [setAssistLayout])
+  const openAssistant = useCallback(() => setAssistLayout((layout) => withAssistantMode(layout, 'floating')), [setAssistLayout])
 
   const [uiBridge] = useState(() => new StudioUiBridge())
   useEffect(() => {
@@ -168,8 +213,12 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
       openExport,
       pickMidiFile: () => midiFileRef.current?.click(),
       toggleAssistant,
+      toggleMixer: toggleConsole,
+      toggleSidePanel: toggleSide,
+      showPanel,
+      openWaveform,
     })
-  }, [uiBridge, recordAllowed, recordHint, openExport, toggleAssistant])
+  }, [uiBridge, recordAllowed, recordHint, openExport, toggleAssistant, toggleConsole, toggleSide, showPanel, openWaveform])
   const registry = useMemo(() => createStudioCommandRegistry(controller, uiBridge), [controller, uiBridge])
   const [keymap, setKeymap] = useState<Keymap>(() => loadKeymap(studioKeymapStorage, registry.list()))
 
@@ -289,7 +338,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
   const missing = snap.engine.missingAssetIds.length
 
   return (
-    <div ref={rootRef} className="stu" data-testid="studio-workspace">
+    <div ref={rootRef} className="stu" data-console={panels.mixerOpen ? 'open' : 'closed'} data-testid="studio-workspace">
       <header className="stu-bar">
         <button type="button" className="stu-btn" data-tone="ghost" onClick={onClose} disabled={recording} aria-label="Volver a la lista de sesiones" data-testid="studio-back">
           <ArrowLeft size={14} />
@@ -368,11 +417,37 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
           title={`Mostrar u ocultar el asistente (${shortcutLabel(registry, keymap, 'view.toggle_assistant')})`}
           data-testid="studio-assistant-toggle"
         >
+          <Sparkles size={14} />
           ASISTENTE
         </button>
-        <button type="button" className="stu-btn" data-on={dockOpen} aria-pressed={dockOpen} onClick={() => setDockOpen((value) => !value)} title="Mostrar u ocultar los paneles laterales" data-testid="studio-dock-toggle">
-          PANELES
-        </button>
+        <div className="stu-seg" role="group" aria-label="Paneles">
+          <button
+            type="button"
+            className="stu-btn"
+            data-size="icon"
+            data-on={panels.mixerOpen}
+            aria-pressed={panels.mixerOpen}
+            onClick={toggleConsole}
+            aria-label="Consola de mezcla"
+            title={`Mostrar u ocultar la consola de mezcla (${shortcutLabel(registry, keymap, 'view.toggle_mixer')})`}
+            data-testid="studio-console-toggle"
+          >
+            <PanelBottom size={15} />
+          </button>
+          <button
+            type="button"
+            className="stu-btn"
+            data-size="icon"
+            data-on={panels.sideOpen}
+            aria-pressed={panels.sideOpen}
+            onClick={toggleSide}
+            aria-label="Panel lateral"
+            title={`Mostrar u ocultar el panel lateral: inspector, dispositivo e IA (${shortcutLabel(registry, keymap, 'view.toggle_side_panel')})`}
+            data-testid="studio-dock-toggle"
+          >
+            <PanelRight size={15} />
+          </button>
+        </div>
       </header>
 
       {!recordAllowed && (
@@ -451,37 +526,78 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
 
       <StudioTransport controller={controller} recordAllowed={recordAllowed} recordHint={recordHint} />
 
-      <div className="stu-main" data-dock={dockOpen} data-assist={assistLayout.mode === 'docked'}>
-        <StudioTimeline controller={controller} recordAllowed={recordAllowed} />
+      <div className="stu-main" data-side={panels.sideOpen}>
+        <StudioTimeline controller={controller} recordAllowed={recordAllowed} waveformOpen={waveformOpen} onWaveformOpenChange={setWaveformOpen} />
 
-        {/* El panel lateral se oculta sin desmontarse: un trabajo de IA en curso no se pierde. */}
-        <aside className="stu-dock" aria-label="Paneles del Estudio" hidden={!dockOpen}>
-            <div className="stu-tabs" role="tablist" aria-label="Paneles">
-              {DOCK_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  id={`studio-tab-${tab.id}`}
-                  aria-selected={dockTab === tab.id}
-                  aria-controls="studio-dock-panel"
-                  className="stu-tab"
-                  onClick={() => setDockTab(tab.id)}
-                  data-testid={`studio-tab-${tab.id}`}
-                >
-                  {tab.label}
-                </button>
-              ))}
+        <aside className="stu-side" aria-label="Panel lateral" data-open={panels.sideOpen} data-testid="studio-side">
+          {/* El panel se oculta sin desmontarse: un trabajo de IA en curso no se pierde. */}
+          <div className="stu-dock" role="tabpanel" id="studio-dock-panel" aria-labelledby={`studio-tab-${panels.sideTab}`} hidden={!panels.sideOpen} data-testid="studio-dock">
+            <div className="stu-dock-head">
+              <span className="stu-dock-title">{STUDIO_SIDE_TAB_LABELS[panels.sideTab]}</span>
+              <button
+                type="button"
+                className="stu-btn"
+                data-size="mini"
+                data-tone="ghost"
+                onClick={toggleSide}
+                aria-label="Plegar el panel lateral"
+                title={`Plegar el panel lateral (${shortcutLabel(registry, keymap, 'view.toggle_side_panel')})`}
+                data-testid="studio-dock-collapse"
+              >
+                <PanelRightClose size={13} />
+              </button>
             </div>
-            <div className="stu-dock-body" role="tabpanel" id="studio-dock-panel" aria-labelledby={`studio-tab-${dockTab}`}>
-              {dockTab === 'device' && <StudioDevicePanel controller={controller} recordAllowed={recordAllowed} recordHint={recordHint} onOpenProbe={openProbe} />}
-              {dockTab === 'inspector' && <StudioInspector controller={controller} />}
+            <div className="stu-dock-body">
+              {panels.sideTab === 'device' && <StudioDevicePanel controller={controller} recordAllowed={recordAllowed} recordHint={recordHint} onOpenProbe={openProbe} />}
+              {panels.sideTab === 'inspector' && <StudioInspector controller={controller} />}
               {/* El panel de IA queda montado al cambiar de pestana, por la misma razon. */}
-              <div className="stu-dock-keep" hidden={dockTab !== 'jobs'}>
+              <div className="stu-dock-keep" hidden={panels.sideTab !== 'jobs'}>
                 <StudioJobsPanel controller={controller} onOpenAssistant={openAssistant} assistantShortcut={shortcutLabel(registry, keymap, 'view.toggle_assistant')} />
               </div>
             </div>
-          </aside>
+          </div>
+          {/* Riel siempre a la vista: el primer boton pliega o despliega; un clic en un icono abre su panel. */}
+          <div className="stu-rail">
+            <button
+              type="button"
+              className="stu-rail-btn"
+              data-tone="ghost"
+              onClick={toggleSide}
+              aria-expanded={panels.sideOpen}
+              aria-controls="studio-dock-panel"
+              aria-label={panels.sideOpen ? 'Plegar el panel lateral' : 'Desplegar el panel lateral'}
+              title={`${panels.sideOpen ? 'Plegar' : 'Desplegar'} el panel lateral (${shortcutLabel(registry, keymap, 'view.toggle_side_panel')})`}
+              data-testid="studio-side-toggle"
+            >
+              {panels.sideOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </button>
+            <span className="stu-rail-sep" aria-hidden="true" />
+            <div className="stu-rail-tabs" role="tablist" aria-orientation="vertical" aria-label="Paneles">
+              {STUDIO_SIDE_TABS.map((tab) => {
+                const Icon = SIDE_TAB_ICONS[tab]
+                const selected = panels.sideTab === tab
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    id={`studio-tab-${tab}`}
+                    aria-selected={selected}
+                    aria-controls="studio-dock-panel"
+                    className="stu-rail-btn"
+                    data-open={panels.sideOpen && selected}
+                    onClick={() => showPanel(tab)}
+                    aria-label={STUDIO_SIDE_TAB_LABELS[tab]}
+                    title={STUDIO_SIDE_TAB_LABELS[tab]}
+                    data-testid={`studio-tab-${tab}`}
+                  >
+                    <Icon size={16} />
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </aside>
 
         {/* Montado siempre (tambien minimizado): una respuesta del asistente en camino no se pierde. */}
         <StudioAssistant
@@ -494,7 +610,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
         />
       </div>
 
-      <StudioMixer controller={controller} onEditFx={showInspector} onExport={openExport} />
+      <StudioMixer controller={controller} onEditFx={showInspector} onExport={openExport} open={panels.mixerOpen} onToggle={toggleConsole} toggleShortcut={shortcutLabel(registry, keymap, 'view.toggle_mixer')} />
 
       <input
         ref={midiFileRef}
@@ -555,8 +671,13 @@ interface HomeProps {
 
 /** Sesiones de una banda. Se monta con `key` = banda: al cambiar de banda arranca limpio. */
 const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, songs }) => {
-  const [controller, setController] = useState<StudioController | null>(null)
-  const controllerRef = useRef<StudioController | null>(null)
+  // El controlador es del audio global: salir de la pestana no cierra la sesion ni corta el audio.
+  // Al volver se retoma la sesion abierta de esta banda (misma clave que el `key` de StudioHome).
+  const audio = useGlobalAudioEngine()
+  const { activeBand } = useHub()
+  const audioTag = `${activeBand?.id ?? 'none'}:${band}`
+  const [controller, setController] = useState<StudioController | null>(() => audio.adoptStudio(audioTag))
+  const controllerRef = useRef<StudioController | null>(controller)
   const [entries, setEntries] = useState<SessionEntry[] | null>(null)
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -597,20 +718,8 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
       .catch(() => undefined)
   }, [refresh])
 
-  // Al salir de la pestana (o cambiar de banda) se cierran motor, grabador y contexto de audio.
-  // El cierre va en un temporizador que el siguiente montaje cancela: con StrictMode o con la
-  // recarga en caliente de Vite el efecto se limpia y se vuelve a montar sin que la vista se vaya.
-  const disposeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    if (disposeTimer.current !== null) clearTimeout(disposeTimer.current)
-    disposeTimer.current = null
-    return () => {
-      disposeTimer.current = setTimeout(() => {
-        void controllerRef.current?.dispose()
-        controllerRef.current = null
-      }, 0)
-    }
-  }, [])
+  // Salir de la pestana ya no cierra nada: motor, grabador y contexto de audio los libera el audio
+  // global (context/GlobalAudioContext.tsx) al cerrar la sesion, al cambiar de banda o de usuario.
 
   const launch = (opened: OpenedSession, importStemsOf: string | null) => {
     const next = new StudioController({
@@ -624,6 +733,8 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
     })
     controllerRef.current = next
     setController(next)
+    // El audio global pasa a ser el dueno (cierra la sesion anterior si habia otra abierta).
+    audio.openStudio(next, audioTag)
     void next.start().then(() => {
       if (importStemsOf) void next.importSongStems(importStemsOf)
     })
@@ -634,7 +745,8 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
     controllerRef.current = null
     setController(null)
     setEntries(null)
-    void (current ? current.dispose() : Promise.resolve()).then(refresh)
+    // Cerrar explicitamente libera el motor (y guarda lo pendiente) a traves del audio global.
+    void (current ? audio.closeStudio() : Promise.resolve()).then(refresh)
   }
 
   const openEntry = async (entry: SessionEntry) => {

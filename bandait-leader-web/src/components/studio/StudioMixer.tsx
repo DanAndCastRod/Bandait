@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { ChevronDown, ChevronUp, Download, Power, RotateCcw, Sparkles } from 'lucide-react'
 import { STEM_ROLE_CODES, stemRoleLabel } from '../../services/stemNames'
 import {
@@ -15,10 +15,11 @@ import {
   type StudioSession,
   type StudioTrack,
 } from '../../services/studio/session'
-import { dbToFader, FADER_MARKS, faderToDb, LED_GAP_PX, ledLitCount, ledSegmentCount, ledZone, type LedZone } from '../../services/studio/faderScale'
+import { dbToFader, FADER_MARKS, faderToDb } from '../../services/studio/faderScale'
 import { updateMaster } from '../../services/studio/sessionOps'
 import { StudioEqCurve } from './StudioInspector'
-import { studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
+import { studioTrackColor } from '../../services/studioCanvasPalette'
+import { ledColors, newMeterState, paintLedMeter, type MeterState } from './ledMeter'
 import { errorText, formatDb, formatPan, trackColor, useStudio, withFx, type StudioController, type StudioFxSelection, type StudioPanelProps } from './studioState'
 import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 
@@ -27,6 +28,11 @@ interface Props extends StudioPanelProps {
   onEditFx: () => void
   /** Abre el dialogo de exportar. */
   onExport: () => void
+  /** Consola desplegada (la vista guarda el estado). */
+  open: boolean
+  onToggle: () => void
+  /** Atajo vigente de view.toggle_mixer, para el titulo del boton. */
+  toggleShortcut: string
 }
 
 // ---------------------------------------------------------------------------
@@ -42,94 +48,8 @@ const faderValue = (db: number) => Math.round((dbToFader(db) * FADER_STEPS) / FA
 // Medidores LED (un solo requestAnimationFrame para todo el mezclador)
 // ---------------------------------------------------------------------------
 
-interface MeterState {
-  hold: number
-  holdUntil: number
-  lastPeak: number
-  lastRms: number
-  lastHold: number
-}
-
-interface LedColors {
-  zones: Readonly<Record<LedZone, { on: string; dim: string }>>
-  off: string
-}
-
-const ledColorsCache = new WeakMap<StudioCanvasPalette, LedColors>()
-
-/**
- * Colores de los LED por zona, del tema vigente (verde, ambar, rojo): encendido por el RMS,
- * atenuado entre el RMS y el pico, apagado arriba. Uno por paleta.
- */
-function ledColors(pal: StudioCanvasPalette): LedColors {
-  let leds = ledColorsCache.get(pal)
-  if (!leds) {
-    leds = {
-      zones: {
-        ok: { on: pal.meterOk, dim: pal.meterOkLedDim },
-        hot: { on: pal.meterHot, dim: pal.meterHotDim },
-        over: { on: pal.meterOver, dim: pal.meterOverDim },
-      },
-      off: pal.meterOff,
-    }
-    ledColorsCache.set(pal, leds)
-  }
-  return leds
-}
-
-/** Zona de cada LED por cantidad de LEDs: se calcula una vez por alto de medidor. */
-const ledZonesCache = new Map<number, LedZone[]>()
-
-function ledZones(count: number): LedZone[] {
-  let zones = ledZonesCache.get(count)
-  if (!zones) {
-    zones = Array.from({ length: count }, (_, i) => ledZone(i, count))
-    ledZonesCache.set(count, zones)
-  }
-  return zones
-}
-
-function paintMeter(canvas: HTMLCanvasElement, state: MeterState, peakDb: number, rmsDb: number, now: number, leds: LedColors): void {
-  const dpr = window.devicePixelRatio || 1
-  const w = Math.round(canvas.clientWidth * dpr)
-  const h = Math.round(canvas.clientHeight * dpr)
-  if (w === 0 || h === 0) return
-  let resized = false
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w
-    canvas.height = h
-    resized = true
-  }
-  const count = ledSegmentCount(canvas.clientHeight)
-  if (count === 0) return
-  const peak = ledLitCount(dbToFader(peakDb), count)
-  const rms = ledLitCount(dbToFader(rmsDb), count)
-  if (peak >= state.hold) {
-    state.hold = peak
-    state.holdUntil = now + 900
-  } else if (now > state.holdUntil) {
-    state.hold = Math.max(peak, state.hold - 0.5)
-  }
-  const hold = Math.round(state.hold)
-  // Sin cambios no se repinta: una pista en silencio no gasta nada.
-  if (!resized && peak === state.lastPeak && rms === state.lastRms && hold === state.lastHold) return
-  state.lastPeak = peak
-  state.lastRms = rms
-  state.lastHold = hold
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  const zones = ledZones(count)
-  const pitch = h / count
-  const gap = Math.max(1, Math.round(LED_GAP_PX * dpr))
-  ctx.clearRect(0, 0, w, h)
-  for (let i = 0; i < count; i++) {
-    const colors = leds.zones[zones[i]]
-    ctx.fillStyle = i < rms ? colors.on : i < peak ? colors.dim : i === hold - 1 ? colors.on : leds.off
-    const y0 = Math.round(h - (i + 1) * pitch)
-    const y1 = Math.round(h - i * pitch) - gap
-    ctx.fillRect(0, y0, w, Math.max(1, y1 - y0))
-  }
-}
+// paintLedMeter y ledColors viven en ledMeter.ts: las cabeceras de pista usan los mismos LED.
+const paintMeter = paintLedMeter
 
 function loudnessText(value: number): string {
   return Number.isFinite(value) && value > -70 ? value.toFixed(1) : '--.-'
@@ -503,26 +423,17 @@ const MasterStrip: React.FC<MasterProps> = ({ controller, session, selectedFx, r
 // Mezclador
 // ---------------------------------------------------------------------------
 
-const COLLAPSE_KEY = 'bandait_studio_mixer'
-
-function readCollapsed(): boolean {
-  try {
-    return localStorage.getItem(COLLAPSE_KEY) === '0'
-  } catch {
-    return false
-  }
-}
-
 /**
- * Mezclador del Estudio: un canal por pista (inserts, envio a reverb, paneo, fader con escala en
- * dB, medidor, mute y solo) y el master (EQ, compresor, limitador, reverb compartida, LUFS
- * integrado y pico real). Medidores y lecturas de sonoridad se pintan desde un solo
- * requestAnimationFrame, sin estado de React.
+ * Consola de mezcla del Estudio: un canal por pista (inserts, envio a reverb, paneo, fader con
+ * escala en dB, medidor LED, mute y solo) y el master (EQ, compresor, limitador, reverb
+ * compartida, LUFS integrado y pico real). Medidores y lecturas de sonoridad se pintan desde un
+ * solo requestAnimationFrame, sin estado de React. Plegarla (boton o Alt+M) deja su barra con
+ * EXPORTAR; el estado lo guarda la vista (services/studio/panelLayout.ts).
  */
-export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport }) => {
+export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport, open, onToggle, toggleShortcut }) => {
   const snap = useStudio(controller)
   const { session } = snap
-  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const collapsed = !open
   const palette = useStudioCanvasPalette()
   const meters = useRef(new Map<string, HTMLCanvasElement>())
   const readouts = useRef(new Map<string, HTMLElement>())
@@ -555,7 +466,7 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport })
       for (const [id, canvas] of meters.current) {
         let state = states.get(id)
         if (!state) {
-          state = { hold: 0, holdUntil: 0, lastPeak: -1, lastRms: -1, lastHold: -1 }
+          state = newMeterState()
           states.set(id, state)
         }
         if (id === STUDIO_MASTER_ID) {
@@ -580,23 +491,21 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport })
     return ids
   }, [session.assets, session.tracks])
 
-  const toggle = () => {
-    const next = !collapsed
-    setCollapsed(next)
-    try {
-      // '0' = plegado; cualquier otra cosa, abierto.
-      localStorage.setItem(COLLAPSE_KEY, next ? '0' : '1')
-    } catch {
-      // Sin almacenamiento solo se pierde la preferencia.
-    }
-  }
-
   return (
-    <section className="stu-mixer" aria-label="Mezclador" data-testid="studio-mixer" data-collapsed={collapsed}>
+    <section className="stu-mixer" aria-label="Consola de mezcla" data-testid="studio-mixer" data-collapsed={collapsed}>
       <header className="stu-mixer-bar">
-        <button type="button" className="stu-btn" data-tone="ghost" onClick={toggle} aria-expanded={!collapsed} aria-controls="studio-mixer-body" data-testid="studio-mixer-toggle">
+        <button
+          type="button"
+          className="stu-btn"
+          data-tone="ghost"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          aria-controls="studio-mixer-body"
+          title={`${collapsed ? 'Mostrar' : 'Ocultar'} la consola (${toggleShortcut})`}
+          data-testid="studio-mixer-toggle"
+        >
           {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          MEZCLADOR
+          CONSOLA
         </button>
         <span className="stu-label">
           {session.tracks.length} {session.tracks.length === 1 ? 'pista' : 'pistas'}

@@ -255,9 +255,15 @@ export function separationStatusText(state: AnalysisState): string {
 }
 
 /** Subida con progreso (XMLHttpRequest: fetch no informa el avance de lo que envia). */
-function xhrUpload(url: string, headers: Record<string, string>, body: Blob, onUpload: (fraction: number) => void): Promise<Response> {
+function xhrUpload(url: string, headers: Record<string, string>, body: Blob, onUpload: (fraction: number) => void, signal?: AbortSignal): Promise<Response> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new StemCloudError('network', 0))
+      return
+    }
     const xhr = new XMLHttpRequest()
+    // Cancelar en la cola aborta la subida: el Worker no llega a lanzar la separacion.
+    signal?.addEventListener('abort', () => xhr.abort(), { once: true })
     xhr.open('POST', url)
     for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
     xhr.upload.onprogress = (e) => {
@@ -273,12 +279,14 @@ function xhrUpload(url: string, headers: Record<string, string>, body: Blob, onU
 /**
  * Sube la cancion completa y lanza la separacion (202). Solo editores. Reemplaza los stems de la
  * nube cuando termina. `onUpload` recibe la fraccion subida (0..1) si el navegador la informa.
+ * `signal` aborta la subida (cola Drop & Split: cancelar antes de que el Worker la reciba).
  */
 export async function startSeparation(
   target: CloudTarget,
   songId: string,
   file: Blob & { name?: string },
-  onUpload?: (fraction: number) => void
+  onUpload?: (fraction: number) => void,
+  signal?: AbortSignal
 ): Promise<{ jobId: string | null }> {
   const contentType = separationContentType({ name: file.name ?? '', type: file.type })
   if (!contentType) throw new StemCloudError('bad_audio_type', 415, ANALYSIS_MESSAGES.bad_audio_type)
@@ -291,12 +299,12 @@ export async function startSeparation(
   let res: Response
   if (useXhr) {
     try {
-      res = await xhrUpload(url, headers, file, onUpload)
+      res = await xhrUpload(url, headers, file, onUpload, signal)
     } catch (err) {
       throw err instanceof StemCloudError ? err : new StemCloudError('network', 0)
     }
   } else {
-    res = await send(target, url, { method: 'POST', headers, body: file })
+    res = await send(target, url, { method: 'POST', headers, body: file, signal })
   }
   if (!res.ok) throw analysisError(await failFrom(res))
   onUpload?.(1)

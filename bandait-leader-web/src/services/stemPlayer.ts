@@ -377,7 +377,12 @@ export class StemPlayer {
 
   /** Region a repetir (null = sin repeticion). Se recorta a la duracion del audio. */
   setLoop(region: LoopRegion | null) {
-    this.loop = region ? clampLoop(region, this.duration) : null
+    const next = region ? clampLoop(region, this.duration) : null
+    // La misma region otra vez (la vista se vuelve a montar con el audio global) no reinicia la
+    // vuelta del Speed Ramp ni salta: no hay nada que cambiar.
+    const prev = this.loop
+    if (next === null ? prev === null : prev !== null && prev.start === next.start && prev.end === next.end) return
+    this.loop = next
     this.lapCursor = 0
     const pos = this.position()
     const target = this.loop && (pos < this.loop.start || pos >= this.loop.end) ? this.loop.start : pos

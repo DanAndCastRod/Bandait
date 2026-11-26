@@ -15,6 +15,7 @@ import {
   type StudioTrack,
 } from '../../services/studio/session'
 import { studioTrackColor } from '../../services/studioCanvasPalette'
+import { ledColors, newMeterState, paintLedMeter } from './ledMeter'
 import { formatDb, formatPan, trackColor, type ArmChannel, type StudioController } from './studioState'
 import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 
@@ -36,14 +37,6 @@ interface Props {
   recording: boolean
   /** Canales que entrega la entrada abierta (0 si no hay entrada). */
   inputChannels: number
-}
-
-const METER_FLOOR_DB = -60
-const METER_TOP_DB = 6
-
-function meterFraction(db: number): number {
-  if (!Number.isFinite(db)) return 0
-  return Math.min(1, Math.max(0, (db - METER_FLOOR_DB) / (METER_TOP_DB - METER_FLOOR_DB)))
 }
 
 /** Texto corto del instrumento para la cabecera: tipo y preset. */
@@ -70,52 +63,15 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
   /** Clips en silencio (tecla 0): de audio inactivos fuera de un grupo de tomas y MIDI con `muted`. */
   const mutedClips = track.clips.filter((c) => !c.active && c.takeGroup === null).length + track.midiClips.filter((c) => c.muted).length
 
+  // Medidor LED de pico y RMS, el mismo de la consola (ledMeter.ts): misma escala que el fader.
   useEffect(() => {
     const canvas = meterRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    let hold = 0
-    let holdUntil = 0
-    let lastPeak = -1
-    let lastRms = -1
-    let lastHold = -1
+    const leds = ledColors(palette)
+    const state = newMeterState()
     return controller.onFrame(() => {
-      const dpr = window.devicePixelRatio || 1
-      const w = Math.round(canvas.clientWidth * dpr)
-      const h = Math.round(canvas.clientHeight * dpr)
-      if (w === 0 || h === 0) return
-      let resized = false
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w
-        canvas.height = h
-        resized = true
-      }
       const reading = controller.engine.readTrackMeter(track.id)
-      const peak = meterFraction(reading.peakDb)
-      const rms = meterFraction(reading.rmsDb)
-      const now = performance.now()
-      if (peak >= hold || now > holdUntil) {
-        if (peak >= hold) holdUntil = now + 900
-        hold = peak >= hold ? peak : Math.max(peak, hold - 0.02)
-      }
-      // Sin cambios no se repinta: una pista en silencio no gasta nada.
-      if (!resized && Math.abs(peak - lastPeak) < 0.004 && Math.abs(rms - lastRms) < 0.004 && Math.abs(hold - lastHold) < 0.004) return
-      lastPeak = peak
-      lastRms = rms
-      lastHold = hold
-      ctx.clearRect(0, 0, w, h)
-      const zero = meterFraction(0)
-      ctx.fillStyle = reading.peakDb > 0 ? palette.meterOver : palette.meterOkDim
-      ctx.fillRect(0, h - peak * h, w, peak * h)
-      ctx.fillStyle = reading.peakDb > 0 ? palette.meterOver : palette.meterOk
-      ctx.fillRect(0, h - rms * h, w, rms * h)
-      if (hold > 0.01) {
-        ctx.fillStyle = hold > zero ? palette.meterOver : palette.meterHold
-        ctx.fillRect(0, Math.max(0, h - hold * h - dpr), w, Math.max(1, dpr))
-      }
-      ctx.fillStyle = palette.rowLine
-      ctx.fillRect(0, h - zero * h, w, Math.max(1, dpr))
+      paintLedMeter(canvas, state, reading.peakDb, reading.rmsDb, performance.now(), leds)
     })
     // palette: un cambio de tema reinicia el bucle y el medidor se repinta con los colores nuevos.
   }, [controller, track.id, palette])
@@ -398,7 +354,7 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
           </span>
         </div>
       </div>
-      <canvas ref={meterRef} className="stu-meter" aria-hidden="true" />
+      <canvas ref={meterRef} className="stu-meter" aria-hidden="true" data-kind="led" data-testid={`studio-led-${track.id}`} />
     </div>
   )
 }

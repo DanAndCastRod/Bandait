@@ -59,6 +59,7 @@ import {
   CHAT_SUMMARY_MAX_CHORDS,
   isDrumTrack,
   midiClipDigest,
+  midiClipMutedFlag,
   mixForSummary,
   sessionChordsForSummary,
   songChordChart,
@@ -1094,6 +1095,8 @@ function trackSummary(
       pitchMin,
       pitchMax,
       digest: midiClipDigest(c, session.beatsPerBar, drums, literalNotes),
+      // Silenciado (tecla 0): el asistente lo ve en la lista pero sabe que no suena.
+      ...midiClipMutedFlag(c),
     }
   })
   const measured = mix?.byTrack.get(track.id)
