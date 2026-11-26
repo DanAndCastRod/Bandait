@@ -2,17 +2,16 @@ import React, { lazy, Suspense, useState } from 'react'
 import { HubProvider } from './context/HubContext'
 import { useHub } from './context/hubContextCore'
 import { AuthScreen } from './components/AuthScreen'
-import { HubNavbar, type HubTab } from './components/HubNavbar'
-import { SyncNoticeBanner } from './components/SyncNoticeBanner'
-import { SupabaseConfigModal } from './components/SupabaseConfigModal'
+import { HubShell } from './components/shell/HubShell'
+import type { HubView, SongsSegment } from './components/shell/hubViews'
+import { MiniPlayer, type MiniPlayerNowPlaying } from './components/MiniPlayer'
 import { PlaylistsHubView } from './views/PlaylistsHubView'
-import { StemsHubView } from './views/StemsHubView'
 import { BandMembersHubView } from './views/BandMembersHubView'
-import { SongsHubView } from './views/SongsHubView'
+import { SongsStemsHubView } from './views/SongsStemsHubView'
 import { RehearsalHubView } from './views/RehearsalHubView'
 import { SettingsHubView } from './views/SettingsHubView'
 import { studioEnabled } from './services/studio/flag'
-import { colors, mono } from './components/hubStyles'
+import { colors, ghostButton, mono, primaryButton, radius } from './components/hubStyles'
 import './styles/global.css'
 
 const STUDIO_ENABLED = studioEnabled()
@@ -37,8 +36,8 @@ const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         width: '100%',
         maxWidth: '460px',
         background: colors.card,
-        border: `1px solid ${colors.border}`,
-        borderRadius: '8px',
+        borderRadius: radius.card,
+        boxShadow: 'var(--b-shadow)',
         padding: '24px',
         display: 'flex',
         flexDirection: 'column',
@@ -56,14 +55,21 @@ const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
 const HubMainContent: React.FC = () => {
   const { user, cloud, initialSyncBlocking, syncStatus, retrySync, continueOffline, logout } = useHub()
-  const [activeTab, setActiveTab] = useState<HubTab>('setlists')
-  /** Cancion a abrir en el editor de CANCIONES (pedido desde ENSAYO); se olvida al cambiar de vista. */
+  const [view, setView] = useState<HubView>('setlists')
+  /** Segmento de Canciones y Stems; se recuerda mientras dure la sesion. */
+  const [songsSegment, setSongsSegment] = useState<SongsSegment>('library')
+  /** Cancion a abrir en el editor de la LIBRERIA (pedido desde ENSAYO); se olvida al cambiar de vista. */
   const [editSongRequest, setEditSongRequest] = useState<string | null>(null)
-  const selectTab = (tab: HubTab) => {
+  const selectView = (next: HubView) => {
     setEditSongRequest(null)
-    setActiveTab(tab)
+    setView(next)
   }
-  const [showCloudModal, setShowCloudModal] = useState(false)
+  /** "Abrir pistas" de Ensayo y la CTA "+ Subir o separar audio": Canciones y Stems > STEMS Y PISTAS. */
+  const openStems = () => {
+    setEditSongRequest(null)
+    setSongsSegment('stems')
+    setView('songs')
+  }
 
   // Cuenta de nube guardada: esperar a que Supabase confirme la sesion antes de mostrar datos.
   if (user?.authProvider === 'supabase' && !cloud.authReady) {
@@ -94,7 +100,7 @@ const HubMainContent: React.FC = () => {
               type="button"
               onClick={retrySync}
               className="stx-btn"
-              style={{ background: colors.cobalt, border: 'none', color: colors.onAccent, borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px', fontWeight: 700 }}
+              style={primaryButton()}
             >
               REINTENTAR
             </button>
@@ -102,7 +108,7 @@ const HubMainContent: React.FC = () => {
               type="button"
               onClick={continueOffline}
               className="stx-btn"
-              style={{ background: 'transparent', border: `1px solid ${colors.border}`, color: colors.muted, borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
+              style={ghostButton}
             >
               TRABAJAR SIN CONEXIÓN
             </button>
@@ -110,7 +116,7 @@ const HubMainContent: React.FC = () => {
               type="button"
               onClick={() => void logout()}
               className="stx-btn"
-              style={{ background: 'transparent', border: `1px solid ${colors.danger}`, color: colors.danger, borderRadius: '4px', padding: '8px 14px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
+              style={{ ...ghostButton, background: 'transparent', color: 'var(--b-danger-text)' }}
             >
               SALIR
             </button>
@@ -126,62 +132,49 @@ const HubMainContent: React.FC = () => {
     )
   }
 
+  // Mini reproductor: por ahora sin motor (lo conecta el GlobalAudioProvider al integrar). En el
+  // Estudio no se muestra: alli el transporte es el del propio Estudio.
+  const nowPlaying: MiniPlayerNowPlaying | null = null
+  const showMiniPlayer = nowPlaying !== null && view !== 'studio'
+
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: '100dvh',
-        width: '100%',
-        background: 'var(--bg-primary)',
-        color: 'var(--text-primary)',
-        overflowX: 'hidden',
-      }}
+    <HubShell
+      view={view}
+      onSelectView={selectView}
+      onUploadAudio={openStems}
+      hasMiniPlayer={showMiniPlayer}
+      overlay={
+        view !== 'studio' && (
+          <MiniPlayer nowPlaying={nowPlaying} onToggle={() => {}} onOpenStudio={STUDIO_ENABLED ? () => selectView('studio') : undefined} />
+        )
+      }
     >
-      {/* TOP HEADER NAVIGATION & MULTI-BAND SWITCHER (INCLUDES MOBILE BOTTOM BAR) */}
-      <HubNavbar activeTab={activeTab} onSelectTab={selectTab} />
-
-      <SyncNoticeBanner onOpenCloud={() => setShowCloudModal(true)} />
-
-      {/* WORKSPACE CONTENT AREA */}
-      <main
-        style={{
-          flex: 1,
-          width: '100%',
-          background: 'var(--bg-primary)',
-          paddingBottom: '80px', // Prevents content from being covered by mobile bottom bar
-          boxSizing: 'border-box',
-        }}
-      >
-        {/*
-          Sin Escenario a proposito: el Hub se sirve por HTTPS (https://bandait.releven.cc/hub/) y una
-          pagina HTTPS no puede abrir ws:// hacia un lider en la LAN (el navegador lo bloquea como
-          contenido mixto). El control de transporte del director vive en la PWA servida desde la LAN.
-        */}
-        {activeTab === 'setlists' && <PlaylistsHubView />}
-        {activeTab === 'songs' && <SongsHubView openSongId={editSongRequest} />}
-        {activeTab === 'rehearsal' && (
-          <RehearsalHubView
-            onOpenTracks={() => selectTab('tracks')}
-            onEditSong={(songId) => {
-              setEditSongRequest(songId)
-              setActiveTab('songs')
-            }}
-          />
-        )}
-        {activeTab === 'tracks' && <StemsHubView />}
-        {/* Estudio Bandait: solo con el interruptor (services/studio/flag.ts). */}
-        {activeTab === 'studio' && STUDIO_ENABLED && (
-          <Suspense fallback={<p style={{ padding: '24px', fontFamily: mono, fontSize: '12px', color: colors.muted }}>Cargando el Estudio...</p>}>
-            <StudioHubView />
-          </Suspense>
-        )}
-        {activeTab === 'band' && <BandMembersHubView />}
-        {activeTab === 'settings' && <SettingsHubView />}
-      </main>
-
-      {showCloudModal && <SupabaseConfigModal onClose={() => setShowCloudModal(false)} />}
-    </div>
+      {/*
+        Sin Escenario a proposito: el Hub se sirve por HTTPS (https://bandait.releven.cc/hub/) y una
+        pagina HTTPS no puede abrir ws:// hacia un lider en la LAN (el navegador lo bloquea como
+        contenido mixto). El control de transporte del director vive en la PWA servida desde la LAN.
+      */}
+      {view === 'setlists' && <PlaylistsHubView />}
+      {view === 'songs' && <SongsStemsHubView segment={songsSegment} onSegmentChange={setSongsSegment} openSongId={editSongRequest} />}
+      {view === 'rehearsal' && (
+        <RehearsalHubView
+          onOpenTracks={openStems}
+          onEditSong={(songId) => {
+            setEditSongRequest(songId)
+            setSongsSegment('library')
+            setView('songs')
+          }}
+        />
+      )}
+      {/* Estudio Bandait: solo con el interruptor (services/studio/flag.ts). */}
+      {view === 'studio' && STUDIO_ENABLED && (
+        <Suspense fallback={<p style={{ padding: '24px', fontFamily: mono, fontSize: '12px', color: colors.muted }}>Cargando el Estudio...</p>}>
+          <StudioHubView />
+        </Suspense>
+      )}
+      {view === 'band' && <BandMembersHubView />}
+      {view === 'settings' && <SettingsHubView />}
+    </HubShell>
   )
 }
 

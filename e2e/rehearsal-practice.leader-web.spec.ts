@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openView } from './support/hubNav';
 
 /**
  * E2E de la practica del ENSAYO (Web 3.0, seccion 5 de docs/REQUERIMIENTOS_WEB_3.0.md):
@@ -33,8 +34,8 @@ async function rehearseMedianoche(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
+  await openView(page, 'tracks');
   await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
   await page.getByTestId('stem-file-input').setInputFiles([
     { name: 'Medianoche - Drums.wav', mimeType: 'audio/wav', buffer: wav(40, 110) },
@@ -42,7 +43,7 @@ async function rehearseMedianoche(page: Page) {
   ]);
   await page.getByTestId('stem-save').click();
   await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
-  await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+  await openView(page, 'rehearsal');
   await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
 }
 

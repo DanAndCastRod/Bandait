@@ -44,7 +44,7 @@ const InviteLinkBox: React.FC<{ link: string }> = ({ link }) => {
           alignItems: 'center',
           gap: '6px',
           background: 'var(--b-elevated)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-field)',
           padding: '8px 12px',
           color: copied ? 'var(--b-success)' : 'var(--b-text)',
@@ -189,8 +189,8 @@ export const BandMembersHubView: React.FC = () => {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '16px',
-          borderBottom: '1px solid var(--b-border)',
-          paddingBottom: '16px',
+          borderBottom: 'none',
+          paddingBottom: '4px',
         }}
       >
         <div>
@@ -236,7 +236,7 @@ export const BandMembersHubView: React.FC = () => {
         data-testid="role-guard-note"
         style={{
           background: 'var(--b-input)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-field)',
           padding: '10px 14px',
           fontSize: '11px',
@@ -290,8 +290,8 @@ export const BandMembersHubView: React.FC = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  background: 'transparent',
-                  border: '1px solid var(--b-border)',
+                  background: 'var(--b-elevated)',
+                  border: '1px solid transparent',
                   borderRadius: 'var(--b-radius-field)',
                   padding: '6px 12px',
                   color: 'var(--b-muted)',
@@ -380,7 +380,7 @@ export const BandMembersHubView: React.FC = () => {
         className="touch-scroll-x"
         style={{
           background: 'var(--b-card)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-card)',
           overflowX: 'auto',
           WebkitOverflowScrolling: 'touch',
@@ -462,7 +462,7 @@ export const BandMembersHubView: React.FC = () => {
                       fontFamily: "'IBM Plex Mono', monospace",
                       fontSize: '11px',
                       fontWeight: 700,
-                      outline: 'none',
+                      outlineOffset: '1px',
                       cursor: blockReason ? 'not-allowed' : 'pointer',
                     }}
                   >
@@ -505,8 +505,8 @@ export const BandMembersHubView: React.FC = () => {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '4px',
-                        background: 'transparent',
-                        border: '1px solid var(--b-border)',
+                        background: 'var(--b-elevated)',
+                        border: '1px solid transparent',
                         borderRadius: 'var(--b-radius-field)',
                         padding: '2px 8px',
                         color: 'var(--b-danger-text)',
@@ -530,7 +530,7 @@ export const BandMembersHubView: React.FC = () => {
       <div
         style={{
           background: 'var(--b-card)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-card)',
           padding: '18px 20px',
         }}
@@ -622,7 +622,7 @@ export const BandMembersHubView: React.FC = () => {
           <div
             style={{
               background: 'var(--b-modal)',
-              border: '1px solid var(--b-border)',
+              border: '1px solid transparent',
               borderRadius: 'var(--b-radius-card)',
               padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
@@ -754,8 +754,8 @@ export const BandMembersHubView: React.FC = () => {
                   type="button"
                   onClick={() => setShowInviteModal(false)}
                   style={{
-                    background: 'transparent',
-                    border: '1px solid var(--b-border)',
+                    background: 'var(--b-elevated)',
+                    border: '1px solid transparent',
                     color: 'var(--b-muted)',
                     padding: '8px 16px',
                     borderRadius: 'var(--b-radius-field)',

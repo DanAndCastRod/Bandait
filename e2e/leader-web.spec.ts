@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { openView } from './support/hubNav';
 
 /**
  * E2E del Web Admin Hub (bandait-leader-web), la app publicada en /hub/.
@@ -25,7 +26,7 @@ async function enterDemo(page: Page, name: RegExp) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
 }
 
 async function enterLocal(page: Page, name: string, email: string) {
@@ -138,30 +139,30 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await expect(page.getByText('Medianoche en Pereira').first()).toBeVisible();
     await expect(page.getByTestId('sync-status')).toHaveAttribute('data-sync-state', 'local_only');
 
-    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await openView(page, 'songs');
     await expect(page.getByRole('heading', { name: 'Librería de Canciones' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await openView(page, 'rehearsal');
     await expect(page.getByRole('heading', { name: 'Ensayo' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+    await openView(page, 'tracks');
     await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     await expect(page.getByRole('heading', { name: 'Integrantes & Matriz de Roles' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
+    await openView(page, 'settings');
     await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
     await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
     await expect(page.getByRole('heading', { name: 'Rider Técnico & Ruteo de Equipos' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'SETLISTS', exact: true }).click();
+    await openView(page, 'setlists');
     await expect(page.getByRole('heading', { name: 'Programación de Setlists & Transiciones' })).toBeVisible();
   });
 
   test('roles: el Owner cambia el rol de otro integrante pero no el suyo', async ({ page }) => {
     await enterDemo(page, /Carlos Mendoza/);
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     await expect(page.getByTestId('role-guard-note')).toBeVisible();
 
     const own = page.getByLabel('Rol de Carlos Mendoza');
@@ -177,7 +178,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
 
   test('roles: quien no es Owner no puede cambiar ningun rol', async ({ page }) => {
     await enterDemo(page, /Alejandro Vélez/);
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     const selects = page.locator('select[aria-label^="Rol de "]');
     await expect(selects).toHaveCount(5);
     for (const s of await selects.all()) {
@@ -224,7 +225,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
 
     await page.getByTestId('band-switcher').click();
     await page.getByRole('button', { name: /Sinfónica Pop Bogotá/ }).click();
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     page.once('dialog', (d) => void d.accept());
     await page.getByTestId('delete-band').click();
     await expect(page.getByTestId('delete-band-result')).toContainText('Sinfónica Pop Bogotá se borró');
@@ -238,7 +239,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
   test('BANDA: sin cuenta de nube explica cómo compartir y no promete invitaciones reales', async ({ page }) => {
     const external = trackExternal(page);
     await enterDemo(page, /Carlos Mendoza/);
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     const panel = page.getByTestId('sharing-panel');
     await expect(panel).toContainText('BANDA SOLO EN TU CUENTA');
     await expect(panel).toContainText('Continuar con Google (nube)');
@@ -288,7 +289,7 @@ test.describe('Web Admin Hub - workspace (MODO DEMO)', () => {
     await enterDemo(page, /Carlos Mendoza/);
     const bottom = page.locator('nav.hub-mobile-nav');
     await expect(bottom).toBeVisible();
-    await bottom.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     await expect(page.getByRole('heading', { name: 'Integrantes & Matriz de Roles' })).toBeVisible();
   });
 });
@@ -309,7 +310,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     const external = trackExternal(page);
     await enterLocal(page, 'Directora E2E', 'directora.e2e@example.com');
 
-    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await openView(page, 'songs');
     await expect(page.getByRole('heading', { name: 'Librería de Canciones' })).toBeVisible();
     // La migracion v1 -> v2 ya puso en la libreria el tema del setlist semilla.
     await expect(page.getByTestId('song-card').filter({ hasText: 'Tema 1 (Apertura Show)' })).toBeVisible();
@@ -344,7 +345,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     const card = page.getByTestId('song-card').filter({ hasText: 'Luz de Neón' });
     await expect(card.getByTestId('song-card-sections')).toContainText('2 secciones · 12 compases');
 
-    await page.getByRole('button', { name: 'SETLISTS', exact: true }).click();
+    await openView(page, 'setlists');
     await page.getByRole('button', { name: 'AÑADIR CANCIÓN', exact: true }).click();
     const picker = page.getByTestId('setlist-add-song');
     await picker.getByLabel('Buscar en la librería').fill('neon'); // sin tilde: la busqueda la ignora
@@ -386,7 +387,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     const item = ws.playlistsMap[band][0].songs.find((i: { songId: string }) => i.songId === song.id);
     expect(item).toMatchObject({ transitionMode: 'auto_count_in', countInBars: 2, countInVoice: true, gapSec: 3, bpm: 100, title: 'Luz de Neón' });
 
-    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await openView(page, 'songs');
     await expect(page.getByTestId('song-card').filter({ hasText: 'Luz de Neón' }).getByTestId('song-card-sections')).toContainText(
       '2 secciones · 12 compases'
     );
@@ -398,7 +399,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     const before = await storedWorkspace(page);
     const original = before.songsMap.band_01.find((s: { title: string }) => s.title === 'Medianoche en Pereira');
 
-    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await openView(page, 'songs');
     await page.getByTestId('song-card').filter({ hasText: 'Medianoche en Pereira' }).getByRole('button', { name: 'EDITAR' }).click();
     const editor = page.getByTestId('song-editor');
     await expect(editor.getByTestId('section-row')).toHaveCount(5);
@@ -416,7 +417,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
 
   test('borrar una canción usada en un setlist pide confirmación y muestra qué setlists la usan', async ({ page }) => {
     await enterDemo(page, /Carlos Mendoza/);
-    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await openView(page, 'songs');
     await page.getByRole('button', { name: 'Eliminar Ruta del Café' }).click();
     const dialog = page.getByTestId('song-delete-confirm');
     await expect(dialog.getByTestId('song-delete-usage')).toContainText('Gira Nacional 2026');
@@ -427,7 +428,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     await page.getByTestId('song-delete-confirm').getByRole('button', { name: 'ELIMINAR Y QUITAR DE LOS SETLISTS' }).click();
     await expect(page.getByTestId('song-card').filter({ hasText: 'Ruta del Café' })).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'SETLISTS', exact: true }).click();
+    await openView(page, 'setlists');
     await expect(page.getByTestId('setlist-row')).toHaveCount(3);
     await expect(page.getByTestId('setlist-row').filter({ hasText: 'Ruta del Café' })).toHaveCount(0);
     const ws = await storedWorkspace(page);
@@ -438,7 +439,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
   test('AJUSTES > VOZ Y CONTEOS guarda la configuración de la banda y avisa que el audio se genera antes del show', async ({ page }) => {
     const external = trackExternal(page);
     await enterDemo(page, /Carlos Mendoza/);
-    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
+    await openView(page, 'settings');
     await expect(page.getByTestId('voice-note')).toContainText('antes del show');
     await expect(page.getByTestId('voice-note')).toContainText('versión posterior');
 
@@ -450,7 +451,7 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     await page.getByLabel('Avisar cada sección').uncheck();
 
     await page.reload();
-    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
+    await openView(page, 'settings');
     await expect(page.getByLabel('Activar voz en el show')).toBeChecked();
     await expect(page.getByLabel('VOZ (AZURE, ES-CO)')).toHaveValue('es-CO-GonzaloNeural');
     const ws = await storedWorkspace(page);
@@ -509,9 +510,9 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
   test('móvil 375 px: CANCIONES, editor, AJUSTES y SETLISTS sin scroll horizontal', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await enterDemo(page, /Carlos Mendoza/);
-    const bottom = page.locator('nav.hub-mobile-nav');
+    await expect(page.getByRole('navigation', { name: 'Vistas del hub' })).toBeVisible();
 
-    await bottom.getByRole('button', { name: 'CANCIONES' }).click();
+    await openView(page, 'songs');
     await expect(page.getByRole('heading', { name: 'Librería de Canciones' })).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
@@ -530,11 +531,11 @@ test.describe('Web Admin Hub - librería v2 (CANCIONES, setlist, VOZ)', () => {
     await editor.getByRole('button', { name: 'CANCELAR' }).first().click();
     await editor.getByRole('button', { name: 'CANCELAR' }).click();
 
-    await bottom.getByRole('button', { name: 'AJUSTES', exact: true }).click();
+    await openView(page, 'settings');
     await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
-    await bottom.getByRole('button', { name: 'SETLISTS', exact: true }).click();
+    await openView(page, 'setlists');
     await expect(page.getByRole('heading', { name: 'Programación de Setlists & Transiciones' })).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     await page.getByRole('button', { name: 'AÑADIR CANCIÓN', exact: true }).click();

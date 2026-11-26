@@ -124,9 +124,13 @@ export const smallInputStyle: React.CSSProperties = {
   minWidth: 0,
 }
 
+/**
+ * Tarjeta minimalista (Web 3.0): superficie tonal sin linea. El borde transparente conserva el
+ * tamano y deja que una vista marque un estado con `borderColor` (peligro, seleccion).
+ */
 export const cardStyle: React.CSSProperties = {
   background: colors.card,
-  border: `1px solid ${colors.border}`,
+  border: '1px solid transparent',
   borderRadius: radius.card,
 }
 
@@ -154,7 +158,7 @@ export const ghostButton: React.CSSProperties = {
   justifyContent: 'center',
   gap: '6px',
   background: colors.elevated,
-  border: `1px solid ${colors.border}`,
+  border: '1px solid transparent',
   borderRadius: radius.control,
   padding: '8px 14px',
   color: colors.text,
@@ -169,7 +173,7 @@ export function iconButton(color: string = colors.text, disabled = false): React
     alignItems: 'center',
     justifyContent: 'center',
     background: colors.elevated,
-    border: `1px solid ${colors.border}`,
+    border: '1px solid transparent',
     color: disabled ? colors.disabled : color,
     borderRadius: radius.control,
     padding: '5px 7px',
@@ -183,12 +187,11 @@ export const headerBarStyle: React.CSSProperties = {
   alignItems: 'center',
   flexWrap: 'wrap',
   gap: '16px',
-  borderBottom: `1px solid ${colors.border}`,
-  paddingBottom: '16px',
+  paddingBottom: '4px',
 }
 
 export const viewStyle: React.CSSProperties = {
-  padding: 'clamp(12px, 3vw, 24px)',
+  padding: 'clamp(14px, 3vw, 28px) clamp(12px, 3vw, 32px)',
   display: 'flex',
   flexDirection: 'column',
   gap: '16px',

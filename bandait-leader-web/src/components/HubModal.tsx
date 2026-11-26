@@ -9,13 +9,15 @@ interface Props {
   testId?: string
   /** false en editores con borrador: Escape no debe descartar cambios. */
   closeOnEscape?: boolean
+  /** Nombre accesible del boton de cerrar (por defecto "Cerrar"). */
+  closeLabel?: string
   children: React.ReactNode
 }
 
 /** Modal del Hub: fondo OLED, cabecera fija y cuerpo con scroll propio (sin scroll horizontal). */
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
 
-export const HubModal: React.FC<Props> = ({ title, onClose, maxWidth = '520px', testId, closeOnEscape = true, children }) => {
+export const HubModal: React.FC<Props> = ({ title, onClose, maxWidth = '520px', testId, closeOnEscape = true, closeLabel = 'Cerrar', children }) => {
   const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -77,7 +79,6 @@ export const HubModal: React.FC<Props> = ({ title, onClose, maxWidth = '520px', 
         data-testid={testId}
         style={{
           background: colors.modal,
-          border: `1px solid ${colors.border}`,
           borderRadius: 'var(--b-radius-card)',
           width: '100%',
           maxWidth,
@@ -94,8 +95,7 @@ export const HubModal: React.FC<Props> = ({ title, onClose, maxWidth = '520px', 
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: '12px',
-            padding: '14px clamp(12px, 3vw, 20px)',
-            borderBottom: `1px solid ${colors.border}`,
+            padding: '16px clamp(14px, 3vw, 22px) 6px',
           }}
         >
           <h3 style={{ margin: 0, fontFamily: mono, fontSize: '15px', letterSpacing: '0.5px', color: colors.text, minWidth: 0 }}>
@@ -104,13 +104,13 @@ export const HubModal: React.FC<Props> = ({ title, onClose, maxWidth = '520px', 
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar"
-            style={{ background: 'transparent', border: 'none', color: colors.muted, cursor: 'pointer', display: 'flex', padding: '4px' }}
+            aria-label={closeLabel}
+            className="hub-icon-btn hub-press"
           >
             <X size={18} />
           </button>
         </div>
-        <div style={{ overflowY: 'auto', overflowX: 'hidden', padding: 'clamp(12px, 3vw, 20px)', minWidth: 0 }}>{children}</div>
+        <div style={{ overflowY: 'auto', overflowX: 'hidden', padding: '10px clamp(14px, 3vw, 22px) clamp(14px, 3vw, 22px)', minWidth: 0 }}>{children}</div>
       </div>
     </div>
   )

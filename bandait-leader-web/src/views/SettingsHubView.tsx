@@ -1,16 +1,16 @@
 import React, { useState } from 'react'
-import { Mic, Palette, Radio, Settings } from 'lucide-react'
+import { Mic, Palette, Radio } from 'lucide-react'
 import { VoiceHubView } from './VoiceHubView'
 import { EquipmentHubView } from './EquipmentHubView'
 import { AppearanceSettings } from '../components/AppearanceSettings'
-import { colors, mono, radius } from '../components/hubStyles'
+import { SegmentedControl } from '../components/SegmentedControl'
 
 export type SettingsSection = 'voice' | 'equipment' | 'appearance'
 
-const SECTIONS: Array<{ id: SettingsSection; label: string; icon: React.ReactNode; accent: string }> = [
-  { id: 'voice', label: 'VOZ Y CONTEOS', icon: <Mic size={14} />, accent: colors.cyan },
-  { id: 'equipment', label: 'EQUIPAMIENTO', icon: <Radio size={14} />, accent: colors.warning },
-  { id: 'appearance', label: 'APARIENCIA', icon: <Palette size={14} />, accent: colors.orange },
+const SECTIONS: ReadonlyArray<{ id: SettingsSection; label: string; icon: React.ReactNode }> = [
+  { id: 'voice', label: 'VOZ Y CONTEOS', icon: <Mic size={14} aria-hidden /> },
+  { id: 'equipment', label: 'EQUIPAMIENTO', icon: <Radio size={14} aria-hidden /> },
+  { id: 'appearance', label: 'APARIENCIA', icon: <Palette size={14} aria-hidden /> },
 ]
 
 /** AJUSTES: agrupa VOZ Y CONTEOS, EQUIPAMIENTO (como en el lider 2.3) y APARIENCIA (Web 3.0). */
@@ -19,52 +19,20 @@ export const SettingsHubView: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      <div
-        style={{
-          padding: 'clamp(12px, 3vw, 24px) clamp(12px, 3vw, 24px) 0',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          flexWrap: 'wrap',
-        }}
-      >
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontFamily: mono, fontSize: '12px', fontWeight: 700, color: colors.muted }}>
-          <Settings size={14} /> AJUSTES
-        </span>
-        <div role="tablist" aria-label="Secciones de ajustes" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {SECTIONS.map((s) => {
-            const active = section === s.id
-            return (
-              <button
-                key={s.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                className="stx-btn"
-                onClick={() => setSection(s.id)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '7px 12px',
-                  borderRadius: radius.control,
-                  border: `1px solid ${active ? s.accent : colors.border}`,
-                  background: active ? colors.elevated : 'transparent',
-                  color: active ? colors.text : colors.muted,
-                  fontFamily: mono,
-                  fontSize: '12px',
-                  fontWeight: active ? 700 : 400,
-                  cursor: 'pointer',
-                }}
-              >
-                <span style={{ color: active ? s.accent : 'inherit', display: 'inline-flex' }}>{s.icon}</span>
-                {s.label}
-              </button>
-            )
-          })}
-        </div>
+      <div className="hub-view-head">
+        <h1 className="hub-view-title">Ajustes</h1>
+        <SegmentedControl
+          ariaLabel="Secciones de ajustes"
+          value={section}
+          options={SECTIONS}
+          onChange={setSection}
+          testIdPrefix="settings-section"
+          panelId="settings-panel"
+        />
       </div>
-      {section === 'voice' ? <VoiceHubView /> : section === 'equipment' ? <EquipmentHubView /> : <AppearanceSettings />}
+      <div id="settings-panel" role="tabpanel" aria-label={SECTIONS.find((s) => s.id === section)?.label} style={{ minWidth: 0 }}>
+        {section === 'voice' ? <VoiceHubView /> : section === 'equipment' ? <EquipmentHubView /> : <AppearanceSettings />}
+      </div>
     </div>
   )
 }

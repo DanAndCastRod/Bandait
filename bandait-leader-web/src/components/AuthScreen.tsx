@@ -22,7 +22,7 @@ const mono = "'IBM Plex Mono', monospace"
 
 const sectionStyle: React.CSSProperties = {
   background: 'var(--b-input)',
-  border: '1px solid var(--b-border)',
+  border: '1px solid transparent',
   borderRadius: 'var(--b-radius-card)',
   padding: '18px 20px',
   display: 'flex',
@@ -70,7 +70,7 @@ const inputStyle: React.CSSProperties = {
   padding: '10px 12px',
   color: 'var(--b-text)',
   fontSize: '13px',
-  outline: 'none',
+  outlineOffset: '1px',
   boxSizing: 'border-box',
 }
 
@@ -201,7 +201,7 @@ export const AuthScreen: React.FC = () => {
         padding: '24px 16px',
         boxSizing: 'border-box',
         color: 'var(--b-text)',
-        fontFamily: "'Space Grotesk', -apple-system, sans-serif",
+        fontFamily: 'var(--font-ui)',
       }}
     >
       <div
@@ -209,7 +209,7 @@ export const AuthScreen: React.FC = () => {
           width: '100%',
           maxWidth: '560px',
           background: 'linear-gradient(180deg, var(--b-card) 0%, var(--b-input) 100%)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-card)',
           padding: 'clamp(20px, 5vw, 36px) clamp(16px, 4vw, 32px)',
           boxShadow: 'var(--b-shadow)',
@@ -349,7 +349,7 @@ export const AuthScreen: React.FC = () => {
               gap: '10px',
               background: cloudDisabledReason ? 'var(--b-elevated)' : 'var(--b-text)',
               color: cloudDisabledReason ? 'var(--b-faint)' : 'var(--b-bg)',
-              border: '1px solid var(--b-border)',
+              border: '1px solid transparent',
               borderRadius: 'var(--b-radius-field)',
               padding: '11px 18px',
               fontSize: '13px',
@@ -429,7 +429,7 @@ export const AuthScreen: React.FC = () => {
                   gap: '10px',
                   background: 'var(--b-elevated)',
                   color: 'var(--b-faint)',
-                  border: '1px solid var(--b-border)',
+                  border: '1px solid transparent',
                   borderRadius: 'var(--b-radius-field)',
                   padding: '11px 18px',
                   fontSize: '13px',
@@ -653,7 +653,7 @@ export const AuthScreen: React.FC = () => {
           <div
             style={{
               background: 'var(--b-modal)',
-              border: '1px solid var(--b-border)',
+              border: '1px solid transparent',
               borderRadius: 'var(--b-radius-card)',
               padding: '24px',
               width: '100%',
@@ -701,7 +701,7 @@ export const AuthScreen: React.FC = () => {
                   onClick={() => setShowClientIdModal(false)}
                   style={{
                     background: 'var(--b-elevated)',
-                    border: '1px solid var(--b-border)',
+                    border: '1px solid transparent',
                     borderRadius: 'var(--b-radius-field)',
                     padding: '8px 14px',
                     color: 'var(--b-muted)',

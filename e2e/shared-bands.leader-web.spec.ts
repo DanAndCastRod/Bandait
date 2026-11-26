@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith, type Row } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E de bandas compartidas contra un Supabase SIMULADO dentro de Playwright: sesion de
@@ -31,7 +32,7 @@ test.describe('Web Admin Hub - bandas compartidas (Supabase simulado)', () => {
     await page.getByRole('button', { name: 'Cerrar perfil' }).click();
     await expect(page.getByTestId('band-switcher')).toContainText("B&O's");
 
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     await page.getByTestId('share-band').click();
     await expect(page.getByTestId('sharing-panel')).toContainText('BANDA COMPARTIDA');
 
@@ -66,7 +67,7 @@ test.describe('Web Admin Hub - bandas compartidas (Supabase simulado)', () => {
     const bos = workspaceWith('band_bos', "B&O's", ['Dame tu aire']);
     fake.workspaces.push({ user_id: USER.id, workspace: bos, updated_at: fake.now() });
     await signInWithFakeCloud(page, fake);
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     await page.getByTestId('share-band').click();
     await expect.poll(() => fake.bands.length).toBe(1);
     await expect(page.getByTestId('band-switcher')).toContainText("B&O's");
@@ -109,7 +110,7 @@ test.describe('Web Admin Hub - bandas compartidas (Supabase simulado)', () => {
     await page.getByTestId('band-switcher').click();
     await page.getByRole('button', { name: /B&O's/ }).click();
     await expect(page.getByTestId('band-switcher')).toContainText("B&O's");
-    await page.getByRole('button', { name: 'BANDA', exact: true }).click();
+    await openView(page, 'band');
     await page.getByTestId('share-band').click();
     await expect(page.getByTestId('sharing-panel')).toContainText('BANDA COMPARTIDA');
 

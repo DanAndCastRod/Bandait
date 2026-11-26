@@ -105,7 +105,7 @@ export const SetlistAddSongModal: React.FC<Props> = ({ songs, inSetlist, default
         <form
           onSubmit={quickCreate}
           data-testid="quick-create-song"
-          style={{ borderTop: `1px solid ${colors.border}`, paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}
+          style={{ borderTop: '1px solid var(--b-border-soft)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}
         >
           <div style={{ fontFamily: mono, fontSize: '12px', fontWeight: 700, color: colors.text }}>CREAR CANCIÓN RÁPIDA</div>
           <div style={{ fontSize: '11px', color: colors.muted }}>

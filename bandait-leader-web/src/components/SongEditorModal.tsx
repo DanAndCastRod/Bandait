@@ -606,7 +606,7 @@ export const SongEditorModal: React.FC<Props> = ({ initial, defaultArtist, onSav
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap', borderTop: `1px solid ${colors.border}`, paddingTop: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap', borderTop: '1px solid var(--b-border-soft)', paddingTop: '12px' }}>
           <button type="button" onClick={onCancel} style={{ ...ghostButton, background: 'transparent', color: colors.muted }}>
             CANCELAR
           </button>

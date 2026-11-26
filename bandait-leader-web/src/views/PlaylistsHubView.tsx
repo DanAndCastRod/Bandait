@@ -114,8 +114,8 @@ export const PlaylistsHubView: React.FC = () => {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '16px',
-          borderBottom: '1px solid var(--b-border)',
-          paddingBottom: '16px',
+          borderBottom: 'none',
+          paddingBottom: '4px',
         }}
       >
         <div style={{ minWidth: 0 }}>
@@ -149,7 +149,7 @@ export const PlaylistsHubView: React.FC = () => {
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: '12px',
                 fontWeight: 700,
-                outline: 'none',
+                outlineOffset: '1px',
                 maxWidth: '100%',
                 minWidth: 0,
               }}
@@ -169,7 +169,7 @@ export const PlaylistsHubView: React.FC = () => {
               alignItems: 'center',
               gap: '6px',
               background: 'var(--b-elevated)',
-              border: '1px solid var(--b-border)',
+              border: '1px solid transparent',
               borderRadius: 'var(--b-radius-field)',
               padding: '8px 14px',
               color: 'var(--b-text)',
@@ -219,7 +219,7 @@ export const PlaylistsHubView: React.FC = () => {
               alignItems: 'center',
               gap: '6px',
               background: 'var(--b-elevated)',
-              border: '1px solid var(--b-border)',
+              border: '1px solid transparent',
               borderRadius: 'var(--b-radius-field)',
               padding: '8px 14px',
               color: 'var(--b-text)',
@@ -300,7 +300,7 @@ export const PlaylistsHubView: React.FC = () => {
             alignItems: 'center',
             gap: '10px',
             background: 'var(--b-card)',
-            border: '1px solid var(--b-border)',
+            border: '1px solid transparent',
             borderRadius: 'var(--b-radius-card)',
             padding: '12px 16px',
             fontSize: '12px',
@@ -375,7 +375,7 @@ export const PlaylistsHubView: React.FC = () => {
           gap: '12px',
         }}
       >
-        <div style={{ background: 'var(--b-card)', border: '1px solid var(--b-border)', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
+        <div style={{ background: 'var(--b-card)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
           <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
             DURACIÓN ESTIMADA DEL SHOW
           </div>
@@ -385,7 +385,7 @@ export const PlaylistsHubView: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ background: 'var(--b-card)', border: '1px solid var(--b-border)', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
+        <div style={{ background: 'var(--b-card)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
           <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
             TOTAL CANCIONES PROGRAMADAS
           </div>
@@ -395,7 +395,7 @@ export const PlaylistsHubView: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ background: 'var(--b-card)', border: '1px solid var(--b-border)', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
+        <div style={{ background: 'var(--b-card)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
           <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
             SINCRONIZACIÓN CON ESCENARIO
           </div>
@@ -413,7 +413,7 @@ export const PlaylistsHubView: React.FC = () => {
         className="touch-scroll-x"
         style={{
           background: 'var(--b-card)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-card)',
           overflowX: 'auto',
           WebkitOverflowScrolling: 'touch',
@@ -562,7 +562,7 @@ export const PlaylistsHubView: React.FC = () => {
                           fontFamily: mono,
                           fontSize: '11px',
                           fontWeight: 700,
-                          outline: 'none',
+                          outlineOffset: '1px',
                         }}
                       >
                         {TRANSITION_MODES.map((m) => (
@@ -692,7 +692,7 @@ export const PlaylistsHubView: React.FC = () => {
                           aria-label={`Mover ${item.title} arriba`}
                           style={{
                             background: 'var(--b-elevated)',
-                            border: '1px solid var(--b-border)',
+                            border: '1px solid transparent',
                             color: isFirst ? 'var(--b-disabled)' : 'var(--b-text)',
                             borderRadius: 'var(--b-radius-field)',
                             padding: '4px 6px',
@@ -709,7 +709,7 @@ export const PlaylistsHubView: React.FC = () => {
                           aria-label={`Mover ${item.title} abajo`}
                           style={{
                             background: 'var(--b-elevated)',
-                            border: '1px solid var(--b-border)',
+                            border: '1px solid transparent',
                             color: isLast ? 'var(--b-disabled)' : 'var(--b-text)',
                             borderRadius: 'var(--b-radius-field)',
                             padding: '4px 6px',
@@ -725,7 +725,7 @@ export const PlaylistsHubView: React.FC = () => {
                           aria-label={`Quitar ${item.title} del setlist`}
                           style={{
                             background: 'var(--b-elevated)',
-                            border: '1px solid var(--b-border)',
+                            border: '1px solid transparent',
                             color: 'var(--b-danger)',
                             borderRadius: 'var(--b-radius-field)',
                             padding: '4px 6px',
@@ -777,7 +777,7 @@ export const PlaylistsHubView: React.FC = () => {
           <div
             style={{
               background: 'var(--b-modal)',
-              border: '1px solid var(--b-border)',
+              border: '1px solid transparent',
               borderRadius: 'var(--b-radius-card)',
               padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
@@ -819,8 +819,8 @@ export const PlaylistsHubView: React.FC = () => {
                   type="button"
                   onClick={() => setShowNewPlaylistModal(false)}
                   style={{
-                    background: 'transparent',
-                    border: '1px solid var(--b-border)',
+                    background: 'var(--b-elevated)',
+                    border: '1px solid transparent',
                     color: 'var(--b-muted)',
                     padding: '8px 16px',
                     borderRadius: 'var(--b-radius-field)',

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { deflateRawSync } from 'node:zlib';
+import { openView } from './support/hubNav';
 
 /**
  * E2E del estudio de stems del hub (vista PISTAS). Los archivos se generan en la prueba (WAV
@@ -98,10 +99,8 @@ async function enterDemoStems(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
-  const bottom = page.locator('nav.hub-mobile-nav');
-  if (await bottom.isVisible()) await bottom.getByRole('button', { name: 'PISTAS', exact: true }).click();
-  else await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
+  await openView(page, 'tracks');
   await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
 }
 
@@ -203,8 +202,8 @@ test.describe('Web Admin Hub - estudio de stems', () => {
 
     // Persisten al recargar (IndexedDB) y se pueden borrar.
     await page.reload();
-    await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+    await expect(page.getByTestId('hub-logo')).toBeVisible();
+    await openView(page, 'tracks');
     await expect(page.getByTestId('stem-song-select')).toContainText('Medianoche en Pereira · 6 stems');
     await expect(page.getByTestId('stem-studio').getByTestId('stem-track')).toHaveCount(6);
 
@@ -269,7 +268,7 @@ test.describe('Web Admin Hub - estudio de stems', () => {
 
     await page.getByTestId('stem-play').click();
     await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'playing');
-    await page.locator('nav.hub-mobile-nav').getByRole('button', { name: 'SETLISTS' }).click();
+    await openView(page, 'setlists');
     await expect(page.getByTestId('stem-studio')).toHaveCount(0);
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __stemCtxs: AudioContext[] }).__stemCtxs.map((c) => c.state)))

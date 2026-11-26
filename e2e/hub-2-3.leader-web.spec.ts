@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E del hub 2.3: navegacion con los nombres y el orden del lider, ENSAYO (prompter que sigue la
@@ -9,7 +10,8 @@ import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './suppor
  */
 
 const STEMS = 'https://stems.e2e.invalid';
-const TABS = ['SETLISTS', 'CANCIONES', 'ENSAYO', 'PISTAS', 'ESTUDIO', 'BANDA', 'AJUSTES'];
+/** Rail de escritorio de Web 3.0 (docs/REQUERIMIENTOS_WEB_3.0.md, seccion 2). */
+const RAIL_VIEWS = ['Estudio DAW', 'Ensayo y Prompter', 'Canciones y Stems', 'Setlists', 'Banda', 'Ajustes'];
 
 function wav(seconds: number, freq: number, rate = 8000): Buffer {
   const samples = Math.round(seconds * rate);
@@ -36,7 +38,7 @@ async function enterDemo(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
 }
 
 async function horizontalOverflow(page: Page): Promise<number> {
@@ -44,15 +46,36 @@ async function horizontalOverflow(page: Page): Promise<number> {
 }
 
 test.describe('Web Admin Hub 2.3 - navegacion', () => {
-  test('escritorio: las 6 vistas del lider y ESTUDIO en orden, sin Escenario, y AJUSTES agrupa voz y equipos', async ({ page }) => {
+  test('escritorio: rail con las 6 vistas de Web 3.0 en orden, CTA de audio, plegable y AJUSTES agrupa voz, equipos y apariencia', async ({ page }) => {
     await enterDemo(page);
-    const nav = page.locator('nav.hub-desktop-nav');
-    await expect(nav.getByRole('button')).toHaveText(TABS);
+    const nav = page.getByRole('navigation', { name: 'Vistas del hub' });
+    await expect(nav.getByRole('button')).toHaveText(RAIL_VIEWS);
     await expect(page.getByRole('button', { name: /ESCENARIO|PLAYLISTS|INTEGRANTES|EQUIPAMIENTO/ })).toHaveCount(0);
-    await expect(nav.getByRole('button', { name: 'SETLISTS' })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('tab-setlists')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('mini-player')).toHaveCount(0);
 
-    await nav.getByRole('button', { name: 'AJUSTES' }).click();
-    await expect(nav.getByRole('button', { name: 'AJUSTES' })).toHaveAttribute('aria-current', 'page');
+    // Canciones y Stems absorbe PISTAS: la CTA lleva al segmento STEMS Y PISTAS.
+    await page.getByTestId('upload-audio-cta').click();
+    await expect(page.getByTestId('tab-songs')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('songs-segment-stems')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
+    await page.getByTestId('songs-segment-library').click();
+    await expect(page.getByRole('heading', { name: 'Librería de Canciones' })).toBeVisible();
+
+    // Rail plegable 244 <-> 72 px; el estado sobrevive a la recarga.
+    const rail = page.locator('#hub-rail');
+    expect(Math.round((await rail.boundingBox())!.width)).toBe(244);
+    await page.getByTestId('rail-toggle').click();
+    await expect(page.getByTestId('rail-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(Math.round((await rail.boundingBox())!.width)).toBe(72);
+    await page.reload();
+    await expect(page.getByTestId('rail-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(Math.round((await page.locator('#hub-rail').boundingBox())!.width)).toBe(72);
+    await page.getByTestId('rail-toggle').click();
+    await expect(page.getByTestId('rail-toggle')).toHaveAttribute('aria-expanded', 'true');
+
+    await openView(page, 'settings');
+    await expect(page.getByTestId('tab-settings')).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO', 'APARIENCIA']);
     await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
     await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
@@ -60,21 +83,44 @@ test.describe('Web Admin Hub 2.3 - navegacion', () => {
     await expect(page.getByRole('heading', { name: 'Rider Técnico & Ruteo de Equipos' })).toBeVisible();
   });
 
-  test('movil 390 px: la barra inferior trae las mismas 7 vistas sin scroll horizontal', async ({ page }) => {
+  test('movil 390 px: barra de 4 pildoras y hoja "Más" con el resto, sin scroll horizontal', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await enterDemo(page);
-    const bottom = page.locator('nav.hub-mobile-nav');
-    await expect(bottom.getByRole('button')).toHaveText(TABS);
-    for (const name of TABS) {
-      await bottom.getByRole('button', { name, exact: true }).click();
-      await expect(bottom.getByRole('button', { name, exact: true })).toHaveAttribute('aria-current', 'page');
+    const bottom = page.getByRole('navigation', { name: 'Vistas del hub' });
+    await expect(bottom.getByRole('button')).toHaveText(['Ensayo', 'Canciones', 'Setlists', 'Más']);
+    for (const id of ['rehearsal', 'songs', 'setlists']) {
+      await page.getByTestId(`tab-${id}`).click();
+      await expect(page.getByTestId(`tab-${id}`)).toHaveAttribute('aria-current', 'page');
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     }
+
+    await page.getByTestId('tab-more').click();
+    const sheet = page.getByTestId('more-sheet');
+    await expect(sheet.getByTestId(/^tab-/)).toHaveText(['Estudio DAW', 'Banda', 'Ajustes']);
+    await expect(sheet.getByTestId('upload-audio-cta')).toBeVisible();
+    await expect(sheet.getByTestId('open-manual')).toBeVisible();
+    await expect(sheet.getByTestId('export-json')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+
+    await openView(page, 'band');
+    await expect(page.getByTestId('tab-more')).toHaveAttribute('aria-current', 'page');
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+    await openView(page, 'settings');
+    await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+    await page.getByTestId('tab-more').click();
+    await page.getByTestId('upload-audio-cta').click();
+    await expect(page.getByTestId('tab-songs')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('songs-segment-stems')).toHaveAttribute('aria-selected', 'true');
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   });
 
   test('AJUSTES > EQUIPAMIENTO: editar un equipo conserva su id y se guarda', async ({ page }) => {
     await enterDemo(page);
-    await page.getByRole('button', { name: 'AJUSTES', exact: true }).click();
+    await openView(page, 'settings');
     await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
     const card = page.getByTestId('equipment-card').filter({ hasText: 'Interfaz ASIO FOH Master' });
     await card.getByRole('button', { name: 'Editar Interfaz ASIO FOH Master' }).click();
@@ -96,7 +142,7 @@ test.describe('Web Admin Hub 2.3 - navegacion', () => {
 test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
   test('el prompter sigue la posicion: seccion actual con su ChordPro, la siguiente, y ACORDES / LETRA', async ({ page }) => {
     await enterDemo(page);
-    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await openView(page, 'rehearsal');
     await expect(page.getByTestId('rehearsal-empty')).toBeVisible();
     await page.getByTestId('rehearsal-empty').getByRole('button', { name: 'IR A PISTAS' }).click();
     await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
@@ -110,7 +156,7 @@ test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
     await page.getByTestId('stem-save').click();
     await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
 
-    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await openView(page, 'rehearsal');
     await expect(page.getByTestId('rehearsal-song-select')).toHaveValue(/.+/);
     await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
     const current = page.getByTestId('rehearsal-current');
@@ -174,7 +220,7 @@ test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await enterDemo(page);
     // Una estrofa con una linea larga de acordes en linea, como la que arma el analisis.
-    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await openView(page, 'songs');
     await page.getByTestId('song-card').filter({ hasText: 'Medianoche en Pereira' }).getByRole('button', { name: 'EDITAR' }).click();
     const editor = page.getByTestId('song-editor');
     const long = '[Am]Medianoche en [F]Pereira, la ciudad no duerme y la [C]noche se queda despierta hasta que [G]vuelvas';
@@ -182,13 +228,13 @@ test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
     await editor.getByTestId('song-save').click();
     await expect(editor).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+    await openView(page, 'tracks');
     await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
     await page.getByTestId('stem-file-input').setInputFiles([{ name: 'Medianoche - Drums.wav', mimeType: 'audio/wav', buffer: wav(20, 110) }]);
     await page.getByTestId('stem-save').click();
     await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(1, { timeout: 15000 });
 
-    await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+    await openView(page, 'rehearsal');
     await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(1, { timeout: 15000 });
     await expect(page.getByTestId('rehearsal-mixer')).not.toHaveAttribute('open', '');
     await page.getByLabel('Posición').fill('9');
@@ -205,7 +251,7 @@ test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
 /** Medianoche en Pereira (124 BPM 4/4, Am) con 40 s de stems, abierta en ENSAYO. */
 async function rehearseMedianoche(page: Page) {
   await enterDemo(page);
-  await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  await openView(page, 'tracks');
   await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
   await page.getByTestId('stem-file-input').setInputFiles([
     { name: 'Medianoche - Drums.wav', mimeType: 'audio/wav', buffer: wav(40, 110) },
@@ -213,7 +259,7 @@ async function rehearseMedianoche(page: Page) {
   ]);
   await page.getByTestId('stem-save').click();
   await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
-  await page.getByRole('button', { name: 'ENSAYO', exact: true }).click();
+  await openView(page, 'rehearsal');
   await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(2, { timeout: 15000 });
 }
 
@@ -451,7 +497,7 @@ async function openEditorWithStems(page: Page, worker: FakeAnalysisWorker) {
   await worker.install(page);
   await signInWithFakeCloud(page, fake);
   await expect(page.getByTestId('band-switcher')).toContainText('Banda de Daniel');
-  await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  await openView(page, 'tracks');
   await page.getByTestId('stem-file-input').setInputFiles([
     { name: 'Tema A - Vocals.wav', mimeType: 'audio/wav', buffer: wav(3, 440) },
     { name: 'Tema A - Bass.wav', mimeType: 'audio/wav', buffer: wav(3, 110) },
@@ -459,7 +505,7 @@ async function openEditorWithStems(page: Page, worker: FakeAnalysisWorker) {
   ]);
   await page.getByTestId('stem-save').click();
   await expect(page.getByTestId('stem-cloud-status')).toHaveText(/EN LA NUBE/, { timeout: 15000 });
-  await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+  await openView(page, 'songs');
   await page.getByTestId('song-card').filter({ hasText: 'Tema A' }).getByRole('button', { name: 'EDITAR' }).click();
   const editor = page.getByTestId('song-editor');
   await expect(editor.getByTestId('song-analysis')).toBeVisible();
@@ -542,7 +588,7 @@ test.describe('Web Admin Hub 2.3 - ANALIZAR CON IA (Worker simulado)', () => {
     fake.workspaces.push({ user_id: USER.id, workspace: workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']), updated_at: fake.now() });
     await worker.install(page);
     await signInWithFakeCloud(page, fake);
-    await page.getByRole('button', { name: 'CANCIONES', exact: true }).click();
+    await openView(page, 'songs');
     await page.getByTestId('song-card').filter({ hasText: 'Tema A' }).getByRole('button', { name: 'EDITAR' }).click();
     const panel = page.getByTestId('song-editor').getByTestId('song-analysis');
     await expect(panel).toHaveAttribute('data-phase', 'none');

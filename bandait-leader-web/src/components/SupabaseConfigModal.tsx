@@ -31,8 +31,8 @@ const inputStyle: React.CSSProperties = {
 }
 
 const smallButton: React.CSSProperties = {
-  background: 'transparent',
-  border: '1px solid var(--b-border)',
+  background: 'var(--b-elevated)',
+  border: '1px solid transparent',
   color: 'var(--b-muted)',
   padding: '7px 12px',
   borderRadius: 'var(--b-radius-field)',
@@ -46,7 +46,7 @@ const smallButton: React.CSSProperties = {
 
 const boxStyle: React.CSSProperties = {
   background: 'var(--b-input)',
-  border: '1px solid var(--b-border)',
+  border: '1px solid transparent',
   borderRadius: 'var(--b-radius-field)',
   padding: '12px',
   fontSize: '11px',
@@ -165,7 +165,7 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
         aria-label="Nube Supabase"
         style={{
           background: 'var(--b-modal)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-card)',
           width: '100%',
           maxWidth: '560px',
@@ -180,7 +180,7 @@ export const SupabaseConfigModal: React.FC<Props> = ({ onClose }) => {
         }}
       >
         {/* HEADER */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--b-border)', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--b-border-soft)', paddingBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Cloud size={20} style={{ color: 'var(--b-cobalt)' }} />
             <h3 style={{ margin: 0, fontFamily: mono, fontSize: '15px', color: 'var(--b-text)' }}>NUBE // SUPABASE</h3>

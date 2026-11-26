@@ -39,7 +39,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
       <div
         style={{
           background: 'var(--b-surface)',
-          border: '1px solid var(--b-border)',
+          border: '1px solid transparent',
           borderRadius: 'var(--b-radius-card)',
           width: '100%',
           maxWidth: '820px',
@@ -54,7 +54,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
         <div
           style={{
             padding: '16px 20px',
-            borderBottom: '1px solid var(--b-border)',
+            borderBottom: '1px solid var(--b-border-soft)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -120,7 +120,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
             gap: '4px',
             background: 'var(--b-input)',
             padding: '8px 12px',
-            borderBottom: '1px solid var(--b-border)',
+            borderBottom: '1px solid var(--b-border-soft)',
             overflowX: 'auto',
           }}
         >
@@ -200,7 +200,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                     key={idx}
                     style={{
                       background: 'var(--b-modal)',
-                      border: '1px solid var(--b-border)',
+                      border: '1px solid transparent',
                       borderRadius: 'var(--b-radius-card)',
                       padding: '14px',
                       display: 'flex',
@@ -241,7 +241,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
               <div
                 style={{
                   background: 'var(--b-bg)',
-                  border: '1px solid var(--b-border)',
+                  border: '1px solid transparent',
                   borderRadius: 'var(--b-radius-card)',
                   padding: '16px',
                   fontFamily: "'IBM Plex Mono', monospace",
@@ -270,7 +270,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                 </pre>
               </div>
 
-              <div style={{ background: 'var(--b-modal)', border: '1px solid var(--b-border)', borderRadius: 'var(--b-radius-card)', padding: '14px', fontSize: '12px', color: 'var(--b-muted)', lineHeight: 1.5 }}>
+              <div style={{ background: 'var(--b-modal)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '14px', fontSize: '12px', color: 'var(--b-muted)', lineHeight: 1.5 }}>
                 <strong style={{ color: 'var(--b-success)' }}>REGLA DE ORO DE ESCENARIO:</strong> Utiliza siempre un router Wi-Fi de 5 GHz propio en la tarima, sin contrasenas publicas. Los smartphones se conectan a esa red interna y reciben paquetes ligeros de sincronizacion NTP (&lt; 1 KB/s).
               </div>
             </div>
@@ -294,7 +294,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   { ch: 'CH 05', name: 'Metronomo / Clic de Ataque', dest: 'Salida 3 Cable Baterista', notes: 'Onda sintetizada con ataque de 5ms enviada por cable sin jitter.' },
                   { ch: 'CH 06', name: 'Bajo / Low-End Stems', dest: 'Bus In-Ear Bajo & Bateria', notes: 'Frecuencias sub-graves controladas para el pulso ritmico.' },
                 ].map((track, i) => (
-                  <div key={i} style={{ background: 'var(--b-modal)', border: '1px solid var(--b-border)', borderRadius: 'var(--b-radius-card)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div key={i} style={{ background: 'var(--b-modal)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: 'var(--b-cobalt)', fontWeight: 700 }}>{track.ch}</span>
                       <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '9px', background: 'color-mix(in srgb, var(--b-success) 10%, transparent)', color: 'var(--b-success)', padding: '2px 5px', borderRadius: 'var(--b-radius-field)' }}>-0.5 dBFS OK</span>
@@ -318,7 +318,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                 </p>
               </div>
 
-              <div style={{ background: 'var(--b-modal)', border: '1px solid var(--b-border)', borderRadius: 'var(--b-radius-card)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ background: 'var(--b-modal)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
                   <div style={{ background: 'color-mix(in srgb, var(--b-warning) 15%, transparent)', padding: '8px', borderRadius: 'var(--b-radius-field)', color: 'var(--b-warning)' }}>
                     <Zap size={20} />
@@ -363,7 +363,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   { role: 'Guitarrista / Bajista', focus: 'Cifrado armonico destacado', detail: 'Acordes grandes en tipografia monoespaciada con tono show transpuesto.' },
                   { role: 'Director Musical', focus: 'Mando dual y saltos de tema', detail: 'Botones grandes para disparar temas imprevistos con alerta general a la banda.' },
                 ].map((item, idx) => (
-                  <div key={idx} style={{ background: 'var(--b-modal)', border: '1px solid var(--b-border)', borderRadius: 'var(--b-radius-card)', padding: '14px' }}>
+                  <div key={idx} style={{ background: 'var(--b-modal)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '14px' }}>
                     <div style={{ color: 'var(--b-violet)', fontWeight: 800, fontSize: '13px', fontFamily: "'IBM Plex Mono', monospace" }}>{item.role}</div>
                     <div style={{ color: 'var(--b-text)', fontWeight: 700, fontSize: '12px', marginTop: '4px' }}>{item.focus}</div>
                     <div style={{ color: 'var(--b-muted)', fontSize: '11px', marginTop: '4px', lineHeight: 1.4 }}>{item.detail}</div>
@@ -378,7 +378,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
         <div
           style={{
             padding: '12px 20px',
-            borderTop: '1px solid var(--b-border)',
+            borderTop: '1px solid var(--b-border-soft)',
             background: 'var(--b-modal)',
             display: 'flex',
             justifyContent: 'space-between',

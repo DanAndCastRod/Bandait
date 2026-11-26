@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E de APARIENCIA (docs/REQUERIMIENTOS_WEB_3.0.md, seccion 1): temas Dark Grafito / Light
@@ -32,11 +33,11 @@ async function enterDemo(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
 }
 
 async function openAppearance(page: Page) {
-  await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'AJUSTES' }).click();
+  await openView(page, 'settings');
   await page.getByRole('tab', { name: 'APARIENCIA' }).click();
   await expect(page.getByTestId('appearance-settings')).toBeVisible();
 }
@@ -127,7 +128,7 @@ test.describe('Web Admin Hub - apariencia', () => {
     // Recargar: todo sigue igual y el tema llega antes del primer render
     await page.reload();
     expect(await theme(page)).toBe('light-estudio');
-    await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+    await expect(page.getByTestId('hub-logo')).toBeVisible();
     expect(await rootVar(page, '--b-accent')).toBe('#E06C9F');
     expect(await rootVar(page, '--b-radius')).toBe('16px');
     await openAppearance(page);
@@ -166,11 +167,11 @@ test.describe('Web Admin Hub - apariencia', () => {
     // cada pasada abre una maqueta nueva.
     const keys = page.locator('[data-testid="studio-transport"] .stu-key');
     for (const r of ['8', '999']) {
-      await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'AJUSTES' }).click();
+      await openView(page, 'settings');
       await page.getByRole('tab', { name: 'APARIENCIA' }).click();
       await radius.fill(r);
       await radius.press('Enter');
-      await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+      await openView(page, 'studio');
       await expect(page.getByTestId('studio-home')).toBeVisible();
       await expect(page.getByTestId('studio-create')).toBeEnabled();
       await page.getByTestId('studio-new-title').fill(`Apariencia ${r}`);
@@ -192,11 +193,11 @@ test.describe('Web Admin Hub - apariencia', () => {
     }
 
     // Reproductor de stems (PISTAS): REPRODUCIR / STOP con forma de pildora (9999px) aunque la redondez sea 8.
-    await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'AJUSTES' }).click();
+    await openView(page, 'settings');
     await page.getByRole('tab', { name: 'APARIENCIA' }).click();
     await radius.fill('8');
     await radius.press('Enter');
-    await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'PISTAS', exact: true }).click();
+    await openView(page, 'tracks');
     await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
     await page.getByTestId('stem-song-select').selectOption({ label: 'Medianoche en Pereira' });
     await page.getByTestId('stem-file-input').setInputFiles([{ name: 'Medianoche en Pereira_drums.wav', mimeType: 'audio/wav', buffer: wav(1, 110) }]);
@@ -214,7 +215,7 @@ test.describe('Web Admin Hub - apariencia', () => {
     await page.getByTestId('appearance-theme-light-estudio').click();
     expect(await theme(page)).toBe('light-estudio');
 
-    await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+    await openView(page, 'studio');
     await expect(page.getByTestId('studio-create')).toBeEnabled();
     await page.getByTestId('studio-new-title').fill('Lienzo claro');
     await page.getByTestId('studio-create').click();

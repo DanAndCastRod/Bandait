@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E de la nube de stems del hub: el Worker bandait-stems se SIMULA con page.route sobre la URL
@@ -122,7 +123,7 @@ class FakeStemsWorker {
 const SONG_A = workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']).songsMap.band_daniel_01[0].id as string;
 
 async function openStems(page: Page) {
-  await page.getByRole('button', { name: 'PISTAS', exact: true }).click();
+  await openView(page, 'tracks');
   await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
 }
 

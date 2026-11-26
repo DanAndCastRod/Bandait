@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { FakeSupabase, USER, signInWithFakeCloud, workspaceWith } from './support/fakeSupabase';
+import { openView } from './support/hubNav';
 
 /**
  * E2E del Estudio Bandait v2 (bandait-protocol/STUDIO_V2.md): pistas de instrumento, piano roll,
@@ -71,11 +72,11 @@ async function enterDemo(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId('hub-logo')).toBeVisible();
 }
 
 async function openStudioHome(page: Page) {
-  await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+  await openView(page, 'studio');
   await expect(page.getByTestId('studio-home')).toBeVisible();
 }
 
