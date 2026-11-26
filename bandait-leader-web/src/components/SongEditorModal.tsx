@@ -598,7 +598,7 @@ export const SongEditorModal: React.FC<Props> = ({ initial, defaultArtist, onSav
         {errors.length > 0 && (
           <div
             data-testid="song-editor-errors"
-            style={{ border: `1px solid ${colors.danger}`, borderRadius: '4px', padding: '8px 10px', color: colors.danger, fontSize: '12px' }}
+            style={{ border: `1px solid ${colors.danger}`, borderRadius: 'var(--b-radius-field)', padding: '8px 10px', color: colors.danger, fontSize: '12px' }}
           >
             {errors.map((e) => (
               <div key={e}>{e}</div>

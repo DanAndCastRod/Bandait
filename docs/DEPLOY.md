@@ -125,6 +125,8 @@ create table if not exists public.bandait_workspaces (
 
 El cliente guarda dentro de `workspace` un objeto `_sync` (`client_write_id`, `client_id`, `updated_at`) para reconocer los ecos de realtime de sus propias escrituras.
 
+**Apariencia (2026-11-25).** Desde Web 3.0 el `workspace` puede traer `uiPreferences` (tema, acento y redondez del músico; `bandait-protocol/WORKSPACE_V2.md`, sección 8). Es un campo más del mismo `jsonb`, así que **no hace falta ningún cambio de SQL ni de RLS**: la fila ya es solo de su dueño (sección 3.3). El campo nunca se escribe en `bandait_bands.content`, de modo que las políticas de bandas compartidas (sección 3.11) no lo tocan y un integrante de solo lectura puede cambiar su apariencia. El navegador guarda además una copia en `localStorage` (`bandait_ui_appearance`) que `index.html` aplica antes del primer render.
+
 ### 3.3. Seguridad de la tabla (OBLIGATORIO)
 
 Activa RLS, quita todo acceso al rol `anon`, borra la política permisiva antigua y deja solo políticas por usuario para `authenticated`:

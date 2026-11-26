@@ -17,11 +17,11 @@ export const SyncNoticeBanner: React.FC<{ onOpenCloud: () => void }> = ({ onOpen
           role="status"
           data-testid="sync-notice"
           style={{
-            background: 'rgba(217, 162, 78, 0.12)',
-            border: '1px solid #D9A24E',
-            borderRadius: '4px',
+            background: 'color-mix(in srgb, var(--b-warning) 12%, transparent)',
+            border: '1px solid var(--b-warning)',
+            borderRadius: 'var(--b-radius-field)',
             padding: '8px 12px',
-            color: '#E3C07A',
+            color: 'var(--b-warning-text)',
             fontSize: '12px',
             fontFamily: mono,
             display: 'flex',
@@ -34,7 +34,7 @@ export const SyncNoticeBanner: React.FC<{ onOpenCloud: () => void }> = ({ onOpen
           <button
             type="button"
             onClick={onOpenCloud}
-            style={{ background: 'none', border: 'none', color: '#E3C07A', textDecoration: 'underline', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
+            style={{ background: 'none', border: 'none', color: 'var(--b-warning-text)', textDecoration: 'underline', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
           >
             VER RESPALDOS
           </button>
@@ -42,7 +42,7 @@ export const SyncNoticeBanner: React.FC<{ onOpenCloud: () => void }> = ({ onOpen
             type="button"
             onClick={dismissSyncNotice}
             aria-label="Cerrar aviso"
-            style={{ background: 'none', border: 'none', color: '#E3C07A', cursor: 'pointer', padding: 0 }}
+            style={{ background: 'none', border: 'none', color: 'var(--b-warning-text)', cursor: 'pointer', padding: 0 }}
           >
             <X size={14} />
           </button>
@@ -53,11 +53,11 @@ export const SyncNoticeBanner: React.FC<{ onOpenCloud: () => void }> = ({ onOpen
           role="alert"
           data-testid="sync-error"
           style={{
-            background: 'rgba(217, 100, 89, 0.12)',
-            border: '1px solid #D96459',
-            borderRadius: '4px',
+            background: 'color-mix(in srgb, var(--b-danger) 12%, transparent)',
+            border: '1px solid var(--b-danger)',
+            borderRadius: 'var(--b-radius-field)',
             padding: '8px 12px',
-            color: '#E8A49B',
+            color: 'var(--b-danger-text)',
             fontSize: '12px',
             fontFamily: mono,
             display: 'flex',
@@ -70,7 +70,7 @@ export const SyncNoticeBanner: React.FC<{ onOpenCloud: () => void }> = ({ onOpen
           <button
             type="button"
             onClick={retrySync}
-            style={{ background: 'transparent', border: '1px solid #D96459', color: '#D96459', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
+            style={{ background: 'transparent', border: '1px solid var(--b-danger)', color: 'var(--b-danger)', borderRadius: 'var(--b-radius-field)', padding: '4px 10px', cursor: 'pointer', fontFamily: mono, fontSize: '11px' }}
           >
             REINTENTAR
           </button>

@@ -83,7 +83,7 @@ function toggleStyle(active: boolean, accent: string): React.CSSProperties {
     fontWeight: 700,
     minWidth: '30px',
     padding: '4px 8px',
-    borderRadius: '3px',
+    borderRadius: 'var(--b-radius-field)',
     border: `1px solid ${active ? accent : colors.border}`,
     background: active ? accent : colors.elevated,
     color: active ? colors.onAccent : colors.muted,
@@ -565,7 +565,7 @@ export const StemStudio: React.FC<Props> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
         <button
           type="button"
-          className="stx-btn"
+          className="stx-btn b-transport"
           data-testid="stem-play"
           onClick={togglePlay}
           disabled={!anyReady}
@@ -575,7 +575,7 @@ export const StemStudio: React.FC<Props> = ({
           {playState === 'playing' ? <Pause size={14} /> : <Play size={14} />}
           {playState === 'playing' ? 'PAUSA' : 'REPRODUCIR'}
         </button>
-        <button type="button" className="stx-btn" data-testid="stem-stop" onClick={stop} disabled={!anyReady} aria-label="Detener" style={{ ...ghostButton, ...(rehearsal ? { padding: '10px 14px' } : {}) }}>
+        <button type="button" className="stx-btn b-transport" data-testid="stem-stop" onClick={stop} disabled={!anyReady} aria-label="Detener" style={{ ...ghostButton, ...(rehearsal ? { padding: '10px 14px' } : {}) }}>
           <Square size={13} /> STOP
         </button>
         <span
@@ -600,7 +600,7 @@ export const StemStudio: React.FC<Props> = ({
               color: colors.onAccent,
               background: colors.success,
               padding: '2px 8px',
-              borderRadius: '3px',
+              borderRadius: 'var(--b-radius-field)',
               marginLeft: rehearsal ? 'auto' : undefined,
             }}
           >
@@ -733,7 +733,7 @@ export const StemStudio: React.FC<Props> = ({
           fontSize: '11px',
           fontWeight: 700,
           padding: '1px 6px',
-          borderRadius: '3px',
+          borderRadius: 'var(--b-radius-field)',
           background: colors.borderSoft,
           color: colors.text,
           flexShrink: 0,

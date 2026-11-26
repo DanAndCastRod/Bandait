@@ -53,7 +53,7 @@ test.describe('Web Admin Hub 2.3 - navegacion', () => {
 
     await nav.getByRole('button', { name: 'AJUSTES' }).click();
     await expect(nav.getByRole('button', { name: 'AJUSTES' })).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO']);
+    await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO', 'APARIENCIA']);
     await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
     await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
     await expect(page.getByRole('tab', { name: 'EQUIPAMIENTO' })).toHaveAttribute('aria-selected', 'true');
