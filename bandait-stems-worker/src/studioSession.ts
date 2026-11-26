@@ -97,6 +97,8 @@ export interface SessionNote { pitch: number; start: number; length: number; vel
 
 export interface SessionMidiClip {
   id: string; start_beat: number; length_beats: number; loop: boolean; loop_beats: number; notes: SessionNote[];
+  /** STUDIO_V2.md 2.4: solo presente cuando es true (false se normaliza a ausente). */
+  muted?: true;
 }
 
 export interface SessionMarker { id: string; beat: number; label: string; kind: string }
@@ -473,8 +475,9 @@ interface Counters { clipIds: Set<string>; notes: number }
 
 function validateMidiClip(raw: unknown, path: string, bpm: number, counters: Counters): SessionMidiClip {
   const o = asObject(raw, path);
-  checkKeys(o, path, ['id', 'start_beat', 'length_beats', 'loop', 'loop_beats', 'notes']);
+  checkKeys(o, path, ['id', 'start_beat', 'length_beats', 'loop', 'loop_beats', 'notes'], ['muted']);
   const clipId = id(o, 'id', path);
+  const muted = o.muted !== undefined && bool(o, 'muted', path);
   const startBeat = num(o, 'start_beat', path, 0, MAX_BEAT);
   const lengthBeats = num(o, 'length_beats', path, MIDI_MIN_CLIP_BEATS, MAX_BEAT);
   const loop = bool(o, 'loop', path);
@@ -492,7 +495,9 @@ function validateMidiClip(raw: unknown, path: string, bpm: number, counters: Cou
     if (end !== undefined && note.start < end - NOTE_EPSILON_BEATS) fail('note_overlap', `${notesPath}[${index}].start`);
     lastEnd.set(note.pitch, note.start + note.length);
   }
-  return { id: clipId, start_beat: startBeat, length_beats: lengthBeats, loop, loop_beats: loopBeats, notes: indexed.map((x) => x.note) };
+  const clip: SessionMidiClip = { id: clipId, start_beat: startBeat, length_beats: lengthBeats, loop, loop_beats: loopBeats, notes: indexed.map((x) => x.note) };
+  if (muted) clip.muted = true;
+  return clip;
 }
 
 const TRACK_COMMON_KEYS = ['name', 'role', 'volume_db', 'pan', 'mute', 'solo', 'reverb_send_db', 'fx'] as const;

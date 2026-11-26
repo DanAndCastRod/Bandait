@@ -59,10 +59,12 @@ export interface R2Bucket {
   delete(keys: string | string[]): Promise<void>;
   /**
    * `include: ['customMetadata']` hace que cada objeto listado traiga su customMetadata (lo usa el
-   * MCP para filtrar eventos sin leerlos uno por uno).
+   * MCP para filtrar eventos sin leerlos uno por uno). `startAfter`: solo claves posteriores a esa
+   * (lo usa el barrido de huerfanos para retomar desde su cursor).
    */
   list(options?: {
-    prefix?: string; cursor?: string; limit?: number; delimiter?: string; include?: ('httpMetadata' | 'customMetadata')[];
+    prefix?: string; cursor?: string; limit?: number; delimiter?: string; startAfter?: string;
+    include?: ('httpMetadata' | 'customMetadata')[];
   }): Promise<R2Objects>;
 }
 

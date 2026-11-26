@@ -352,6 +352,117 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test('rectángulo de selección y silencio de clips MIDI (0): el clip silenciado no suena ni alarga la exportación', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+    await enterDemo(page);
+    await openStudioHome(page);
+    await createFreeSession(page, 'Rectangulo e2e');
+    await page.getByTestId('studio-add-instrument').selectOption('synth');
+    await expect(tracks(page)).toHaveCount(1);
+    const track = tracks(page).first();
+    const selection = page.getByTestId('studio-selection');
+    const undo = page.getByTestId('studio-undo');
+
+    // Tres clips MIDI de 4 compases seguidos (compases 1, 5 y 9; 8 s cada uno a 120 BPM).
+    await page.getByTestId('studio-add-midi-clip').click();
+    await blur(page);
+    await page.keyboard.press('Control+c');
+    await page.keyboard.press('Control+v');
+    await page.keyboard.press('Control+v');
+    await expect(track).toHaveAttribute('data-clips', '3');
+
+    // Alejar una vez: 24 px por segundo, los clips quedan en x 0-192, 192-384 y 384-576.
+    await page.getByRole('button', { name: 'Alejar', exact: true }).click();
+    const canvas = page.getByTestId('studio-canvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const at = (x: number, y: number) => ({ x: box!.x + x, y: box!.y + y });
+    // Fila de la pista: y 46..158 (los clips en 50..154); debajo, zona vacia hasta 210.
+
+    // Arrastre desde la zona vacia de abajo hasta la fila: el rectangulo toca los dos primeros clips.
+    let p = at(100, 195);
+    await page.mouse.move(p.x, p.y);
+    await page.mouse.down();
+    p = at(250, 120);
+    await page.mouse.move(p.x, p.y, { steps: 6 });
+    await page.mouse.up();
+    await expect(selection).toHaveAttribute('data-count', '2');
+    await expect(selection).toContainText('2 CLIPS ELEGIDOS');
+
+    // Con Shift, otro rectangulo suma el tercero sin perder los anteriores.
+    await page.keyboard.down('Shift');
+    p = at(420, 195);
+    await page.mouse.move(p.x, p.y);
+    await page.mouse.down();
+    p = at(440, 110);
+    await page.mouse.move(p.x, p.y, { steps: 6 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    await expect(selection).toHaveAttribute('data-count', '3');
+
+    // 0 silencia los tres clips MIDI en un paso de deshacer; otra vez, vuelven a sonar.
+    await page.keyboard.press('0');
+    await expect(track).toHaveAttribute('data-muted-clips', '3');
+    await expect(undo).toHaveAttribute('title', /Silenciar 3 clips/);
+    await page.keyboard.press('0');
+    await expect(track).toHaveAttribute('data-muted-clips', '0');
+    await expect(undo).toHaveAttribute('title', /Hacer sonar 3 clips/);
+
+    // Un clic en una zona vacia (sin arrastrar) suelta la seleccion, como antes.
+    await canvas.click({ position: { x: 300, y: 195 } });
+    await expect(selection).toHaveAttribute('data-count', '0');
+
+    // Quitar el tercero y dibujar una nota en el segundo (el primero queda vacio).
+    await canvas.click({ position: { x: 480, y: 100 } });
+    await page.keyboard.press('Delete');
+    await expect(track).toHaveAttribute('data-clips', '2');
+    await canvas.click({ position: { x: 300, y: 100 } });
+    await page.getByTestId('studio-open-piano').click();
+    await page.getByTestId('studio-piano-tool-draw').click();
+    await page.getByTestId('studio-piano-canvas').click({ position: { x: 90, y: 90 } });
+    await expect(page.getByTestId('studio-piano-status')).toContainText('1 notas');
+    await page.getByTestId('studio-piano-back').click();
+    await expect(canvas).toBeVisible();
+
+    const exportMix = async () => {
+      await page.getByTestId('studio-export-open').click();
+      const run = page.getByTestId('studio-export-run');
+      await expect(run).toBeEnabled();
+      await run.click();
+      const downloadButton = page.getByTestId('studio-export-download');
+      await expect(downloadButton).toBeVisible({ timeout: 30_000 });
+      const [download] = await Promise.all([page.waitForEvent('download'), downloadButton.click()]);
+      const info = readWav(readFileSync(await download.path()));
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('studio-export-run')).toHaveCount(0);
+      return info;
+    };
+
+    // Sonando: la nota se oye y la mezcla llega hasta el final del segundo clip (16 s y la cola).
+    const loud = await exportMix();
+    expect(loud.seconds).toBeGreaterThan(15.9);
+    expect(loud.peak).toBeGreaterThan(0.01 * 0x7fffff);
+
+    // Silenciado (0): la misma exportacion no tiene sonido y dura solo el primer clip y la cola.
+    await canvas.click({ position: { x: 300, y: 100 } });
+    await page.keyboard.press('0');
+    await expect(track).toHaveAttribute('data-muted-clips', '1');
+    await expect(selection).toContainText('SILENCIADO MIDI');
+    const quiet = await exportMix();
+    expect(quiet.seconds).toBeGreaterThan(7.9);
+    expect(quiet.seconds).toBeLessThan(13);
+    expect(quiet.peak).toBe(0);
+
+    // Con los dos en silencio la pista no tiene nada que exportar.
+    await canvas.click({ position: { x: 100, y: 100 } });
+    await page.keyboard.press('0');
+    await expect(track).toHaveAttribute('data-muted-clips', '2');
+    await page.getByTestId('studio-export-open').click();
+    await expect(page.getByTestId('studio-export-run')).toBeDisabled();
+    expect(pageErrors).toEqual([]);
+  });
+
   test('COMPONER contra el Worker simulado: confirma el costo y el clip entra solo al aceptar', async ({ page }) => {
     const worker = new FakeStudioV2Worker();
     await enterCloudStudio(page, worker, 'Componer e2e');

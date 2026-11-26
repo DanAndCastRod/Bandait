@@ -1,31 +1,163 @@
-/* Bandait Cloud & Web Admin Hub — Swiss Bauhaus Lab Design Tokens & Responsive Rules */
+/* Bandait Cloud & Web Admin Hub — tokens de apariencia y reglas responsivas.
+
+   Temas (docs/REQUERIMIENTOS_WEB_3.0.md, seccion 1): `Dark Grafito` (por defecto) y
+   `Light Estudio`, elegidos con `data-theme` en <html>. Los valores de cada tema son los de
+   THEME_TOKENS en src/services/appearance.ts; scripts/verify-appearance-logic.ts compara los
+   dos bloques de abajo con ese objeto para que no deriven.
+   El acento (--b-accent), su tinta de contraste (--b-on-accent) y la redondez (--b-radius) los
+   escribe applyAppearance() en <html style> con las preferencias del musico. */
+
+:root,
+[data-theme='dark-grafito'] {
+  --b-bg: #111316;
+  --b-surface: #16191D;
+  --b-card: #1A1D22;
+  --b-modal: #1E2227;
+  --b-input: #22262C;
+  --b-elevated: #262A31;
+  --b-hover: #2E333A;
+  --b-border: #FFFFFF14;
+  --b-border-soft: #FFFFFF0B;
+  --b-border-strong: #FFFFFF26;
+  --b-well: #0C0E10;
+  --b-lane: #121417;
+  --b-text: #E4E7EB;
+  --b-text-soft: #C3C9D1;
+  --b-muted: #8E97A3;
+  --b-faint: #868F9B;
+  --b-disabled: #4A525D;
+  --b-accent: #5CC8C2;
+  --b-on-accent: #15181C;
+  --b-cobalt: #7AA5D6;
+  --b-success: #B8CF7A;
+  --b-warning: #D9A24E;
+  --b-danger: #D96459;
+  --b-violet: #B48EDB;
+  --b-cyan: #7AC4D6;
+  --b-danger-text: #E8A49B;
+  --b-warning-text: #E3C07A;
+  --b-success-text: #C8DB9F;
+  --b-on-strong: #15181C;
+  color-scheme: dark;
+}
+
+[data-theme='light-estudio'] {
+  --b-bg: #F2F3F5;
+  --b-surface: #F8F9FA;
+  --b-card: #FFFFFF;
+  --b-modal: #FFFFFF;
+  --b-input: #EEF0F3;
+  --b-elevated: #E8EAEE;
+  --b-hover: #DEE1E6;
+  --b-border: #15181C17;
+  --b-border-soft: #15181C0D;
+  --b-border-strong: #15181C2B;
+  --b-well: #E4E7EB;
+  --b-lane: #EDEFF2;
+  --b-text: #15181C;
+  --b-text-soft: #2C3238;
+  --b-muted: #4F5761;
+  --b-faint: #5F6771;
+  --b-disabled: #9AA2AC;
+  --b-accent: #1A7F7A;
+  --b-on-accent: #FFFFFF;
+  --b-cobalt: #2B62A8;
+  --b-success: #46691A;
+  --b-warning: #8A5608;
+  --b-danger: #B23B30;
+  --b-violet: #7046A6;
+  --b-cyan: #1A6B80;
+  --b-danger-text: #A3332A;
+  --b-warning-text: #7E4F07;
+  --b-success-text: #3F6016;
+  --b-on-strong: #FFFFFF;
+  color-scheme: light;
+}
 
 :root {
-  --bg-primary: #15181C;
-  --bg-surface: #1A1E23;
-  --bg-elevated: #232830;
-  --bg-hover: #2B313A;
+  /* Redondez: --b-radius va de 8px a 999px (pildora, por defecto). Los botones la usan tal cual;
+     campos, chips e insignias la topan en 14px y tarjetas y paneles en 18px, para no perder la
+     densidad de consola. */
+  --b-radius: 999px;
+  --b-radius-control: max(8px, var(--b-radius));
+  --b-radius-field: min(var(--b-radius-control), 14px);
+  --b-radius-card: min(var(--b-radius-control), 18px);
+  --b-radius-transport: 9999px;
 
-  --text-primary: #D5DAE0;
-  --text-secondary: #8E97A3;
-  --text-disabled: #4A525D;
+  /* Derivados del acento y de los temas (color-mix sobre los tokens de arriba). */
+  --b-accent-hover: color-mix(in srgb, var(--b-accent) 82%, var(--b-text));
+  --b-accent-soft: color-mix(in srgb, var(--b-accent) 16%, transparent);
+  --b-overlay: color-mix(in srgb, #000 80%, transparent);
+  --b-shadow: 0 18px 48px color-mix(in srgb, #000 45%, transparent);
 
-  --accent-orange: #5CC8C2;
-  --accent-cobalt: #7AA5D6;
-  --accent-active: #D5DAE0;
-  --accent-success: #B8CF7A;
-  --accent-warning: #D9A24E;
-  --accent-danger: #D96459;
-
-  --border-subtle: #2E343D;
-  --border-active: #7AA5D6;
+  /* Nombres anteriores: siguen funcionando y ahora siguen el tema. */
+  --bg-primary: var(--b-bg);
+  --bg-surface: var(--b-surface);
+  --bg-elevated: var(--b-elevated);
+  --bg-hover: var(--b-hover);
+  --text-primary: var(--b-text);
+  --text-secondary: var(--b-muted);
+  --text-disabled: var(--b-disabled);
+  --accent-orange: var(--b-accent);
+  --accent-cobalt: var(--b-cobalt);
+  --accent-active: var(--b-text);
+  --accent-success: var(--b-success);
+  --accent-warning: var(--b-warning);
+  --accent-danger: var(--b-danger);
+  --border-subtle: var(--b-border);
+  --border-active: var(--b-cobalt);
 
   --font-ui: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
 
-  --radius-sm: 3px;
-  --radius-md: 4px;
-  --radius-lg: 8px;
+  --radius-sm: var(--b-radius-field);
+  --radius-md: var(--b-radius-field);
+  --radius-lg: var(--b-radius-card);
+}
+
+[data-theme='light-estudio'] {
+  --b-overlay: color-mix(in srgb, #15181C 40%, transparent);
+  --b-shadow: 0 14px 36px color-mix(in srgb, #15181C 18%, transparent);
+}
+
+/* Ningun boton cuadrado: todo boton usa la redondez del musico (>= 8px). Va con !important
+   porque muchas vistas ponen el radio en estilos en linea. */
+button,
+[role='button'],
+input[type='button'],
+input[type='submit'],
+input[type='reset'],
+input[type='file']::file-selector-button {
+  border-radius: var(--b-radius-control) !important;
+}
+
+/* Campos, selects, menus y listas: nunca menos de 8px (14px con la redondez por defecto). */
+input:not([type='checkbox']):not([type='radio']):not([type='range']),
+select,
+textarea,
+[role='combobox'],
+[role='listbox'],
+[role='menu'],
+[role='menuitem'] {
+  border-radius: var(--b-radius-field) !important;
+}
+
+/* Botones-tarjeta (varias lineas: opciones de tema, filas de listas): radio de tarjeta para que
+   la pildora no los deforme. */
+.b-block,
+button.b-block,
+.stu-row,
+.stu-palette-row,
+.rh-chip {
+  border-radius: var(--b-radius-card) !important;
+}
+
+/* Transporte (Play, Pausa, Stop, Grabar): siempre circular, por memoria muscular. */
+.b-transport,
+button.b-transport,
+.stu-key,
+button.stu-key {
+  border-radius: var(--b-radius-transport) !important;
 }
 
 *, *::before, *::after {
@@ -243,7 +375,7 @@ input, select, textarea {
   gap: 10px;
   padding: 12px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--b-radius-card);
 }
 .rh-mixer-summary:hover {
   opacity: 0.85;
@@ -266,8 +398,8 @@ input, select, textarea {
   gap: 6px;
   padding: 8px 10px;
   border: 1px solid;
-  border-radius: 4px;
-  background: #15181c;
+  border-radius: var(--b-radius-field);
+  background: var(--b-bg);
   min-width: 0;
   transition: opacity 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -288,9 +420,9 @@ input, select, textarea {
   align-items: flex-start;
   gap: 2px;
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: var(--b-radius-control);
   border: 1px solid var(--border-subtle);
-  background: #232830;
+  background: var(--b-elevated);
   color: inherit;
   cursor: pointer;
   text-align: left;
@@ -302,8 +434,8 @@ input, select, textarea {
   opacity: 0.5;
 }
 .rh-chip[data-state='current'] {
-  border-color: #7ac4d6;
-  background: #1f2a30;
+  border-color: var(--b-cyan);
+  background: color-mix(in srgb, var(--b-cyan) 14%, var(--b-elevated));
 }
 .rh-chip:hover:not(:disabled) {
   opacity: 0.85;
@@ -403,7 +535,7 @@ input, select, textarea {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #8e97a3;
+  background: var(--b-muted);
   opacity: 0.22;
   transform: scale(0.8);
   transition:
@@ -413,7 +545,7 @@ input, select, textarea {
 .rh-beat[data-accent='1'] {
   width: 12px;
   height: 12px;
-  background: #7ac4d6;
+  background: var(--b-cyan);
 }
 .rh-beat[data-on='1'] {
   opacity: 1;
@@ -422,12 +554,12 @@ input, select, textarea {
 .rh-progress {
   height: 3px;
   border-radius: 2px;
-  background: #2b313a;
+  background: var(--b-hover);
   overflow: hidden;
 }
 .rh-progress-fill {
   height: 100%;
-  background: #7ac4d6;
+  background: var(--b-cyan);
   transform-origin: left center;
   transform: scaleX(0);
 }
@@ -443,14 +575,14 @@ input, select, textarea {
 }
 .rh-next[data-warn] {
   opacity: 1;
-  border-top-color: #d9a24e;
+  border-top-color: var(--b-warning);
 }
 .rh-countdown {
   font-weight: 700;
-  color: #15181c;
-  background: #d9a24e;
+  color: var(--b-on-strong);
+  background: var(--b-warning);
   padding: 2px 8px;
-  border-radius: 3px;
+  border-radius: var(--b-radius-field);
   letter-spacing: 0.3px;
 }
 .rh-focus-transport {
@@ -461,7 +593,7 @@ input, select, textarea {
   align-items: center;
   gap: 10px;
   padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 0px));
-  background: #15181c;
+  background: var(--b-bg);
   border-top: 1px solid var(--border-subtle);
   margin-top: auto;
 }
@@ -476,21 +608,21 @@ input, select, textarea {
   margin: 0 4px 4px 0;
   border: 1px solid var(--border-subtle);
   border-bottom-width: 2px;
-  border-radius: 4px;
-  background: #232830;
-  color: #d5dae0;
+  border-radius: var(--b-radius-field);
+  background: var(--b-elevated);
+  color: var(--b-text);
 }
 
 /* SUBIR CANCION Y SEPARAR (SplitUpload): barra de progreso y confirmacion de reemplazo. */
 .split-progress {
   height: 4px;
   border-radius: 2px;
-  background: #2b313a;
+  background: var(--b-hover);
   overflow: hidden;
 }
 .split-progress-fill {
   height: 100%;
-  background: #b48edb;
+  background: var(--b-violet);
   transform-origin: left center;
   transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -511,9 +643,9 @@ input, select, textarea {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  border: 1px solid #d9a24e;
-  border-radius: 4px;
-  background: #1a1e23;
+  border: 1px solid var(--b-warning);
+  border-radius: var(--b-radius-field);
+  background: var(--b-surface);
   scroll-margin-bottom: 16px;
 }
 @media (max-width: 768px) {
@@ -547,4 +679,88 @@ input, select, textarea {
   .stx-fade-in {
     animation: none;
   }
+}
+
+/* Practica del reproductor de stems (StemStudio): velocidad, tono y Speed Ramp. Clases nuevas
+   (sp-*), solo con los tokens existentes. Las filas ajustan renglon a 390 px. */
+.sp-practice,
+.sp-ramp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.sp-practice {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+.sp-ramp {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.sp-row-end {
+  justify-content: flex-end;
+}
+.sp-label {
+  flex: 0 0 72px;
+}
+.sp-range {
+  flex: 1 1 120px;
+  width: auto;
+}
+.sp-value {
+  min-width: 44px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.sp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.sp-check input {
+  accent-color: var(--accent-cobalt);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.sp-check input:focus-visible {
+  outline: 2px solid var(--accent-cobalt);
+  outline-offset: 2px;
+}
+.sp-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.sp-warn {
+  color: var(--accent-warning);
+}
+.sp-rate {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-cobalt);
+  border: 1px solid var(--accent-cobalt);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sp-rate:empty {
+  display: none;
 }

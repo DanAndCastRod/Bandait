@@ -387,6 +387,11 @@ export interface StudioMidiClip {
   loopBeats: number
   /** Ordenadas por start y pitch, sin solapes del mismo pitch (STUDIO_V2.md 2.4). */
   notes: StudioMidiNote[]
+  /**
+   * Clip silenciado (tecla 0): se ve y se edita pero no suena al escuchar ni al exportar
+   * (STUDIO_V2.md 2.4). Ausente o false = suena; en el cable solo se escribe cuando es true.
+   */
+  muted?: boolean
 }
 
 export interface StudioMarker {
@@ -549,6 +554,8 @@ export interface WireStudioMidiClip {
   loop: boolean
   loop_beats: number
   notes: WireStudioMidiNote[]
+  /** Opcional, solo true (STUDIO_V2.md 2.4). */
+  muted?: true
 }
 
 export interface WireStudioMarker {
@@ -1513,8 +1520,9 @@ interface ParseCounters {
 
 function parseMidiClip(raw: unknown, path: string, bpm: number, counters: ParseCounters): StudioMidiClip {
   const o = asObject(raw, path)
-  checkKeys(o, path, ['id', 'start_beat', 'length_beats', 'loop', 'loop_beats', 'notes'])
+  checkKeys(o, path, ['id', 'start_beat', 'length_beats', 'loop', 'loop_beats', 'notes'], ['muted'])
   const clipId = id(o, 'id', path)
+  const muted = o.muted !== undefined && bool(o, 'muted', path)
   const startBeat = num(o, 'start_beat', path, 0, STUDIO_MAX_BEAT)
   const lengthBeats = num(o, 'length_beats', path, STUDIO_MIDI_MIN_CLIP_BEATS, STUDIO_MAX_BEAT)
   const loop = bool(o, 'loop', path)
@@ -1536,7 +1544,9 @@ function parseMidiClip(raw: unknown, path: string, bpm: number, counters: ParseC
     }
     lastEnd.set(note.pitch, note.start + note.length)
   }
-  return { id: clipId, startBeat, lengthBeats, loop, loopBeats, notes: indexed.map((x) => x.note) }
+  const clip: StudioMidiClip = { id: clipId, startBeat, lengthBeats, loop, loopBeats, notes: indexed.map((x) => x.note) }
+  if (muted) clip.muted = true
+  return clip
 }
 
 const TRACK_COMMON_KEYS = ['id', 'name', 'role', 'volume_db', 'pan', 'mute', 'solo', 'reverb_send_db', 'fx'] as const
@@ -1804,7 +1814,7 @@ function instrumentToWire(instrument: StudioInstrument): WireStudioInstrument {
 }
 
 function midiClipToWire(c: StudioMidiClip): WireStudioMidiClip {
-  return {
+  const wire: WireStudioMidiClip = {
     id: c.id,
     start_beat: c.startBeat,
     length_beats: c.lengthBeats,
@@ -1812,6 +1822,8 @@ function midiClipToWire(c: StudioMidiClip): WireStudioMidiClip {
     loop_beats: c.loopBeats,
     notes: sortNotes(c.notes ?? []).map((n) => ({ pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity })),
   }
+  if (c.muted === true) wire.muted = true
+  return wire
 }
 
 function clipToWire(c: StudioClip): WireStudioClip {
@@ -2170,6 +2182,8 @@ export function sessionEndSeconds(session: StudioSession): number {
       if (clip.active && clip.startS + clip.lengthS > end) end = clip.startS + clip.lengthS
     }
     for (const clip of track.midiClips ?? []) {
+      // Igual que un clip de audio inactivo, un clip MIDI silenciado no alarga lo que suena.
+      if (clip.muted) continue
       const clipEnd = beatsToSeconds(clip.startBeat + clip.lengthBeats, session.bpm)
       if (clipEnd > end) end = clipEnd
     }

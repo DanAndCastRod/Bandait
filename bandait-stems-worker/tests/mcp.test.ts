@@ -285,12 +285,12 @@ test('cliente oficial: initialize, tools/list con anotaciones de solo lectura', 
   const { connect } = setup();
   const client = await connect();
   assert.equal(client.getServerVersion()?.name, 'bandait');
-  assert.equal(client.getServerVersion()?.version, '1.3.0');
+  assert.equal(client.getServerVersion()?.version, '1.4.0');
   assert.match(client.getInstructions() || '', /solo lectura/);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name), [
     'bandait_salud', 'bandait_eventos', 'bandait_trabajo_ver', 'bandait_gasto', 'bandait_sesiones',
-    'bandait_sesion_resumen', 'bandait_stems', 'bandait_contrato',
+    'bandait_sesion_resumen', 'bandait_huerfanos', 'bandait_stems', 'bandait_contrato',
   ]);
   for (const t of tools) {
     assert.equal(t.inputSchema.type, 'object', t.name);
@@ -348,7 +348,7 @@ test('un fallo al escribir el evento no rompe ni retrasa el trabajo', async () =
 });
 
 test('herramientas con R2 simulado; ninguna respuesta trae tokens, prompts ni audio', async () => {
-  const { connect, seen } = await seeded();
+  const { connect, seen, bucket } = await seeded();
   const client = await connect();
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const res = await client.callTool({ name, arguments: args });
@@ -357,7 +357,7 @@ test('herramientas con R2 simulado; ninguna respuesta trae tokens, prompts ni au
   };
 
   const salud = await call('bandait_salud');
-  assert.equal(salud.version, '1.3.0');
+  assert.equal(salud.version, '1.4.0');
   assert.equal(salud.proveedores.urit_ai.configurado, true);
   assert.equal(salud.proveedores.musicai.configurado, false);
   assert.deepEqual(salud.topes_usd, { por_banda_mensual: 20, global_mensual: 30 });
@@ -399,6 +399,20 @@ test('herramientas con R2 simulado; ninguna respuesta trae tokens, prompts ni au
   // ast_t1 lo dejo el generate de seeded(): esta en R2 y no en el documento.
   assert.deepEqual([resumen.audios_en_r2.cantidad, resumen.audios_en_r2.huerfanos, resumen.audios_en_r2.faltantes], [3, 2, 0]);
   assert.equal(resumen.trabajos.cantidad, 2);
+
+  // Huerfanos: ast_huerfano y ast_t1 (los trabajos de ses_a terminaron). Solo lectura: no borra.
+  const keysBefore = bucket.objects.size;
+  const huerfanos = await call('bandait_huerfanos', { band: BAND });
+  assert.deepEqual(
+    [huerfanos.huerfanos, huerfanos.bytes, huerfanos.sesiones, huerfanos.sesiones_protegidas, huerfanos.bloqueado, huerfanos.truncated],
+    [2, AUDIO_TEXT.length * 2, 2, 0, null, undefined],
+  );
+  assert.equal(bucket.objects.size, keysBefore, 'bandait_huerfanos no borra nada');
+  assert.ok(bucket.objects.has(`bands/${BAND}/studio/ses_a/assets/ast_huerfano.mp3`));
+  assert.equal((await call('bandait_huerfanos', { band: `users/${USER}` })).huerfanos, 0);
+  // El registro de cada trabajo lleva su estado en customMetadata: la limpieza no tiene que leerlo.
+  assert.equal(bucket.objects.get(`bands/${BAND}/studio/ses_a/jobs/job_ok.json`)?.custom?.status, 'SUCCEEDED');
+  assert.equal(bucket.objects.get(`bands/${BAND}/studio/ses_a/jobs/job_fail.json`)?.custom?.status, 'FAILED');
 
   const stems = await call('bandait_stems', { band: BAND });
   assert.deepEqual(stems.songs, [

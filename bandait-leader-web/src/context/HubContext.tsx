@@ -69,6 +69,8 @@ import { legacyEmailProfileId, localProfileId } from '../services/identity'
 import { uuidv4 } from '../services/uuid'
 import { downloadJson, slugify } from '../services/download'
 import { createDemoWorkspace, createPersonalWorkspace } from './seedData'
+import { carryUiPreferences, defaultUiPreferences, normalizeUiPreferences, resolveUiPreferences, withUiPreferences, type UiPreferences } from '../services/appearance'
+import { applyAppearance, readCachedPreferences } from '../services/appearanceDom'
 import { HubContext, type HubActionResult, type HubContextType, type HubSyncStatus, type SharingInfo } from './hubContextCore'
 
 const workspaceKey = (userId: string) => `bandait_workspace_${userId}`
@@ -285,6 +287,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /** null: aun no se sabe; false: las tablas no existen en Supabase (falta el SQL de la seccion 3.11). */
   const [sharedAvailable, setSharedAvailable] = useState<boolean | null>(null)
   const [sharedError, setSharedError] = useState<string | null>(null)
+  /** Apariencia sin sesion (pantalla de acceso): la de la cache de este navegador. */
+  const [guestUiPreferences, setGuestUiPreferences] = useState<UiPreferences>(() => readCachedPreferences() ?? defaultUiPreferences())
 
   const userRef = useRef<UserProfile | null>(user)
   const workspaceRef = useRef<WorkspaceStore>(workspace)
@@ -322,6 +326,30 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const cloudUserId = user?.authProvider === 'supabase' && cloudSessionUserId === user.id ? user.id : null
 
+  // Apariencia del musico: con sesion vive en su workspace personal (uiPreferences, que nunca
+  // entra en una banda compartida); sin sesion, en la cache del navegador.
+  const workspaceUiPreferences = workspace.uiPreferences
+  const uiPreferences = useMemo(
+    () => (user ? resolveUiPreferences(workspaceUiPreferences) : guestUiPreferences),
+    [user, workspaceUiPreferences, guestUiPreferences]
+  )
+  useEffect(() => {
+    applyAppearance(uiPreferences)
+  }, [uiPreferences])
+  /**
+   * Cambia la apariencia. No pasa por blockIfReadOnly: es del musico, no de la banda, asi que un
+   * Musician de solo lectura en una banda compartida tambien puede cambiarla. Solo toca la raiz
+   * del workspace (parte personal -> bandait_workspaces).
+   */
+  const setUiPreferences = useCallback((next: UiPreferences) => {
+    const clean = normalizeUiPreferences(next)
+    if (!userRef.current) {
+      setGuestUiPreferences(clean)
+      return
+    }
+    setWorkspace((prev) => withUiPreferences(prev, clean))
+  }, [])
+
   /** Bandas compartidas cargadas (id -> puede editar), derivado del estado y no de refs. */
   const sharedFlags = useMemo(
     () => new Map((sharedKey ? sharedKey.split(',') : []).map((p) => [p.slice(0, p.lastIndexOf(':')), p.endsWith(':w')] as const)),
@@ -337,6 +365,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const applyUser = useCallback((next: UserProfile | null) => {
+    // Al cerrar sesion la pantalla de acceso conserva la ultima apariencia aplicada en este navegador.
+    if (!next && userRef.current) setGuestUiPreferences(readCachedPreferences() ?? defaultUiPreferences())
     userRef.current = next
     const had = next ? readStoredWorkspace(next.id) !== null : false
     const loaded = loadStateFor(next)
@@ -1307,7 +1337,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Reemplaza solo la parte personal: las bandas compartidas viven en la nube y no se tocan
     // (si el archivo las trae, p. ej. una exportacion de este mismo Hub, se ignoran).
     const sharedIds = new Set(sharedRef.current.keys())
-    const imported = personalPart(clone(result.workspace), sharedIds, result.workspace.activeBandId)
+    // La apariencia es de quien importa, no del archivo.
+    const imported = carryUiPreferences(personalPart(clone(result.workspace), sharedIds, result.workspace.activeBandId), workspaceRef.current)
     if (imported.bands.length === 0) {
       return { ok: false, message: 'El archivo solo trae bandas compartidas que ya tienes en la nube.' }
     }
@@ -1456,6 +1487,8 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateVoiceConfig,
     exportWorkspaceJson,
     importWorkspaceJson,
+    uiPreferences,
+    setUiPreferences,
   }
 
   return <HubContext.Provider value={value}>{children}</HubContext.Provider>

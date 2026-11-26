@@ -3,6 +3,8 @@ import { Snowflake, X } from 'lucide-react'
 import { KNOWN_STEM_ROLES, STEM_ROLE_CODES, stemRoleLabel, type StemRole } from '../../services/stemNames'
 import { instrumentAvailability } from '../../services/studio/instruments/index'
 import {
+  drumsPresetParams,
+  synthPresetParams,
   STUDIO_DRUMS_PRESETS,
   STUDIO_INSTRUMENT_TYPE_LABELS,
   STUDIO_MAX_TRACK_NAME,
@@ -58,10 +60,12 @@ function instrumentSummary(instrument: StudioInstrument): string {
  */
 export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, height, armed, midiArmed, selected, recordAllowed, recording, inputChannels }) => {
   const meterRef = useRef<HTMLCanvasElement>(null)
-  const color = trackColor(index)
+  const color = trackColor(index, track.role)
   const instrument = track.kind === 'instrument' ? track.instrument : null
   const availability = instrument ? instrumentAvailability(instrument) : null
   const clipCount = track.clips.length + track.midiClips.length
+  /** Clips en silencio (tecla 0): de audio inactivos fuera de un grupo de tomas y MIDI con `muted`. */
+  const mutedClips = track.clips.filter((c) => !c.active && c.takeGroup === null).length + track.midiClips.filter((c) => c.muted).length
 
   useEffect(() => {
     const canvas = meterRef.current
@@ -129,6 +133,16 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
     [controller, track.id],
   )
 
+  const changePreset = (current: StudioInstrument, id: string) => {
+    if (current.type === 'synth') {
+      const preset = STUDIO_SYNTH_PRESETS.find((p) => p.id === id)
+      if (preset) controller.setTrackInstrument(track.id, { type: 'synth', preset: preset.id, params: synthPresetParams(preset.id) }, `Preset ${preset.label}`)
+    } else if (current.type === 'drums') {
+      const preset = STUDIO_DRUMS_PRESETS.find((p) => p.id === id)
+      if (preset) controller.setTrackInstrument(track.id, { type: 'drums', preset: preset.id, params: drumsPresetParams(preset.id) }, `Preset ${preset.label}`)
+    }
+  }
+
   const commitName = (raw: string) => {
     const name = raw.trim().slice(0, STUDIO_MAX_TRACK_NAME)
     if (name && name !== track.name) controller.updateTrack(track.id, { name }, 'Renombrar pista')
@@ -144,6 +158,7 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
       data-selected={selected}
       data-kind={track.kind}
       data-clips={clipCount}
+      data-muted-clips={mutedClips}
       data-testid={`studio-track-${track.id}`}
       role="group"
       aria-label={`Pista ${index + 1}: ${track.name}${instrument ? ` (${STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type]})` : ''}`}
@@ -219,17 +234,41 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
               >
                 R
               </button>
-              <button
-                type="button"
-                className="stu-head-inst"
-                onClick={() => controller.selectTrack(track.id)}
-                title={availability?.available === false ? `${availability.reason ?? 'No disponible'}${track.frozenAssetId ? ' Suena el congelado.' : ' No suena.'}` : 'Ver el instrumento en el inspector'}
-                aria-label={`Instrumento: ${STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type]}, ${instrumentSummary(instrument)}`}
-                data-testid={`studio-track-instrument-${track.id}`}
-              >
-                <span className="stu-head-inst-type">{STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type].toUpperCase()}</span>
-                <span className="stu-head-inst-preset">{instrumentSummary(instrument)}</span>
-              </button>
+              {instrument.type === 'synth' || instrument.type === 'drums' ? (
+                // Selector de sonido en la cabecera (fidelidad DAW 4.2): el preset cambia en un paso
+                // de deshacer, igual que en el inspector; los parametros finos siguen alli.
+                <div className="stu-head-inst" data-picker="true" data-testid={`studio-track-instrument-${track.id}`}>
+                  <span className="stu-head-inst-type">{STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type].toUpperCase()}</span>
+                  <select
+                    className="stu-head-inst-select"
+                    value={instrument.preset ?? ''}
+                    disabled={recording}
+                    onChange={(event) => changePreset(instrument, event.target.value)}
+                    aria-label={`Sonido de ${track.name} (${STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type]})`}
+                    title={availability?.available === false ? `${availability.reason ?? 'No disponible'}${track.frozenAssetId ? ' Suena el congelado.' : ' No suena.'}` : 'Sonido del instrumento. Los parámetros, en el inspector.'}
+                    data-testid={`studio-head-preset-${track.id}`}
+                  >
+                    {instrument.preset === null && <option value="">{instrumentSummary(instrument)}</option>}
+                    {(instrument.type === 'synth' ? STUDIO_SYNTH_PRESETS : STUDIO_DRUMS_PRESETS).map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="stu-head-inst"
+                  onClick={() => controller.selectTrack(track.id)}
+                  title={availability?.available === false ? `${availability.reason ?? 'No disponible'}${track.frozenAssetId ? ' Suena el congelado.' : ' No suena.'}` : 'Ver el instrumento en el inspector'}
+                  aria-label={`Instrumento: ${STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type]}, ${instrumentSummary(instrument)}`}
+                  data-testid={`studio-track-instrument-${track.id}`}
+                >
+                  <span className="stu-head-inst-type">{STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type].toUpperCase()}</span>
+                  <span className="stu-head-inst-preset">{instrumentSummary(instrument)}</span>
+                </button>
+              )}
               {track.frozenAssetId && (
                 <span className="stu-badge" data-tone="sel" title="Tiene audio congelado: suena donde el instrumento no esté disponible">
                   <Snowflake size={10} aria-hidden="true" />

@@ -6,6 +6,7 @@ import { useStudioApi } from '../components/studioApi'
 import { ChordProPreview } from '../components/ChordProPreview'
 import { HubModal } from '../components/HubModal'
 import { transposeChordPro, transposeKey } from '../services/chordpro'
+import { INITIAL_TONE, applyLinked, applyPitch, applyTranspose, formatPitch, toneOctaveFolded, type ToneState } from '../services/stemPractice'
 import {
   DEFAULT_FONT_STEP,
   FONT_SCALES,
@@ -326,7 +327,7 @@ function chipStyle(active: boolean): React.CSSProperties {
     fontSize: '11px',
     fontWeight: 700,
     padding: '6px 10px',
-    borderRadius: '4px',
+    borderRadius: 'var(--b-radius-field)',
     border: `1px solid ${active ? colors.cyan : colors.border}`,
     background: active ? colors.cyan : colors.elevated,
     color: active ? colors.onAccent : colors.muted,
@@ -345,6 +346,9 @@ const toolButton: React.CSSProperties = {
   justifyContent: 'center',
 }
 
+/** Nueva transposicion de acordes, o funcion de la actual (como un setState). */
+type TransposeUpdate = number | ((current: number) => number)
+
 /**
  * Prompter + reproductor de una cancion. Se monta de nuevo al cambiar de cancion o de pistas.
  * Un solo rAF lee la posicion y escribe al DOM (compas, pulso, progreso); React solo vuelve a
@@ -354,7 +358,16 @@ const RehearsalSession: React.FC<SessionProps> = ({ song, record, origin, onReco
   const [mode, setMode] = useState<PrompterMode>('chords')
   const [current, setCurrent] = useState(-1)
   const [warn, setWarn] = useState(0)
-  const [transpose, setTranspose] = useState(0)
+  // Tono del audio y transposicion de acordes, vinculados (stemPractice.ts: fuera de +-6 el audio
+  // va a la octava equivalente y se avisa).
+  const [tone, setTone] = useState<ToneState>(INITIAL_TONE)
+  const transpose = tone.transpose
+  const onTranspose = useCallback((next: TransposeUpdate) => setTone((s) => applyTranspose(s, typeof next === 'function' ? next(s.transpose) : next)), [])
+  const onPitch = useCallback((semitones: number) => setTone((s) => applyPitch(s, semitones)), [])
+  const onLinked = useCallback((linked: boolean) => setTone((s) => applyLinked(s, linked)), [])
+  const pitchNote = toneOctaveFolded(tone)
+    ? `Acordes ${tone.transpose > 0 ? '+' : ''}${tone.transpose}: el audio suena ${formatPitch(tone.pitch)}, la misma tonalidad una octava ${tone.pitch < tone.transpose ? 'abajo' : 'arriba'} (el tono del audio llega a ±6).`
+    : null
   const [fontStep, setFontStep] = useState(readFontStep)
   const [focus, setFocus] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -458,6 +471,11 @@ const RehearsalSession: React.FC<SessionProps> = ({ song, record, origin, onReco
       onPlayer={onPlayer}
       layout="rehearsal"
       onManageTracks={onOpenTracks}
+      pitch={tone.pitch}
+      onPitchChange={onPitch}
+      pitchLinked={tone.linked}
+      onPitchLinkedChange={onLinked}
+      pitchNote={pitchNote}
       stage={
         <RehearsalPrompter
           song={song}
@@ -470,7 +488,7 @@ const RehearsalSession: React.FC<SessionProps> = ({ song, record, origin, onReco
           mode={mode}
           onMode={setMode}
           transpose={transpose}
-          onTranspose={setTranspose}
+          onTranspose={onTranspose}
           fontStep={fontStep}
           onFont={changeFont}
           focus={focus}
@@ -502,7 +520,8 @@ interface PrompterProps {
   mode: PrompterMode
   onMode: (mode: PrompterMode) => void
   transpose: number
-  onTranspose: React.Dispatch<React.SetStateAction<number>>
+  /** Transpone los acordes; con el tono vinculado mueve tambien el del audio. */
+  onTranspose: (next: TransposeUpdate) => void
   fontStep: number
   onFont: (delta: number) => void
   focus: boolean
@@ -944,7 +963,7 @@ const RehearsalPrompter: React.FC<PrompterProps> = ({
           </button>
           <button
             type="button"
-            className="stx-btn"
+            className="stx-btn b-transport"
             data-testid="rehearsal-focus-play"
             aria-label={api.playing ? 'Pausa' : 'Reproducir'}
             disabled={!api.ready}

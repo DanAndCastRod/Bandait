@@ -314,6 +314,11 @@ loop          boolean
 loop_beats    número 0.0625..5200. Largo del patrón que se repite cuando `loop` es true. Con
               `loop` false se conserva (el editor lo recuerda) pero no se usa
 notes         Note[], 0..4096
+muted         boolean, OPCIONAL (2026-11-25). true = el clip está silenciado: ninguna de sus
+              notas suena al escuchar, al exportar (mezcla, pistas, rango) ni en el MIDI
+              exportado, y no cuenta como notas que suenan para el asistente. Ausente = suena.
+              Quien escribe el documento lo pone solo cuando es true y siempre después de
+              `notes`; `false` se acepta al leer y se normaliza a ausente
 ```
 
 Note (claves en este orden):
@@ -345,6 +350,11 @@ Reglas:
   distinto `pitch` se solapan libremente (acordes).
 - **Orden.** El orden de `notes` no es significativo. `serializeSession` las escribe ordenadas por
   `start` y, a igual `start`, por `pitch`; `parseSession` devuelve ese mismo orden.
+- **Silencio.** Un clip con `muted` true sigue ocupando su lugar (se ve, se edita, se mueve y
+  cuenta para los topes y para `session_too_long`), pero no suena ni alarga lo que se exporta:
+  es el equivalente MIDI de un clip de audio con `active` false fuera de un grupo de tomas. Copiar, duplicar, dividir o
+  mover un clip silenciado conserva `muted`. Un Worker anterior a este campo rechaza el
+  documento que lo trae (`unknown_field`): el Worker se despliega antes que el Hub.
 - **Clips solapados.** Dos clips MIDI de la misma pista pueden solaparse; ambos suenan. Si una
   misma nota suena en los dos, el instrumento la trata como dos notas (dos voces).
 - **Topes.** 4096 notas por clip, 256 clips MIDI por pista y 16384 notas en toda la sesión (si
@@ -443,6 +453,7 @@ Las mismas de v1 (v1 3). Cambios:
   los congelados y los de las zonas del sampler.
 - `POST .../jobs` admite los `kind` nuevos de la sección 4. El cuerpo sigue limitado a 64 KB,
   salvo `chat`, que admite hasta **196608 bytes (192 KB)**. Pasarse: 400 `bad_job`, como en v1.
+- Rutas nuevas `GET`/`POST .../studio/_cleanup` para los audios huérfanos (3.1).
 
 Objetos en R2 que se suman a v1 3.1 (Worker 1.2.0, interno: ningún cliente los lee ni las rutas
 los exponen):
@@ -454,6 +465,80 @@ los exponen):
 - El registro de un trabajo (`studio/<session>/jobs/<job>.json`) guarda además
   `urit_request_id` cuando el proveedor es URiT IA. La respuesta de `GET .../jobs/{job}` (v1 6.5
   y 4.5 de este contrato) no cambia.
+
+### 3.1 Limpieza de audios huérfanos (Worker 1.4.0)
+
+Un audio `studio/<session>/assets/<file>` de una banda (o del workspace personal
+`users/<uuid>`) es **huérfano** cuando se cumplen las tres condiciones:
+
+1. El `session.json` de su sesión no lo nombra: ni en `assets[]` (por `file` o por `id`) ni en un
+   clip, una zona del sampler o un `frozen_asset_id`. Una carpeta de sesión sin `session.json` no
+   protege ninguno de sus audios.
+2. Ningún trabajo de su sesión está en curso: un registro en `jobs/` con estado distinto de
+   `SUCCEEDED` y `FAILED` (o ilegible) protege **toda** la sesión. Eso cubre el fragmento
+   `audio.asset_id` de un `chat` que aún corre y las salidas que un trabajo está copiando.
+3. Tiene más de **2 horas**: la fecha de subida de R2 (`uploaded`) o, si existe y es posterior,
+   `customMetadata.created_at`.
+
+Reglas de seguridad (normativas):
+
+- Nada se borra de una banda hasta leer **todas** sus sesiones. Si una lectura falla (R2 lanza, o
+  un `session.json` no es JSON o no tiene `assets` y `tracks` como listas), no se borra nada de
+  esa banda.
+- Si el tope de operaciones de R2 no alcanza para leer la banda entera, tampoco se borra nada.
+- Antes de borrar se vuelve a pedir el etag de cada `session.json` con candidatos; si cambió, esa
+  sesión se salta.
+- Un audio referenciado nunca se borra. Si el Hub vuelve a usar un audio que se borró (deshacer),
+  el siguiente `PUT .../session` responde 409 `missing_asset` y el Hub sube de nuevo los audios
+  desde el equipo (comportamiento ya existente).
+- Matiza v1 4.2 ("guardar no borra audios que dejaron de estar listados"): el `PUT` en sí sigue
+  sin borrar nada, pero después de responder corre la limpieza oportunista de abajo, que sí borra
+  los huérfanos de más de 2 horas de esa sesión.
+
+Rutas:
+
+| Método y ruta | Quién | Respuesta |
+|---|---|---|
+| `GET /v1/bands/{band}/studio/_cleanup` | integrante | inspección, sin borrar |
+| `POST /v1/bands/{band}/studio/_cleanup` | Owner, MusicDirector (la autorización de las escrituras); en `me`, la cuenta dueña | borra los huérfanos |
+
+`{band}` es el uuid o `me`. `_cleanup` no choca con una sesión: los ids que empiezan por `_`
+están reservados (v1 3). Otro método: 405 `method_not_allowed`. Las dos responden 200 con:
+
+```json
+{"orphans": 3, "bytes": 3145728, "sample": ["ses_a/ast_1.wav"], "sessions": 4,
+ "protected_sessions": 1, "complete": true, "blocked": null, "deleted": 3, "deleted_bytes": 3145728}
+```
+
+- `orphans` y `bytes`: huérfanos encontrados. `sample`: hasta 20 `<session>/<file>`.
+- `sessions`: carpetas de sesión revisadas; `protected_sessions`: saltadas por un trabajo en curso.
+- `complete`: false si no se revisó todo; entonces `blocked` es `session_unreadable` (una lectura
+  falló) o `incomplete` (no alcanzó el tope de 900 operaciones), y `deleted` es 0.
+- `deleted` y `deleted_bytes`: lo borrado (0 en `GET`). Puede ser menor que `orphans` si una
+  sesión cambió entre la lectura y el borrado.
+
+Limpieza automática:
+
+- **Cron diario** (`17 4 * * *`, el mismo de la retención de eventos): recorre `bands/` y luego
+  `users/`, en orden alfabético, con hasta 860 operaciones de R2 por corrida (con las 40 de la
+  retención de eventos, el cron queda en 900). Si no termina, guarda el cursor (última banda
+  terminada) en `studio/_cleanup/cursor.json`, en la raíz del bucket, y la corrida siguiente sigue
+  desde ahí. Una banda que no cabe en el tope ni con el cupo entero se salta (evento FAILED
+  `budget`) para no atascar el barrido.
+- **Después de guardar**: tras un `PUT .../session` correcto, en `waitUntil` y sin retrasar la
+  respuesta, se limpian los huérfanos de **esa** sesión (hasta 300 operaciones), como mucho una vez
+  cada 2 horas por banda. La marca vive en `<prefijo de la banda>studio/_cleanup/last.json` y se
+  escribe con condición antes de leer: de dos guardados simultáneos solo uno limpia.
+
+Registro: cada limpieza que borra algo o que se bloquea deja un evento (sección 3, objetos en R2)
+con `kind` `cleanup`, `provider` `r2`, `status` `SUCCEEDED` o `FAILED` (`provider_code`
+`session_unreadable`, `delete_failed` o `budget`), y además `objects` (audios borrados), `bytes` y
+`trigger` (`cron`, `save` o `manual`). Nunca lleva ids de audios. Una inspección no anota nada.
+
+Objetos internos nuevos (ningún cliente los lee): `studio/_cleanup/cursor.json` (raíz),
+`studio/_cleanup/last.json` (bajo la banda) y `customMetadata.status` en cada registro de trabajo
+(`STARTED`, `SUCCEEDED` o `FAILED`), para que la limpieza no tenga que leer los terminados. Un
+registro anterior a 1.4.0, sin esa metadata, se lee.
 
 ## 4. Trabajos nuevos
 

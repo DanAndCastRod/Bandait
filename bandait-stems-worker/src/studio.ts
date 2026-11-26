@@ -9,14 +9,19 @@
 //   GET    /v1/bands/{band}/studio/{session}/assets/{asset}     integrante (admite Range)
 //   POST   /v1/bands/{band}/studio/{session}/jobs[?estimate=1]  Owner / MusicDirector (src/studioJobs.ts)
 //   GET    /v1/bands/{band}/studio/{session}/jobs/{job}         integrante
+//   GET    /v1/bands/{band}/studio/_cleanup                     integrante: audios huerfanos, sin borrar
+//   POST   /v1/bands/{band}/studio/_cleanup                     Owner / MusicDirector: los borra (src/studioCleanup.ts)
 //
 // En R2, bajo el prefijo de la banda: studio/<session>/session.json, studio/<session>/assets/<file>,
-// studio/<session>/jobs/<job>.json y studio/_usage/AAAA-MM.json.
+// studio/<session>/jobs/<job>.json, studio/_usage/AAAA-MM.json y studio/_cleanup/last.json.
 //
 // Este modulo e index.ts se importan entre si: aqui no se usa nada de index.ts al cargar el modulo,
 // solo dentro de funciones.
 
 import { ApiError, authorize, json, listAll } from './index.ts';
+import { OpBudget } from './events.ts';
+import { CLEANUP_REQUEST_MAX_OPS, cleanupScope, opportunisticCleanup } from './studioCleanup.ts';
+import type { CleanupReport } from './studioCleanup.ts';
 import { jobStatus, startJob } from './studioJobs.ts';
 import {
   ASSET_MAX_BYTES, ID_RE, SESSION_MAX_BYTES, SessionError, assetExtension, isAssetFile, validateSession,
@@ -25,6 +30,8 @@ import type { SessionDocument } from './studioSession.ts';
 import type { Env, FetchLike, R2Object, StudioDeps } from './types.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** `/v1/bands/{band}/studio/_cleanup`: no choca con una sesion (los ids con `_` estan reservados). */
+const CLEANUP_SEGMENT = '_cleanup';
 const MAX_LISTED_SESSIONS = 500;
 const LIST_CONCURRENCY = 16;
 /** Tope de audios en `assets/` de una sesion: el de un documento (256) mas margen para mezclas y trabajos. */
@@ -134,6 +141,16 @@ export async function studioRoute(
     if (method !== 'GET') throw new ApiError(405, 'method_not_allowed');
     const prefix = await authorize(req, env, band, false, fetchFn);
     return listSessions(env, `${prefix}studio/`);
+  }
+
+  // Audios huerfanos (src/studioCleanup.ts): GET inspecciona (integrante), POST borra (Owner /
+  // MusicDirector, la misma autorizacion de las escrituras).
+  if (rest.length === 1 && rest[0] === CLEANUP_SEGMENT) {
+    if (method !== 'GET' && method !== 'POST') throw new ApiError(405, 'method_not_allowed');
+    const remove = method === 'POST';
+    const prefix = await authorize(req, env, band, remove, fetchFn);
+    const report = await cleanupScope(env, deps, `${prefix}studio/`, new OpBudget(CLEANUP_REQUEST_MAX_OPS), { remove, trigger: 'manual' });
+    return json(200, publicCleanupReport(report));
   }
 
   const session = rest[0];
@@ -269,7 +286,31 @@ async function putSession(req: Request, ctx: StudioContext): Promise<Response> {
     onlyIf: current ? { etagMatches: current.etag } : createOnly(),
   });
   if (!stored) throw new ApiError(412, 'session_conflict');
+  // Limpieza oportunista de los huerfanos de esta sesion (como mucho cada 2 h por banda), despues
+  // de responder: va a waitUntil y nunca retrasa ni rompe el guardado.
+  if (ctx.deps.waitUntil) {
+    ctx.deps.waitUntil(opportunisticCleanup(ctx.env, ctx.deps, ctx.studioPrefix, ctx.session).catch(() => {}));
+  }
   return json(200, doc, { ETag: stored.httpEtag });
+}
+
+/**
+ * Respuesta de `GET`/`POST .../studio/_cleanup` (STUDIO_V2.md 3.1). `blocked`: null si se leyo todo,
+ * `session_unreadable` si una sesion no se pudo leer (no se borra nada) o `incomplete` si no
+ * alcanzo el tope de operaciones (tampoco se borra nada).
+ */
+export function publicCleanupReport(report: CleanupReport): Record<string, unknown> {
+  return {
+    orphans: report.orphans,
+    bytes: report.bytes,
+    sample: report.sample,
+    sessions: report.sessions,
+    protected_sessions: report.protected_sessions,
+    complete: report.status === 'done',
+    blocked: report.status === 'done' ? null : report.status === 'budget' ? 'incomplete' : 'session_unreadable',
+    deleted: report.deleted,
+    deleted_bytes: report.deleted_bytes,
+  };
 }
 
 /**

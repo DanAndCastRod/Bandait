@@ -135,7 +135,7 @@ test('documento: el fixture v2 valida y vuelve identico; el v1 se guarda como v1
   assert.equal(v1.version, 1);
   assert.ok(!('markers' in v1));
   assert.ok(!('kind' in v1.tracks[0]));
-  assert.equal(VERSION, '1.3.0');
+  assert.equal(VERSION, '1.4.0');
 
   // Tolerancias: markers ausente es [], parametros ausentes toman el valor de la tabla, las notas y
   // las marcas salen ordenadas.
@@ -153,6 +153,21 @@ test('documento: el fixture v2 valida y vuelve identico; el v1 se guarda como v1
   const unsorted = structuredClone(FIXTURE_V2);
   unsorted.markers.reverse();
   assert.deepEqual(validateSession(unsorted).markers, FIXTURE_V2.markers);
+});
+
+test('documento v2: muted del clip MIDI es opcional; true se conserva despues de notes y false se normaliza a ausente', () => {
+  const out = validateSession(structuredClone(FIXTURE_V2));
+  const muted = out.tracks[3].midi_clips![1];
+  assert.equal(muted.id, 'mid_s9');
+  assert.equal(muted.muted, true);
+  assert.deepEqual(Object.keys(muted), ['id', 'start_beat', 'length_beats', 'loop', 'loop_beats', 'notes', 'muted']);
+  assert.ok(!('muted' in out.tracks[3].midi_clips![0]), 'un clip que suena no lleva la clave');
+  const off = structuredClone(FIXTURE_V2);
+  (off.tracks[3].midi_clips[1] as Record<string, unknown>).muted = false;
+  assert.ok(!('muted' in validateSession(off).tracks[3].midi_clips![1]));
+  const absent = structuredClone(FIXTURE_V2);
+  delete (absent.tracks[3].midi_clips[1] as Record<string, unknown>).muted;
+  assert.ok(!('muted' in validateSession(absent).tracks[3].midi_clips![1]));
 });
 
 test('documento v2: cada mutacion se rechaza con su codigo y su ruta', () => {
@@ -182,6 +197,8 @@ test('documento v2: cada mutacion se rechaza con su codigo y su ruta', () => {
     ['duplicate_id', 'tracks[2].midi_clips[0].id', (d) => { d.tracks[2].midi_clips[0].id = 'clp_1'; }],
     ['session_too_long', 'tracks[1].midi_clips[0].start_beat', (d) => { d.tracks[1].midi_clips[0].start_beat = 2390; }],
     ['missing_field', 'tracks[1].midi_clips[0].loop_beats', (d) => { delete d.tracks[1].midi_clips[0].loop_beats; }],
+    ['bad_type', 'tracks[3].midi_clips[1].muted', (d) => { (d.tracks[3].midi_clips[1] as Record<string, unknown>).muted = 'si'; }],
+    ['bad_type', 'tracks[1].midi_clips[0].muted', (d) => { (d.tracks[1].midi_clips[0] as Record<string, unknown>).muted = 1; }],
     ['duplicate_id', 'markers[1].id', (d) => { d.markers[1].id = 'mk_1'; }],
     ['bad_value', 'markers[0].kind', (d) => { d.markers[0].kind = 'drop'; }],
     ['out_of_range', 'markers[0].label', (d) => { d.markers[0].label = 'x'.repeat(61); }],

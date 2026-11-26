@@ -1,6 +1,12 @@
 {
   "schemaVersion": 2,
   "activeBandId": "band_01",
+  "uiPreferences": {
+    "version": 1,
+    "theme": "light-estudio",
+    "accent": "#E06C9F",
+    "radius": 12
+  },
   "bands": [
     {
       "id": "band_01",

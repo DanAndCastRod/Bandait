@@ -226,6 +226,29 @@ export const StudioTransport: React.FC<Props> = ({ controller, recordAllowed, re
             data-testid="studio-bpm"
           />
         </label>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="small"
+          disabled={recording}
+          // pointerdown y no click: el golpe cuenta cuando el dedo baja, como en un pad.
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            event.preventDefault()
+            controller.tapTempo()
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            event.stopPropagation()
+            if (!event.repeat) controller.tapTempo()
+          }}
+          aria-label="Tap tempo: marca el pulso tres veces o más (Shift+T)"
+          title="Tap tempo: marca el pulso tres veces o más (Shift+T). Una pausa de 2 s cierra el cambio."
+          data-testid="studio-tap-tempo"
+        >
+          TAP
+        </button>
         <label className="stu-meta">
           <span className="stu-label">Compás</span>
           <input

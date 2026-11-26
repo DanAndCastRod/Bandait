@@ -741,11 +741,19 @@ function jobKey(ctx: StudioContext, jobId: string): string {
   return `${ctx.sessionPrefix}jobs/${jobId}.json`;
 }
 
+/**
+ * customMetadata del registro: su estado. La limpieza de huerfanos (src/studioCleanup.ts) lista
+ * los registros con `include: ['customMetadata']` y solo lee los que no dicen SUCCEEDED o FAILED.
+ */
+function jobMetadata(record: JobRecord): Record<string, string> {
+  return { status: record.status };
+}
+
 /** Guarda el registro sin condicion, con dos reintentos: perderlo dejaria un trabajo pagado sin resultado. */
 async function saveJob(ctx: StudioContext, record: JobRecord): Promise<void> {
   for (let attempt = 0; ; attempt++) {
     try {
-      await ctx.env.STEMS.put(jobKey(ctx, record.job_id), JSON.stringify(record), { httpMetadata: { contentType: 'application/json' } });
+      await ctx.env.STEMS.put(jobKey(ctx, record.job_id), JSON.stringify(record), { httpMetadata: { contentType: 'application/json' }, customMetadata: jobMetadata(record) });
       return;
     } catch (err) {
       if (attempt >= 2) throw err;
@@ -816,7 +824,7 @@ export async function startJob(req: Request, ctx: StudioContext, estimate: boole
   // 1. Reserva: registro del trabajo (solo si no existe) y costo en los dos contadores, ANTES de
   //    llamar al proveedor. Un trabajo pagado nunca queda sin registro ni sin anotar.
   const reserved = await ctx.env.STEMS.put(jobKey(ctx, jobId), JSON.stringify(record), {
-    httpMetadata: { contentType: 'application/json' }, onlyIf: createOnly(),
+    httpMetadata: { contentType: 'application/json' }, customMetadata: jobMetadata(record), onlyIf: createOnly(),
   });
   if (!reserved) {
     const existing = await ctx.env.STEMS.get(jobKey(ctx, jobId));
@@ -1193,7 +1201,7 @@ export async function jobStatus(ctx: StudioContext, jobId: string): Promise<Resp
   let etag = stored.etag;
   const save = async (): Promise<boolean> => {
     const put = await ctx.env.STEMS.put(key, JSON.stringify(record), {
-      httpMetadata: { contentType: 'application/json' }, onlyIf: { etagMatches: etag },
+      httpMetadata: { contentType: 'application/json' }, customMetadata: jobMetadata(record), onlyIf: { etagMatches: etag },
     });
     if (!put) return false;
     etag = put.etag;
