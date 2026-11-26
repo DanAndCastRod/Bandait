@@ -1,9 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ChevronDown, Pause, Play, Repeat, Sliders, Square, Trash2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Minus, Pause, Play, Plus, Repeat, RotateCcw, Sliders, Square, Trash2 } from 'lucide-react'
 import type { Song } from '../types/hub'
 import { KNOWN_STEM_ROLES, STEM_ROLE_CODES, stemRoleLabel, type StemRole } from '../services/stemNames'
 import { defaultLabels, formatBytes } from '../services/stemImport'
-import { StemPlayer, type PlayerState } from '../services/stemPlayer'
+import { StemPlayer, type PlayerState, type ShifterStatus } from '../services/stemPlayer'
+import {
+  DEFAULT_SPEED_RAMP,
+  PITCH_MAX,
+  PITCH_MIN,
+  SPEED_MAX,
+  SPEED_MIN,
+  SPEED_STEP,
+  clampPitch,
+  formatPitch,
+  formatRampStep,
+  formatSpeed,
+  normalizeRamp,
+  parseRampStep,
+  parseSpeed,
+  rampLabel,
+  stepSpeed,
+  type SpeedRamp,
+} from '../services/stemPractice'
 import { clampOffset, deleteStemTrack, loadStemSong, StemStoreError, updateStemMeta, type StemSongRecord } from '../services/stemStore'
 import { formatClock, sectionSpans, type LoopRegion } from '../services/stemTiming'
 import { CommitInput } from './CommitInput'
@@ -30,6 +48,17 @@ interface Props {
   stage?: React.ReactNode
   /** 'rehearsal': enlace a PISTAS para cambiar roles o quitar pistas. */
   onManageTracks?: () => void
+  /**
+   * Tono del audio en semitonos (+-6), controlado por el padre: ENSAYO lo vincula a la
+   * transposicion de acordes. Sin el, StemStudio lo guarda por su cuenta.
+   */
+  pitch?: number
+  onPitchChange?: (semitones: number) => void
+  /** Vinculo tono del audio / acordes (solo si el padre lo maneja). */
+  pitchLinked?: boolean
+  onPitchLinkedChange?: (linked: boolean) => void
+  /** Aviso del padre bajo el tono (acordes fuera de +-6: el audio suena en otra octava). */
+  pitchNote?: string | null
 }
 
 interface Mix {
@@ -70,7 +99,20 @@ function toggleStyle(active: boolean, accent: string): React.CSSProperties {
 /** Ancho desde el que la mezcla de ENSAYO arranca abierta (panel lateral). */
 const WIDE_QUERY = '(min-width: 1100px)'
 
-export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPlayer, layout = 'studio', stage, onManageTracks }) => {
+export const StemStudio: React.FC<Props> = ({
+  song,
+  record,
+  onRecordChange,
+  onPlayer,
+  layout = 'studio',
+  stage,
+  onManageTracks,
+  pitch: pitchProp,
+  onPitchChange,
+  pitchLinked,
+  onPitchLinkedChange,
+  pitchNote,
+}) => {
   const rehearsal = layout === 'rehearsal'
   const [mixerOpen, setMixerOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia || window.matchMedia(WIDE_QUERY).matches)
   const [initialTracks] = useState(() => record.tracks)
@@ -89,10 +131,19 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
   const [offsetMs, setOffsetMs] = useState(record.offsetMs)
   const [metaError, setMetaError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  // Practica: velocidad, tono (propio o del padre) y Speed Ramp.
+  const [speed, setSpeed] = useState(1)
+  const [localPitch, setLocalPitch] = useState(0)
+  const pitch = pitchProp ?? localPitch
+  const setPitch = onPitchChange ?? setLocalPitch
+  const [ramp, setRamp] = useState<SpeedRamp>(DEFAULT_SPEED_RAMP)
+  const [shifter, setShifter] = useState<ShifterStatus>('pending')
 
   const playerRef = useRef<StemPlayer | null>(null)
   const posTextRef = useRef<HTMLSpanElement>(null)
   const posRangeRef = useRef<HTMLInputElement>(null)
+  const rateTextRef = useRef<HTMLSpanElement>(null)
+  const lastRateText = useRef('')
   const draggingRef = useRef(false)
 
   // Ultimo onPlayer sin recrear el reproductor si el padre pasa otra funcion en cada render.
@@ -122,6 +173,8 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
           }
         )
         if (!cancelled) setDuration(player.duration)
+        const status = await player.whenShifterSettled()
+        if (!cancelled) setShifter(status)
       } catch (err) {
         if (cancelled) return
         setLoadError(err instanceof StemStoreError ? err.message : err instanceof Error ? err.message : 'No se pudo preparar el audio.')
@@ -144,6 +197,17 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
     const dur = player ? player.duration : 0
     if (posTextRef.current) posTextRef.current.textContent = `${formatClock(pos)} / ${formatClock(dur)}`
     if (posRangeRef.current && !draggingRef.current) posRangeRef.current.value = String(pos)
+    // Velocidad que se oye y vuelta del Speed Ramp: solo se escribe al cambiar (cada vuelta).
+    let rateText = ''
+    if (player) {
+      const st = player.practiceStatus()
+      if (st.lap !== null) rateText = `RAMPA ${rampLabel(player.getSpeedRamp(), st.lap)}`
+      else if (Math.abs(st.rate - 1) > 1e-6) rateText = formatSpeed(st.rate)
+    }
+    if (rateText !== lastRateText.current && rateTextRef.current) {
+      lastRateText.current = rateText
+      rateTextRef.current.textContent = rateText
+    }
   }, [])
 
   useEffect(() => {
@@ -172,6 +236,16 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
   useEffect(() => {
     playerRef.current?.setMasterVolume(masterDb)
   }, [masterDb, duration])
+
+  // Velocidad, tono y Speed Ramp -> reproductor. Se repinta el indicador aunque este en pausa.
+  useEffect(() => {
+    const player = playerRef.current
+    if (!player || duration <= 0) return
+    player.setSpeed(speed)
+    player.setPitch(pitch)
+    player.setSpeedRamp(ramp)
+    paint()
+  }, [speed, pitch, ramp, duration, paint])
 
   const spans = useMemo(() => sectionSpans(song, offsetMs), [song, offsetMs])
 
@@ -315,6 +389,174 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
     </div>
   )
 
+  // ---- practica: velocidad y tono ----
+  const rampApplies = ramp.enabled && loopMode !== 'none'
+  const pitchOff = shifter === 'unavailable'
+  const commitSpeed = (text: string): boolean => {
+    const v = parseSpeed(text)
+    if (v === null) return false
+    setSpeed(v)
+    return true
+  }
+  const changePitch = (st: number) => setPitch(clampPitch(st))
+  const resetPractice = () => {
+    setSpeed(1)
+    setPitch(0)
+  }
+  const smallStep: React.CSSProperties = { ...ghostButton, padding: '5px 7px', minWidth: '30px', justifyContent: 'center' }
+  const practice = (
+    <div className="sp-practice" data-testid="stem-practice" data-shifter={shifter} role="group" aria-label="Velocidad y tono">
+      <div className="sp-row">
+        <label htmlFor="stem-speed" className="sp-label" style={labelStyle}>
+          VELOCIDAD
+        </label>
+        <button
+          type="button"
+          className="stx-btn"
+          aria-label="Bajar la velocidad 0,05"
+          disabled={rampApplies || speed <= SPEED_MIN}
+          onClick={() => setSpeed((s) => stepSpeed(s, -1))}
+          style={smallStep}
+        >
+          <Minus size={12} />
+        </button>
+        <input
+          id="stem-speed"
+          type="range"
+          className="stx-range sp-range"
+          data-testid="stem-speed"
+          min={SPEED_MIN}
+          max={SPEED_MAX}
+          step={SPEED_STEP}
+          value={speed}
+          aria-valuetext={formatSpeed(speed)}
+          disabled={rampApplies}
+          onChange={(e) => setSpeed(Number(e.target.value))}
+        />
+        <button
+          type="button"
+          className="stx-btn"
+          aria-label="Subir la velocidad 0,05"
+          disabled={rampApplies || speed >= SPEED_MAX}
+          onClick={() => setSpeed((s) => stepSpeed(s, 1))}
+          style={smallStep}
+        >
+          <Plus size={12} />
+        </button>
+        <CommitInput
+          value={formatSpeed(speed)}
+          onCommit={commitSpeed}
+          ariaLabel="Velocidad exacta (0,50 a 1,25)"
+          title="Velocidad exacta: 0,50 a 1,25 (también 75%)"
+          testId="stem-speed-exact"
+          inputMode="decimal"
+          width="68px"
+        />
+      </div>
+      <div className="sp-row">
+        <label htmlFor="stem-pitch" className="sp-label" style={labelStyle}>
+          TONO
+        </label>
+        <button type="button" className="stx-btn" aria-label="Bajar el tono del audio medio tono" disabled={pitchOff || pitch <= PITCH_MIN} onClick={() => changePitch(pitch - 1)} style={smallStep}>
+          <Minus size={12} />
+        </button>
+        <input
+          id="stem-pitch"
+          type="range"
+          className="stx-range sp-range"
+          data-testid="stem-pitch"
+          min={PITCH_MIN}
+          max={PITCH_MAX}
+          step={1}
+          value={pitch}
+          aria-valuetext={formatPitch(pitch)}
+          disabled={pitchOff}
+          onChange={(e) => changePitch(Number(e.target.value))}
+        />
+        <button type="button" className="stx-btn" aria-label="Subir el tono del audio medio tono" disabled={pitchOff || pitch >= PITCH_MAX} onClick={() => changePitch(pitch + 1)} style={smallStep}>
+          <Plus size={12} />
+        </button>
+        <span data-testid="stem-pitch-value" className="sp-value" style={{ fontFamily: mono }}>
+          {formatPitch(pitch)}
+        </span>
+      </div>
+      <div className="sp-row sp-row-end">
+        {onPitchLinkedChange && (
+          <label className="sp-check">
+            <input type="checkbox" data-testid="stem-pitch-link" checked={!!pitchLinked} onChange={(e) => onPitchLinkedChange(e.target.checked)} />
+            <span>ACORDES SIGUEN EL TONO</span>
+          </label>
+        )}
+        <button
+          type="button"
+          className="stx-btn"
+          data-testid="stem-practice-reset"
+          disabled={speed === 1 && pitch === 0}
+          onClick={resetPractice}
+          title="Velocidad 1,00x y tono original"
+          style={{ ...ghostButton, padding: '5px 10px', fontSize: '11px', marginLeft: 'auto' }}
+        >
+          <RotateCcw size={12} /> RESTABLECER
+        </button>
+      </div>
+      {rampApplies && (
+        <div className="sp-note" data-testid="stem-speed-ramp-note">
+          El Speed Ramp maneja la velocidad mientras haya repetición.
+        </div>
+      )}
+      {pitchOff && (
+        <div className="sp-note sp-warn" role="status" data-testid="stem-pitch-unavailable">
+          Este navegador no carga el procesador de audio: la velocidad cambia también el tono y el tono queda fijo.
+        </div>
+      )}
+      {pitchNote && (
+        <div className="sp-note" role="status" data-testid="stem-pitch-note">
+          {pitchNote}
+        </div>
+      )}
+    </div>
+  )
+
+  // ---- Speed Ramp ----
+  const updateRamp = (patch: Partial<SpeedRamp>) => setRamp((prev) => normalizeRamp({ ...prev, ...patch }))
+  const commitRampSpeed = (key: 'start' | 'top', text: string): boolean => {
+    const v = parseSpeed(text)
+    if (v === null) return false
+    updateRamp({ [key]: v })
+    return true
+  }
+  const commitRampStep = (text: string): boolean => {
+    const v = parseRampStep(text)
+    if (v === null) return false
+    updateRamp({ step: v })
+    return true
+  }
+  const rampPanel = (
+    <div className="sp-ramp" data-testid="stem-ramp">
+      <label className="sp-check">
+        <input type="checkbox" data-testid="stem-ramp-toggle" checked={ramp.enabled} onChange={(e) => updateRamp({ enabled: e.target.checked })} />
+        <span>SPEED RAMP: subir la velocidad en cada vuelta</span>
+      </label>
+      {ramp.enabled && (
+        <>
+          <div className="sp-row">
+            <span style={labelStyle}>INICIO</span>
+            <CommitInput value={formatSpeed(ramp.start)} onCommit={(t) => commitRampSpeed('start', t)} ariaLabel="Velocidad inicial de la rampa" testId="stem-ramp-start" inputMode="decimal" width="64px" />
+            <span style={labelStyle}>PASO</span>
+            <CommitInput value={formatRampStep(ramp.step)} onCommit={commitRampStep} ariaLabel="Aumento de velocidad por vuelta" testId="stem-ramp-step" inputMode="decimal" width="64px" />
+            <span style={labelStyle}>TOPE</span>
+            <CommitInput value={formatSpeed(ramp.top)} onCommit={(t) => commitRampSpeed('top', t)} ariaLabel="Velocidad tope de la rampa" testId="stem-ramp-top" inputMode="decimal" width="64px" />
+          </div>
+          <div className="sp-note">
+            {loopMode === 'none'
+              ? 'Elige una repetición (una sección o el tramo A-B) para que la rampa actúe.'
+              : `Cada vuelta sube ${formatRampStep(ramp.step)} desde ${formatSpeed(ramp.start)} hasta ${formatSpeed(ramp.top)}. Cambiarla vuelve a la primera vuelta.`}
+          </div>
+        </>
+      )}
+    </div>
+  )
+
   const transport = (
     <div
       data-testid="stem-transport"
@@ -365,6 +607,8 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
             <Repeat size={11} /> REPITIENDO {formatClock(Math.max(0, regionStart ?? 0))}-{formatClock(Math.min(duration, regionEnd ?? 0))}
           </span>
         )}
+        {/* Velocidad que se oye / vuelta del Speed Ramp: la escribe paint() (rAF), no React. */}
+        <span ref={rateTextRef} data-testid="stem-rate" className="sp-rate" aria-live="polite" />
       </div>
       <input
         ref={posRangeRef}
@@ -393,6 +637,7 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
           paint()
         }}
       />
+      {practice}
       {!rehearsal && masterVolume}
     </div>
   )
@@ -467,6 +712,7 @@ export const StemStudio: React.FC<Props> = ({ song, record, onRecordChange, onPl
           {ab.b <= ab.a && <span style={{ fontSize: '11px', color: colors.warning }}>B debe ser mayor que A.</span>}
         </div>
       )}
+      {rampPanel}
     </div>
   )
 
