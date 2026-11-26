@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { AlertTriangle, ChevronDown, Minus, Pause, Play, Plus, Repeat, RotateCcw, Sliders, Square, Trash2 } from 'lucide-react'
 import type { Song } from '../types/hub'
+import { useGlobalAudioEngine } from '../context/globalAudioContextCore'
 import { KNOWN_STEM_ROLES, STEM_ROLE_CODES, stemRoleLabel, type StemRole } from '../services/stemNames'
 import { defaultLabels, formatBytes } from '../services/stemImport'
-import { StemPlayer, type PlayerState, type ShifterStatus } from '../services/stemPlayer'
+import type { StemPlayer } from '../services/stemPlayer'
+import type { StemMix, StemTrackStatus } from '../services/stemSession'
 import {
-  DEFAULT_SPEED_RAMP,
   PITCH_MAX,
   PITCH_MIN,
   SPEED_MAX,
@@ -22,11 +23,12 @@ import {
   stepSpeed,
   type SpeedRamp,
 } from '../services/stemPractice'
-import { clampOffset, deleteStemTrack, loadStemSong, StemStoreError, updateStemMeta, type StemSongRecord } from '../services/stemStore'
+import { clampOffset, deleteStemTrack, StemStoreError, updateStemMeta, type StemSongRecord } from '../services/stemStore'
 import { formatClock, sectionSpans, type LoopRegion } from '../services/stemTiming'
 import { CommitInput } from './CommitInput'
 import { StudioApiContext, type StudioApi } from './studioApi'
-import { cardStyle, colors, ghostButton, labelStyle, mono, primaryButton, smallInputStyle } from './hubStyles'
+import { colors, labelStyle, mono, smallInputStyle } from './hubStyles'
+import '../styles/audio.css'
 
 interface Props {
   song: Song
@@ -34,8 +36,8 @@ interface Props {
   /** Metadatos cambiados (offset, rol) o null si se borro la ultima pista. */
   onRecordChange: (record: StemSongRecord | null) => void
   /**
-   * Recibe el reproductor al crearlo y null al liberarlo. Lo usa ENSAYO para seguir la posicion
-   * con rAF (el reproductor es el mismo; no se duplica).
+   * Recibe el reproductor al montarse y null al desmontarse (el reproductor sigue vivo en el
+   * audio global). Lo usa ENSAYO para seguir la posicion con rAF.
    */
   onPlayer?: (player: StemPlayer | null) => void
   /**
@@ -61,14 +63,6 @@ interface Props {
   pitchNote?: string | null
 }
 
-interface Mix {
-  db: number
-  muted: boolean
-  solo: boolean
-}
-
-type TrackStatus = { kind: 'loading' } | { kind: 'ok' } | { kind: 'error'; message: string }
-
 const DB_MIN = -30
 const DB_MAX = 6
 
@@ -76,29 +70,16 @@ function formatDb(db: number): string {
   return `${db > 0 ? '+' : ''}${db.toFixed(1)} dB`
 }
 
-function toggleStyle(active: boolean, accent: string): React.CSSProperties {
-  return {
-    fontFamily: mono,
-    fontSize: '11px',
-    fontWeight: 700,
-    minWidth: '30px',
-    padding: '4px 8px',
-    borderRadius: 'var(--b-radius-field)',
-    border: `1px solid ${active ? accent : colors.border}`,
-    background: active ? accent : colors.elevated,
-    color: active ? colors.onAccent : colors.muted,
-    cursor: 'pointer',
-  }
-}
-
-/**
- * Estudio de una cancion: decodifica sus stems guardados y los reproduce alineados.
- * Se monta con key = cancion + ids de pistas: cambiar de cancion o de pistas crea un reproductor
- * nuevo y libera el anterior (AudioContext cerrado, nodos desconectados).
- */
 /** Ancho desde el que la mezcla de ENSAYO arranca abierta (panel lateral). */
 const WIDE_QUERY = '(min-width: 1100px)'
 
+/**
+ * Estudio de una cancion: reproduce sus stems guardados, alineados. El reproductor NO es de este
+ * componente: lo da el audio global (context/GlobalAudioContext.tsx), asi que cambiar de vista no
+ * corta el audio y volver a la misma cancion recupera posicion, velocidad, tono, repeticion y
+ * mezcla. Se monta con key = cancion + ids de pistas: otra cancion u otras pistas piden otro
+ * reproductor y el audio global libera el anterior.
+ */
 export const StemStudio: React.FC<Props> = ({
   song,
   record,
@@ -114,101 +95,78 @@ export const StemStudio: React.FC<Props> = ({
   pitchNote,
 }) => {
   const rehearsal = layout === 'rehearsal'
+  const audio = useGlobalAudioEngine()
+  // Pedir (o reusar) el reproductor una sola vez por montaje: la key del padre cambia con la cancion.
+  const [session] = useState(() => audio.acquireStem({ song, record, view: rehearsal ? 'rehearsal' : 'tracks' }))
+  const player = session.player
+  const [initialUi] = useState(() => session.ui)
+
+  const subscribeLoad = useCallback((listener: () => void) => session.onLoad(listener), [session])
+  const getLoad = useCallback(() => session.getLoad(), [session])
+  const load = useSyncExternalStore(subscribeLoad, getLoad, getLoad)
+  const { status, loadError, duration, shifter } = load
+
+  const subscribeState = useCallback((listener: () => void) => player.onStateChange(listener), [player])
+  const getState = useCallback(() => player.getState(), [player])
+  const playState = useSyncExternalStore(subscribeState, getState, getState)
+
   const [mixerOpen, setMixerOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia || window.matchMedia(WIDE_QUERY).matches)
-  const [initialTracks] = useState(() => record.tracks)
-  const [status, setStatus] = useState<Record<string, TrackStatus>>(() =>
-    Object.fromEntries(record.tracks.map((t) => [t.id, { kind: 'loading' } as TrackStatus]))
-  )
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [duration, setDuration] = useState(0)
-  const [playState, setPlayState] = useState<PlayerState>('stopped')
-  const [mix, setMix] = useState<Record<string, Mix>>(() =>
-    Object.fromEntries(record.tracks.map((t) => [t.id, { db: 0, muted: false, solo: false }]))
-  )
-  const [masterDb, setMasterDb] = useState(0)
-  const [loopMode, setLoopMode] = useState<string>('none')
-  const [ab, setAb] = useState<{ a: number; b: number }>({ a: 0, b: 0 })
+  const [mix, setMix] = useState<Record<string, StemMix>>(initialUi.mix)
+  const [masterDb, setMasterDb] = useState(initialUi.masterDb)
+  const [loopMode, setLoopMode] = useState<string>(initialUi.loopMode)
+  const [ab, setAb] = useState<{ a: number; b: number }>(initialUi.ab)
   const [offsetMs, setOffsetMs] = useState(record.offsetMs)
   const [metaError, setMetaError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   // Practica: velocidad, tono (propio o del padre) y Speed Ramp.
-  const [speed, setSpeed] = useState(1)
-  const [localPitch, setLocalPitch] = useState(0)
+  const [speed, setSpeed] = useState(initialUi.speed)
+  const [localPitch, setLocalPitch] = useState(initialUi.localPitch)
   const pitch = pitchProp ?? localPitch
   const setPitch = onPitchChange ?? setLocalPitch
-  const [ramp, setRamp] = useState<SpeedRamp>(DEFAULT_SPEED_RAMP)
-  const [shifter, setShifter] = useState<ShifterStatus>('pending')
+  const [ramp, setRamp] = useState<SpeedRamp>(initialUi.ramp)
 
-  const playerRef = useRef<StemPlayer | null>(null)
   const posTextRef = useRef<HTMLSpanElement>(null)
   const posRangeRef = useRef<HTMLInputElement>(null)
   const rateTextRef = useRef<HTMLSpanElement>(null)
   const lastRateText = useRef('')
   const draggingRef = useRef(false)
 
-  // Ultimo onPlayer sin recrear el reproductor si el padre pasa otra funcion en cada render.
+  // Lo que se ve al volver a esta cancion: se guarda en la sesion global en cada cambio.
+  useEffect(() => {
+    session.saveUi({ mix, masterDb, loopMode, ab, speed, localPitch, ramp })
+  }, [session, mix, masterDb, loopMode, ab, speed, localPitch, ramp])
+
+  // Titulo y vista vigentes para el mini reproductor.
+  useEffect(() => {
+    session.touch(rehearsal ? 'rehearsal' : 'tracks', song)
+  }, [session, rehearsal, song])
+
+  // Ultimo onPlayer sin volver a avisar si el padre pasa otra funcion en cada render.
   const onPlayerRef = useRef(onPlayer)
   useEffect(() => {
     onPlayerRef.current = onPlayer
   }, [onPlayer])
-
-  // Crear el reproductor y decodificar. Solo los callbacks async tocan el estado.
   useEffect(() => {
-    const player = new StemPlayer()
-    playerRef.current = player
     onPlayerRef.current?.(player)
-    let cancelled = false
-    const off = player.onStateChange((s) => {
-      if (!cancelled) setPlayState(s)
-    })
-    void (async () => {
-      try {
-        const loaded = await loadStemSong(song.id)
-        if (cancelled) return
-        await player.load(
-          initialTracks.map((t) => ({ id: t.id, blob: loaded?.blobs.get(t.id) ?? null })),
-          (r) => {
-            if (cancelled) return
-            setStatus((prev) => ({ ...prev, [r.id]: r.ok ? { kind: 'ok' } : { kind: 'error', message: r.error } }))
-          }
-        )
-        if (!cancelled) setDuration(player.duration)
-        const status = await player.whenShifterSettled()
-        if (!cancelled) setShifter(status)
-      } catch (err) {
-        if (cancelled) return
-        setLoadError(err instanceof StemStoreError ? err.message : err instanceof Error ? err.message : 'No se pudo preparar el audio.')
-        setStatus((prev) => Object.fromEntries(Object.keys(prev).map((id) => [id, { kind: 'error', message: 'Sin cargar' } as TrackStatus])))
-      }
-    })()
-    return () => {
-      cancelled = true
-      off()
-      player.dispose()
-      if (playerRef.current === player) playerRef.current = null
-      onPlayerRef.current?.(null)
-    }
-  }, [song.id, initialTracks])
+    return () => onPlayerRef.current?.(null)
+  }, [player])
 
   // Pinta la posicion escribiendo al DOM: nada de estado React por frame.
   const paint = useCallback(() => {
-    const player = playerRef.current
-    const pos = player ? player.position() : 0
-    const dur = player ? player.duration : 0
+    const pos = player.position()
+    const dur = player.duration
     if (posTextRef.current) posTextRef.current.textContent = `${formatClock(pos)} / ${formatClock(dur)}`
     if (posRangeRef.current && !draggingRef.current) posRangeRef.current.value = String(pos)
     // Velocidad que se oye y vuelta del Speed Ramp: solo se escribe al cambiar (cada vuelta).
     let rateText = ''
-    if (player) {
-      const st = player.practiceStatus()
-      if (st.lap !== null) rateText = `RAMPA ${rampLabel(player.getSpeedRamp(), st.lap)}`
-      else if (Math.abs(st.rate - 1) > 1e-6) rateText = formatSpeed(st.rate)
-    }
+    const st = player.practiceStatus()
+    if (st.lap !== null) rateText = `RAMPA ${rampLabel(player.getSpeedRamp(), st.lap)}`
+    else if (Math.abs(st.rate - 1) > 1e-6) rateText = formatSpeed(st.rate)
     if (rateText !== lastRateText.current && rateTextRef.current) {
       lastRateText.current = rateText
       rateTextRef.current.textContent = rateText
     }
-  }, [])
+  }, [player])
 
   useEffect(() => {
     paint()
@@ -222,30 +180,28 @@ export const StemStudio: React.FC<Props> = ({
     return () => cancelAnimationFrame(raf)
   }, [playState, duration, paint])
 
-  // Mezcla -> reproductor (sistema externo).
+  // Mezcla -> reproductor (sistema externo). Repetir los mismos valores al volver es inocuo.
   useEffect(() => {
-    const player = playerRef.current
-    if (!player || duration <= 0) return
+    if (duration <= 0) return
     for (const [id, m] of Object.entries(mix)) {
       player.setTrackVolume(id, m.db)
       player.setTrackMute(id, m.muted)
       player.setTrackSolo(id, m.solo)
     }
-  }, [mix, duration])
+  }, [player, mix, duration])
 
   useEffect(() => {
-    playerRef.current?.setMasterVolume(masterDb)
-  }, [masterDb, duration])
+    player.setMasterVolume(masterDb)
+  }, [player, masterDb, duration])
 
-  // Velocidad, tono y Speed Ramp -> reproductor. Se repinta el indicador aunque este en pausa.
+  // Velocidad, tono y Speed Ramp -> reproductor (idempotentes). Se repinta aunque este en pausa.
   useEffect(() => {
-    const player = playerRef.current
-    if (!player || duration <= 0) return
+    if (duration <= 0) return
     player.setSpeed(speed)
     player.setPitch(pitch)
     player.setSpeedRamp(ramp)
     paint()
-  }, [speed, pitch, ramp, duration, paint])
+  }, [player, speed, pitch, ramp, duration, paint])
 
   const spans = useMemo(() => sectionSpans(song, offsetMs), [song, offsetMs])
 
@@ -261,25 +217,23 @@ export const StemStudio: React.FC<Props> = ({
   const regionStart = region?.start ?? null
   const regionEnd = region?.end ?? null
   useEffect(() => {
-    const player = playerRef.current
-    if (!player || duration <= 0) return
+    if (duration <= 0) return
+    // setLoop no hace nada si la region es la misma (volver a la vista no reinicia la rampa).
     player.setLoop(regionStart !== null && regionEnd !== null ? { start: regionStart, end: regionEnd } : null)
     paint()
-  }, [regionStart, regionEnd, duration, paint])
+  }, [player, regionStart, regionEnd, duration, paint])
 
   const appliedLoop = duration > 0 && regionStart !== null && regionEnd !== null && regionStart < duration
   const anyReady = Object.values(status).some((s) => s.kind === 'ok')
   const loading = Object.values(status).some((s) => s.kind === 'loading')
 
-  const togglePlay = () => {
-    const player = playerRef.current
-    if (!player) return
+  const togglePlay = useCallback(() => {
     if (player.getState() === 'playing') player.pause()
     else void player.play()
-  }
+  }, [player])
 
   const stop = () => {
-    playerRef.current?.stop()
+    player.stop()
     paint()
   }
 
@@ -304,7 +258,7 @@ export const StemStudio: React.FC<Props> = ({
   }
 
   const markAb = (key: 'a' | 'b') => {
-    const pos = playerRef.current?.position() ?? 0
+    const pos = player.position()
     setAb((prev) => ({ ...prev, [key]: Math.round(pos * 10) / 10 }))
   }
 
@@ -321,38 +275,36 @@ export const StemStudio: React.FC<Props> = ({
   const removeTrack = (trackId: string) => {
     setConfirmDelete(null)
     void deleteStemTrack(song.id, trackId)
-      .then((next) => onRecordChange(next))
+      .then((next) => {
+        // Sin pistas no queda nada que reproducir: se libera el reproductor global.
+        if (!next) audio.releaseStem(song.id)
+        onRecordChange(next)
+      })
       .catch((err) => setMetaError(err instanceof StemStoreError ? err.message : 'No se pudo quitar la pista.'))
   }
 
-  const updateMix = (id: string, patch: Partial<Mix>) =>
+  const updateMix = (id: string, patch: Partial<StemMix>) =>
     setMix((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { db: 0, muted: false, solo: false }), ...patch } }))
 
   const sectionsUnavailable = spans.length === 0
 
   const seekTo = useCallback(
     (sec: number) => {
-      playerRef.current?.seek(sec)
+      player.seek(sec)
       paint()
     },
-    [paint]
+    [player, paint]
   )
   const toggleSectionLoop = useCallback((id: string) => setLoopMode((prev) => (prev === `sec:${id}` ? 'none' : `sec:${id}`)), [])
   const loopSectionId = loopMode.startsWith('sec:') ? loopMode.slice(4) : null
-  const togglePlayApi = useCallback(() => {
-    const player = playerRef.current
-    if (!player) return
-    if (player.getState() === 'playing') player.pause()
-    else void player.play()
-  }, [])
-  const positionApi = useCallback(() => playerRef.current?.position() ?? 0, [])
+  const positionApi = useCallback(() => player.position(), [player])
   const toggleMixer = useCallback(() => setMixerOpen((open) => !open), [])
   const playing = playState === 'playing'
   const api = useMemo<StudioApi>(
     () => ({
       ready: anyReady,
       playing,
-      togglePlay: togglePlayApi,
+      togglePlay,
       position: positionApi,
       seek: seekTo,
       loopSectionId,
@@ -360,11 +312,11 @@ export const StemStudio: React.FC<Props> = ({
       mixerOpen,
       toggleMixer,
     }),
-    [anyReady, playing, togglePlayApi, positionApi, seekTo, loopSectionId, toggleSectionLoop, mixerOpen, toggleMixer]
+    [anyReady, playing, togglePlay, positionApi, seekTo, loopSectionId, toggleSectionLoop, mixerOpen, toggleMixer]
   )
 
   const loadAlert = loadError && (
-    <div role="alert" style={{ ...cardStyle, padding: '10px 12px', color: colors.danger, fontSize: '12px', borderColor: colors.danger }}>
+    <div role="alert" className="ga-alert">
       {loadError}
     </div>
   )
@@ -403,7 +355,6 @@ export const StemStudio: React.FC<Props> = ({
     setSpeed(1)
     setPitch(0)
   }
-  const smallStep: React.CSSProperties = { ...ghostButton, padding: '5px 7px', minWidth: '30px', justifyContent: 'center' }
   const practice = (
     <div className="sp-practice" data-testid="stem-practice" data-shifter={shifter} role="group" aria-label="Velocidad y tono">
       <div className="sp-row">
@@ -412,11 +363,11 @@ export const StemStudio: React.FC<Props> = ({
         </label>
         <button
           type="button"
-          className="stx-btn"
+          className="ga-round"
           aria-label="Bajar la velocidad 0,05"
           disabled={rampApplies || speed <= SPEED_MIN}
           onClick={() => setSpeed((s) => stepSpeed(s, -1))}
-          style={smallStep}
+          style={{ width: '30px', height: '30px' }}
         >
           <Minus size={12} />
         </button>
@@ -435,11 +386,11 @@ export const StemStudio: React.FC<Props> = ({
         />
         <button
           type="button"
-          className="stx-btn"
+          className="ga-round"
           aria-label="Subir la velocidad 0,05"
           disabled={rampApplies || speed >= SPEED_MAX}
           onClick={() => setSpeed((s) => stepSpeed(s, 1))}
-          style={smallStep}
+          style={{ width: '30px', height: '30px' }}
         >
           <Plus size={12} />
         </button>
@@ -457,7 +408,14 @@ export const StemStudio: React.FC<Props> = ({
         <label htmlFor="stem-pitch" className="sp-label" style={labelStyle}>
           TONO
         </label>
-        <button type="button" className="stx-btn" aria-label="Bajar el tono del audio medio tono" disabled={pitchOff || pitch <= PITCH_MIN} onClick={() => changePitch(pitch - 1)} style={smallStep}>
+        <button
+          type="button"
+          className="ga-round"
+          aria-label="Bajar el tono del audio medio tono"
+          disabled={pitchOff || pitch <= PITCH_MIN}
+          onClick={() => changePitch(pitch - 1)}
+          style={{ width: '30px', height: '30px' }}
+        >
           <Minus size={12} />
         </button>
         <input
@@ -473,7 +431,14 @@ export const StemStudio: React.FC<Props> = ({
           disabled={pitchOff}
           onChange={(e) => changePitch(Number(e.target.value))}
         />
-        <button type="button" className="stx-btn" aria-label="Subir el tono del audio medio tono" disabled={pitchOff || pitch >= PITCH_MAX} onClick={() => changePitch(pitch + 1)} style={smallStep}>
+        <button
+          type="button"
+          className="ga-round"
+          aria-label="Subir el tono del audio medio tono"
+          disabled={pitchOff || pitch >= PITCH_MAX}
+          onClick={() => changePitch(pitch + 1)}
+          style={{ width: '30px', height: '30px' }}
+        >
           <Plus size={12} />
         </button>
         <span data-testid="stem-pitch-value" className="sp-value" style={{ fontFamily: mono }}>
@@ -489,12 +454,14 @@ export const StemStudio: React.FC<Props> = ({
         )}
         <button
           type="button"
-          className="stx-btn"
+          className="ga-pill"
+          data-size="sm"
+          data-tone="ghost"
           data-testid="stem-practice-reset"
           disabled={speed === 1 && pitch === 0}
           onClick={resetPractice}
           title="Velocidad 1,00x y tono original"
-          style={{ ...ghostButton, padding: '5px 10px', fontSize: '11px', marginLeft: 'auto' }}
+          style={{ marginLeft: 'auto' }}
         >
           <RotateCcw size={12} /> RESTABLECER
         </button>
@@ -558,57 +525,25 @@ export const StemStudio: React.FC<Props> = ({
   )
 
   const transport = (
-    <div
-      data-testid="stem-transport"
-      style={{ ...cardStyle, padding: rehearsal ? '12px 14px' : '14px', display: 'flex', flexDirection: 'column', gap: rehearsal ? '10px' : '12px', minWidth: 0 }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="stx-btn b-transport"
-          data-testid="stem-play"
-          onClick={togglePlay}
-          disabled={!anyReady}
-          aria-label={playState === 'playing' ? 'Pausa' : 'Reproducir'}
-          style={{ ...primaryButton(colors.cobalt), color: colors.onAccent, minWidth: '112px', ...(rehearsal ? { padding: '10px 18px' } : {}) }}
-        >
-          {playState === 'playing' ? <Pause size={14} /> : <Play size={14} />}
-          {playState === 'playing' ? 'PAUSA' : 'REPRODUCIR'}
+    <div data-testid="stem-transport" className="ga-panel" data-tight={rehearsal ? 'true' : undefined}>
+      <div className="ga-transport-bar">
+        <button type="button" className="ga-play" data-testid="stem-play" onClick={togglePlay} disabled={!anyReady} aria-label={playing ? 'Pausa' : 'Reproducir'}>
+          {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
         </button>
-        <button type="button" className="stx-btn b-transport" data-testid="stem-stop" onClick={stop} disabled={!anyReady} aria-label="Detener" style={{ ...ghostButton, ...(rehearsal ? { padding: '10px 14px' } : {}) }}>
-          <Square size={13} /> STOP
+        <button type="button" className="ga-round" data-testid="stem-stop" onClick={stop} disabled={!anyReady} aria-label="Detener">
+          <Square size={13} />
         </button>
-        <span
-          ref={posTextRef}
-          data-testid="stem-position"
-          style={{ fontFamily: mono, fontSize: rehearsal ? '17px' : '15px', fontWeight: 700, color: colors.text, fontVariantNumeric: 'tabular-nums' }}
-        >
+        <span ref={posTextRef} data-testid="stem-position" className="ga-clock" style={rehearsal ? { fontSize: '17px' } : undefined}>
           0:00.0 / 0:00.0
         </span>
         {loading && <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>DECODIFICANDO PISTAS...</span>}
         {appliedLoop && (
-          <span
-            data-testid="stem-loop-badge"
-            className="stx-fade-in"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontFamily: mono,
-              fontSize: '11px',
-              fontWeight: 700,
-              color: colors.onAccent,
-              background: colors.success,
-              padding: '2px 8px',
-              borderRadius: 'var(--b-radius-field)',
-              marginLeft: rehearsal ? 'auto' : undefined,
-            }}
-          >
+          <span data-testid="stem-loop-badge" className="ga-chip stx-fade-in" data-tone="success" style={{ marginLeft: 'auto' }}>
             <Repeat size={11} /> REPITIENDO {formatClock(Math.max(0, regionStart ?? 0))}-{formatClock(Math.min(duration, regionEnd ?? 0))}
           </span>
         )}
         {/* Velocidad que se oye / vuelta del Speed Ramp: la escribe paint() (rAF), no React. */}
-        <span ref={rateTextRef} data-testid="stem-rate" className="sp-rate" aria-live="polite" />
+        <span ref={rateTextRef} data-testid="stem-rate" className="sp-rate ga-chip" aria-live="polite" />
       </div>
       <input
         ref={posRangeRef}
@@ -625,7 +560,7 @@ export const StemStudio: React.FC<Props> = ({
         }}
         onPointerUp={(e) => {
           draggingRef.current = false
-          playerRef.current?.seek(Number((e.target as HTMLInputElement).value))
+          player.seek(Number((e.target as HTMLInputElement).value))
           paint()
         }}
         onChange={(e) => {
@@ -633,7 +568,7 @@ export const StemStudio: React.FC<Props> = ({
             if (posTextRef.current) posTextRef.current.textContent = `${formatClock(Number(e.target.value))} / ${formatClock(duration)}`
             return
           }
-          playerRef.current?.seek(Number(e.target.value))
+          player.seek(Number(e.target.value))
           paint()
         }}
       />
@@ -643,7 +578,7 @@ export const StemStudio: React.FC<Props> = ({
   )
 
   const loopPanel = (
-    <div style={{ ...cardStyle, padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
+    <div className="ga-panel">
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div style={{ flex: '1 1 220px', minWidth: 0 }}>
           <label htmlFor="stem-loop" style={labelStyle}>
@@ -655,7 +590,7 @@ export const StemStudio: React.FC<Props> = ({
             className="stx-field"
             value={loopMode}
             onChange={(e) => setLoopMode(e.target.value)}
-            style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '6px 8px' }}
+            style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '7px 10px' }}
           >
             <option value="none">Sin repetición</option>
             {spans.map((s) => (
@@ -704,7 +639,7 @@ export const StemStudio: React.FC<Props> = ({
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>{k.toUpperCase()} (s)</span>
               <CommitInput value={ab[k].toFixed(1)} onCommit={(t) => commitAb(k, t)} ariaLabel={`Punto ${k.toUpperCase()} en segundos`} width="72px" inputMode="decimal" />
-              <button type="button" className="stx-btn" onClick={() => markAb(k)} disabled={!anyReady} style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px' }}>
+              <button type="button" className="ga-pill" data-size="sm" onClick={() => markAb(k)} disabled={!anyReady}>
                 MARCAR {k.toUpperCase()}
               </button>
             </div>
@@ -717,52 +652,37 @@ export const StemStudio: React.FC<Props> = ({
   )
 
   const metaAlert = metaError && (
-    <div role="alert" style={{ color: colors.danger, fontSize: '12px' }}>
+    <div role="alert" className="ga-alert">
       {metaError}
     </div>
   )
 
   const trackRows = record.tracks.map((t) => {
-    const st = status[t.id] ?? { kind: 'error', message: 'Pista nueva: vuelve a abrir la canción.' }
+    const st: StemTrackStatus = status[t.id] ?? { kind: 'error', message: 'Pista nueva: vuelve a abrir la canción.' }
     const m = mix[t.id] ?? { db: 0, muted: false, solo: false }
     const ok = st.kind === 'ok'
-    const codeBadge = (
-      <span
-        style={{
-          fontFamily: mono,
-          fontSize: '11px',
-          fontWeight: 700,
-          padding: '1px 6px',
-          borderRadius: 'var(--b-radius-field)',
-          background: colors.borderSoft,
-          color: colors.text,
-          flexShrink: 0,
-        }}
-      >
-        {STEM_ROLE_CODES[t.role]}
-      </span>
-    )
+    const codeBadge = <span className="ga-code">{STEM_ROLE_CODES[t.role]}</span>
     const toggles = (
       <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
         <button
           type="button"
-          className="stx-btn"
+          className="ga-toggle"
+          data-kind="mute"
           aria-pressed={m.muted}
           aria-label={`Silenciar ${t.label}`}
           disabled={!ok}
           onClick={() => updateMix(t.id, { muted: !m.muted })}
-          style={toggleStyle(m.muted, colors.danger)}
         >
           M
         </button>
         <button
           type="button"
-          className="stx-btn"
+          className="ga-toggle"
+          data-kind="solo"
           aria-pressed={m.solo}
           aria-label={`Solo ${t.label}`}
           disabled={!ok}
           onClick={() => updateMix(t.id, { solo: !m.solo })}
-          style={toggleStyle(m.solo, colors.warning)}
         >
           S
         </button>
@@ -795,17 +715,10 @@ export const StemStudio: React.FC<Props> = ({
     // ENSAYO: fila compacta de consola (nombre, M, S y volumen). Roles y quitar viven en PISTAS.
     if (rehearsal) {
       return (
-        <div
-          key={t.id}
-          data-testid="stem-track"
-          data-role={t.role}
-          data-status={st.kind}
-          className="rh-track"
-          style={{ borderColor: st.kind === 'error' ? colors.danger : colors.borderSoft, opacity: m.muted ? 0.6 : 1 }}
-        >
+        <div key={t.id} data-testid="stem-track" data-role={t.role} data-status={st.kind} className="rh-track ga-track" style={{ opacity: m.muted ? 0.6 : 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             {codeBadge}
-            <span style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.label}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 600, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.label}>
               {t.label}
             </span>
             {toggles}
@@ -820,25 +733,10 @@ export const StemStudio: React.FC<Props> = ({
     }
 
     return (
-      <div
-        key={t.id}
-        data-testid="stem-track"
-        data-role={t.role}
-        data-status={st.kind}
-        style={{
-          ...cardStyle,
-          padding: '10px 12px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          flexWrap: 'wrap',
-          minWidth: 0,
-          borderColor: st.kind === 'error' ? colors.danger : colors.border,
-        }}
-      >
+      <div key={t.id} data-testid="stem-track" data-role={t.role} data-status={st.kind} className="ga-track">
         {codeBadge}
         <div style={{ flex: '1 1 150px', minWidth: 0 }}>
-          <div style={{ fontSize: '13px', fontWeight: 700, color: colors.text, overflowWrap: 'anywhere' }}>{t.label}</div>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: colors.text, overflowWrap: 'anywhere' }}>{t.label}</div>
           <div style={{ fontSize: '10px', color: colors.muted, fontFamily: mono, overflowWrap: 'anywhere' }}>
             {t.fileName} · {formatBytes(t.size)}
           </div>
@@ -860,20 +758,15 @@ export const StemStudio: React.FC<Props> = ({
           </select>
           {confirmDelete === t.id ? (
             <>
-              <button
-                type="button"
-                className="stx-btn"
-                onClick={() => removeTrack(t.id)}
-                style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px', background: colors.danger, color: colors.onAccent, borderColor: colors.danger }}
-              >
+              <button type="button" className="ga-pill" data-size="sm" data-tone="danger" onClick={() => removeTrack(t.id)}>
                 QUITAR
               </button>
-              <button type="button" className="stx-btn" onClick={() => setConfirmDelete(null)} style={{ ...ghostButton, padding: '5px 8px', fontSize: '11px' }}>
+              <button type="button" className="ga-pill" data-size="sm" data-tone="ghost" onClick={() => setConfirmDelete(null)}>
                 NO
               </button>
             </>
           ) : (
-            <button type="button" className="stx-btn" aria-label={`Quitar ${t.label}`} onClick={() => setConfirmDelete(t.id)} style={{ ...ghostButton, padding: '5px 7px', color: colors.danger }}>
+            <button type="button" className="ga-round" aria-label={`Quitar ${t.label}`} onClick={() => setConfirmDelete(t.id)} style={{ width: '30px', height: '30px', color: colors.danger, background: 'transparent' }}>
               <Trash2 size={13} />
             </button>
           )}
@@ -899,7 +792,7 @@ export const StemStudio: React.FC<Props> = ({
             data-testid="rehearsal-mixer"
             open={mixerOpen}
             onToggle={(e) => setMixerOpen((e.currentTarget as HTMLDetailsElement).open)}
-            style={{ ...cardStyle, minWidth: 0 }}
+            style={{ background: colors.cardAlt, borderRadius: 'var(--b-radius-card)', minWidth: 0 }}
           >
             <summary className="rh-mixer-summary">
               <span style={{ ...labelStyle, color: colors.text, fontWeight: 700 }}>MEZCLA</span>
@@ -912,7 +805,7 @@ export const StemStudio: React.FC<Props> = ({
               {masterVolume}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>{trackRows}</div>
               {onManageTracks && (
-                <button type="button" className="stx-btn" onClick={onManageTracks} style={{ ...ghostButton, padding: '6px 10px', fontSize: '11px', alignSelf: 'flex-start' }}>
+                <button type="button" className="ga-pill" data-size="sm" onClick={onManageTracks} style={{ alignSelf: 'flex-start' }}>
                   <Sliders size={12} /> ROLES Y PISTAS EN PISTAS
                 </button>
               )}

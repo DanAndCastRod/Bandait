@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ArrowLeft, Check, CloudUpload, Command, Keyboard, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
+import { useGlobalAudioEngine } from '../context/globalAudioContextCore'
 import { HubModal } from '../components/HubModal'
 import { StudioDevicePanel } from '../components/studio/StudioDevicePanel'
 import { StudioDeviceProbe } from '../components/studio/StudioDeviceProbe'
@@ -555,8 +556,13 @@ interface HomeProps {
 
 /** Sesiones de una banda. Se monta con `key` = banda: al cambiar de banda arranca limpio. */
 const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, songs }) => {
-  const [controller, setController] = useState<StudioController | null>(null)
-  const controllerRef = useRef<StudioController | null>(null)
+  // El controlador es del audio global: salir de la pestana no cierra la sesion ni corta el audio.
+  // Al volver se retoma la sesion abierta de esta banda (misma clave que el `key` de StudioHome).
+  const audio = useGlobalAudioEngine()
+  const { activeBand } = useHub()
+  const audioTag = `${activeBand?.id ?? 'none'}:${band}`
+  const [controller, setController] = useState<StudioController | null>(() => audio.adoptStudio(audioTag))
+  const controllerRef = useRef<StudioController | null>(controller)
   const [entries, setEntries] = useState<SessionEntry[] | null>(null)
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -597,20 +603,8 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
       .catch(() => undefined)
   }, [refresh])
 
-  // Al salir de la pestana (o cambiar de banda) se cierran motor, grabador y contexto de audio.
-  // El cierre va en un temporizador que el siguiente montaje cancela: con StrictMode o con la
-  // recarga en caliente de Vite el efecto se limpia y se vuelve a montar sin que la vista se vaya.
-  const disposeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    if (disposeTimer.current !== null) clearTimeout(disposeTimer.current)
-    disposeTimer.current = null
-    return () => {
-      disposeTimer.current = setTimeout(() => {
-        void controllerRef.current?.dispose()
-        controllerRef.current = null
-      }, 0)
-    }
-  }, [])
+  // Salir de la pestana ya no cierra nada: motor, grabador y contexto de audio los libera el audio
+  // global (context/GlobalAudioContext.tsx) al cerrar la sesion, al cambiar de banda o de usuario.
 
   const launch = (opened: OpenedSession, importStemsOf: string | null) => {
     const next = new StudioController({
@@ -624,6 +618,8 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
     })
     controllerRef.current = next
     setController(next)
+    // El audio global pasa a ser el dueno (cierra la sesion anterior si habia otra abierta).
+    audio.openStudio(next, audioTag)
     void next.start().then(() => {
       if (importStemsOf) void next.importSongStems(importStemsOf)
     })
@@ -634,7 +630,8 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
     controllerRef.current = null
     setController(null)
     setEntries(null)
-    void (current ? current.dispose() : Promise.resolve()).then(refresh)
+    // Cerrar explicitamente libera el motor (y guarda lo pendiente) a traves del audio global.
+    void (current ? audio.closeStudio() : Promise.resolve()).then(refresh)
   }
 
   const openEntry = async (entry: SessionEntry) => {

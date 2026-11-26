@@ -609,6 +609,34 @@ async function main() {
     player.dispose()
   })
 
+  await check('audio global: la misma repeticion otra vez (la vista se vuelve a montar) no reinicia la vuelta ni salta', async () => {
+    const { player, ctx } = await loadedPlayer()
+    player.setLoop({ start: 2, end: 4 })
+    player.setSpeedRamp({ enabled: true, start: 0.7, step: 0.1, top: 0.9 })
+    await player.play()
+    const tick = () => (player as unknown as { tick(): void }).tick()
+    const when = ctx.sources[0].startArgs?.[0] ?? 0
+    // Segunda vuelta sonando.
+    const second = when + 2 / 0.7
+    ctx.currentTime = second - 0.5
+    tick()
+    ctx.currentTime = second + 0.01
+    tick()
+    assert.deepEqual(player.practiceStatus(), { rate: 0.8, lap: 1 })
+    const created = ctx.sources.length
+    const pos = player.position()
+    // StemStudio vuelve a montarse y aplica la misma region y la misma rampa.
+    player.setLoop({ start: 2, end: 4 })
+    player.setSpeedRamp({ enabled: true, start: 0.7, step: 0.1, top: 0.9 })
+    assert.equal(ctx.sources.length, created, 'no se reprograma nada')
+    assert.deepEqual(player.practiceStatus(), { rate: 0.8, lap: 1 })
+    close(player.position(), pos, 1e-9, 'la posicion sigue igual:')
+    // Una region distinta si reinicia en la primera vuelta.
+    player.setLoop({ start: 1, end: 4 })
+    assert.equal(player.practiceStatus().lap, 0)
+    player.dispose()
+  })
+
   await check('tono sin worklet: se guarda acotado a +-6 y el estado lo dice (unavailable)', async () => {
     const { player } = await loadedPlayer()
     player.setPitch(9)

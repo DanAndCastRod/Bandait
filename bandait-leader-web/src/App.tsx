@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useState } from 'react'
 import { HubProvider } from './context/HubContext'
+import { GlobalAudioProvider } from './context/GlobalAudioContext'
 import { useHub } from './context/hubContextCore'
 import { AuthScreen } from './components/AuthScreen'
 import { HubNavbar, type HubTab } from './components/HubNavbar'
@@ -188,7 +189,9 @@ const HubMainContent: React.FC = () => {
 export default function App() {
   return (
     <HubProvider>
-      <HubMainContent />
+      <GlobalAudioProvider>
+        <HubMainContent />
+      </GlobalAudioProvider>
     </HubProvider>
   )
 }

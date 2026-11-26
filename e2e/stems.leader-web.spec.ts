@@ -240,8 +240,8 @@ test.describe('Web Admin Hub - estudio de stems', () => {
     await expect(page.getByTestId('stem-candidate')).toHaveAttribute('data-role', 'click');
   });
 
-  test('390 px: importador y estudio sin scroll horizontal; al salir de la vista cierra el AudioContext', async ({ page }) => {
-    // Registra cada AudioContext que crea la pagina para comprobar que se cierra al salir.
+  test('390 px: importador y estudio sin scroll horizontal; salir de la vista no corta el audio y borrar los stems cierra el AudioContext', async ({ page }) => {
+    // Registra cada AudioContext que crea la pagina: el audio global lo mantiene al cambiar de vista.
     await page.addInitScript(() => {
       const Original = window.AudioContext;
       const created: AudioContext[] = [];
@@ -267,12 +267,25 @@ test.describe('Web Admin Hub - estudio de stems', () => {
     await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(3, { timeout: 15000 });
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
+    // Repetir la Intro (mas larga que el audio de 3 s): sigue sonando mientras se cambia de vista.
+    const loopSelect = page.getByTestId('stem-loop-select');
+    await loopSelect.selectOption((await loopSelect.locator('option', { hasText: 'Intro' }).getAttribute('value')) as string);
     await page.getByTestId('stem-play').click();
     await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'playing');
     await page.locator('nav.hub-mobile-nav').getByRole('button', { name: 'SETLISTS' }).click();
     await expect(page.getByTestId('stem-studio')).toHaveCount(0);
-    await expect
-      .poll(() => page.evaluate(() => (window as unknown as { __stemCtxs: AudioContext[] }).__stemCtxs.map((c) => c.state)))
-      .toEqual(['closed']);
+    const ctxStates = () => page.evaluate(() => (window as unknown as { __stemCtxs: AudioContext[] }).__stemCtxs.map((c) => c.state));
+    // Fuera de PISTAS el reproductor sigue sonando (audio global): un solo AudioContext, abierto.
+    await page.waitForTimeout(500);
+    expect(await ctxStates()).toEqual(['running']);
+    // Al volver, la vista se reengancha al mismo reproductor, que sigue sonando.
+    await page.locator('nav.hub-mobile-nav').getByRole('button', { name: /PISTAS/ }).click();
+    await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'playing');
+    expect(await ctxStates()).toEqual(['running']);
+    // Borrar los stems libera el reproductor y cierra su AudioContext.
+    await page.getByTestId('stem-delete-song').click();
+    await page.getByTestId('stem-delete-confirm').getByRole('button', { name: 'BORRAR' }).click();
+    await expect(page.getByTestId('stem-studio')).toHaveCount(0);
+    await expect.poll(ctxStates).toEqual(['closed']);
   });
 });
