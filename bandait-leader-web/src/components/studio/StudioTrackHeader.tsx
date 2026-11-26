@@ -14,7 +14,9 @@ import {
   type StudioInstrument,
   type StudioTrack,
 } from '../../services/studio/session'
+import { studioTrackColor } from '../../services/studioCanvasPalette'
 import { formatDb, formatPan, trackColor, type ArmChannel, type StudioController } from './studioState'
+import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 
 interface Props {
   controller: StudioController
@@ -60,7 +62,8 @@ function instrumentSummary(instrument: StudioInstrument): string {
  */
 export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, height, armed, midiArmed, selected, recordAllowed, recording, inputChannels }) => {
   const meterRef = useRef<HTMLCanvasElement>(null)
-  const color = trackColor(index, track.role)
+  const palette = useStudioCanvasPalette()
+  const color = studioTrackColor(palette, trackColor(index, track.role))
   const instrument = track.kind === 'instrument' ? track.instrument : null
   const availability = instrument ? instrumentAvailability(instrument) : null
   const clipCount = track.clips.length + track.midiClips.length
@@ -103,18 +106,19 @@ export const StudioTrackHeader: React.FC<Props> = ({ controller, track, index, h
       lastHold = hold
       ctx.clearRect(0, 0, w, h)
       const zero = meterFraction(0)
-      ctx.fillStyle = reading.peakDb > 0 ? '#D96459' : '#3C6E6B'
+      ctx.fillStyle = reading.peakDb > 0 ? palette.meterOver : palette.meterOkDim
       ctx.fillRect(0, h - peak * h, w, peak * h)
-      ctx.fillStyle = reading.peakDb > 0 ? '#D96459' : '#5CC8C2'
+      ctx.fillStyle = reading.peakDb > 0 ? palette.meterOver : palette.meterOk
       ctx.fillRect(0, h - rms * h, w, rms * h)
       if (hold > 0.01) {
-        ctx.fillStyle = hold > zero ? '#D96459' : '#D5DAE0'
+        ctx.fillStyle = hold > zero ? palette.meterOver : palette.meterHold
         ctx.fillRect(0, Math.max(0, h - hold * h - dpr), w, Math.max(1, dpr))
       }
-      ctx.fillStyle = '#2E343D'
+      ctx.fillStyle = palette.rowLine
       ctx.fillRect(0, h - zero * h, w, Math.max(1, dpr))
     })
-  }, [controller, track.id])
+    // palette: un cambio de tema reinicia el bucle y el medidor se repinta con los colores nuevos.
+  }, [controller, track.id, palette])
 
   // F2 (registro de comandos): foco en el nombre, con el texto elegido para escribir encima. Se
   // espera un fotograma: si el piano roll estaba abierto, la cabecera todavia esta oculta.

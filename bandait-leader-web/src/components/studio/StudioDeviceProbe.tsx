@@ -395,7 +395,7 @@ export const StudioDeviceProbe: React.FC = () => {
       const recorder = recorderRef.current
       const left = 46
       const span = Math.max(10, width - left - 86)
-      // El canvas no entiende var(--b-*): colores del tema resueltos en cada cuadro.
+      // El canvas no entiende var(--b-*): colores del tema resueltos y cacheados (se renuevan al cambiar el tema).
       const pal = canvasPalette()
       g.clearRect(0, 0, width, METER_HEIGHT)
       g.font = `600 11px ${mono}`

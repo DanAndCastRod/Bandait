@@ -24,8 +24,10 @@ import {
 import { expandMidiClipNotes, moveClip, moveClipsBy, moveMidiClip, resizeMidiClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
 import { clipsInMarquee, dragLoopRegion, marqueeFromPoints, marqueeSelection, type LoopDragPart, type MarqueeClipBox, type MarqueeRect } from '../../services/studio/timelineMath'
 import type { AssetPeaks, LoopRegionS, PeakColumns, SnapMode } from '../../services/studio/types'
+import { studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
 import { StudioPianoRoll } from './StudioPianoRoll'
 import { StudioTrackHeader } from './StudioTrackHeader'
+import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 import {
   downloadBlob,
   formatBarBeat,
@@ -97,6 +99,8 @@ interface Scene {
   /** Rectangulo de seleccion en curso (coordenadas del contenido), o null. */
   marquee: MarqueeRect | null
   getPeaks: (assetId: string) => AssetPeaks | null
+  /** Colores del tema vigente (useStudioCanvasPalette). */
+  palette: StudioCanvasPalette
 }
 
 interface PeakBuffers {
@@ -180,6 +184,7 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
   const missing = scene.missing.has(clip.assetId)
   const x = Math.max(box.x, -2)
   const w = Math.min(box.x + box.w, view.width + 2) - x
+  const pal = scene.palette
 
   ctx.save()
   ctx.beginPath()
@@ -189,7 +194,7 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
   ctx.fillRect(x, box.y, w, box.h)
 
   if (missing) {
-    ctx.strokeStyle = withAlpha('#D96459', 0.5)
+    ctx.strokeStyle = pal.missingHatch
     ctx.lineWidth = 1
     ctx.beginPath()
     for (let hx = x - box.h; hx < x + w; hx += 10) {
@@ -209,7 +214,7 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
   if (clip.active) {
     const fadeIn = clip.fadeInS * view.zoom
     const fadeOut = clip.fadeOutS * view.zoom
-    ctx.fillStyle = 'rgba(15, 17, 20, 0.6)'
+    ctx.fillStyle = pal.fadeShade
     ctx.strokeStyle = withAlpha(color, 0.9)
     ctx.lineWidth = 1
     if (fadeIn >= 1) {
@@ -251,14 +256,14 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
     const tx = Math.max(box.x, 0) + 6
     const ty = box.y + (clip.active ? 5 : 7)
     // Fondo bajo el texto: se lee tambien encima de la forma de onda.
-    ctx.fillStyle = 'rgba(15, 17, 20, 0.72)'
+    ctx.fillStyle = pal.labelBg
     ctx.fillRect(tx - 3, ty - 2, ctx.measureText(text).width + 6, 14)
-    ctx.fillStyle = missing ? '#D96459' : withAlpha('#D5DAE0', clip.active ? 0.92 : 0.7)
+    ctx.fillStyle = missing ? pal.danger : withAlpha(pal.text, clip.active ? 0.92 : 0.7)
     ctx.fillText(text, tx, ty)
   }
   ctx.restore()
 
-  ctx.strokeStyle = selected ? '#D5DAE0' : withAlpha(color, clip.active ? 0.75 : 0.4)
+  ctx.strokeStyle = selected ? pal.text : withAlpha(color, clip.active ? 0.75 : 0.4)
   ctx.lineWidth = selected ? 1.5 : 1
   if (!clip.active) ctx.setLineDash([4, 3])
   ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1)
@@ -266,7 +271,7 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
 
   // Manijas de fade del clip elegido o bajo el puntero.
   if (clip.active && (selected || hovered) && box.w > 40) {
-    ctx.fillStyle = '#D5DAE0'
+    ctx.fillStyle = pal.text
     const hy = box.y + 1
     const inX = box.x + clip.fadeInS * view.zoom
     const outX = box.x + box.w - clip.fadeOutS * view.zoom
@@ -307,6 +312,7 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
   const x = Math.max(box.x, -2)
   const w = Math.min(box.x + box.w, view.width + 2) - x
   const beatPx = beatsToSeconds(1, bpm) * view.zoom
+  const pal = scene.palette
 
   ctx.save()
   ctx.beginPath()
@@ -362,21 +368,21 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
     ctx.textBaseline = 'top'
     const tx = Math.max(box.x, 0) + 6
     const ty = box.y + 5
-    ctx.fillStyle = 'rgba(15, 17, 20, 0.72)'
+    ctx.fillStyle = pal.labelBg
     ctx.fillRect(tx - 3, ty - 2, ctx.measureText(text).width + 6, 14)
-    ctx.fillStyle = withAlpha('#D5DAE0', muted ? 0.7 : 0.92)
+    ctx.fillStyle = withAlpha(pal.text, muted ? 0.7 : 0.92)
     ctx.fillText(text, tx, ty)
   }
   ctx.restore()
 
-  ctx.strokeStyle = selected ? '#D5DAE0' : withAlpha(color, muted ? 0.4 : 0.75)
+  ctx.strokeStyle = selected ? pal.text : withAlpha(color, muted ? 0.4 : 0.75)
   ctx.lineWidth = selected ? 1.5 : 1
   if (muted) ctx.setLineDash([4, 3])
   ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1)
   ctx.setLineDash([])
   // Bordes que se arrastran para recortar, en el clip elegido.
   if (selected && box.w > 24) {
-    ctx.fillStyle = '#D5DAE0'
+    ctx.fillStyle = pal.text
     ctx.fillRect(box.x + 1, box.y + box.h / 2 - 8, 2, 16)
     ctx.fillRect(box.x + box.w - 3, box.y + box.h / 2 - 8, 2, 16)
   }
@@ -387,27 +393,28 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
   const { width, height, zoom, scrollX } = view
   const t0 = scrollX / zoom
   const t1 = (scrollX + width) / zoom
+  const pal = scene.palette
   ctx.clearRect(0, 0, width, height)
-  ctx.fillStyle = '#0F1114'
+  ctx.fillStyle = pal.bg
   ctx.fillRect(0, 0, width, height)
 
   // Filas
   rows.forEach((row, index) => {
     const y = RULER_H + row.top
-    ctx.fillStyle = index % 2 === 0 ? '#14171B' : '#12151A'
+    ctx.fillStyle = index % 2 === 0 ? pal.lane : pal.laneAlt
     ctx.fillRect(0, y, width, TRACK_ROW_H)
     if (row.laneCount > 0) {
-      ctx.fillStyle = '#0D0F12'
+      ctx.fillStyle = pal.takeLane
       ctx.fillRect(0, y + TRACK_ROW_H, width, row.height - TRACK_ROW_H)
     }
     if (scene.arms[row.trackId] !== undefined || scene.midiArmed === row.trackId) {
-      ctx.fillStyle = 'rgba(217, 100, 89, 0.06)'
+      ctx.fillStyle = pal.armedTint
       ctx.fillRect(0, y, width, TRACK_ROW_H)
     } else if (scene.selectedTrackId === row.trackId) {
-      ctx.fillStyle = 'rgba(122, 165, 214, 0.05)'
+      ctx.fillStyle = pal.selectedTrackTint
       ctx.fillRect(0, y, width, TRACK_ROW_H)
     }
-    ctx.fillStyle = '#2E343D'
+    ctx.fillStyle = pal.rowLine
     ctx.fillRect(0, y + row.height - 1, width, 1)
   })
   const rowsBottom = RULER_H + (rows.length > 0 ? rows[rows.length - 1].top + rows[rows.length - 1].height : 0)
@@ -422,10 +429,10 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
   const showBeats = beatS * zoom >= 16
   for (let bar = startBar; bar * barS <= t1; bar += barStep) {
     const x = Math.round(bar * barS * zoom - scrollX)
-    ctx.fillStyle = '#2A3038'
+    ctx.fillStyle = pal.gridStrong
     ctx.fillRect(x, RULER_H, 1, rowsBottom - RULER_H)
     if (showBeats && barStep === 1) {
-      ctx.fillStyle = '#1D2127'
+      ctx.fillStyle = pal.gridSoft
       for (let beat = 1; beat < session.beatsPerBar; beat++) {
         ctx.fillRect(Math.round((bar * barS + beat * beatS) * zoom - scrollX), RULER_H, 1, rowsBottom - RULER_H)
       }
@@ -436,9 +443,9 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
   if (scene.loop) {
     const lx = scene.loop.startS * zoom - scrollX
     const lw = (scene.loop.endS - scene.loop.startS) * zoom
-    ctx.fillStyle = 'rgba(92, 200, 194, 0.07)'
+    ctx.fillStyle = pal.loopFill
     ctx.fillRect(lx, RULER_H, lw, rowsBottom - RULER_H)
-    ctx.fillStyle = 'rgba(92, 200, 194, 0.55)'
+    ctx.fillStyle = pal.loopEdge
     ctx.fillRect(Math.round(lx), RULER_H, 1, rowsBottom - RULER_H)
     ctx.fillRect(Math.round(lx + lw), RULER_H, 1, rowsBottom - RULER_H)
   }
@@ -447,7 +454,7 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
   session.tracks.forEach((track, index) => {
     const row = rows[index]
     if (!row) return
-    const color = trackColor(index, track.role)
+    const color = studioTrackColor(pal, trackColor(index, track.role))
     if (track.kind === 'instrument') {
       let selectedMidi: StudioMidiClip | null = null
       for (const clip of track.midiClips) {
@@ -458,7 +465,7 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
       if (track.midiClips.length === 0 && view.width > 200) {
         ctx.font = FONT
         ctx.textBaseline = 'middle'
-        ctx.fillStyle = 'rgba(142, 151, 163, 0.45)'
+        ctx.fillStyle = pal.hint
         ctx.fillText('DOBLE CLIC PARA CREAR UN CLIP MIDI', 10, RULER_H + row.top + TRACK_ROW_H / 2)
       }
       return
@@ -472,7 +479,7 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     if (row.laneCount > 0) {
       ctx.font = FONT
       ctx.textBaseline = 'top'
-      ctx.fillStyle = 'rgba(142, 151, 163, 0.5)'
+      ctx.fillStyle = pal.hint
       ctx.fillText('TOMAS', 6, RULER_H + row.top + TRACK_ROW_H + 3)
     }
   })
@@ -483,9 +490,9 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     const rw = (scene.recBand.endS - scene.recBand.startS) * zoom
     rows.forEach((row) => {
       if (scene.arms[row.trackId] === undefined && scene.midiArmed !== row.trackId) return
-      ctx.fillStyle = 'rgba(217, 100, 89, 0.28)'
+      ctx.fillStyle = pal.recFill
       ctx.fillRect(rx, RULER_H + row.top + 4, rw, TRACK_ROW_H - 8)
-      ctx.strokeStyle = '#D96459'
+      ctx.strokeStyle = pal.danger
       ctx.lineWidth = 1
       ctx.strokeRect(rx + 0.5, RULER_H + row.top + 4.5, rw - 1, TRACK_ROW_H - 9)
     })
@@ -497,9 +504,9 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     const mw = Math.max(1, (scene.marquee.endS - scene.marquee.startS) * zoom)
     const my = scene.marquee.top
     const mh = Math.max(1, scene.marquee.bottom - scene.marquee.top)
-    ctx.fillStyle = 'rgba(122, 165, 214, 0.12)'
+    ctx.fillStyle = pal.selectionFill
     ctx.fillRect(mx, my, mw, mh)
-    ctx.strokeStyle = '#7AA5D6'
+    ctx.strokeStyle = pal.selection
     ctx.lineWidth = 1
     ctx.setLineDash([4, 3])
     ctx.strokeRect(Math.round(mx) + 0.5, Math.round(my) + 0.5, Math.round(mw) - 1, Math.round(mh) - 1)
@@ -508,7 +515,7 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
 
   // Regla (siempre visible: se dibuja en el scroll vertical del cuerpo)
   const ry = view.scrollTop
-  ctx.fillStyle = '#1A1E23'
+  ctx.fillStyle = pal.ruler
   ctx.fillRect(0, ry, width, RULER_H)
   ctx.font = FONT
   ctx.textBaseline = 'middle'
@@ -517,28 +524,28 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     const sx = section.startSec * zoom - scrollX
     const sw = (section.endSec - section.startSec) * zoom
     const active = scene.loop !== null && Math.abs(scene.loop.startS - section.startSec) < 0.001 && Math.abs(scene.loop.endS - section.endSec) < 0.001
-    ctx.fillStyle = active ? 'rgba(92, 200, 194, 0.3)' : '#232830'
+    ctx.fillStyle = active ? pal.sectionActive : pal.section
     ctx.fillRect(sx + 1, ry + 2, sw - 2, SECTION_BAND_H - 3)
     if (sw > 26) {
       ctx.save()
       ctx.beginPath()
       ctx.rect(sx + 1, ry, sw - 2, SECTION_BAND_H)
       ctx.clip()
-      ctx.fillStyle = active ? '#D5DAE0' : '#8E97A3'
+      ctx.fillStyle = active ? pal.rulerTextActive : pal.rulerText
       ctx.fillText(section.label.toUpperCase(), Math.max(sx, 0) + 6, ry + SECTION_BAND_H / 2 + 0.5)
       ctx.restore()
     }
   }
   if (scene.sections.length === 0) {
-    ctx.fillStyle = '#4A525D'
+    ctx.fillStyle = pal.rulerHint
     ctx.fillText('SIN SECCIONES: ARRASTRA SOBRE LA REGLA PARA MARCAR UNA REPETICIÓN', 8, ry + SECTION_BAND_H / 2 + 0.5)
   }
   if (scene.loop) {
     const lx = scene.loop.startS * zoom - scrollX
     const lw = (scene.loop.endS - scene.loop.startS) * zoom
-    ctx.fillStyle = 'rgba(92, 200, 194, 0.22)'
+    ctx.fillStyle = pal.loopRuler
     ctx.fillRect(lx, ry + SECTION_BAND_H, lw, RULER_H - SECTION_BAND_H)
-    ctx.fillStyle = '#5CC8C2'
+    ctx.fillStyle = pal.accent
     ctx.fillRect(lx, ry + RULER_H - 3, lw, 3)
     // Tiradores de los bordes: se arrastran para estirar o encoger la repeticion; el centro la mueve.
     ctx.fillRect(Math.round(lx), ry + SECTION_BAND_H + 2, 3, RULER_H - SECTION_BAND_H - 2)
@@ -546,12 +553,12 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
   }
   for (let bar = startBar; bar * barS <= t1; bar += barStep) {
     const x = Math.round(bar * barS * zoom - scrollX)
-    ctx.fillStyle = '#4A525D'
+    ctx.fillStyle = pal.rulerTick
     ctx.fillRect(x, ry + SECTION_BAND_H + 12, 1, RULER_H - SECTION_BAND_H - 12)
-    ctx.fillStyle = '#8E97A3'
+    ctx.fillStyle = pal.rulerText
     ctx.fillText(String(bar + 1), x + 4, ry + SECTION_BAND_H + 9)
   }
-  ctx.fillStyle = '#2E343D'
+  ctx.fillStyle = pal.rowLine
   ctx.fillRect(0, ry + RULER_H - 1, width, 1)
   ctx.fillRect(0, ry + SECTION_BAND_H, width, 1)
 
@@ -560,9 +567,9 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     const ms = beatsToSeconds(marker.beat, session.bpm)
     if (ms < t0 - 1 || ms > t1) continue
     const mx = Math.round(ms * zoom - scrollX)
-    ctx.fillStyle = 'rgba(217, 162, 78, 0.35)'
+    ctx.fillStyle = pal.markerLine
     ctx.fillRect(mx, ry + RULER_H, 1, rowsBottom - RULER_H)
-    ctx.fillStyle = '#D9A24E'
+    ctx.fillStyle = pal.marker
     ctx.beginPath()
     ctx.moveTo(mx, ry + RULER_H - 1)
     ctx.lineTo(mx + 6, ry + RULER_H - 7)
@@ -737,6 +744,9 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   const fileRef = useRef<HTMLInputElement>(null)
   const midiFileRef = useRef<HTMLInputElement>(null)
   const dirtyRef = useRef(true)
+  // Colores del tema vigente: cacheados, cambian (y repintan) solo al cambiar tema o acento.
+  const palette = useStudioCanvasPalette()
+  const paletteRef = useRef(palette)
   const zoomRef = useRef(DEFAULT_ZOOM)
   const draftRef = useRef<StudioSession | null>(null)
   const loopDraftRef = useRef<LoopRegionS | null>(null)
@@ -758,8 +768,10 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
 
   // Cualquier cambio discreto repinta el canvas en el siguiente fotograma.
   useEffect(() => {
+    paletteRef.current = palette
     dirtyRef.current = true
   }, [
+    palette,
     session,
     snap.selectedClipId,
     snap.selectedClipIds,
@@ -818,6 +830,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       selectedTrackId: current.selectedTrackId,
       recBand: fromS === null ? null : { startS: fromS, endS: Math.max(fromS, controller.engine.position()) },
       getPeaks: (assetId) => controller.getPeaks(assetId),
+      palette: paletteRef.current,
     }
   }, [controller])
 

@@ -18,8 +18,10 @@ import {
   type StudioSession,
 } from '../../services/studio/session'
 import { moveClip, moveMidiClip, resizeMidiClip, setClipFades, setClipGain, updateMidiClip } from '../../services/studio/sessionOps'
+import type { StudioCanvasPalette } from '../../services/studioCanvasPalette'
 import { StudioInstrumentPanel } from './StudioInstrumentPanel'
 import { StudioMidiDevicePanel } from './StudioMidiDevicePanel'
+import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 import {
   barBeatAt,
   downloadBlob,
@@ -106,7 +108,7 @@ const CURVE_MAX_HZ = 20000
 const CURVE_RANGE_DB = 20
 const CURVE_GRID_HZ: readonly number[] = [100, 1000, 10000]
 
-function drawEqCurve(canvas: HTMLCanvasElement, params: EqParams, sampleRate: number, bypass: boolean, detailed: boolean): void {
+function drawEqCurve(canvas: HTMLCanvasElement, params: EqParams, sampleRate: number, bypass: boolean, detailed: boolean, pal: StudioCanvasPalette): void {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const dpr = window.devicePixelRatio || 1
@@ -123,7 +125,7 @@ function drawEqCurve(canvas: HTMLCanvasElement, params: EqParams, sampleRate: nu
   const yOf = (db: number) => h / 2 - (Math.max(-CURVE_RANGE_DB, Math.min(CURVE_RANGE_DB, db)) / CURVE_RANGE_DB) * (h / 2 - dpr)
 
   ctx.lineWidth = Math.max(1, dpr)
-  ctx.strokeStyle = '#232830'
+  ctx.strokeStyle = pal.eqGrid
   ctx.beginPath()
   for (const hz of CURVE_GRID_HZ) {
     const x = Math.round(xOf(hz)) + 0.5
@@ -138,7 +140,7 @@ function drawEqCurve(canvas: HTMLCanvasElement, params: EqParams, sampleRate: nu
     }
   }
   ctx.stroke()
-  ctx.strokeStyle = '#2E343D'
+  ctx.strokeStyle = pal.eqAxis
   ctx.beginPath()
   ctx.moveTo(0, Math.round(h / 2) + 0.5)
   ctx.lineTo(w, Math.round(h / 2) + 0.5)
@@ -158,7 +160,7 @@ function drawEqCurve(canvas: HTMLCanvasElement, params: EqParams, sampleRate: nu
     if (i === 0) ctx.moveTo(x, yOf(db))
     else ctx.lineTo(x, yOf(db))
   }
-  ctx.strokeStyle = bypass ? '#4A525D' : '#5CC8C2'
+  ctx.strokeStyle = bypass ? pal.eqBypass : pal.accent
   ctx.lineWidth = Math.max(1.5, 1.5 * dpr)
   ctx.lineJoin = 'round'
   ctx.stroke()
@@ -166,11 +168,11 @@ function drawEqCurve(canvas: HTMLCanvasElement, params: EqParams, sampleRate: nu
     ctx.lineTo(w, h / 2)
     ctx.lineTo(0, h / 2)
     ctx.closePath()
-    ctx.fillStyle = 'rgba(92, 200, 194, 0.14)'
+    ctx.fillStyle = pal.eqCurveFill
     ctx.fill()
   }
   if (detailed) {
-    ctx.fillStyle = '#8E97A3'
+    ctx.fillStyle = pal.eqLabel
     ctx.font = `${Math.round(9 * dpr)}px ui-monospace, monospace`
     ctx.textBaseline = 'bottom'
     for (const [hz, text] of [
@@ -202,17 +204,18 @@ interface EqCurveProps {
 export const StudioEqCurve: React.FC<EqCurveProps> = ({ params, sampleRate, bypass, detailed = false, className = 'stu-eq-curve' }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { hpfHz, lowDb, midHz, midDb, midQ, highDb } = params
+  const palette = useStudioCanvasPalette()
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const draw = () => drawEqCurve(canvas, { hpfHz, lowDb, midHz, midDb, midQ, highDb }, sampleRate, bypass, detailed)
+    const draw = () => drawEqCurve(canvas, { hpfHz, lowDb, midHz, midDb, midQ, highDb }, sampleRate, bypass, detailed, palette)
     draw()
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(draw)
     observer.observe(canvas)
     return () => observer.disconnect()
-  }, [hpfHz, lowDb, midHz, midDb, midQ, highDb, sampleRate, bypass, detailed])
+  }, [hpfHz, lowDb, midHz, midDb, midQ, highDb, sampleRate, bypass, detailed, palette])
 
   return <canvas ref={canvasRef} className={className} aria-hidden="true" />
 }

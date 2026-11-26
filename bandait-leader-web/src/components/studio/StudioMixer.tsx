@@ -18,7 +18,9 @@ import {
 import { dbToFader, FADER_MARKS, faderToDb, LED_GAP_PX, ledLitCount, ledSegmentCount, ledZone, type LedZone } from '../../services/studio/faderScale'
 import { updateMaster } from '../../services/studio/sessionOps'
 import { StudioEqCurve } from './StudioInspector'
+import { studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
 import { errorText, formatDb, formatPan, trackColor, useStudio, withFx, type StudioController, type StudioFxSelection, type StudioPanelProps } from './studioState'
+import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 
 interface Props extends StudioPanelProps {
   /** Abre el inspector en el efecto recien elegido (la vista muestra la pestana INSPECTOR). */
@@ -48,16 +50,32 @@ interface MeterState {
   lastHold: number
 }
 
-/**
- * Colores de los LED por zona, los mismos de la paleta del Estudio (--stu-play, --stu-warn,
- * --stu-rec): encendido por el RMS, atenuado entre el RMS y el pico, apagado arriba.
- */
-const LED_COLORS: Readonly<Record<LedZone, { on: string; dim: string }>> = {
-  ok: { on: '#5CC8C2', dim: 'rgba(92, 200, 194, 0.32)' },
-  hot: { on: '#D9A24E', dim: 'rgba(217, 162, 78, 0.36)' },
-  over: { on: '#D96459', dim: 'rgba(217, 100, 89, 0.42)' },
+interface LedColors {
+  zones: Readonly<Record<LedZone, { on: string; dim: string }>>
+  off: string
 }
-const LED_OFF = '#1D2127'
+
+const ledColorsCache = new WeakMap<StudioCanvasPalette, LedColors>()
+
+/**
+ * Colores de los LED por zona, del tema vigente (verde, ambar, rojo): encendido por el RMS,
+ * atenuado entre el RMS y el pico, apagado arriba. Uno por paleta.
+ */
+function ledColors(pal: StudioCanvasPalette): LedColors {
+  let leds = ledColorsCache.get(pal)
+  if (!leds) {
+    leds = {
+      zones: {
+        ok: { on: pal.meterOk, dim: pal.meterOkLedDim },
+        hot: { on: pal.meterHot, dim: pal.meterHotDim },
+        over: { on: pal.meterOver, dim: pal.meterOverDim },
+      },
+      off: pal.meterOff,
+    }
+    ledColorsCache.set(pal, leds)
+  }
+  return leds
+}
 
 /** Zona de cada LED por cantidad de LEDs: se calcula una vez por alto de medidor. */
 const ledZonesCache = new Map<number, LedZone[]>()
@@ -71,7 +89,7 @@ function ledZones(count: number): LedZone[] {
   return zones
 }
 
-function paintMeter(canvas: HTMLCanvasElement, state: MeterState, peakDb: number, rmsDb: number, now: number): void {
+function paintMeter(canvas: HTMLCanvasElement, state: MeterState, peakDb: number, rmsDb: number, now: number, leds: LedColors): void {
   const dpr = window.devicePixelRatio || 1
   const w = Math.round(canvas.clientWidth * dpr)
   const h = Math.round(canvas.clientHeight * dpr)
@@ -105,8 +123,8 @@ function paintMeter(canvas: HTMLCanvasElement, state: MeterState, peakDb: number
   const gap = Math.max(1, Math.round(LED_GAP_PX * dpr))
   ctx.clearRect(0, 0, w, h)
   for (let i = 0; i < count; i++) {
-    const colors = LED_COLORS[zones[i]]
-    ctx.fillStyle = i < rms ? colors.on : i < peak ? colors.dim : i === hold - 1 ? colors.on : LED_OFF
+    const colors = leds.zones[zones[i]]
+    ctx.fillStyle = i < rms ? colors.on : i < peak ? colors.dim : i === hold - 1 ? colors.on : leds.off
     const y0 = Math.round(h - (i + 1) * pitch)
     const y1 = Math.round(h - i * pitch) - gap
     ctx.fillRect(0, y0, w, Math.max(1, y1 - y0))
@@ -286,8 +304,9 @@ interface StripProps {
 const TrackStrip: React.FC<StripProps> = React.memo(({ controller, track, index, sampleRate, selectedFx, generated, registerMeter, onEditFx }) => {
   const eq = track.fx.find((item) => item.type === 'eq')
   const picked = selectedFx?.targetId === track.id ? selectedFx.type : null
+  const palette = useStudioCanvasPalette()
   return (
-    <div className="stu-strip" role="group" aria-label={`Canal ${index + 1}: ${track.name}`} style={{ ['--stu-track' as string]: trackColor(index, track.role) }} data-testid={`studio-strip-${track.id}`}>
+    <div className="stu-strip" role="group" aria-label={`Canal ${index + 1}: ${track.name}`} style={{ ['--stu-track' as string]: studioTrackColor(palette, trackColor(index, track.role)) }} data-testid={`studio-strip-${track.id}`}>
       <div className="stu-strip-head">
         <span className="stu-strip-name" title={track.name}>
           {track.name}
@@ -504,6 +523,7 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport })
   const snap = useStudio(controller)
   const { session } = snap
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  const palette = useStudioCanvasPalette()
   const meters = useRef(new Map<string, HTMLCanvasElement>())
   const readouts = useRef(new Map<string, HTMLElement>())
 
@@ -516,7 +536,9 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport })
     else readouts.current.delete(key)
   }, [])
 
+  // Un cambio de tema reinicia el bucle: estados nuevos, asi que cada medidor se repinta entero.
   useEffect(() => {
+    const leds = ledColors(palette)
     const states = new Map<string, MeterState>()
     const texts = new Map<string, string>()
     const write = (key: string, text: string, alert: boolean) => {
@@ -538,17 +560,17 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport })
         }
         if (id === STUDIO_MASTER_ID) {
           const reading = controller.engine.readMasterMeter()
-          paintMeter(canvas, state, reading.peakDb, reading.rmsDb, now)
+          paintMeter(canvas, state, reading.peakDb, reading.rmsDb, now, leds)
           write('integrated', loudnessText(reading.integratedLufs), false)
           write('momentary', loudnessText(reading.momentaryLufs), false)
           write('peak', loudnessText(reading.truePeakDb), reading.truePeakDb > -1)
         } else {
           const reading = controller.engine.readTrackMeter(id)
-          paintMeter(canvas, state, reading.peakDb, reading.rmsDb, now)
+          paintMeter(canvas, state, reading.peakDb, reading.rmsDb, now, leds)
         }
       }
     })
-  }, [controller])
+  }, [controller, palette])
 
   const generatedTracks = useMemo(() => {
     const generated = new Set(session.assets.filter((asset) => asset.kind === 'generated').map((asset) => asset.id))

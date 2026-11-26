@@ -1,11 +1,13 @@
 import type React from 'react'
+import { APPEARANCE_EVENT } from '../services/appearanceDom'
 
 /**
  * Estilos compartidos de las vistas del Hub. Los colores son variables CSS (--b-*, global.css)
  * para que sigan el tema del musico (Dark Grafito / Light Estudio) y su acento; los valores de
  * cada tema viven en THEME_TOKENS (services/appearance.ts).
  *
- * Un `var(...)` no sirve en un <canvas>: para dibujar usa `hexColors` (paleta Grafito fija).
+ * Un `var(...)` no sirve en un <canvas>: para dibujar usa `canvasPalette()` (colores del tema
+ * vigente, cacheados) o, en el Estudio, `useStudioCanvasPalette()`.
  */
 export const mono = "'IBM Plex Mono', monospace"
 
@@ -53,19 +55,33 @@ export const hexColors = {
 
 export type CanvasPalette = Record<keyof typeof hexColors, string>
 
+let paletteCache: CanvasPalette | null = null
+let paletteListening = false
+
 /**
  * Colores del tema vigente resueltos a valores concretos, para dibujar en <canvas>. Sin DOM
- * (o si una variable falta) devuelve la paleta Grafito fija.
+ * (o si una variable falta) devuelve la paleta Grafito fija. Se cachea: los estilos computados
+ * se leen una vez y otra solo cuando applyAppearance() avisa un cambio (APPEARANCE_EVENT), asi
+ * que se puede llamar en cada cuadro. Los lienzos del Estudio tienen su paleta con mas roles en
+ * services/studioCanvasPalette.ts.
  */
 export function canvasPalette(): CanvasPalette {
+  if (paletteCache) return paletteCache
   const out = { ...hexColors }
   if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return out
+  if (!paletteListening && typeof window !== 'undefined') {
+    window.addEventListener(APPEARANCE_EVENT, () => {
+      paletteCache = null
+    })
+    paletteListening = true
+  }
   const style = getComputedStyle(document.documentElement)
   for (const key of Object.keys(hexColors) as Array<keyof typeof hexColors>) {
     const name = /^var\((--[a-z-]+)\)$/.exec(colors[key])?.[1]
     const value = name ? style.getPropertyValue(name).trim() : ''
     if (value) out[key] = value
   }
+  paletteCache = out
   return out
 }
 

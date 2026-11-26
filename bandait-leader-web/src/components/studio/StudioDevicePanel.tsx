@@ -3,6 +3,7 @@ import { Cable, FlaskConical, Headphones, Mic, RefreshCw } from 'lucide-react'
 import { recorderWarningMessage } from '../../services/studio/recorder'
 import { STUDIO_LATENCY_OFFSET_MS_MAX, STUDIO_LATENCY_OFFSET_MS_MIN, STUDIO_MAX_ASSET_BYTES } from '../../services/studio/session'
 import { maxTakeSeconds, useStudio, type StudioController, type StudioPanelProps } from './studioState'
+import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 
 interface Props extends StudioPanelProps {
   /** false en navegadores sin grabacion o en pantallas angostas. */
@@ -33,7 +34,9 @@ function yesNo(value: boolean | null): string {
 /** Medidor horizontal de una entrada, pintado desde requestAnimationFrame. */
 const InputLevel: React.FC<{ controller: StudioController; channel: 0 | 1 }> = ({ controller, channel }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const palette = useStudioCanvasPalette()
 
+  // palette en las dependencias: un cambio de tema reinicia el bucle y repinta con los colores nuevos.
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
@@ -59,17 +62,17 @@ const InputLevel: React.FC<{ controller: StudioController; channel: 0 | 1 }> = (
       last = signature
       const clipping = reading !== null && reading.peakDb >= -0.3
       ctx.clearRect(0, 0, w, h)
-      ctx.fillStyle = clipping ? '#D96459' : '#3C6E6B'
+      ctx.fillStyle = clipping ? palette.meterOver : palette.meterOkDim
       ctx.fillRect(0, 0, peak * w, h)
-      ctx.fillStyle = clipping ? '#D96459' : '#5CC8C2'
+      ctx.fillStyle = clipping ? palette.meterOver : palette.meterOk
       ctx.fillRect(0, 0, rms * w, h)
-      ctx.fillStyle = '#D5DAE0'
+      ctx.fillStyle = palette.meterHold
       if (hold > 0.01) ctx.fillRect(Math.min(w - dpr, hold * w), 0, Math.max(1, dpr), h)
       // Marca de -12 dBFS: nivel de trabajo razonable para grabar.
-      ctx.fillStyle = '#4A525D'
+      ctx.fillStyle = palette.meterTick
       ctx.fillRect(levelFraction(-12) * w, 0, Math.max(1, dpr), h)
     })
-  }, [controller, channel])
+  }, [controller, channel, palette])
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '64px minmax(0, 1fr)', alignItems: 'center', gap: '8px' }}>

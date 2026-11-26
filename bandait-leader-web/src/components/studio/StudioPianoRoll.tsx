@@ -29,7 +29,9 @@ import {
   type StudioMidiNote,
 } from '../../services/studio/session'
 import type { MidiEditResult, QuantizeGrid } from '../../services/studio/types'
+import { inkOn, studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
 import { downloadBlob, formatBarBeat, isBlackKey, pitchName, trackColor, useStudio, type PianoTool, type StudioController } from './studioState'
+import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 
 interface Props {
   controller: StudioController
@@ -121,6 +123,8 @@ interface Scene {
   beatsPerBar: number
   rubber: Rubber | null
   hoverRow: number | null
+  /** Colores del tema vigente (useStudioCanvasPalette). */
+  palette: StudioCanvasPalette
 }
 
 const alphaCache = new Map<string, string>()
@@ -149,10 +153,10 @@ function isOnGrid(value: number, step: number): boolean {
 // ---------------------------------------------------------------------------
 
 function paintRoll(ctx: CanvasRenderingContext2D, scene: Scene, view: View): void {
-  const { clip, rows, notes, selection, color, beatsPerBar } = scene
+  const { clip, rows, notes, selection, color, beatsPerBar, palette: pal } = scene
   const { width, height, pxPerBeat, rowH } = view
   ctx.clearRect(0, 0, width, height)
-  ctx.fillStyle = '#0F1114'
+  ctx.fillStyle = pal.bg
   ctx.fillRect(0, 0, width, height)
 
   // Filas: teclas negras mas oscuras; linea mas clara en cada Do.
@@ -162,13 +166,13 @@ function paintRoll(ctx: CanvasRenderingContext2D, scene: Scene, view: View): voi
     const pitch = rows.pitches[r]
     const y = yOfRow(r, view)
     const dark = rows.labels ? r % 2 === 1 : isBlackKey(pitch)
-    ctx.fillStyle = dark ? '#111317' : '#16191E'
+    ctx.fillStyle = dark ? pal.rowBlack : pal.rowWhite
     ctx.fillRect(KEYS_W, y, width - KEYS_W, rowH)
     if (scene.hoverRow === r) {
-      ctx.fillStyle = 'rgba(213, 218, 224, 0.035)'
+      ctx.fillStyle = pal.rowHover
       ctx.fillRect(KEYS_W, y, width - KEYS_W, rowH)
     }
-    ctx.fillStyle = !rows.labels && pitch % 12 === 0 ? '#2A3038' : '#1A1E23'
+    ctx.fillStyle = !rows.labels && pitch % 12 === 0 ? pal.gridStrong : pal.gridFaint
     ctx.fillRect(KEYS_W, y + rowH - 1, width - KEYS_W, 1)
   }
   const rowsBottom = Math.min(height, yOfRow(rows.pitches.length, view))
@@ -183,27 +187,29 @@ function paintRoll(ctx: CanvasRenderingContext2D, scene: Scene, view: View): voi
     const abs = clip.startBeat + b
     const x = Math.round(xOfBeat(b, view))
     if (x < KEYS_W) continue
-    ctx.fillStyle = isOnGrid(abs, beatsPerBar) ? '#343B46' : isOnGrid(abs, 1) ? '#242930' : '#1B1F25'
+    ctx.fillStyle = isOnGrid(abs, beatsPerBar) ? pal.gridStrong : isOnGrid(abs, 1) ? pal.gridSoft : pal.gridFaint
     ctx.fillRect(x, RULER_H, 1, rowsBottom - RULER_H)
   }
 
   // Fuera del clip y, con repeticion, lo que queda despues del patron.
   const endX = xOfBeat(clip.lengthBeats, view)
   if (endX < width) {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.fillStyle = pal.outsideClip
     ctx.fillRect(Math.max(KEYS_W, endX), RULER_H, width - Math.max(KEYS_W, endX), rowsBottom - RULER_H)
   }
   const looping = clip.loop && clip.loopBeats < clip.lengthBeats - 1e-6
   if (looping) {
     const lx = Math.max(KEYS_W, xOfBeat(clip.loopBeats, view))
-    ctx.fillStyle = 'rgba(15, 17, 20, 0.5)'
+    ctx.fillStyle = pal.afterLoop
     ctx.fillRect(lx, RULER_H, Math.max(0, Math.min(endX, width) - lx), rowsBottom - RULER_H)
   }
 
   // Notas
   ctx.font = FONT
   ctx.textBaseline = 'middle'
-  const drawNote = (n: StudioMidiNote, offset: number, ghost: boolean, picked: boolean) => {
+  // Nombre de la nota sobre la nota: tinta de mayor contraste con el color de la pista.
+  const noteInk = inkOn(color)
+  const drawNote =(n: StudioMidiNote, offset: number, ghost: boolean, picked: boolean) => {
     const row = rows.rowOf.get(n.pitch)
     if (row === undefined || row < firstRow - 1 || row > lastRow + 1) return
     const x = xOfBeat(n.start + offset, view)
@@ -220,12 +226,12 @@ function paintRoll(ctx: CanvasRenderingContext2D, scene: Scene, view: View): voi
     ctx.fillStyle = withAlpha(color, picked ? 1 : 0.35 + 0.6 * (n.velocity / 127))
     ctx.fillRect(x, y, w, h)
     if (picked) {
-      ctx.strokeStyle = '#D5DAE0'
+      ctx.strokeStyle = pal.text
       ctx.lineWidth = 1.5
       ctx.strokeRect(x + 0.75, y + 0.75, w - 1.5, h - 1.5)
     }
     if (w > 34 && rowH >= 12) {
-      ctx.fillStyle = picked ? '#15181C' : 'rgba(15, 17, 20, 0.85)'
+      ctx.fillStyle = picked ? noteInk : withAlpha(noteInk, 0.85)
       ctx.fillText(rows.labels ? (rows.labels.get(n.pitch) ?? pitchName(n.pitch)) : pitchName(n.pitch), x + 4, y + h / 2 + 0.5)
     }
   }
@@ -245,34 +251,34 @@ function paintRoll(ctx: CanvasRenderingContext2D, scene: Scene, view: View): voi
     const x1 = xOfBeat(Math.max(b0, b1), view)
     const y0 = yOfRow(Math.min(r0, r1), view)
     const y1 = yOfRow(Math.max(r0, r1) + 1, view)
-    ctx.fillStyle = 'rgba(122, 165, 214, 0.12)'
+    ctx.fillStyle = pal.selectionFill
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0)
-    ctx.strokeStyle = '#7AA5D6'
+    ctx.strokeStyle = pal.selection
     ctx.lineWidth = 1
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0 - 1, y1 - y0 - 1)
   }
 
   // Teclado (fijo a la izquierda, encima de lo que se desplaza)
-  ctx.fillStyle = '#1A1E23'
+  ctx.fillStyle = pal.keybed
   ctx.fillRect(0, RULER_H, KEYS_W, height - RULER_H)
   for (let r = firstRow; r <= lastRow; r++) {
     const pitch = rows.pitches[r]
     const y = yOfRow(r, view)
     const black = !rows.labels && isBlackKey(pitch)
-    ctx.fillStyle = scene.hoverRow === r ? withAlpha(color, 0.45) : black ? '#101215' : '#262B33'
+    ctx.fillStyle = scene.hoverRow === r ? withAlpha(color, 0.45) : black ? pal.keyBlack : pal.keyWhite
     ctx.fillRect(black ? 0 : 0, y, black ? KEYS_W * 0.62 : KEYS_W - 1, rowH - 1)
     const label = rows.labels ? (rows.labels.get(pitch) ?? pitchName(pitch)) : pitch % 12 === 0 ? pitchName(pitch) : null
     if (label && rowH >= 9) {
-      ctx.fillStyle = rows.labels && !rows.labels.has(pitch) ? '#4A525D' : '#8E97A3'
+      ctx.fillStyle = rows.labels && !rows.labels.has(pitch) ? pal.keyLabelFaint : pal.keyLabel
       ctx.textBaseline = 'middle'
       ctx.fillText(label.toUpperCase(), black ? KEYS_W * 0.62 + 3 : 5, y + rowH / 2)
     }
   }
-  ctx.fillStyle = '#2E343D'
+  ctx.fillStyle = pal.rowLine
   ctx.fillRect(KEYS_W - 1, RULER_H, 1, height - RULER_H)
 
   // Regla: compases de la sesion y fin del clip.
-  ctx.fillStyle = '#1A1E23'
+  ctx.fillStyle = pal.ruler
   ctx.fillRect(KEYS_W, 0, width - KEYS_W, RULER_H)
   ctx.textBaseline = 'middle'
   let barStep = 1
@@ -281,9 +287,9 @@ function paintRoll(ctx: CanvasRenderingContext2D, scene: Scene, view: View): voi
   for (let bar = firstBar - (firstBar % barStep); (bar * beatsPerBar - clip.startBeat) <= beatEnd; bar += barStep) {
     const x = Math.round(xOfBeat(bar * beatsPerBar - clip.startBeat, view))
     if (x < KEYS_W - 1) continue
-    ctx.fillStyle = '#4A525D'
+    ctx.fillStyle = pal.rulerTick
     ctx.fillRect(x, 10, 1, RULER_H - 10)
-    ctx.fillStyle = '#8E97A3'
+    ctx.fillStyle = pal.rulerText
     ctx.fillText(String(bar + 1), x + 4, 9)
   }
   if (endX >= KEYS_W && endX <= width) {
@@ -293,26 +299,27 @@ function paintRoll(ctx: CanvasRenderingContext2D, scene: Scene, view: View): voi
   if (looping) {
     const lx = xOfBeat(clip.loopBeats, view)
     if (lx >= KEYS_W && lx <= width) {
-      ctx.fillStyle = '#5CC8C2'
+      ctx.fillStyle = pal.accent
       ctx.fillRect(Math.round(lx) - 1, RULER_H - 6, 2, 6)
     }
   }
-  ctx.fillStyle = '#2E343D'
+  ctx.fillStyle = pal.rowLine
   ctx.fillRect(0, RULER_H - 1, width, 1)
-  ctx.fillStyle = '#1A1E23'
+  ctx.fillStyle = pal.ruler
   ctx.fillRect(0, 0, KEYS_W, RULER_H - 1)
-  ctx.fillStyle = '#4A525D'
+  ctx.fillStyle = pal.rulerHint
   ctx.fillText(rows.labels ? 'CARRIL' : 'NOTA', 6, RULER_H / 2)
 }
 
 function paintVelocity(ctx: CanvasRenderingContext2D, scene: Scene, view: View, height: number): void {
   const { width, pxPerBeat } = view
+  const pal = scene.palette
   ctx.clearRect(0, 0, width, height)
-  ctx.fillStyle = '#121418'
+  ctx.fillStyle = pal.velocityBg
   ctx.fillRect(0, 0, width, height)
   const top = 6
   const usable = height - top - 4
-  ctx.fillStyle = '#1D2127'
+  ctx.fillStyle = pal.velocityGuide
   ctx.fillRect(KEYS_W, top, width - KEYS_W, 1)
   ctx.fillRect(KEYS_W, top + usable / 2, width - KEYS_W, 1)
   scene.notes.forEach((n, i) => {
@@ -320,18 +327,18 @@ function paintVelocity(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     if (x > width || x < KEYS_W - 6) return
     const h = Math.max(2, (n.velocity / 127) * usable)
     const picked = scene.selection.has(i)
-    ctx.fillStyle = picked ? '#D5DAE0' : withAlpha(scene.color, 0.85)
+    ctx.fillStyle = picked ? pal.text : withAlpha(scene.color, 0.85)
     ctx.fillRect(Math.round(x), top + usable - h, 2, h)
     ctx.fillRect(Math.round(x) - 2, top + usable - h, Math.min(8, Math.max(4, n.length * pxPerBeat)), 2)
   })
-  ctx.fillStyle = '#1A1E23'
+  ctx.fillStyle = pal.keybed
   ctx.fillRect(0, 0, KEYS_W, height)
-  ctx.fillStyle = '#2E343D'
+  ctx.fillStyle = pal.rowLine
   ctx.fillRect(KEYS_W - 1, 0, 1, height)
   ctx.fillRect(0, 0, width, 1)
   ctx.font = FONT
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = '#8E97A3'
+  ctx.fillStyle = pal.keyLabel
   ctx.fillText('VEL', 6, height / 2)
 }
 
@@ -434,11 +441,15 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
   const contentWidth = KEYS_W + Math.ceil((lengthBeats + TAIL_BEATS) * pxPerBeat)
   const contentHeight = RULER_H + rows.pitches.length * rowH
   const selectionCount = piano.selection.length
-  const color = trackColor(loc?.trackIndex ?? 0, loc?.track.role)
+  // Colores del tema vigente: cacheados, cambian (y repintan) solo al cambiar tema o acento.
+  const palette = useStudioCanvasPalette()
+  const paletteRef = useRef(palette)
+  const color = studioTrackColor(palette, trackColor(loc?.trackIndex ?? 0, loc?.track.role))
 
   useEffect(() => {
+    paletteRef.current = palette
     dirtyRef.current = true
-  }, [clip, piano, rows, pxPerBeat, rowH, contentWidth, contentHeight])
+  }, [palette, clip, piano, rows, pxPerBeat, rowH, contentWidth, contentHeight])
 
   useLayoutEffect(() => {
     pxRef.current = pxPerBeat
@@ -491,11 +502,12 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
       notes,
       selection: new Set(draft?.selection ?? current.piano.selection),
       rows: rowsFor(location.track.instrument?.type === 'drums', notes),
-      color: trackColor(location.trackIndex, location.track.role),
+      color: studioTrackColor(paletteRef.current, trackColor(location.trackIndex, location.track.role)),
       gridStep: controller.pianoGridBeats(),
       beatsPerBar: current.session.beatsPerBar,
       rubber: rubberRef.current,
       hoverRow: hoverRowRef.current,
+      palette: paletteRef.current,
     }
   }, [controller])
 
