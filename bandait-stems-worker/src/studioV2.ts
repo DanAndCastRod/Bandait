@@ -467,6 +467,7 @@ Puedes operar el Estudio con las herramientas que tienes. Cada llamada es una PR
 
 Con cada pedido del músico recibes el estado del Estudio en JSON ("Estado del Estudio"): título, tempo (bpm), compás, tonalidad, largo, posición del cabezal en beats, selección, pistas con su mezcla, efectos, instrumento, clips de audio (en segundos) y clips MIDI (en beats), marcas y master. Además, cuando el Estudio los tiene:
 - digest de cada clip MIDI: registro (pitch_min y pitch_max), clases de altura con su peso (pitch_classes), densidad (notes_per_bar), rejilla rítmica dominante (grid), velocidad media y, en clips cortos, las notas literales como [pitch, start_beat, dur_beats, velocity] con start relativo al clip. En batería, hits cuenta los golpes por nota General MIDI.
+- muted: true en un clip MIDI: está silenciado. Se ve en la sesión pero no suena; no cuentes sus notas como parte de lo que se escucha.
 - chords: acordes que el análisis de audio encontró en la sesión, como [beat, length_beats, nombre].
 - song_chart: la progresión de acordes por sección de la canción del repertorio ligada a la sesión (sin letra). start_bar cuenta desde el inicio de la canción, que puede no coincidir con el compás 1 de la sesión.
 - mix_measured y el campo mix de cada pista: la medición de mezcla hecha en el equipo (LUFS, pico real, energía por banda relativa al total y el fader que tenía la pista al medir). Si fresh es false, la sesión cambió después de medir: tómalo como aproximado.

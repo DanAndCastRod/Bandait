@@ -791,8 +791,10 @@ TrackSummary
   instrument      {"type", "preset": string | null, "plugin_id": string | null} | null
   clips           [{"id", "start_s", "length_s", "active"}] 0..64. Clips de audio
   midi_clips      [{"id", "start_beat", "length_beats", "loop", "note_count", "pitch_min",
-                    "pitch_max", "digest" (opcional)}] 0..64. pitch_min y pitch_max son null
-                    sin notas (son el registro del clip)
+                    "pitch_max", "digest" (opcional), "muted" (opcional)}] 0..64. pitch_min y
+                    pitch_max son null sin notas (son el registro del clip). `muted` (2026-11-26)
+                    viaja solo en true: el clip está silenciado (2.4), se ve pero no suena. El
+                    Worker ya aceptaba claves extra en cada clip, así que no cambia su validación
   mix             (opcional) {"lufs": number | null, "true_peak_db": number | null,
                   "bands": {"low_db", "low_mid_db", "high_mid_db", "high_db"} | null,
                   "volume_db": number}. Medición de la pista sola (v1 6.3); `volume_db` es

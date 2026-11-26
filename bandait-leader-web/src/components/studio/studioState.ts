@@ -56,7 +56,7 @@ import {
   splitNotesAt,
   transpose,
 } from '../../services/studio/midiOps'
-import { computePeaks, PEAKS_BASE_BUCKET } from '../../services/studio/peaks'
+import { computePeaks, peaksHaveRms, PEAKS_BASE_BUCKET } from '../../services/studio/peaks'
 import { StudioRecorder } from '../../services/studio/recorder'
 import { midiClipExportNotes, parseSmf, SMF_DRUM_CHANNEL, writeSmf } from '../../services/studio/smf'
 import { adjacentMarkerBeat, cloudHasOtherVersion, referencedAssetFiles, takeClipWindows, tapTempo as computeTapTempo, TAP_TEMPO_RESET_MS, type ClipWindow } from '../../services/studio/timelineMath'
@@ -946,19 +946,35 @@ export class StudioController {
       if (!buffer) continue
       this.peaksPending.add(asset.id)
       try {
-        let peaks = await studioStore.loadPeaks(this.sessionId, asset.id).catch(() => null)
-        if (!peaks || peaks.channels.length === 0) {
+        const stored = await studioStore.loadPeaks(this.sessionId, asset.id).catch(() => null)
+        const compute = async (): Promise<AssetPeaks> => {
           const channels = []
           for (let c = 0; c < Math.min(2, buffer.numberOfChannels); c++) {
             channels.push(computePeaks(buffer.getChannelData(c), PEAKS_BASE_BUCKET))
             // Cede el hilo entre canales: un audio largo no congela la interfaz.
             await new Promise((resolve) => setTimeout(resolve, 0))
           }
-          peaks = { assetId: asset.id, sampleRate: buffer.sampleRate, channels }
-          void studioStore.savePeaks(this.sessionId, peaks).catch(() => undefined)
+          const fresh: AssetPeaks = { assetId: asset.id, sampleRate: buffer.sampleRate, channels }
+          void studioStore.savePeaks(this.sessionId, fresh).catch(() => undefined)
+          return fresh
         }
-        this.peaks.set(asset.id, peaks)
-        this.emit({ peaksVersion: this.snap.peaksVersion + 1 })
+        if (stored && stored.channels.length > 0) {
+          // Se muestran ya los picos guardados. Los de antes del RMS (peaks.ts) se recalculan una
+          // vez desde el audio decodificado y se vuelven a guardar con el RMS.
+          this.peaks.set(asset.id, stored)
+          this.emit({ peaksVersion: this.snap.peaksVersion + 1 })
+          if (!peaksHaveRms(stored.channels)) {
+            const upgraded = await compute()
+            if (this.disposed) return
+            this.peaks.set(asset.id, upgraded)
+            this.emit({ peaksVersion: this.snap.peaksVersion + 1 })
+          }
+        } else {
+          const fresh = await compute()
+          if (this.disposed) return
+          this.peaks.set(asset.id, fresh)
+          this.emit({ peaksVersion: this.snap.peaksVersion + 1 })
+        }
       } finally {
         this.peaksPending.delete(asset.id)
       }

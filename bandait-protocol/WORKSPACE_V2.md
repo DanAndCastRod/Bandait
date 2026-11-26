@@ -192,12 +192,40 @@ solo del hub; el líder lo conserva como campo desconocido y no lo usa.
 
 ```
 uiPreferences {
-  version   1                                   entero; un hub más nuevo puede subirlo
+  version   2                                   entero; un hub más nuevo puede subirlo
   theme     "dark-grafito" | "light-estudio"     por defecto "dark-grafito"
   accent    "#RRGGBB" | null                     null = el acento del tema
   radius    entero 8..999                        redondez de los botones en px (999 = píldora)
+  waveform  Waveform                             OPCIONAL (v2, 2026-11-26): forma de onda
+}
+
+Waveform {
+  version   1                                   entero; propio del bloque
+  style     "bars" | "filled" | "line"          por defecto "filled". Barras redondeadas,
+                                                relleno continuo o solo el contorno
+  layout    "mirrored" | "bottom"               por defecto "mirrored" (espejo sobre el
+                                                centro); "bottom" crece desde la base
+  data      "peak" | "rms" | "peak-rms"         por defecto "peak". "peak-rms": dos capas,
+                                                RMS opaco sobre el pico translúcido
+  scale     "linear" | "db"                     por defecto "linear". "db": logarítmica,
+                                                0 dBFS arriba y piso de -48 dBFS
+  color     "track" | "accent" | "neutral"      por defecto "track" (color de la pista)
+  gain      número 0.5..3                       por defecto 1. Zoom vertical solo visual
+                                                (no cambia el audio), dos decimales
+  barWidth  entero 1..6                         por defecto 2. Ancho de barra en px (solo "bars")
+  barGap    entero 0..4                         por defecto 1. Separación en px (solo "bars")
 }
 ```
+
+- Los valores por defecto de `waveform` reproducen el aspecto que tenía el Estudio antes de la
+  opción (relleno, espejo, pico, lineal, color de la pista, sin zoom).
+- `waveform` ausente (documento v1) = valores por defecto. Lectura tolerante campo por campo,
+  igual que el resto: un valor fuera de rango se acota o toma su valor por defecto y
+  `validateWorkspace` lo informa como advertencia.
+- Un hub v1 lee un documento v2 con los campos que conoce; si el músico cambia la apariencia en
+  ese hub, el bloque `waveform` se pierde (vuelve a los valores por defecto). No hay migración:
+  el hub v2 lo escribe la próxima vez que el músico cambia algo.
+- Es solo visual y solo del hub: no viaja al líder ni a los followers.
 
 - Es del músico, no de la banda: vive **solo** en el workspace personal
   (`bandait_workspaces`). Nunca se escribe en `bandait_bands.content` (sección 7), así que un

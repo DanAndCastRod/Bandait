@@ -1,0 +1,160 @@
+/* Controles de la forma de onda (components/WaveformSettings.tsx): APARIENCIA y el acceso rapido
+   del Estudio. Solo tokens --b-* del tema; radios con la redondez del musico (nunca < 8 px). */
+
+.wf {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  color: var(--b-text);
+  font-family: var(--font-ui);
+}
+.wf[data-compact='true'] {
+  gap: 8px;
+}
+.wf-preview {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--b-border-soft);
+  border-radius: var(--b-radius-card);
+  background: var(--b-lane);
+}
+.wf-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.wf[data-compact='true'] .wf-row {
+  grid-template-columns: 88px minmax(0, 1fr);
+}
+.wf-row[data-disabled='true'] {
+  opacity: 0.45;
+}
+.wf-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--b-muted);
+}
+.wf-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  justify-self: start;
+  border-radius: var(--b-radius-control);
+  background: var(--b-well);
+}
+.wf-seg-btn {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--b-radius-control);
+  background: transparent;
+  color: var(--b-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.wf-seg-btn:hover {
+  color: var(--b-text);
+  background: var(--b-hover);
+}
+.wf-seg-btn:active {
+  transform: scale(0.95);
+}
+.wf-seg-btn[aria-checked='true'] {
+  background: var(--b-elevated);
+  color: var(--b-accent);
+}
+.wf-seg-btn:focus-visible,
+.wf-range:focus-visible,
+.wf-reset:focus-visible {
+  outline: 2px solid var(--b-cobalt);
+  outline-offset: 2px;
+}
+.wf-range-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.wf-range {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--b-accent);
+  cursor: pointer;
+}
+.wf-range:disabled {
+  cursor: not-allowed;
+}
+.wf-value {
+  flex: 0 0 52px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--b-text);
+}
+.wf-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wf-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--b-muted);
+}
+.wf-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--b-border);
+  border-radius: var(--b-radius-control);
+  background: var(--b-elevated);
+  color: var(--b-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.wf-reset:hover:not(:disabled) {
+  background: var(--b-hover);
+}
+.wf-reset:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.wf-reset:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .wf-row,
+  .wf[data-compact='true'] .wf-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-seg-btn,
+  .wf-reset {
+    transition: none;
+  }
+}

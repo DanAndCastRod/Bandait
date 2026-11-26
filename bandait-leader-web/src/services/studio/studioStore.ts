@@ -615,12 +615,21 @@ function isPeakData(value: unknown): value is PeakData {
   )
 }
 
+/**
+ * Picos guardados, saneados. El RMS es opcional (los guardados antes del 2026-11-26 no lo
+ * traen): uno danado o de otro largo se descarta y queda el pico; studioState lo recalcula.
+ */
 function sanitizePeaks(value: unknown, assetId: string): AssetPeaks | null {
   if (typeof value !== 'object' || value === null) return null
   const v = value as Partial<AssetPeaks>
   if (v.assetId !== assetId || typeof v.sampleRate !== 'number' || !(v.sampleRate > 0)) return null
   if (!Array.isArray(v.channels) || v.channels.length === 0 || !v.channels.every(isPeakData)) return null
-  return { assetId, sampleRate: v.sampleRate, channels: v.channels }
+  const channels: PeakData[] = v.channels.map((c) =>
+    c.rms instanceof Uint8Array && c.rms.length === c.min.length
+      ? { min: c.min, max: c.max, samplesPerBucket: c.samplesPerBucket, rms: c.rms }
+      : { min: c.min, max: c.max, samplesPerBucket: c.samplesPerBucket },
+  )
+  return { assetId, sampleRate: v.sampleRate, channels }
 }
 
 export async function savePeaks(sessionId: string, peaks: AssetPeaks): Promise<void> {

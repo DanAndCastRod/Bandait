@@ -63,6 +63,7 @@ import {
   studioTrackColor,
 } from '../src/services/studioCanvasPalette.ts'
 import { loadWorkspaceDocument, migrateWorkspace, parseImportedWorkspace, validateWorkspace } from '../src/services/workspaceSchema.ts'
+import { defaultWaveformPreferences } from '../src/services/waveform.ts'
 import { mergeWorkspace, personalPart, sliceBand, type SharedBand } from '../src/services/sharedBands.ts'
 import { stableStringify } from '../src/services/workspaceSync.ts'
 import type { WorkspaceStore } from '../src/types/hub.ts'
@@ -209,9 +210,13 @@ check('global.css define exactamente los tokens de THEME_TOKENS en cada tema (si
 
 check('el Estudio mapea sus tokens --stu-* a los globales (sigue el tema, sin colores fijos)', () => {
   const block = studioCss.slice(studioCss.indexOf('.stu {'), studioCss.indexOf('}', studioCss.indexOf('.stu {')))
-  const stu = [...block.matchAll(/--stu-([a-z-]+):\s*([^;]+);/g)].filter((m) => !['ease', 'head-w'].includes(m[1]))
+  const all = [...block.matchAll(/--stu-([a-z-]+):\s*([^;]+);/g)]
+  // Geometria (no color): curva, ancho de cabeceras, separacion y radios de los paneles.
+  const stu = all.filter((m) => !['ease', 'head-w', 'gap', 'r-panel', 'r-inner'].includes(m[1]))
   assert.ok(stu.length >= 14)
   for (const m of stu) assert.match(m[2], /^var\(--b-[a-z-]+\)$/, `--stu-${m[1]}`)
+  // Los radios de los paneles salen de la redondez del musico (que nunca baja de 8 px).
+  for (const m of all.filter((x) => x[1].startsWith('r-'))) assert.match(m[2], /^min\(var\(--b-radius-control\), \d+px\)$/, `--stu-${m[1]}`)
   const hex = studioCss.match(/#[0-9a-f]{3,8}\b/gi) ?? []
   assert.deepEqual(hex, [], 'studio.css sin hexadecimales fijos')
 })
@@ -461,17 +466,20 @@ console.log('Lectura tolerante y fusion con el workspace')
 check('parseUiPreferences: ausente o no-objeto da null; campos danados toman el valor por defecto', () => {
   for (const none of [undefined, null, 'dark', 3, []]) assert.equal(parseUiPreferences(none), null)
   assert.deepEqual(parseUiPreferences({ theme: 'neon', accent: 'rojo', radius: 'abc' }), { ...defaultUiPreferences() })
+  // Un documento v1 (sin `waveform`) toma la forma de onda por defecto.
   assert.deepEqual(parseUiPreferences({ theme: 'light-estudio', accent: '#abc', radius: 3 }), {
-    version: 1,
+    version: 2,
     theme: 'light-estudio',
     accent: '#AABBCC',
     radius: 8,
+    waveform: defaultWaveformPreferences(),
   })
   assert.deepEqual(parseUiPreferences({ version: 7, theme: 'dark-grafito', accent: null, radius: 2000, futuro: true }), {
-    version: 1,
+    version: 2,
     theme: 'dark-grafito',
     accent: null,
     radius: 999,
+    waveform: defaultWaveformPreferences(),
   })
   assert.deepEqual(parseUiPreferences({}), defaultUiPreferences())
 })
@@ -516,9 +524,18 @@ check('withUiPreferences: mismo objeto si no cambia (sin escritura), nuevo objet
   assert.notEqual(next, fx)
   assert.equal(next.bands, fx.bands)
   assert.equal(next.songsMap, fx.songsMap)
-  assert.deepEqual(next.uiPreferences, { version: 1, theme: 'dark-grafito', accent: null, radius: 999 })
+  assert.deepEqual(next.uiPreferences, { version: 2, theme: 'dark-grafito', accent: null, radius: 999, waveform: defaultWaveformPreferences() })
   const dirty = withUiPreferences({ ...fx, uiPreferences: { ...fx.uiPreferences!, extra: 1 } as unknown as UiPreferences }, fx.uiPreferences!)
-  assert.equal(Object.keys(dirty.uiPreferences!).length, 4, 'limpia campos sobrantes')
+  assert.equal(Object.keys(dirty.uiPreferences!).length, 5, 'limpia campos sobrantes')
+  const dirtyWave = withUiPreferences({ ...fx, uiPreferences: { ...fx.uiPreferences!, waveform: { ...fx.uiPreferences!.waveform, extra: 1 } } as unknown as UiPreferences }, fx.uiPreferences!)
+  assert.notEqual(dirtyWave.uiPreferences, fx.uiPreferences)
+  assert.equal(Object.keys(dirtyWave.uiPreferences!.waveform).length, 9, 'limpia campos sobrantes del bloque waveform')
+  // Un documento v1 (4 campos, sin waveform) se reescribe al guardar algo, con la version y el bloque.
+  const v1 = { ...fx, uiPreferences: { version: 1, theme: 'dark-grafito', accent: null, radius: 999 } as unknown as UiPreferences }
+  const upgraded = withUiPreferences(v1, prefs({ theme: 'dark-grafito', radius: 999 }))
+  assert.notEqual(upgraded, v1)
+  assert.equal(upgraded.uiPreferences!.version, 2)
+  assert.deepEqual(upgraded.uiPreferences!.waveform, defaultWaveformPreferences())
 })
 
 check('banda compartida: uiPreferences queda en la parte personal y nunca en el contenido de la banda', () => {
@@ -550,7 +567,7 @@ check('banda compartida: uiPreferences queda en la parte personal y nunca en el 
   assert.equal('uiPreferences' in (slice as object), false, 'el documento de la banda no lleva apariencia')
   assert.equal(stableStringify(slice), stableStringify(sliceBand(merged, bandId)), 'la banda compartida no cambia: nada que bloquear ni escribir')
   const mine = personalPart(edited, new Set([bandId]), personal.activeBandId)
-  assert.deepEqual(mine.uiPreferences, { version: 1, theme: 'dark-grafito', accent: '#B48EDB', radius: 24 })
+  assert.deepEqual(mine.uiPreferences, { version: 2, theme: 'dark-grafito', accent: '#B48EDB', radius: 24, waveform: defaultWaveformPreferences() })
   assert.notEqual(stableStringify(mine), stableStringify(personalPart(merged, new Set([bandId]), personal.activeBandId)), 'la parte personal si cambia')
 })
 

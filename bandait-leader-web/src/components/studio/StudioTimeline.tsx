@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Download, FileMusic, Layers, Music, Piano, Plus, Redo2, Scissors, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
+import { AudioWaveform, Copy, Download, FileMusic, Layers, Music, Piano, Plus, Redo2, Scissors, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
 import { isStemAudioPath } from '../../services/stemNames'
 import { dbToGain, type SectionSpan } from '../../services/stemTiming'
 import { clipFadeFactor } from '../../services/studio/graph'
@@ -22,12 +22,16 @@ import {
   type StudioTrack,
 } from '../../services/studio/session'
 import { expandMidiClipNotes, moveClip, moveClipsBy, moveMidiClip, resizeMidiClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
-import { clipsInMarquee, dragLoopRegion, marqueeFromPoints, marqueeSelection, type LoopDragPart, type MarqueeClipBox, type MarqueeRect } from '../../services/studio/timelineMath'
+import { clipsInMarquee, dragLoopRegion, edgeScrollSpeed, marqueeFromPoints, marqueeSelection, type LoopDragPart, type MarqueeClipBox, type MarqueeRect } from '../../services/studio/timelineMath'
 import type { AssetPeaks, LoopRegionS, PeakColumns, SnapMode } from '../../services/studio/types'
 import { studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
+import type { WaveformPreferences } from '../../services/waveform'
+import { drawWaveform, resolveWaveformColors } from '../../services/waveformRender'
 import { StudioPianoRoll } from './StudioPianoRoll'
 import { StudioTrackHeader } from './StudioTrackHeader'
+import { StudioWaveformPopover } from './StudioWaveformPopover'
 import { useStudioCanvasPalette } from './useStudioCanvasPalette'
+import { useWaveformPreferences } from './useWaveformPreferences'
 import {
   downloadBlob,
   formatBarBeat,
@@ -48,6 +52,9 @@ interface Props {
   controller: StudioController
   /** false en modo de solo reproduccion y mezcla. */
   recordAllowed: boolean
+  /** Acceso rapido a la forma de onda abierto (lo abre tambien el comando de la paleta). */
+  waveformOpen: boolean
+  onWaveformOpenChange: (open: boolean) => void
 }
 
 const MIN_ZOOM = 2
@@ -101,11 +108,20 @@ interface Scene {
   getPeaks: (assetId: string) => AssetPeaks | null
   /** Colores del tema vigente (useStudioCanvasPalette). */
   palette: StudioCanvasPalette
+  /** Forma de onda elegida por el musico (uiPreferences.waveform). */
+  waveform: WaveformPreferences
 }
 
+/** Columnas por canal y la mezcla de los dos (lo que se dibuja), reutilizadas entre repintados. */
 interface PeakBuffers {
   a: PeakColumns
   b: PeakColumns
+  m: { min: Float32Array; max: Float32Array; rms: Float32Array }
+}
+
+function peakBuffers(width: number): PeakBuffers {
+  const columns = () => ({ min: new Float32Array(width), max: new Float32Array(width), rms: new Float32Array(width) })
+  return { a: columns(), b: columns(), m: columns() }
 }
 
 const alphaCache = new Map<string, string>()
@@ -121,7 +137,7 @@ function withAlpha(hex: string, alpha: number): string {
 }
 
 function columnsOf(buffers: PeakColumns, columns: number): PeakColumns {
-  return { min: buffers.min.subarray(0, columns), max: buffers.max.subarray(0, columns) }
+  return { min: buffers.min.subarray(0, columns), max: buffers.max.subarray(0, columns), rms: buffers.rms?.subarray(0, columns) }
 }
 
 interface ClipBox {
@@ -129,6 +145,32 @@ interface ClipBox {
   y: number
   w: number
   h: number
+}
+
+/** Radio de los clips en el lienzo: el minimo de la interfaz (nunca menos de 8 px, salvo que el clip no alcance). */
+const CLIP_RADIUS = 8
+
+/**
+ * Trazo redondeado de un clip, acotado a la zona visible mas el radio: un clip de varios minutos
+ * no arma un trazo de miles de px, y las esquinas fuera de la vista no se ven igual.
+ */
+function clipPath(ctx: CanvasRenderingContext2D, box: ClipBox, viewWidth: number, inset = 0): void {
+  const r = Math.max(0, Math.min(CLIP_RADIUS, box.h / 2, box.w / 2) - inset)
+  const x0 = Math.max(box.x + inset, -r - 4)
+  const x1 = Math.min(box.x + box.w - inset, viewWidth + r + 4)
+  const w = x1 - x0
+  const h = box.h - 2 * inset
+  if (w <= 0 || h <= 0) return
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x0, box.y + inset, w, h, r)
+  else ctx.rect(x0, box.y + inset, w, h)
+}
+
+/** Fondo de etiqueta en pildora (se lee encima de la forma de onda). */
+function labelPill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  ctx.beginPath()
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, h / 2)
+  else ctx.rect(x, y, w, h)
+  ctx.fill()
 }
 
 function clipBox(clip: StudioClip, row: TrackRowLayout, view: View): ClipBox {
@@ -139,7 +181,12 @@ function clipBox(clip: StudioClip, row: TrackRowLayout, view: View): ClipBox {
   return { x, y: RULER_H + row.top + TRACK_ROW_H + lane * TAKE_LANE_H + 2, w, h: TAKE_LANE_H - 4 }
 }
 
-function paintWave(ctx: CanvasRenderingContext2D, clip: StudioClip, peaks: AssetPeaks, box: ClipBox, view: View, buffers: PeakBuffers): void {
+/**
+ * Forma de onda de un clip de audio con las preferencias del musico (services/waveformRender):
+ * solo las columnas visibles, con la ganancia del clip y sus fundidos. Los dos canales se juntan
+ * (minimo de minimos, maximo de maximos, RMS como media de potencias).
+ */
+function paintWave(ctx: CanvasRenderingContext2D, clip: StudioClip, peaks: AssetPeaks, box: ClipBox, view: View, buffers: PeakBuffers, prefs: WaveformPreferences, colors: { solid: string; translucent: string }): void {
   const first = peaks.channels[0]
   if (!first) return
   const vx0 = Math.max(box.x, 0)
@@ -155,24 +202,39 @@ function paintWave(ctx: CanvasRenderingContext2D, clip: StudioClip, peaks: Asset
   const a = peaksForRange(first, request, columnsOf(buffers.a, columns))
   const second = peaks.channels[1]
   const b = second ? peaksForRange(second, request, columnsOf(buffers.b, columns)) : null
+  // Sin RMS en los picos (guardados antes de la opcion, se recalculan solos) se dibuja el pico.
+  const hasRms = first.rms !== undefined && (!second || second.rms !== undefined)
+  let min: ArrayLike<number> = a.min
+  let max: ArrayLike<number> = a.max
+  let rms: ArrayLike<number> | null = hasRms && a.rms ? a.rms : null
+  if (b) {
+    const m = buffers.m
+    for (let i = 0; i < columns; i++) {
+      m.min[i] = a.min[i] < b.min[i] ? a.min[i] : b.min[i]
+      m.max[i] = a.max[i] > b.max[i] ? a.max[i] : b.max[i]
+      if (rms && a.rms && b.rms) m.rms[i] = Math.sqrt((a.rms[i] * a.rms[i] + b.rms[i] * b.rms[i]) / 2)
+    }
+    min = m.min
+    max = m.max
+    rms = rms && b.rms ? m.rms : null
+  }
   const gain = dbToGain(clip.gainDb)
-  const mid = box.y + box.h / 2
-  const half = Math.max(1, box.h / 2 - 3)
-  ctx.beginPath()
-  for (let i = 0; i < columns; i++) {
-    const factor = gain * clipFadeFactor(clip, (vx0 + i + 0.5 - box.x) / view.zoom)
-    const hi = Math.min(1, (b ? Math.max(a.max[i], b.max[i]) : a.max[i]) * factor)
-    if (i === 0) ctx.moveTo(vx0, mid - hi * half)
-    else ctx.lineTo(vx0 + i, mid - hi * half)
-  }
-  for (let i = columns - 1; i >= 0; i--) {
-    const factor = gain * clipFadeFactor(clip, (vx0 + i + 0.5 - box.x) / view.zoom)
-    const lo = Math.max(-1, (b ? Math.min(a.min[i], b.min[i]) : a.min[i]) * factor)
-    ctx.lineTo(vx0 + i, mid - lo * half)
-  }
-  ctx.closePath()
-  ctx.fill()
-  ctx.fillRect(vx0, mid - 0.5, columns, 1)
+  drawWaveform(
+    ctx,
+    {
+      min,
+      max,
+      rms,
+      count: columns,
+      x: vx0,
+      top: box.y,
+      height: box.h,
+      barOrigin: box.x,
+      factor: (i) => gain * clipFadeFactor(clip, (vx0 + i + 0.5 - box.x) / view.zoom),
+    },
+    prefs,
+    colors,
+  )
 }
 
 function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip, row: TrackRowLayout, color: string, view: View, buffers: PeakBuffers): void {
@@ -188,7 +250,7 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
 
   ctx.save()
   ctx.beginPath()
-  ctx.rect(x, box.y, w, box.h)
+  clipPath(ctx, box, view.width)
   ctx.clip()
   ctx.fillStyle = withAlpha(color, clip.active ? (selected ? 0.3 : 0.18) : selected ? 0.18 : 0.08)
   ctx.fillRect(x, box.y, w, box.h)
@@ -205,8 +267,8 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
   } else {
     const peaks = scene.getPeaks(clip.assetId)
     if (peaks) {
-      ctx.fillStyle = withAlpha(color, clip.active ? 0.9 : 0.45)
-      paintWave(ctx, clip, peaks, box, view, buffers)
+      const colors = resolveWaveformColors(scene.waveform.color, { track: color, accent: pal.accent, neutral: pal.text }, clip.active ? 0.9 : 0.45)
+      paintWave(ctx, clip, peaks, box, view, buffers, scene.waveform, colors)
     }
   }
 
@@ -257,7 +319,7 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
     const ty = box.y + (clip.active ? 5 : 7)
     // Fondo bajo el texto: se lee tambien encima de la forma de onda.
     ctx.fillStyle = pal.labelBg
-    ctx.fillRect(tx - 3, ty - 2, ctx.measureText(text).width + 6, 14)
+    labelPill(ctx, tx - 5, ty - 2, ctx.measureText(text).width + 10, 14)
     ctx.fillStyle = missing ? pal.danger : withAlpha(pal.text, clip.active ? 0.92 : 0.7)
     ctx.fillText(text, tx, ty)
   }
@@ -266,17 +328,22 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
   ctx.strokeStyle = selected ? pal.text : withAlpha(color, clip.active ? 0.75 : 0.4)
   ctx.lineWidth = selected ? 1.5 : 1
   if (!clip.active) ctx.setLineDash([4, 3])
-  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1)
+  ctx.beginPath()
+  clipPath(ctx, box, view.width, 0.5)
+  ctx.stroke()
   ctx.setLineDash([])
 
-  // Manijas de fade del clip elegido o bajo el puntero.
+  // Manijas de fade del clip elegido o bajo el puntero (mismo lugar y zona de agarre de siempre).
   if (clip.active && (selected || hovered) && box.w > 40) {
     ctx.fillStyle = pal.text
-    const hy = box.y + 1
+    const hy = box.y + 4.5
     const inX = box.x + clip.fadeInS * view.zoom
     const outX = box.x + box.w - clip.fadeOutS * view.zoom
-    ctx.fillRect(inX - 3, hy, 7, 7)
-    ctx.fillRect(outX - 4, hy, 7, 7)
+    ctx.beginPath()
+    ctx.arc(Math.max(inX, box.x + 4.5), hy, 3.5, 0, Math.PI * 2)
+    ctx.moveTo(Math.min(outX, box.x + box.w - 4.5) + 3.5, hy)
+    ctx.arc(Math.min(outX, box.x + box.w - 4.5), hy, 3.5, 0, Math.PI * 2)
+    ctx.fill()
   }
 }
 
@@ -316,7 +383,7 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
 
   ctx.save()
   ctx.beginPath()
-  ctx.rect(x, box.y, w, box.h)
+  clipPath(ctx, box, view.width)
   ctx.clip()
   ctx.fillStyle = withAlpha(color, muted ? (selected ? 0.12 : 0.05) : selected ? 0.24 : 0.12)
   ctx.fillRect(x, box.y, w, box.h)
@@ -369,7 +436,7 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
     const tx = Math.max(box.x, 0) + 6
     const ty = box.y + 5
     ctx.fillStyle = pal.labelBg
-    ctx.fillRect(tx - 3, ty - 2, ctx.measureText(text).width + 6, 14)
+    labelPill(ctx, tx - 5, ty - 2, ctx.measureText(text).width + 10, 14)
     ctx.fillStyle = withAlpha(pal.text, muted ? 0.7 : 0.92)
     ctx.fillText(text, tx, ty)
   }
@@ -378,7 +445,9 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
   ctx.strokeStyle = selected ? pal.text : withAlpha(color, muted ? 0.4 : 0.75)
   ctx.lineWidth = selected ? 1.5 : 1
   if (muted) ctx.setLineDash([4, 3])
-  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1)
+  ctx.beginPath()
+  clipPath(ctx, box, view.width, 0.5)
+  ctx.stroke()
   ctx.setLineDash([])
   // Bordes que se arrastran para recortar, en el clip elegido.
   if (selected && box.w > 24) {
@@ -732,7 +801,7 @@ function clampZoom(zoom: number): number {
  * ancho visible (el scroll horizontal es nativo, sobre un espaciador) y se repinta solo cuando
  * algo cambia; el cabezal es un div que se mueve con transform desde requestAnimationFrame.
  */
-export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) => {
+export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed, waveformOpen, onWaveformOpenChange }) => {
   const snap = useStudio(controller)
   const { session, recording, ready } = snap
   const [zoom, setZoom] = useState(DEFAULT_ZOOM)
@@ -747,6 +816,12 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   // Colores del tema vigente: cacheados, cambian (y repintan) solo al cambiar tema o acento.
   const palette = useStudioCanvasPalette()
   const paletteRef = useRef(palette)
+  // Forma de onda del musico: igual que la paleta, cambia (y repinta) solo al elegir otra.
+  const waveform = useWaveformPreferences()
+  const waveformRef = useRef(waveform)
+  /** Ultima posicion del puntero durante un rectangulo de seleccion (autoscroll en los bordes). */
+  const pointerRef = useRef<{ clientX: number; clientY: number } | null>(null)
+  const waveformButtonRef = useRef<HTMLButtonElement>(null)
   const zoomRef = useRef(DEFAULT_ZOOM)
   const draftRef = useRef<StudioSession | null>(null)
   const loopDraftRef = useRef<LoopRegionS | null>(null)
@@ -769,9 +844,11 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   // Cualquier cambio discreto repinta el canvas en el siguiente fotograma.
   useEffect(() => {
     paletteRef.current = palette
+    waveformRef.current = waveform
     dirtyRef.current = true
   }, [
     palette,
+    waveform,
     session,
     snap.selectedClipId,
     snap.selectedClipIds,
@@ -831,6 +908,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       recBand: fromS === null ? null : { startS: fromS, endS: Math.max(fromS, controller.engine.position()) },
       getPeaks: (assetId) => controller.getPeaks(assetId),
       palette: paletteRef.current,
+      waveform: waveformRef.current,
     }
   }, [controller])
 
@@ -842,7 +920,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     if (!canvas || !scroller || !body) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const buffers: PeakBuffers = { a: { min: new Float32Array(0), max: new Float32Array(0) }, b: { min: new Float32Array(0), max: new Float32Array(0) } }
+    let buffers: PeakBuffers = peakBuffers(0)
     const markDirty = () => {
       dirtyRef.current = true
     }
@@ -870,6 +948,30 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
         const width = laneWidth(scroller)
         if (x > left + width - 24 || x < left) scroller.scrollLeft = Math.max(0, x - width * 0.12)
       }
+      // Rectangulo de seleccion junto a un borde: la vista se desplaza sola y el rectangulo crece
+      // con ella, aunque el puntero no se mueva.
+      const drag = dragRef.current
+      const pointer = pointerRef.current
+      if (drag?.kind === 'marquee' && drag.moved && pointer) {
+        const canvasBox = canvas.getBoundingClientRect()
+        const bodyBox = body.getBoundingClientRect()
+        const dx = edgeScrollSpeed(pointer.clientX, canvasBox.left, canvasBox.left + laneWidth(scroller))
+        const dy = edgeScrollSpeed(pointer.clientY, bodyBox.top + RULER_H, bodyBox.bottom)
+        if (dx !== 0 || dy !== 0) {
+          const beforeLeft = scroller.scrollLeft
+          const beforeTop = body.scrollTop
+          if (dx !== 0) scroller.scrollLeft = Math.max(0, beforeLeft + dx)
+          if (dy !== 0) body.scrollTop = Math.max(0, beforeTop + dy)
+          if (scroller.scrollLeft !== beforeLeft || body.scrollTop !== beforeTop) {
+            const box = canvas.getBoundingClientRect()
+            const px = pointer.clientX - box.left
+            const py = pointer.clientY - box.top
+            const timeS = Math.max(0, Math.min(STUDIO_MAX_SESSION_SECONDS, (scroller.scrollLeft + px) / zoomNow))
+            marqueeRef.current = marqueeFromPoints({ timeS: drag.startS, y: drag.startPy }, { timeS, y: Math.max(RULER_H, py) })
+            dirtyRef.current = true
+          }
+        }
+      }
       if (current.recording) dirtyRef.current = true
       if (!dirtyRef.current) return
       dirtyRef.current = false
@@ -882,10 +984,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
         canvas.height = Math.round(height * dpr)
         canvas.style.width = `${width}px`
       }
-      if (buffers.a.min.length < width) {
-        buffers.a = { min: new Float32Array(width), max: new Float32Array(width) }
-        buffers.b = { min: new Float32Array(width), max: new Float32Array(width) }
-      }
+      if (buffers.a.min.length < width) buffers = peakBuffers(width)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       paintTimeline(ctx, sceneOf(), { scrollX: scroller.scrollLeft, scrollTop: body.scrollTop, width, height, zoom: zoomNow }, buffers)
     })
@@ -1078,6 +1177,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       return
     }
     if (drag.kind === 'marquee') {
+      pointerRef.current = { clientX: event.clientX, clientY: event.clientY }
       if (!drag.moved && Math.hypot(at.px - drag.startPx, at.py - drag.startPy) < DRAG_THRESHOLD_PX) return
       drag.moved = true
       marqueeRef.current = marqueeFromPoints({ timeS: drag.startS, y: drag.startPy }, { timeS, y: Math.max(RULER_H, at.py) })
@@ -1150,6 +1250,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     const drag = dragRef.current
     if (!drag) return
     dragRef.current = null
+    pointerRef.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     dirtyRef.current = true
     if (drag.kind === 'ruler') {
@@ -1358,7 +1459,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
 
         <span
           className="stu-label stu-mono"
-          style={{ flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          style={{ flex: '1 1 40px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
           aria-live="polite"
           data-testid="studio-selection"
           data-count={snap.selectedClipIds.length}
@@ -1371,6 +1472,25 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
               ? `${selectedMidi.clip.muted ? 'SILENCIADO ' : ''}MIDI ${selectedMidi.track.name} · ${formatBarBeat(selectedMidi.clip.startBeat, session.beatsPerBar)} · ${(selectedMidi.clip.lengthBeats / session.beatsPerBar).toFixed(2)} compases · ${selectedMidi.clip.notes.length} notas`
               : 'Sin clip elegido'}
         </span>
+
+        <div className="stu-bar-group stu-wave-anchor" role="group" aria-label="Forma de onda">
+          <button
+            ref={waveformButtonRef}
+            type="button"
+            className="stu-btn"
+            data-on={waveformOpen}
+            aria-pressed={waveformOpen}
+            aria-haspopup="dialog"
+            aria-expanded={waveformOpen}
+            onClick={() => onWaveformOpenChange(!waveformOpen)}
+            title="Forma de onda: estilo, datos, escala, color y zoom vertical"
+            data-testid="studio-waveform-open"
+          >
+            <AudioWaveform size={14} />
+            ONDA
+          </button>
+          {waveformOpen && <StudioWaveformPopover anchorRef={waveformButtonRef} onClose={() => onWaveformOpenChange(false)} />}
+        </div>
 
         <div className="stu-bar-group" role="group" aria-label="Zoom">
           <button type="button" className="stu-btn" data-size="icon" disabled={zoom <= MIN_ZOOM} onClick={() => changeZoom(zoom / 1.5)} aria-label="Alejar" title="Alejar (Ctrl + rueda)">

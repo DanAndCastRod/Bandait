@@ -1,14 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { AppWindow, Minus, PanelRight, Sparkles } from 'lucide-react'
-import {
-  ASSISTANT_NARROW_PX,
-  clampDockWidth,
-  clampFloatRect,
-  withAssistantMode,
-  type AssistantLayout,
-  type AssistantMode,
-  type AssistantRect,
-} from '../../services/studio/assistantWindow'
+import { Minus, Sparkles } from 'lucide-react'
+import { ASSISTANT_NARROW_PX, clampFloatRect, withAssistantMode, type AssistantLayout, type AssistantMode, type AssistantRect } from '../../services/studio/assistantWindow'
 import { formatUsd } from '../../services/studio/jobs'
 import type { CommandContext } from '../../services/studio/types'
 import { StudioChatPanel, type StudioChatStatus } from './StudioChatPanel'
@@ -54,7 +46,6 @@ const IDLE_STATUS: StudioChatStatus = { thinking: false, pending: 0, auditioning
 type Gesture =
   | { kind: 'move'; pointerId: number; startX: number; startY: number; from: AssistantRect; rect: AssistantRect }
   | { kind: 'resize'; pointerId: number; startX: number; startY: number; from: AssistantRect; rect: AssistantRect }
-  | { kind: 'dock'; pointerId: number; startX: number; from: number; width: number }
 
 interface Props {
   controller: StudioController
@@ -67,11 +58,12 @@ interface Props {
 }
 
 /**
- * Ventana del asistente del Estudio con tres modos: ACOPLADO (columna a la derecha, ancho que se
- * arrastra), FLOTANTE (se arrastra por su barra y se redimensiona por la esquina, sin salir de la
- * ventana del navegador; en pantallas angostas es una hoja inferior) y MINIMIZADO (pastilla con
- * el estado). El chat queda montado en los tres: una respuesta en camino no se pierde.
- * Solo se animan transform y opacity; el modo, la posicion y el tamano los guarda la vista.
+ * Ventana del asistente del Estudio con dos modos: FLOTANTE (se arrastra por su barra y se
+ * redimensiona por la esquina, sin salir de la ventana del navegador; en pantallas angostas es una
+ * hoja inferior) y MINIMIZADO (pildora con el estado). El modo acoplado se retiro en la ola 2 de
+ * Web 3.0: la linea de tiempo y el piano roll ocupan el area central. El chat queda montado en
+ * los dos modos: una respuesta en camino no se pierde. Solo se animan transform y opacity; el
+ * modo, la posicion y el tamano los guarda la vista.
  */
 export const StudioAssistant: React.FC<Props> = ({ controller, registry, commandContext, layout, onLayout, shortcut }) => {
   const narrow = useNarrow()
@@ -91,26 +83,21 @@ export const StudioAssistant: React.FC<Props> = ({ controller, registry, command
     const el = rootRef.current
     if (!el) return
     if (floating) placeFloating(el, layout.float)
-    else if (mode === 'docked' && !narrow) {
-      clearPlacement(el)
-      el.style.width = `${layout.dockWidth}px`
-    } else clearPlacement(el)
-  }, [floating, mode, narrow, layout.float, layout.dockWidth])
+    else clearPlacement(el)
+  }, [floating, layout.float])
 
   // Al cambiar el tamano del navegador la ventana se acota para seguir entera a la vista.
   useEffect(() => {
     const onResize = () => {
-      const vp = viewport()
-      const float = clampFloatRect(layout.float, vp)
-      const dockWidth = clampDockWidth(layout.dockWidth, vp)
+      const float = clampFloatRect(layout.float, viewport())
       const f = layout.float
-      if (float.x !== f.x || float.y !== f.y || float.w !== f.w || float.h !== f.h || dockWidth !== layout.dockWidth) onLayout({ ...layout, float, dockWidth })
+      if (float.x !== f.x || float.y !== f.y || float.w !== f.w || float.h !== f.h) onLayout({ ...layout, float })
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [layout, onLayout])
 
-  // Foco: al abrirse va al campo del mensaje; al minimizarse con el foco adentro, a la pastilla.
+  // Foco: al abrirse va al campo del mensaje; al minimizarse con el foco adentro, a la pildora.
   useEffect(() => {
     const prev = prevModeRef.current
     prevModeRef.current = mode
@@ -120,12 +107,10 @@ export const StudioAssistant: React.FC<Props> = ({ controller, registry, command
       if (!active || active === document.body || rootRef.current?.contains(active)) pillRef.current?.focus({ preventScroll: true })
       return
     }
-    if (prev === 'minimized') {
-      const root = rootRef.current
-      const input = root?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')
-      if (input) input.focus({ preventScroll: true })
-      else root?.querySelector<HTMLElement>('.stu-assist-title')?.focus({ preventScroll: true })
-    }
+    const root = rootRef.current
+    const input = root?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')
+    if (input) input.focus({ preventScroll: true })
+    else root?.querySelector<HTMLElement>('.stu-assist-title')?.focus({ preventScroll: true })
   }, [mode])
 
   const setMode = (next: AssistantMode) => onLayout(withAssistantMode(layout, next))
@@ -138,8 +123,7 @@ export const StudioAssistant: React.FC<Props> = ({ controller, registry, command
     gestureRef.current = null
     setDragging(false)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-    if (g.kind === 'dock') onLayout({ ...layout, dockWidth: g.width })
-    else onLayout({ ...layout, float: g.rect })
+    onLayout({ ...layout, float: g.rect })
   }
 
   const startMove = (event: React.PointerEvent<HTMLElement>) => {
@@ -160,25 +144,11 @@ export const StudioAssistant: React.FC<Props> = ({ controller, registry, command
     setDragging(true)
   }
 
-  const startDock = (event: React.PointerEvent<HTMLElement>) => {
-    if (mode !== 'docked' || event.button !== 0) return
-    event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    gestureRef.current = { kind: 'dock', pointerId: event.pointerId, startX: event.clientX, from: layout.dockWidth, width: layout.dockWidth }
-    setDragging(true)
-  }
-
   const onGestureMove = (event: React.PointerEvent<HTMLElement>) => {
     const g = gestureRef.current
     const el = rootRef.current
     if (!g || !el || g.pointerId !== event.pointerId) return
     const vp = viewport()
-    if (g.kind === 'dock') {
-      // La columna esta a la derecha: arrastrar hacia la izquierda la ensancha.
-      g.width = clampDockWidth(g.from + (g.startX - event.clientX), vp)
-      el.style.width = `${g.width}px`
-      return
-    }
     const dx = event.clientX - g.startX
     const dy = event.clientY - g.startY
     g.rect = g.kind === 'move' ? clampFloatRect({ ...g.from, x: g.from.x + dx, y: g.from.y + dy }, vp) : clampFloatRect({ ...g.from, w: g.from.w + dx, h: g.from.h + dy }, vp)
@@ -187,15 +157,7 @@ export const StudioAssistant: React.FC<Props> = ({ controller, registry, command
 
   const gestureHandlers = { onPointerMove: onGestureMove, onPointerUp: endGesture, onPointerCancel: endGesture }
 
-  /** Teclado en el separador de la columna: flechas cambian el ancho de a 24 px. */
-  const onDockKey = (event: React.KeyboardEvent<HTMLElement>) => {
-    const step = event.key === 'ArrowLeft' ? 24 : event.key === 'ArrowRight' ? -24 : 0
-    if (!step) return
-    event.preventDefault()
-    onLayout({ ...layout, dockWidth: clampDockWidth(layout.dockWidth + step, viewport()) })
-  }
-
-  /** Esc minimiza la ventana flotante, pero nunca mientras hay texto escrito en el mensaje. */
+  /** Esc minimiza la ventana, pero nunca mientras hay texto escrito en el mensaje. */
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape' || event.nativeEvent.isComposing || mode !== 'floating') return
     const target = event.target
@@ -222,37 +184,16 @@ export const StudioAssistant: React.FC<Props> = ({ controller, registry, command
         onKeyDown={onKeyDown}
         data-testid="studio-assistant"
       >
-        {mode === 'docked' && !narrow && (
-          <div
-            className="stu-assist-edge"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Ancho del asistente"
-            aria-valuenow={layout.dockWidth}
-            tabIndex={0}
-            onPointerDown={startDock}
-            onKeyDown={onDockKey}
-            {...gestureHandlers}
-            data-testid="studio-assistant-dock-resize"
-          />
-        )}
         <header className="stu-assist-bar" data-movable={floating} onPointerDown={startMove} {...gestureHandlers} data-testid="studio-assistant-bar">
-          <Sparkles size={13} aria-hidden="true" />
+          <span className="stu-assist-mark" aria-hidden="true">
+            <Sparkles size={13} />
+          </span>
           <h2 className="stu-assist-title" tabIndex={-1}>
             ASISTENTE
           </h2>
           {status.spentUsd > 0 && <span className="stu-label">{formatUsd(status.spentUsd)}</span>}
           <span className="stu-bar-spacer" />
-          {mode === 'docked' ? (
-            <button type="button" className="stu-btn" data-size="icon" data-tone="ghost" onClick={() => setMode('floating')} aria-label="Ventana flotante" title="Ventana flotante" data-testid="studio-assistant-float">
-              <AppWindow size={14} />
-            </button>
-          ) : (
-            <button type="button" className="stu-btn" data-size="icon" data-tone="ghost" onClick={() => setMode('docked')} aria-label="Acoplar a la derecha" title="Acoplar a la derecha" data-testid="studio-assistant-dock">
-              <PanelRight size={14} />
-            </button>
-          )}
-          <button type="button" className="stu-btn" data-size="icon" data-tone="ghost" onClick={() => setMode('minimized')} aria-label={`Minimizar el asistente (${shortcut})`} title={`Minimizar (${shortcut})`} data-testid="studio-assistant-minimize">
+          <button type="button" className="stu-btn" data-size="icon" data-tone="ghost" onClick={() => setMode('minimized')} aria-label={`Minimizar el asistente (${shortcut})`} title={`Minimizar a la píldora (${shortcut} o Esc)`} data-testid="studio-assistant-minimize">
             <Minus size={14} />
           </button>
         </header>
@@ -268,13 +209,15 @@ export const StudioAssistant: React.FC<Props> = ({ controller, registry, command
           type="button"
           className="stu-assist-pill"
           data-state={pillState}
-          onClick={() => setMode(layout.lastOpen)}
+          onClick={() => setMode('floating')}
           aria-label={`Mostrar el asistente (${shortcut})${pillText ? `. ${pillText}` : ''}`}
           title={`Mostrar el asistente (${shortcut})`}
           data-testid="studio-assistant-pill"
         >
-          <Sparkles size={13} aria-hidden="true" />
-          <span>ASISTENTE</span>
+          <span className="stu-assist-mark" aria-hidden="true">
+            <Sparkles size={13} />
+          </span>
+          <span>Asistente</span>
           {pillText ? (
             <span className="stu-assist-pill-state" aria-live="polite" data-testid="studio-assistant-pill-state">
               {pillState === 'thinking' && <span className="stu-assist-dot" aria-hidden="true" />}

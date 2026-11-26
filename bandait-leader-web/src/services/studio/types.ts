@@ -379,6 +379,13 @@ export interface PeakData {
   min: Int8Array
   max: Int8Array
   samplesPerBucket: number
+  /**
+   * Valor eficaz (RMS) de cada cubeta, cuantizado a Uint8: round(rms * 255), 0..255. Opcional
+   * (2026-11-26, forma de onda configurable): los picos guardados antes no lo traen y se
+   * recalculan en segundo plano al abrir la sesion (studioState.ensurePeaks); mientras tanto la
+   * forma de onda RMS usa el pico.
+   */
+  rms?: Uint8Array
 }
 
 /** Picos de un audio completo: lo que guarda studioStore.savePeaks. */
@@ -393,6 +400,8 @@ export interface AssetPeaks {
 export interface PeakColumns {
   min: Float32Array
   max: Float32Array
+  /** RMS por columna en 0..1, si los picos lo traen y quien pide paso donde escribirlo. */
+  rms?: Float32Array
 }
 
 export interface PeakRangeRequest {
@@ -410,8 +419,9 @@ export interface PeaksApi {
   computePeaks(samples: Float32Array, samplesPerBucket: number): PeakData
   /**
    * Picos por rango: reagrupa las cubetas que cubren [startS, endS) en `columns` columnas
-   * (minimo de minimos, maximo de maximos). Fuera del audio devuelve 0. No asigna por
-   * fotograma si se le pasa `out` del tamano correcto.
+   * (minimo de minimos, maximo de maximos; el RMS como raiz de la media de los cuadrados).
+   * Fuera del audio devuelve 0. No asigna por fotograma si se le pasa `out` del tamano
+   * correcto; el RMS se escribe solo si los picos lo traen y `out` trae `rms` (o no hay `out`).
    */
   peaksForRange(peaks: PeakData, request: PeakRangeRequest, out?: PeakColumns): PeakColumns
 }
@@ -1941,6 +1951,8 @@ export interface StudioTrackSummary {
     pitchMax: number | null
     /** Resumen de las notas (opcional; chatContext.midiClipDigest). */
     digest?: MidiClipDigest
+    /** Solo si el clip esta silenciado (tecla 0): se ve pero no suena (STUDIO_V2.md 4.3.2). */
+    muted?: true
   }>
   /** Medicion de la pista sola (opcional; solo con `mixMeasured` en el resumen). */
   mix?: TrackMixSummary

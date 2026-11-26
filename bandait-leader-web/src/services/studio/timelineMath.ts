@@ -223,6 +223,29 @@ export interface MarqueeClipBox {
   bottom: number
 }
 
+/** Franja junto a cada borde del carril donde el rectangulo de seleccion desplaza la vista. */
+export const EDGE_SCROLL_ZONE_PX = 36
+/** Desplazamiento maximo por cuadro (px) con el puntero en el borde o fuera del carril. */
+export const EDGE_SCROLL_MAX_PX = 24
+
+/**
+ * Desplazamiento por cuadro mientras se arrastra cerca de un borde (autoscroll del rectangulo de
+ * seleccion, auditoria de fidelidad DAW 4.1): negativo hacia el inicio, positivo hacia el final,
+ * 0 en el centro. Crece con el cuadrado de lo que el puntero entra en la franja y llega al
+ * maximo en el borde o fuera del carril. Con un carril angosto la franja se achica a un cuarto.
+ */
+export function edgeScrollSpeed(pos: number, start: number, end: number, zone = EDGE_SCROLL_ZONE_PX, maxSpeed = EDGE_SCROLL_MAX_PX): number {
+  if (!Number.isFinite(pos) || !(end > start) || !(maxSpeed > 0)) return 0
+  const band = Math.max(1, Math.min(zone, (end - start) / 4))
+  const speed = (depth: number) => {
+    const t = Math.min(1, depth / band)
+    return Math.max(1, Math.round(maxSpeed * t * t))
+  }
+  if (pos < start + band) return -speed(start + band - pos)
+  if (pos > end - band) return speed(pos - (end - band))
+  return 0
+}
+
 /** Rectangulo entre el punto donde empezo el arrastre y el punto actual, en cualquier direccion. */
 export function marqueeFromPoints(a: { timeS: number; y: number }, b: { timeS: number; y: number }): MarqueeRect {
   return { startS: Math.min(a.timeS, b.timeS), endS: Math.max(a.timeS, b.timeS), top: Math.min(a.y, b.y), bottom: Math.max(a.y, b.y) }
