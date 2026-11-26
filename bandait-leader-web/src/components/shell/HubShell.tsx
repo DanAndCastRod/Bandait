@@ -6,6 +6,7 @@ import { GoogleIcon } from '../GoogleIcon'
 import { SupabaseConfigModal } from '../SupabaseConfigModal'
 import { SyncNoticeBanner } from '../SyncNoticeBanner'
 import { UserManualModal } from '../UserManualModal'
+import { SplitQueueIndicator } from '../SplitQueueIndicator'
 import { NewBandModal, ProfileModal } from './HubAccountModals'
 import { Avatar, BandSwitcher, BrandMark, SyncButton } from './HubShellParts'
 import {
@@ -111,6 +112,9 @@ export const HubShell: React.FC<Props> = ({ view, onSelectView, onUploadAudio, h
             {!collapsed && <span>Subir o separar audio</span>}
           </button>
 
+          {/* Estado de la cola Drop & Split; no ocupa nada si la cola esta vacia. */}
+          <SplitQueueIndicator variant={collapsed ? 'compact' : 'full'} />
+
           <nav className="hub-rail-nav hub-desktop-nav" aria-label="Vistas del hub">
             {HUB_VIEWS.map((item) => {
               const active = item.id === view
@@ -204,6 +208,7 @@ export const HubShell: React.FC<Props> = ({ view, onSelectView, onUploadAudio, h
         <BrandMark showWord={false} />
         <BandSwitcher onNewBand={() => setShowNewBand(true)} />
         <span style={{ flex: 1 }} />
+        <SplitQueueIndicator variant="compact" align="end" />
         <SyncButton compact onOpen={() => setShowCloud(true)} />
         {user && (
           <button type="button" className="hub-avatar-btn hub-press" onClick={() => setShowProfile(true)} title={profileTitle} aria-label="Perfil y sesión">

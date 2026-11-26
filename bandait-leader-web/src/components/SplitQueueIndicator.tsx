@@ -139,7 +139,7 @@ export const SplitQueueIndicator: React.FC<Props> = ({ variant = 'full', align =
                         <RefreshCw size={12} /> REINTENTAR
                       </button>
                     ) : (
-                      <span style={{ fontSize: '11px', color: colors.muted, alignSelf: 'center' }}>Para reintentar, vuelve a elegir el audio en PISTAS.</span>
+                      <span style={{ fontSize: '11px', color: colors.muted, alignSelf: 'center' }}>Para reintentar, vuelve a elegir el audio en STEMS Y PISTAS.</span>
                     ))}
                   {!active && (
                     <button type="button" className="ga-pill" data-size="sm" data-tone="ghost" aria-label={`Quitar ${job.songTitle} de la lista`} onClick={() => queue.dismiss(job.id)}>

@@ -235,11 +235,11 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
           <Music size={28} style={{ color: colors.disabled }} aria-hidden="true" />
           <span style={{ maxWidth: '52ch' }}>
             {target
-              ? 'Ninguna canción de esta banda tiene stems en este equipo ni en la nube. Cárgalos en PISTAS y vuelve a ensayar.'
-              : 'Ninguna canción de esta banda tiene stems en este equipo. Cárgalos en PISTAS y vuelve a ensayar.'}
+              ? 'Ninguna canción de esta banda tiene stems en este equipo ni en la nube. Cárgalos en Canciones y Stems y vuelve a ensayar.'
+              : 'Ninguna canción de esta banda tiene stems en este equipo. Cárgalos en Canciones y Stems y vuelve a ensayar.'}
           </span>
           <button type="button" className="ga-pill" data-tone="accent" onClick={onOpenTracks}>
-            <Sliders size={13} /> IR A PISTAS
+            <Sliders size={13} /> IR A STEMS Y PISTAS
           </button>
         </div>
       )}

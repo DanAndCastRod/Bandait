@@ -806,7 +806,7 @@ export const StemStudio: React.FC<Props> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>{trackRows}</div>
               {onManageTracks && (
                 <button type="button" className="ga-pill" data-size="sm" onClick={onManageTracks} style={{ alignSelf: 'flex-start' }}>
-                  <Sliders size={12} /> ROLES Y PISTAS EN PISTAS
+                  <Sliders size={12} /> ROLES EN STEMS Y PISTAS
                 </button>
               )}
             </div>

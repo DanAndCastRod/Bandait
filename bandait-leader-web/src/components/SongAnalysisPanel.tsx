@@ -249,7 +249,7 @@ export const SongAnalysisPanel: React.FC<Props> = ({ song, beatsPerBar, onAccept
   const noStemsNote =
     canEdit && source === 'none' ? (
       <div data-testid="analysis-no-stems" style={{ fontSize: '12px', color: colors.warning }}>
-        No hay stems de esta canción en este equipo ni en la nube: cárgalos en PISTAS, o sube la canción completa abajo para que Music AI la separe y la analice.
+        No hay stems de esta canción en este equipo ni en la nube: cárgalos en STEMS Y PISTAS, o sube la canción completa abajo para que Music AI la separe y la analice.
       </div>
     ) : null
 

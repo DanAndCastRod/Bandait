@@ -8,7 +8,6 @@ import { StemImporter } from '../components/StemImporter'
 import { StemStudio } from '../components/StemStudio'
 import { StemCloudBar, type CloudSongState } from '../components/StemCloudBar'
 import { SplitUpload } from '../components/SplitUpload'
-import { SplitQueueIndicator } from '../components/SplitQueueIndicator'
 import { onCloudStemsChanged } from '../services/stemCloudEvents'
 import { formatBytes } from '../services/stemImport'
 import { deleteStemSong, listStemSongs, loadStemSong, storageEstimate, StemStoreError, type StemSongRecord } from '../services/stemStore'
@@ -268,8 +267,6 @@ export const StemsHubView: React.FC = () => {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          {/* Provisional: el Shell lo llevara al rail junto a "+ Subir o separar audio". */}
-          <SplitQueueIndicator />
           {usage && (
             <div
               data-testid="stem-storage"

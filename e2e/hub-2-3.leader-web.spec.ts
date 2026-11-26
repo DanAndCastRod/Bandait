@@ -144,7 +144,7 @@ test.describe('Web Admin Hub 2.3 - ENSAYO', () => {
     await enterDemo(page);
     await openView(page, 'rehearsal');
     await expect(page.getByTestId('rehearsal-empty')).toBeVisible();
-    await page.getByTestId('rehearsal-empty').getByRole('button', { name: 'IR A PISTAS' }).click();
+    await page.getByTestId('rehearsal-empty').getByRole('button', { name: 'IR A STEMS Y PISTAS' }).click();
     await expect(page.getByRole('heading', { name: 'Estudio de Stems' })).toBeVisible();
 
     // Medianoche en Pereira: 124 BPM 4/4, Intro 4 compases (7.74 s) y Estrofa 1 de 8.

@@ -278,7 +278,7 @@ test.describe('Web Admin Hub - estudio de stems', () => {
     await page.waitForTimeout(500);
     expect(await ctxStates()).toEqual(['running']);
     // Al volver, la vista se reengancha al mismo reproductor, que sigue sonando.
-    await page.locator('nav.hub-mobile-nav').getByRole('button', { name: /PISTAS/ }).click();
+    await openView(page, 'tracks');
     await expect(page.getByTestId('stem-studio')).toHaveAttribute('data-state', 'playing');
     expect(await ctxStates()).toEqual(['running']);
     // Borrar los stems libera el reproductor y cierra su AudioContext.

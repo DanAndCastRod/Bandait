@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openView, type HubViewId } from './support/hubNav';
 
 /**
  * E2E del audio global del Hub (docs/REQUERIMIENTOS_WEB_3.0.md, secciones 3 y 5): el reproductor de
@@ -50,9 +51,20 @@ function ctxStates(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { __ctxs: AudioContext[] }).__ctxs.map((c) => c.state));
 }
 
-/** Va a una vista por su boton de navegacion (barra superior o barra inferior movil). */
+/** Nombres de las vistas de antes del shell Web 3.0 -> ids del rail (e2e/support/hubNav.ts). */
+const VIEW_BY_NAME: Record<string, HubViewId> = {
+  PISTAS: 'tracks',
+  SETLISTS: 'setlists',
+  ENSAYO: 'rehearsal',
+  CANCIONES: 'songs',
+  ESTUDIO: 'studio',
+};
+
+/** Va a una vista por la navegacion del shell (rail en escritorio, barra y hoja "Mas" en movil). */
 async function goTo(page: Page, name: string) {
-  await page.getByRole('button', { name, exact: true }).first().click();
+  const view = VIEW_BY_NAME[name];
+  if (!view) throw new Error(`Vista desconocida en la prueba: ${name}`);
+  await openView(page, view);
 }
 
 async function enterDemo(page: Page) {

@@ -5,7 +5,8 @@ import { useHub } from './context/hubContextCore'
 import { AuthScreen } from './components/AuthScreen'
 import { HubShell } from './components/shell/HubShell'
 import type { HubView, SongsSegment } from './components/shell/hubViews'
-import { MiniPlayer, type MiniPlayerNowPlaying } from './components/MiniPlayer'
+import { MiniPlayer } from './components/MiniPlayer'
+import { useGlobalAudio, type AudioView } from './context/globalAudioContextCore'
 import { PlaylistsHubView } from './views/PlaylistsHubView'
 import { BandMembersHubView } from './views/BandMembersHubView'
 import { SongsStemsHubView } from './views/SongsStemsHubView'
@@ -54,8 +55,17 @@ const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   </div>
 )
 
+/** Vista del audio global que corresponde a la vista del shell (null si no tiene transporte propio). */
+function viewOfSource(view: HubView, segment: SongsSegment): AudioView | null {
+  if (view === 'songs') return segment === 'stems' ? 'tracks' : null
+  if (view === 'rehearsal' || view === 'studio') return view
+  return null
+}
+
 const HubMainContent: React.FC = () => {
   const { user, cloud, initialSyncBlocking, syncStatus, retrySync, continueOffline, logout } = useHub()
+  /** Motor de audio global: lo que suena sigue sonando al cambiar de vista (mini reproductor). */
+  const globalAudio = useGlobalAudio()
   const [view, setView] = useState<HubView>('setlists')
   /** Segmento de Canciones y Stems; se recuerda mientras dure la sesion. */
   const [songsSegment, setSongsSegment] = useState<SongsSegment>('library')
@@ -133,10 +143,10 @@ const HubMainContent: React.FC = () => {
     )
   }
 
-  // Mini reproductor: por ahora sin motor (lo conecta el GlobalAudioProvider al integrar). En el
-  // Estudio no se muestra: alli el transporte es el del propio Estudio.
-  const nowPlaying: MiniPlayerNowPlaying | null = null
-  const showMiniPlayer = nowPlaying !== null && view !== 'studio'
+  // Mini reproductor alimentado por el GlobalAudioProvider. No se muestra en la vista de origen de
+  // lo que suena (alli ya esta su propio transporte) ni en el Estudio.
+  const nowPlaying = globalAudio.nowPlaying
+  const showMiniPlayer = nowPlaying !== null && view !== 'studio' && nowPlaying.view !== viewOfSource(view, songsSegment)
 
   return (
     <HubShell
@@ -145,8 +155,12 @@ const HubMainContent: React.FC = () => {
       onUploadAudio={openStems}
       hasMiniPlayer={showMiniPlayer}
       overlay={
-        view !== 'studio' && (
-          <MiniPlayer nowPlaying={nowPlaying} onToggle={() => {}} onOpenStudio={STUDIO_ENABLED ? () => selectView('studio') : undefined} />
+        showMiniPlayer && (
+          <MiniPlayer
+            nowPlaying={nowPlaying}
+            onToggle={globalAudio.toggle}
+            onOpenStudio={STUDIO_ENABLED ? () => selectView('studio') : undefined}
+          />
         )
       }
     >
