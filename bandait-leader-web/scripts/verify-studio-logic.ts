@@ -190,13 +190,16 @@ import {
 } from '../src/services/studio/sessionOps.ts'
 import {
   STUDIO_JOB_MAX_RETRIES,
+  cleanOrphans,
   deleteSession,
   estimateJob,
   getAsset,
   getJob,
   getSession,
+  inspectOrphans,
   jobRequestToWire,
   listSessions,
+  parseCleanupReport,
   parseJobState,
   parseMixSuggestions,
   putAsset,
@@ -1257,6 +1260,41 @@ async function main() {
     const { target } = newCloud()
     assert.equal(studioUrl(target), `https://stems.example.test/v1/bands/${band}/studio`)
     assert.equal(studioUrl({ ...target, baseUrl: 'http://x', band: 'me' }), 'http://x/v1/bands/me/studio')
+  })
+
+  await check('limpieza de audios sin usar: GET inspecciona, POST borra; 403 para un musico; respuesta rara es bad_response', async () => {
+    const seen: { method: string; url: string; auth: string | null }[] = []
+    const answers: Record<string, () => Response> = {
+      GET: () => Response.json({ orphans: 3, bytes: 3072, sample: ['ses_a/ast_1.wav', 7], sessions: 2, protected_sessions: 1, complete: true, blocked: null, deleted: 0, deleted_bytes: 0 }),
+      POST: () => Response.json({ orphans: 3, bytes: 3072, sample: [], sessions: 2, protected_sessions: 1, complete: true, blocked: null, deleted: 3, deleted_bytes: 3072 }),
+    }
+    const target: CloudTarget = {
+      baseUrl: 'https://stems.example.test/',
+      band,
+      getToken: async () => 'tok-ok',
+      fetchFn: async (input, init) => {
+        const headers = new Headers(init?.headers)
+        seen.push({ method: init?.method ?? 'GET', url: String(input), auth: headers.get('Authorization') })
+        return answers[init?.method ?? 'GET']()
+      },
+    }
+    assert.deepStrictEqual(await inspectOrphans(target), {
+      orphans: 3, bytes: 3072, sample: ['ses_a/ast_1.wav'], sessions: 2, protectedSessions: 1, complete: true, blocked: null, deleted: 0, deletedBytes: 0,
+    })
+    assert.deepStrictEqual(seen[0], { method: 'GET', url: `https://stems.example.test/v1/bands/${band}/studio/_cleanup`, auth: 'Bearer tok-ok' })
+    const cleaned = await cleanOrphans(target)
+    assert.deepStrictEqual([cleaned.deleted, cleaned.deletedBytes, seen[1].method], [3, 3072, 'POST'])
+
+    answers.GET = () => Response.json({ orphans: 0, bytes: 0, sample: [], sessions: 1, protected_sessions: 0, complete: false, blocked: 'session_unreadable', deleted: 0, deleted_bytes: 0 })
+    const blocked = await inspectOrphans(target)
+    assert.deepStrictEqual([blocked.complete, blocked.blocked], [false, 'session_unreadable'])
+    answers.POST = () => Response.json({ error: 'not_an_editor' }, { status: 403 })
+    await cloudError(cleanOrphans(target), 'not_an_editor', 403)
+    answers.GET = () => Response.json({ huerfanos: 1 })
+    await cloudError(inspectOrphans(target), 'bad_response')
+    assert.deepStrictEqual(parseCleanupReport({ orphans: -2, bytes: 1.5, blocked: 'otra cosa', complete: true }, 200), {
+      orphans: 0, bytes: 1, sample: [], sessions: 0, protectedSessions: 0, complete: true, blocked: null, deleted: 0, deletedBytes: 0,
+    })
   })
 
   await check('sin token no sale a la red: no_session 401 con mensaje de sesion de nube', async () => {

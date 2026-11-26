@@ -114,6 +114,8 @@ El escenario (leader, follower) no usa estas rutas.
 | `POST /v1/bands/{band}/studio/{session}/jobs` | Owner, MusicDirector | 202 `{"job_id","status":"STARTED","kind"}` |
 | `POST /v1/bands/{band}/studio/{session}/jobs?estimate=1` | Owner, MusicDirector | `{"kind","estimated_cost_usd","spent_usd","budget_usd","allowed"}`, sin lanzar nada |
 | `GET /v1/bands/{band}/studio/{session}/jobs/{job}` | integrante | estado del trabajo; 404 `no_job` |
+| `GET /v1/bands/{band}/studio/_cleanup` | integrante | audios huérfanos: `{"orphans","bytes","sample","sessions","protected_sessions","complete","blocked","deleted":0,"deleted_bytes":0}`, sin borrar |
+| `POST /v1/bands/{band}/studio/_cleanup` | Owner, MusicDirector | lo mismo, y los borra (`deleted`, `deleted_bytes`) |
 
 `{session}` y `{job}` son `[A-Za-z0-9_-]{1,80}` (una sesión no puede empezar por `_`). `{asset}`
 es `<id>.wav`, `<id>.flac` o `<id>.mp3`. En R2, bajo el prefijo de la banda:
@@ -125,7 +127,8 @@ para crear o `If-Match: <etag>` para reemplazar (sin ninguna, 428 `precondition_
 sesión ya existe, o el `ETag` no es el guardado, responde 412 `session_conflict` y no pisa nada.
 El Worker valida el documento completo (`src/studioSession.ts`; 400 `bad_session`), exige que
 cada audio listado exista en `assets/` con ese tamaño (409 `missing_asset`) y pone `updated_at` y
-`updated_by`. Guardar no borra audios que dejaron de listarse. Documento de hasta 1 MiB (413
+`updated_by`. Guardar no borra audios que dejaron de listarse en la respuesta (después corre la
+limpieza oportunista, ver "Audios huérfanos"). Documento de hasta 1 MiB (413
 `session_too_large`). Acepta documentos `version` 1 y 2 y guarda cada uno en su versión (el
 Worker no migra: el Hub migra un v1 al abrirlo y lo guarda como v2). Un v1 se valida con las
 reglas de v1 (un campo de v2 en un v1 es error). En v2 se comprueban también los audios de los
@@ -259,9 +262,45 @@ Errores propios del Estudio: 400 `bad_session_id` / `bad_session` / `bad_asset` 
 `provider_unavailable` (`suno`), 502 `provider_failed` (solo al lanzar) / `asset_copy_failed`,
 503 `provider_unavailable` (falta el secreto o el workflow) / `usage_busy`.
 
-Pendiente conocido: no hay cuota de almacenamiento por banda ni limpieza de audios de sesiones
-sin documento; `If-None-Match: *` en `onlyIf` de R2 está sin verificar contra R2 real (si R2 lo
-ignorara, crear una sesión o un audio queda protegido solo por el `head` previo).
+Pendiente conocido: no hay cuota de almacenamiento por banda; `If-None-Match: *` en `onlyIf` de
+R2 está sin verificar contra R2 real (si R2 lo ignorara, crear una sesión o un audio queda
+protegido solo por el `head` previo).
+
+### Audios huérfanos (desde 1.4.0)
+
+`src/studioCleanup.ts`; contrato normativo en `bandait-protocol/STUDIO_V2.md`, sección 3.1. Un
+audio de `studio/<session>/assets/` es huérfano si el `session.json` de su sesión no lo nombra
+(`assets[]` por `file` o `id`, clips, zonas del sampler, `frozen_asset_id`; una carpeta sin
+documento no protege nada), ningún trabajo de su sesión está en curso (un registro que no dice
+`SUCCEEDED` ni `FAILED` protege la sesión entera, también el fragmento de un `chat` que corre) y
+tiene más de 2 horas (`uploaded` de R2, o `customMetadata.created_at` si es posterior).
+
+- **Seguridad:** nada se borra de una banda hasta leer todas sus sesiones; ante cualquier error
+  de lectura (o si no alcanza el tope de operaciones) no se borra nada de esa banda. Antes de
+  borrar se vuelve a pedir el etag de cada `session.json` y se salta la sesión que cambió.
+- **Cron diario** (el mismo `17 4 * * *` de la retención de eventos): todas las bandas
+  (`bands/`) y workspaces (`users/`), hasta 860 operaciones de R2 por corrida (con las 40 de la
+  retención, 900 en total). Si no termina, guarda el cursor en `studio/_cleanup/cursor.json` y
+  sigue al día siguiente. Una banda que no cabe ni con el cupo entero se salta con un evento
+  FAILED `budget`.
+- **Después de guardar** (`PUT .../session` correcto): en `waitUntil`, sin retrasar la respuesta,
+  solo esa sesión, hasta 300 operaciones, como mucho una vez cada 2 horas por banda (marca en
+  `studio/_cleanup/last.json` bajo la banda, escrita con condición).
+- **A pedido:** `GET .../studio/_cleanup` inspecciona (integrante) y `POST` borra (Owner o
+  MusicDirector), hasta 900 operaciones. `blocked` es `session_unreadable` o `incomplete` cuando
+  no se borró nada por seguridad. El Hub lo ofrece en la lista de sesiones del Estudio (botón
+  AUDIOS SIN USAR, y LIMPIAR AUDIOS SIN USAR con confirmación).
+- **Eventos:** cada limpieza que borra algo o se bloquea anota un evento `kind` `cleanup`,
+  `provider` `r2`, con `objects`, `bytes` y `trigger` (`cron`, `save`, `manual`); sin ids de
+  audios.
+- Cada registro de trabajo lleva su estado en `customMetadata.status`, para que la limpieza no
+  lea los terminados (los registros anteriores a 1.4.0 se leen).
+
+NO VERIFICADO contra Cloudflare real: el conteo real de operaciones de R2 por invocación (se
+asume el límite de 1000; el resto del Worker supone 50 en el plan gratuito para el MCP), que
+`list` honre `startAfter` junto con `delimiter` y que `include: ['customMetadata']` traiga la
+metadata en el listado (si no la trae, la limpieza lee cada registro: más operaciones, mismo
+resultado).
 
 ### Registro de eventos (desde 1.2.0)
 
@@ -274,7 +313,9 @@ forma de clave o token, hasta 80 caracteres), `urit_request_id`, `model`, `durat
 aceptó el trabajo al lanzarlo: no queda registro ni costo) o `TRANSIENT` (falló un sondeo o una
 copia y el trabajo sigue). Nunca guarda el prompt, letras, audio, métricas, la respuesta del
 modelo, tokens ni claves. La escritura va a `waitUntil` y nunca hace fallar la respuesta.
-Retención: 30 días, con el cron diario de `wrangler.jsonc` (handler `scheduled`).
+Retención: 30 días, con el cron diario de `wrangler.jsonc` (handler `scheduled`). Desde 1.4.0
+también se anotan las limpiezas de audios huérfanos (`kind` `cleanup`, `provider` `r2`, con los
+campos extra `objects`, `bytes` y `trigger`; ver "Audios huérfanos").
 
 El registro de cada trabajo (`studio/<session>/jobs/<job>.json`) guarda además
 `urit_request_id`: el `id` que devuelve URiT IA (`ai_...`, también en la cabecera
@@ -314,6 +355,7 @@ como `users/<uuid>`.
 | `bandait_gasto` | `mes` (AAAA-MM, por omisión el actual), `band` (opcional) | gasto global y por banda contra `STUDIO_GLOBAL_MONTHLY_BUDGET_USD` y `STUDIO_MONTHLY_BUDGET_USD`, por tipo y por proveedor; con `band`, su contador propio |
 | `bandait_sesiones` | `band` | sesiones: id, título, versión del documento, fecha y tamaño |
 | `bandait_sesion_resumen` | `band`, `session` | pistas (tipo, rol, clips, clips MIDI, notas, efectos), audios del documento (tipo, tamaño, duración, origen), audios en R2 (huérfanos y faltantes) y trabajos; sin nombres ni etiquetas |
+| `bandait_huerfanos` | `band` | cuántos audios huérfanos tiene el Estudio de la banda y sus bytes (reglas de "Audios huérfanos"), sesiones revisadas y protegidas; no borra nada. Con más de 45 operaciones responde `truncated` |
 | `bandait_stems` | `band` | canciones con stems en R2: archivos, bytes, manifiesto, análisis y total |
 | `bandait_contrato` | `codigo` (opcional) | qué significa un código de error y qué secciones de `STUDIO_V1.md` / `STUDIO_V2.md` lo explican; sin código, la lista. La tabla va empaquetada en `src/mcp.ts` (el Worker no tiene sistema de archivos): si cambia el contrato, se actualiza ahí |
 

@@ -337,7 +337,7 @@ test('sesion: crear con If-None-Match, leer con ETag, reemplazar con If-Match, c
 });
 
 test('sesion: 409 missing_asset, 400 bad_session, 413 session_too_large; guardar no borra audios', async () => {
-  const { call, bucket } = setup();
+  const { call, bucket, waited } = setup();
   const body = JSON.stringify(FIXTURE);
   const missing = await call('PUT', '/ses_9f2c/session', { token: OWNER, body, headers: CREATE });
   assert.equal(missing.status, 409);
@@ -359,6 +359,12 @@ test('sesion: 409 missing_asset, 400 bad_session, 413 session_too_large; guardar
 
   assert.equal((await call('PUT', '/ses_9f2c/session', { token: OWNER, body, headers: CREATE })).status, 200);
   assert.ok(bucket.objects.has(`${prefix}ses_9f2c/assets/ast_viejo.wav`), 'un audio que el documento no lista sigue ahi');
+  // Desde 1.4.0, despues de responder, la limpieza oportunista (waitUntil) borra los audios que el
+  // documento no lista y tienen mas de 2 h (aqui todos: este R2 simulado los fecha en 1970). Los
+  // listados se quedan. Detalle en tests/studioCleanup.test.ts.
+  await Promise.all(waited);
+  assert.ok(!bucket.objects.has(`${prefix}ses_9f2c/assets/ast_viejo.wav`), 'la limpieza tras guardar se lo lleva');
+  for (const a of FIXTURE.assets) assert.ok(bucket.objects.has(`${prefix}ses_9f2c/assets/${a.file}`), a.file);
 });
 
 test('lista de sesiones por fecha descendente y borrado idempotente', async () => {

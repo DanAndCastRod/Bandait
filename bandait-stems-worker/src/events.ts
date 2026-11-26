@@ -1,6 +1,7 @@
 // Registro de eventos del Estudio (docs/PLAN_MCP_BANDAIT_URIT.md, seccion 2.2). Cada trabajo de IA
 // que termina (SUCCEEDED o FAILED) y cada fallo de proveedor (rechazo al lanzar, error HTTP al
-// sondear o al copiar) deja un JSON en R2:
+// sondear o al copiar) deja un JSON en R2. Tambien cada limpieza de audios huerfanos que borra algo
+// o que se bloquea por una sesion ilegible (`kind` `cleanup`, `provider` `r2`, src/studioCleanup.ts):
 //
 //   studio/_events/AAAA-MM-DD/<HHMMSSmmm>-<8 hex>.json
 //
@@ -45,6 +46,13 @@ export interface StudioEvent {
   model: string | null;
   duration_ms: number | null;
   cost_usd: number | null;
+  /**
+   * Solo en los eventos de limpieza de huerfanos (`kind` `cleanup`, src/studioCleanup.ts): audios
+   * borrados, sus bytes y quien la disparo (`cron`, `save` o `manual`). Nunca ids de audios.
+   */
+  objects?: number;
+  bytes?: number;
+  trigger?: string;
 }
 
 export type EventInput = Omit<StudioEvent, 'at' | 'provider_detail'> & { provider_detail?: unknown };
@@ -122,6 +130,11 @@ export function recordEvent(env: Env, deps: Pick<StudioDeps, 'now' | 'waitUntil'
       duration_ms: input.duration_ms !== null && Number.isFinite(input.duration_ms) ? Math.max(0, Math.round(input.duration_ms)) : null,
       cost_usd: input.cost_usd !== null && Number.isFinite(input.cost_usd) ? input.cost_usd : null,
     };
+    if (input.objects !== undefined) {
+      event.objects = Number.isSafeInteger(input.objects) ? Math.max(0, input.objects) : 0;
+      event.bytes = Number.isSafeInteger(input.bytes) ? Math.max(0, input.bytes!) : 0;
+      event.trigger = String(input.trigger ?? '').slice(0, 20);
+    }
     const write = env.STEMS.put(eventKey(now), JSON.stringify(event), {
       httpMetadata: { contentType: 'application/json' },
       customMetadata: {

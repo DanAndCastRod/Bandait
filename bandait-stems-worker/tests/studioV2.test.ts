@@ -135,7 +135,7 @@ test('documento: el fixture v2 valida y vuelve identico; el v1 se guarda como v1
   assert.equal(v1.version, 1);
   assert.ok(!('markers' in v1));
   assert.ok(!('kind' in v1.tracks[0]));
-  assert.equal(VERSION, '1.3.0');
+  assert.equal(VERSION, '1.4.0');
 
   // Tolerancias: markers ausente es [], parametros ausentes toman el valor de la tabla, las notas y
   // las marcas salen ordenadas.

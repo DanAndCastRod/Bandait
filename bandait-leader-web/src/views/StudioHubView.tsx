@@ -9,6 +9,7 @@ import { createStudioCommandRegistry, StudioUiBridge, studioKeymapStorage, type 
 import { StudioExportDialog } from '../components/studio/StudioExportDialog'
 import { StudioShortcuts } from '../components/studio/StudioShortcuts'
 import { StudioAssistant } from '../components/studio/StudioAssistant'
+import { StudioCloudCleanup } from '../components/studio/StudioCloudCleanup'
 import { StudioInspector } from '../components/studio/StudioInspector'
 import { StudioJobsPanel } from '../components/studio/StudioJobsPanel'
 import { StudioMixer } from '../components/studio/StudioMixer'
@@ -871,6 +872,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
               })}
             </ul>
           )}
+          {cloud && canEditCloud && <StudioCloudCleanup cloud={cloud} />}
         </section>
 
         <form className="stu-card" onSubmit={(event) => void create(event)} aria-label="Sesión nueva" data-testid="studio-new">
