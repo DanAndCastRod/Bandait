@@ -548,3 +548,87 @@ input, select, textarea {
     animation: none;
   }
 }
+
+/* Practica del reproductor de stems (StemStudio): velocidad, tono y Speed Ramp. Clases nuevas
+   (sp-*), solo con los tokens existentes. Las filas ajustan renglon a 390 px. */
+.sp-practice,
+.sp-ramp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.sp-practice {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+.sp-ramp {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.sp-row-end {
+  justify-content: flex-end;
+}
+.sp-label {
+  flex: 0 0 72px;
+}
+.sp-range {
+  flex: 1 1 120px;
+  width: auto;
+}
+.sp-value {
+  min-width: 44px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.sp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.sp-check input {
+  accent-color: var(--accent-cobalt);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.sp-check input:focus-visible {
+  outline: 2px solid var(--accent-cobalt);
+  outline-offset: 2px;
+}
+.sp-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.sp-warn {
+  color: var(--accent-warning);
+}
+.sp-rate {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-cobalt);
+  border: 1px solid var(--accent-cobalt);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sp-rate:empty {
+  display: none;
+}
