@@ -285,7 +285,7 @@ test('cliente oficial: initialize, tools/list con anotaciones de solo lectura', 
   const { connect } = setup();
   const client = await connect();
   assert.equal(client.getServerVersion()?.name, 'bandait');
-  assert.equal(client.getServerVersion()?.version, '1.4.0');
+  assert.equal(client.getServerVersion()?.version, '1.4.1');
   assert.match(client.getInstructions() || '', /solo lectura/);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name), [
@@ -357,7 +357,7 @@ test('herramientas con R2 simulado; ninguna respuesta trae tokens, prompts ni au
   };
 
   const salud = await call('bandait_salud');
-  assert.equal(salud.version, '1.4.0');
+  assert.equal(salud.version, '1.4.1');
   assert.equal(salud.proveedores.urit_ai.configurado, true);
   assert.equal(salud.proveedores.musicai.configurado, false);
   assert.deepEqual(salud.topes_usd, { por_banda_mensual: 20, global_mensual: 30 });

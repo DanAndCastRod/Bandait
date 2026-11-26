@@ -1800,4 +1800,20 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   3. Selector de instrumento para sampler y plugins web en la cabecera de pista (auditoría, pendiente 3).
   4. `StemImporter`, `StemCloudBar` y el prompter de ENSAYO conservan tarjetas con borde; las cabeceras internas de Canciones y Ajustes repiten el título del shell.
   5. Un hub v1 que guarde la apariencia descarta el bloque `waveform` (documentado en el contrato).
-  6. Reindexar codebase-memory: el MCP no conectó en esta sesión.
+  6. Reindexar codebase-memory: el MCP no conectó en esta sesión. (Hecho más tarde el mismo día: 22705 nodos.)
+
+### [2026-11-26] - Estudio: qué hace una toma al salir de la vista (AJUSTES > ESTUDIO) y Worker 1.4.1
+* **Sprint / Módulo:** `bandait-leader-web`, `bandait-stems-worker` (1.4.1, sin desplegar), `e2e/studio.leader-web.spec.ts`. Pedido de Daniel Castaneda: "despliega el worker, la opción de pausar la grabación en estudio al cambiar de vista agrégalo a configuración y pon por default que la toma sigue". Agente: Claude Code (Opus 5.5).
+* **Estado encontrado:** desde la ola 2 el audio global es dueño del `StudioController`, así que una toma seguía grabando al salir del Estudio sin opción para cambiarlo (pendiente 2 de la entrada anterior). El Worker en producción era 1.4.0, sin la línea del prompt que explica `muted`.
+* **Acción técnica realizada:**
+  - `services/studio/studioPrefs.ts` (puro): `recordingOnLeave` `'continue'` (por defecto) o `'stop'`, en localStorage `bandait_studio_prefs` con lectura tolerante y evento `bandait:studio-prefs`.
+  - `components/StudioSettings.tsx` y sección ESTUDIO en AJUSTES (solo con el interruptor del Estudio): "Seguir grabando" o "Detener la toma".
+  - `views/StudioHubView.tsx` (`StudioHome`): al desmontarse, si la preferencia es detener y hay toma en curso, llama a `stopRecording()`; lo grabado queda como clip y como paso deshacible.
+  - Worker: `VERSION` 1.4.1 (y las tres pruebas que la fijan) para poder confirmar el despliegue por `/v1/health`.
+* **Verificación (resultado literal):** `verify-studio-layout.ts` -> `18 ok, 0 fallas` (4 pruebas nuevas); Worker `npm test` -> `# pass 91 / # fail 0`; Playwright nuevo "AJUSTES > ESTUDIO ..." -> `1 passed (35.2s)` (con el micrófono simulado: por defecto la toma sigue tras ir a SETLISTS y volver; con "Detener la toma" vuelve detenida con el paso "Grabar toma"; la elección sobrevive a la recarga). Suite completa `--workers=2`: `120 passed, 2 failed`; las dos fallas eran pruebas que fijaban las pestañas de AJUSTES sin ESTUDIO (`appearance` y `hub-2-3`); corregidas, esos dos archivos dan `16 passed`. `verify:logic` salida 0.
+* **Decisiones:**
+  - Daniel Castaneda pidió "pausar"; se implementó como detener la toma, porque el Estudio no tiene pausa a mitad de toma y detener conserva lo grabado como clip (igual que REC). Si quiere una pausa que retome la misma toma, es un cambio aparte del grabador.
+  - Preferencia del equipo (localStorage) y no de `uiPreferences`: depende del navegador y del dispositivo de audio, y así no cambia el contrato del workspace.
+* **Despliegue del Worker: no se hizo.** `wrangler deploy` por ClipVault falló con `fetch failed`. La red inspecciona TLS: `openssl s_client` a `api.cloudflare.com` muestra la cadena `CN=grupobios.co` emitida por `CN=Grupo Bios CA`, y ni Node (`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`, también con `--use-system-ca`) ni schannel de Windows (`0x80096004`, no se puede comprobar la firma) la validan. No se desactivó la verificación TLS.
+* **Pendientes:**
+  1. Desplegar el Worker 1.4.1 cuando la red lo permita (otra red o la CA corporativa instalada) y confirmar `/v1/health` -> 1.4.1.

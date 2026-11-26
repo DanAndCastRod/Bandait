@@ -72,7 +72,8 @@ test.describe('Web Admin Hub - apariencia', () => {
     await enterDemo(page);
     expect(await theme(page)).toBe('dark-grafito');
     await openAppearance(page);
-    await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO', 'APARIENCIA']);
+    // ESTUDIO solo aparece con el interruptor del Estudio (encendido en esta compilacion de pruebas).
+    await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO', 'ESTUDIO', 'APARIENCIA']);
 
     // Tema
     await page.getByTestId('appearance-theme-light-estudio').click();

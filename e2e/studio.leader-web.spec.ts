@@ -341,6 +341,72 @@ test.describe('Web Admin Hub - Estudio Bandait', () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test('AJUSTES > ESTUDIO: por defecto la toma sigue al salir del Estudio; con "Detener la toma" se cierra como clip', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+
+    await enableStudio(page);
+    await enterDemo(page);
+
+    // La opcion vive en AJUSTES > ESTUDIO y por defecto la toma sigue.
+    await openView(page, 'settings');
+    await page.getByTestId('settings-section-studio').click();
+    await expect(page.getByTestId('studio-settings-on-leave-continue')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('studio-settings-on-leave-stop')).toHaveAttribute('aria-checked', 'false');
+
+    await openStudioHome(page);
+    await createFreeSession(page, 'Toma al salir');
+    await page.getByTestId('studio-tab-device').click();
+    await page.getByTestId('studio-device-list').click();
+    await expect(page.getByTestId('studio-device-select')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('studio-device-open').click();
+    await expect(page.getByTestId('studio-device-status')).toHaveText('ABIERTA', { timeout: 15_000 });
+    await page.getByTestId('studio-add-track').click();
+    await page.locator('[data-testid^="studio-arm-"]').click();
+
+    const record = page.getByTestId('studio-record');
+    const startTake = async () => {
+      await expect(record).toBeEnabled();
+      await record.click();
+      await expect(page.getByTestId('studio-status')).toHaveText('GRABANDO', { timeout: 20_000 });
+      await expect(page.getByTestId('studio-position-time')).toHaveText(/^0:0[1-9]\./, { timeout: 20_000 });
+    };
+
+    // Por defecto: salir y volver no corta la toma.
+    await startTake();
+    await openView(page, 'setlists');
+    await page.waitForTimeout(500);
+    await openView(page, 'studio');
+    await expect(page.getByTestId('studio-status')).toHaveText('GRABANDO');
+    await expect(record).toHaveAttribute('aria-pressed', 'true');
+    await record.click();
+    await expect(record).toHaveAttribute('aria-pressed', 'false', { timeout: 20_000 });
+    await expect(page.getByTestId('studio-undo')).toHaveAttribute('title', /Grabar toma/);
+
+    // Con "Detener la toma": salir cierra la toma y queda como paso que se puede deshacer.
+    await openView(page, 'settings');
+    await page.getByTestId('settings-section-studio').click();
+    await page.getByTestId('studio-settings-on-leave-stop').click();
+    await expect(page.getByTestId('studio-settings-on-leave-stop')).toHaveAttribute('aria-checked', 'true');
+    await openView(page, 'studio');
+    await expect(page.getByTestId('studio-workspace')).toBeVisible();
+    await page.getByTestId('studio-undo').click();
+    await expect(page.getByTestId('studio-undo')).not.toHaveAttribute('title', /Grabar toma/);
+    await startTake();
+    await openView(page, 'setlists');
+    await openView(page, 'studio');
+    await expect(record).toHaveAttribute('aria-pressed', 'false', { timeout: 20_000 });
+    await expect(page.getByTestId('studio-status')).not.toHaveText('GRABANDO');
+    await expect(page.getByTestId('studio-undo')).toHaveAttribute('title', /Grabar toma/);
+
+    // La eleccion se recuerda en este navegador.
+    await page.reload();
+    await openView(page, 'settings');
+    await page.getByTestId('settings-section-studio').click();
+    await expect(page.getByTestId('studio-settings-on-leave-stop')).toHaveAttribute('aria-checked', 'true');
+    expect(pageErrors).toEqual([]);
+  });
+
   test('con sesión de nube: GUARDAR sube el audio y después el documento al Worker simulado', async ({ page }) => {
     const worker = new FakeStudioWorker();
     const fake = new FakeSupabase();
