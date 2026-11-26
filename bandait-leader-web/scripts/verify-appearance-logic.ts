@@ -37,9 +37,11 @@ import {
   normalizeHex,
   parseAppearanceCache,
   parseUiPreferences,
+  hexToRgb,
   pickOnAccent,
   radiusToStop,
   relativeLuminance,
+  rgbToHsl,
   resolveUiPreferences,
   serializeAppearanceCache,
   stopToRadius,
@@ -49,6 +51,17 @@ import {
   type ThemeId,
   type UiPreferences,
 } from '../src/services/appearance.ts'
+import {
+  GRID_MIN_CONTRAST,
+  HINT_MIN_CONTRAST,
+  RULER_TEXT_MIN_CONTRAST,
+  STUDIO_CANVAS_NEUTRALS,
+  STUDIO_CANVAS_ROLES,
+  TRACK_MIN_CONTRAST,
+  buildStudioCanvasPalette,
+  readableOn,
+  studioTrackColor,
+} from '../src/services/studioCanvasPalette.ts'
 import { loadWorkspaceDocument, migrateWorkspace, parseImportedWorkspace, validateWorkspace } from '../src/services/workspaceSchema.ts'
 import { mergeWorkspace, personalPart, sliceBand, type SharedBand } from '../src/services/sharedBands.ts'
 import { stableStringify } from '../src/services/workspaceSync.ts'
@@ -201,6 +214,146 @@ check('el Estudio mapea sus tokens --stu-* a los globales (sigue el tema, sin co
   for (const m of stu) assert.match(m[2], /^var\(--b-[a-z-]+\)$/, `--stu-${m[1]}`)
   const hex = studioCss.match(/#[0-9a-f]{3,8}\b/gi) ?? []
   assert.deepEqual(hex, [], 'studio.css sin hexadecimales fijos')
+})
+
+console.log('Lienzos del Estudio (paleta por tema)')
+
+const HEX6 = /^#[0-9A-F]{6}$/
+const RGBA = /^rgba\(\d{1,3}, \d{1,3}, \d{1,3}, (0|1|0?\.\d+)\)$/
+const ROW_BACKGROUNDS = ['lane', 'laneAlt', 'rowWhite', 'rowBlack'] as const
+
+/** Colores de pista (por posicion y por rol) tal como los declara studioState.ts. */
+function declaredTrackColors(): string[] {
+  const src = read('../src/components/studio/studioState.ts')
+  const track = /const TRACK_COLORS[^=]*=\s*\[([^\]]+)\]/.exec(src)?.[1] ?? ''
+  const role = /const ROLE_COLORS[^=]*=\s*\{([^}]+)\}/.exec(src)?.[1] ?? ''
+  return [...new Set([...track.matchAll(/#[0-9A-Fa-f]{6}/g), ...role.matchAll(/#[0-9A-Fa-f]{6}/g)].map((m) => m[0].toUpperCase()))]
+}
+
+check('cada tema define todos los roles de los lienzos con un color valido (hex o rgba)', () => {
+  assert.ok(STUDIO_CANVAS_ROLES.length >= 50)
+  assert.equal(new Set(STUDIO_CANVAS_ROLES).size, STUDIO_CANVAS_ROLES.length, 'roles sin repetir')
+  for (const theme of THEME_IDS) {
+    const pal = buildStudioCanvasPalette(theme, null)
+    assert.equal(pal.theme, theme)
+    for (const role of STUDIO_CANVAS_ROLES) {
+      const value = pal[role]
+      assert.equal(typeof value, 'string', `${theme}.${role}`)
+      assert.ok(HEX6.test(value) || RGBA.test(value), `${theme}.${role}: ${value}`)
+    }
+    for (const [role, value] of Object.entries(STUDIO_CANVAS_NEUTRALS[theme])) assert.match(value, HEX6, `${theme}.${role} declarado en hexadecimal`)
+  }
+})
+
+check('Light Estudio pinta claro y Dark Grafito oscuro: fondo, carriles, regla, piano y velocidad', () => {
+  const surfaces = ['bg', 'lane', 'laneAlt', 'takeLane', 'ruler', 'rowWhite', 'rowBlack', 'keybed', 'keyWhite', 'velocityBg'] as const
+  const light = buildStudioCanvasPalette('light-estudio', null)
+  const dark = buildStudioCanvasPalette('dark-grafito', null)
+  for (const role of surfaces) {
+    assert.ok(relativeLuminance(light[role]) > 0.6, `light-estudio.${role} ${light[role]} es claro`)
+    assert.ok(relativeLuminance(dark[role]) < 0.03, `dark-grafito.${role} ${dark[role]} es oscuro`)
+  }
+  assert.ok(relativeLuminance(light.text) < 0.03 && relativeLuminance(dark.text) > 0.6, 'texto sobre clips invertido')
+})
+
+check('texto de la regla y del teclado >= 4,5:1 sobre su fondo; pistas de texto >= 3:1', () => {
+  for (const theme of THEME_IDS) {
+    const p = buildStudioCanvasPalette(theme, null)
+    const pairs: Array<[string, string, string, number]> = [
+      ['rulerText/ruler', p.rulerText, p.ruler, RULER_TEXT_MIN_CONTRAST],
+      ['rulerTextActive/ruler', p.rulerTextActive, p.ruler, RULER_TEXT_MIN_CONTRAST],
+      ['rulerText/section', p.rulerText, p.section, RULER_TEXT_MIN_CONTRAST],
+      ['keyLabel/keyWhite', p.keyLabel, p.keyWhite, RULER_TEXT_MIN_CONTRAST],
+      ['keyLabel/keybed', p.keyLabel, p.keybed, RULER_TEXT_MIN_CONTRAST],
+      ['text/lane', p.text, p.lane, RULER_TEXT_MIN_CONTRAST],
+      ['rulerHint/ruler', p.rulerHint, p.ruler, HINT_MIN_CONTRAST],
+    ]
+    for (const [name, fg, bg, min] of pairs) {
+      const ratio = contrastRatio(fg, bg)
+      assert.ok(ratio >= min, `${theme} ${name}: ${ratio.toFixed(2)} < ${min}`)
+    }
+  }
+})
+
+check('rejilla de compas y de tiempo >= 1,3:1 sobre todo fondo de fila; la de compas mas marcada', () => {
+  for (const theme of THEME_IDS) {
+    const p = buildStudioCanvasPalette(theme, null)
+    for (const bg of ROW_BACKGROUNDS) {
+      for (const line of ['gridStrong', 'gridSoft'] as const) {
+        const ratio = contrastRatio(p[line], p[bg])
+        assert.ok(ratio >= GRID_MIN_CONTRAST, `${theme} ${line}/${bg}: ${ratio.toFixed(2)}`)
+      }
+      assert.ok(contrastRatio(p.gridStrong, p[bg]) > contrastRatio(p.gridSoft, p[bg]), `${theme} compas > tiempo sobre ${bg}`)
+      assert.ok(contrastRatio(p.gridSoft, p[bg]) > contrastRatio(p.gridFaint, p[bg]), `${theme} tiempo > subdivision sobre ${bg}`)
+      assert.ok(contrastRatio(p.gridFaint, p[bg]) > 1.02, `${theme} la subdivision se ve sobre ${bg}`)
+    }
+    assert.ok(contrastRatio(p.rowLine, p.lane) >= GRID_MIN_CONTRAST, `${theme} separador de filas`)
+  }
+})
+
+check('medidores: LED verde, ambar y rojo >= 3:1 contra el LED apagado en ambos temas', () => {
+  for (const theme of THEME_IDS) {
+    const p = buildStudioCanvasPalette(theme, null)
+    for (const role of ['meterOk', 'meterHot', 'meterOver', 'meterHold'] as const) {
+      const ratio = contrastRatio(p[role], p.meterOff)
+      assert.ok(ratio >= 3, `${theme} ${role}/meterOff: ${ratio.toFixed(2)}`)
+    }
+  }
+})
+
+check('colores de pista: los mismos en Dark Grafito; en Light Estudio mas oscuros, mismo tono y >= 3:1 sobre los carriles', () => {
+  const declared = declaredTrackColors()
+  assert.ok(declared.length >= 8, `colores de studioState.ts: ${declared.length}`)
+  const dark = buildStudioCanvasPalette('dark-grafito', null)
+  const light = buildStudioCanvasPalette('light-estudio', null)
+  for (const color of declared) {
+    assert.equal(studioTrackColor(dark, color), color, `Dark Grafito conserva ${color}`)
+    const adapted = studioTrackColor(light, color)
+    for (const bg of ['lane', 'laneAlt'] as const) {
+      const ratio = contrastRatio(adapted, light[bg])
+      assert.ok(ratio >= TRACK_MIN_CONTRAST, `${color} -> ${adapted} sobre ${bg}: ${ratio.toFixed(2)}`)
+      assert.ok(contrastRatio(color, dark[bg]) >= TRACK_MIN_CONTRAST, `${color} sobre ${bg} de Dark Grafito`)
+    }
+    assert.ok(relativeLuminance(adapted) < relativeLuminance(color), `${color} se oscurece`)
+    const [h0, s0] = rgbToHsl(hexToRgb(color))
+    const [h1] = rgbToHsl(hexToRgb(adapted))
+    if (s0 > 0.05) assert.ok(Math.min(Math.abs(h0 - h1), 1 - Math.abs(h0 - h1)) < 0.02, `${color} -> ${adapted} conserva el tono`)
+  }
+})
+
+check('acento del musico: la linea de repeticion y la curva de EQ llegan a 3:1 sobre el carril', () => {
+  for (const theme of THEME_IDS) {
+    for (const accent of [null, ...ACCENT_PRESETS.map((p) => p.hex), '#FFFFFF', '#000000']) {
+      const p = buildStudioCanvasPalette(theme, accent)
+      assert.ok(contrastRatio(p.accent, p.lane) >= TRACK_MIN_CONTRAST, `${theme} ${accent}: ${p.accent}`)
+    }
+  }
+  assert.equal(buildStudioCanvasPalette('dark-grafito', null).accent, THEME_TOKENS['dark-grafito'].accent)
+})
+
+check('cache: misma combinacion, mismo objeto; otro tema u otro acento, otra paleta; tema invalido = Dark Grafito', () => {
+  const a = buildStudioCanvasPalette('light-estudio', '#e06c9f')
+  assert.equal(buildStudioCanvasPalette('light-estudio', '#E06C9F'), a)
+  assert.notEqual(buildStudioCanvasPalette('dark-grafito', '#E06C9F'), a)
+  assert.notEqual(buildStudioCanvasPalette('light-estudio', '#2B62A8'), a)
+  assert.equal(buildStudioCanvasPalette('light-estudio', null), buildStudioCanvasPalette('light-estudio', THEME_TOKENS['light-estudio'].accent))
+  assert.equal(buildStudioCanvasPalette('neon', null).theme, 'dark-grafito')
+  assert.equal(readableOn('#123456', '#FFFFFF', 3), '#123456', 'si ya llega, no cambia')
+})
+
+check('auditoria: los lienzos del Estudio no pintan con colores literales y repintan al cambiar el tema', () => {
+  const files = ['StudioTimeline.tsx', 'StudioPianoRoll.tsx', 'StudioMixer.tsx', 'StudioTrackHeader.tsx', 'StudioInspector.tsx', 'StudioDevicePanel.tsx']
+  for (const file of files) {
+    const src = read(`../src/components/studio/${file}`)
+    const literal = src.split('\n').filter((line) => /(fillStyle|strokeStyle)\s*=/.test(line) && /#[0-9A-Fa-f]{3,8}\b|rgba?\(/.test(line))
+    assert.deepEqual(literal, [], `${file}: colores literales en el canvas`)
+    assert.ok(/#[0-9A-Fa-f]{6}\b/.test(src) === false, `${file}: sin hexadecimales fijos`)
+    assert.ok(src.includes('useStudioCanvasPalette()'), `${file}: lee la paleta del tema`)
+  }
+  const dom = read('../src/services/appearanceDom.ts')
+  assert.ok(dom.includes('dispatchEvent') && dom.includes('APPEARANCE_EVENT'), 'applyAppearance avisa el cambio')
+  const store = read('../src/services/studioCanvasPaletteDom.ts')
+  assert.ok(store.includes('addEventListener(APPEARANCE_EVENT'), 'la paleta escucha el aviso')
 })
 
 console.log('Redondez y transporte')

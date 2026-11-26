@@ -207,6 +207,56 @@ test.describe('Web Admin Hub - apariencia', () => {
     expect(await radiusOf(page, 'stem-stop')).toBe('9999px');
   });
 
+  test('lienzos del Estudio con Light Estudio: carriles y regla claros; repinta al cambiar el tema', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('bandait_studio', '1'));
+    await enterDemo(page);
+    await openAppearance(page);
+    await page.getByTestId('appearance-theme-light-estudio').click();
+    expect(await theme(page)).toBe('light-estudio');
+
+    await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+    await expect(page.getByTestId('studio-create')).toBeEnabled();
+    await page.getByTestId('studio-new-title').fill('Lienzo claro');
+    await page.getByTestId('studio-create').click();
+    await expect(page.getByTestId('studio-workspace')).toBeVisible();
+    await page.getByTestId('studio-add-track').click();
+    await page.getByTestId('studio-add-track').click();
+    await expect(page.locator('[data-testid^="studio-arm-"]')).toHaveCount(2);
+
+    // Mediana de una franja de pixeles del canvas (en px CSS): esquiva las lineas de la rejilla.
+    const stripe = (y: number) =>
+      page.getByTestId('studio-canvas').evaluate((el, cssY) => {
+        const canvas = el as HTMLCanvasElement;
+        const ctx = canvas.getContext('2d')!;
+        const dpr = canvas.width / canvas.clientWidth;
+        const row = ctx.getImageData(0, Math.round(cssY * dpr), Math.round(160 * dpr), 1).data;
+        const lum: number[] = [];
+        for (let i = 0; i < row.length; i += 4) lum.push(0.2126 * row[i] + 0.7152 * row[i + 1] + 0.0722 * row[i + 2]);
+        lum.sort((a, b) => a - b);
+        return lum[Math.floor(lum.length / 2)];
+      }, y);
+    // Regla de 46 px; carril de la primera pista de 46 a 158 y de la segunda de 158 a 270.
+    const lanes = async () => ({ ruler: await stripe(30), first: await stripe(100), second: await stripe(212) });
+
+    await expect.poll(async () => (await lanes()).first, { timeout: 5000 }).toBeGreaterThan(200);
+    const light = await lanes();
+    expect(light.second).toBeGreaterThan(200);
+    expect(light.ruler).toBeGreaterThan(200);
+
+    // applyAppearance avisa el cambio (bandait:appearance) con el lienzo montado: se repinta oscuro
+    // en el siguiente cuadro, sin recargar ni salir del Estudio.
+    await page.evaluate(() => {
+      const root = document.documentElement;
+      root.dataset.theme = 'dark-grafito';
+      root.style.setProperty('--b-accent', '#5CC8C2');
+      window.dispatchEvent(new CustomEvent('bandait:appearance', { detail: { theme: 'dark-grafito', accent: '#5CC8C2' } }));
+    });
+    await expect.poll(async () => (await lanes()).first, { timeout: 5000 }).toBeLessThan(40);
+    const dark = await lanes();
+    expect(dark.second).toBeLessThan(40);
+    expect(dark.ruler).toBeLessThan(40);
+  });
+
   test('un Musician de solo lectura en una banda compartida cambia SU apariencia: va a bandait_workspaces, no a la banda', async ({ page }) => {
     const fake = new FakeSupabase();
     fake.workspaces.push({ user_id: USER.id, workspace: workspaceWith('band_daniel_01', 'Banda de Daniel', ['Tema A']), updated_at: fake.now() });

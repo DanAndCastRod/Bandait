@@ -236,7 +236,8 @@ export function pickOnAccent(accent: string): InkChoice {
   return light > dark ? { ink: INK_LIGHT, ratio: light } : { ink: INK_DARK, ratio: dark }
 }
 
-function rgbToHsl([r, g, b]: [number, number, number]): [number, number, number] {
+/** [r, g, b] 0..255 -> [h, s, l] 0..1. */
+export function rgbToHsl([r, g, b]: [number, number, number]): [number, number, number] {
   const rn = r / 255
   const gn = g / 255
   const bn = b / 255
@@ -253,7 +254,8 @@ function rgbToHsl([r, g, b]: [number, number, number]): [number, number, number]
   return [h / 6, s, l]
 }
 
-function hslToHex(h: number, s: number, l: number): string {
+/** h, s, l 0..1 -> '#RRGGBB'. */
+export function hslToHex(h: number, s: number, l: number): string {
   if (s === 0) return rgbToHex(l * 255, l * 255, l * 255)
   const hue = (p: number, q: number, t: number) => {
     let x = t
