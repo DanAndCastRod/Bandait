@@ -1759,3 +1759,13 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Pendientes:**
   1. Al publicar, regenerar `landing/hub` con `npm run build:landing` (no se hizo aquí).
   2. Ola 2 (shell y paneles del Estudio): si se agrega otro lienzo, usar `useStudioCanvasPalette()` y agregar el archivo a la auditoría de `verify-appearance-logic.ts`.
+
+### [2026-11-26] - Web 3.0 ola 1: integración, despliegue y rediseño en maqueta
+* **Sprint / Módulo:** `bandait-leader-web`, `bandait-stems-worker` 1.4.0. Pedido de Daniel Castaneda: "proceder con el resto de la implementación ... y todas las recomendaciones", y a mitad del trabajo "rediseño minimalista con influencia de Moises". Agente: Claude Code (Opus 5.5) coordinando cuatro subagentes (nube, audio, apariencia, estudio) en worktrees; plan en `docs/PLAN_WEB_3.0_IMPLEMENTACION.md`.
+* **Acción técnica realizada:** rama `feat/web30-ola1` con las cuatro ramas (conflictos solo en `DEVLOG.md` y en `verify:logic` de `package.json`, donde se conservaron los dos scripts nuevos); PR #57. La ampliación del rediseño se pasó al agente de apariencia en curso (píldora por defecto, superficies por tono, bordes de baja opacidad).
+* **Verificación:** Hub lint, `tsc -b`, `verify:logic` (10 suites), build; Worker 91/91; Playwright `leader-web` 72/72; CI del PR #57 en verde.
+* **Despliegue:** Worker 1.4.0 por ClipVault (versión de Cloudflare `bae155c9-fd60-4725-a242-f9b1704e623e`) antes de fusionar el PR #57; `bandait_salud` del MCP responde 1.4.0. No verificado: la primera corrida del cron de limpieza contra R2 real.
+* **Decisiones de Daniel Castaneda:** acento por defecto turquesa (`#5CC8C2` en Dark Grafito, `#1A7F7A` en Light Estudio), no el naranja del sistema de diseño de octubre; publicar la ola 1 sin esperar la revisión de la maqueta.
+* **Maqueta del rediseño:** lienzo de Claude Design https://claude.ai/artifact/KtX2hxX7WZwwrzvrKUw18B con Hub (rail, Canciones y Stems, mini reproductor), Estudio, Ajustes · Apariencia y Móvil · Ensayo; pendiente de aprobación antes de la ola 2.
+* **Errores propios:** el PR #56 se fusionó con el CI del leader aún en curso (la espera se cortó por tiempo; terminó en verde). Un servidor Vite del follower lanzado por el agente de audio quedó en el puerto 5174 (PID 115120) y el clasificador de permisos no dejó detenerlo; su worktree sigue sin borrar.
+* **Pendientes:** aprobación de la maqueta y ola 2 (shell, `GlobalAudioProvider`, cola `Drop & Split`, paneles plegables, asistente solo flotante); `STUDIO_SPENDER_UIDS`; workflow de master en Music.AI; escuchar el tono y la velocidad con stems reales.
