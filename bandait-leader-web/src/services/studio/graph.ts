@@ -251,9 +251,9 @@ export function reverbTailSeconds(session: StudioSession): number {
   return sends ? session.master.reverb.decayS : 0
 }
 
-/** true si la pista tiene algo que suene: un clip de audio activo, un clip MIDI o un congelado. */
+/** true si la pista tiene algo que suene: un clip de audio activo, un clip MIDI sin silenciar o un congelado. */
 export function trackHasSound(track: Pick<StudioTrack, 'clips' | 'midiClips' | 'frozenAssetId'>): boolean {
-  return track.clips.some((c) => c.active) || (track.midiClips ?? []).length > 0 || Boolean(track.frozenAssetId)
+  return track.clips.some((c) => c.active) || (track.midiClips ?? []).some((c) => !c.muted) || Boolean(track.frozenAssetId)
 }
 
 /** Regla de STUDIO_V1.md 2.3: con algun solo suenan solo las pistas en solo; mute gana sobre solo. */

@@ -198,3 +198,95 @@ export function adjacentMarkerBeat(markers: readonly { beat: number }[], beat: n
   }
   return best
 }
+
+// ---------------------------------------------------------------------------
+// Seleccion por rectangulo y region de repeticion arrastrable (linea de tiempo)
+// ---------------------------------------------------------------------------
+
+/**
+ * Rectangulo de seleccion en coordenadas del contenido: tiempo en segundos (eje x, independiente
+ * del zoom y del scroll) y px verticales desde arriba del contenido (eje y).
+ */
+export interface MarqueeRect {
+  startS: number
+  endS: number
+  top: number
+  bottom: number
+}
+
+/** Caja de un clip en las mismas coordenadas que MarqueeRect. */
+export interface MarqueeClipBox {
+  id: string
+  startS: number
+  endS: number
+  top: number
+  bottom: number
+}
+
+/** Rectangulo entre el punto donde empezo el arrastre y el punto actual, en cualquier direccion. */
+export function marqueeFromPoints(a: { timeS: number; y: number }, b: { timeS: number; y: number }): MarqueeRect {
+  return { startS: Math.min(a.timeS, b.timeS), endS: Math.max(a.timeS, b.timeS), top: Math.min(a.y, b.y), bottom: Math.max(a.y, b.y) }
+}
+
+/**
+ * Ids de los clips que el rectangulo TOCA (no hace falta encerrarlos enteros), en el orden de
+ * `boxes`. Tocar el borde cuenta: un rectangulo de alto o ancho cero sobre un clip lo elige.
+ */
+export function clipsInMarquee(boxes: readonly MarqueeClipBox[], rect: MarqueeRect): string[] {
+  const out: string[] = []
+  for (const box of boxes) {
+    if (box.endS < rect.startS || box.startS > rect.endS) continue
+    if (box.bottom < rect.top || box.top > rect.bottom) continue
+    out.push(box.id)
+  }
+  return out
+}
+
+/**
+ * Seleccion que deja el rectangulo: sin Shift/Ctrl reemplaza la anterior; con Shift/Ctrl suma los
+ * clips nuevos detras de los que ya estaban, sin repetir.
+ */
+export function marqueeSelection(current: readonly string[], picked: readonly string[], additive: boolean): string[] {
+  if (!additive) return [...new Set(picked)]
+  const out = [...current]
+  const seen = new Set(current)
+  for (const id of picked) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+}
+
+/** Parte de la region de repeticion que se arrastra sobre la regla. */
+export type LoopDragPart = 'start' | 'end' | 'body'
+
+export interface LoopDragOptions {
+  /** Largo minimo de la region. */
+  minLengthS: number
+  /** Fin de la sesion (la region no pasa de aqui). */
+  maxS: number
+  /** Ajuste a la rejilla del borde que se mueve (o del inicio, al mover la region entera). */
+  snap?: (timeS: number) => number
+}
+
+/**
+ * Region tras arrastrar `deltaS` segundos uno de sus bordes o la region entera. Con `body` el largo
+ * no cambia; con un borde, el otro queda quieto y el largo nunca baja de `minLengthS`. Siempre
+ * dentro de [0, maxS].
+ */
+export function dragLoopRegion(base: LoopRegionS, part: LoopDragPart, deltaS: number, options: LoopDragOptions): LoopRegionS {
+  const snap = options.snap ?? ((s: number) => s)
+  const maxS = Math.max(options.minLengthS, options.maxS)
+  const length = base.endS - base.startS
+  if (part === 'body') {
+    const startS = Math.min(Math.max(0, snap(base.startS + deltaS)), Math.max(0, maxS - length))
+    return { startS, endS: startS + length }
+  }
+  if (part === 'start') {
+    const startS = Math.min(Math.max(0, snap(base.startS + deltaS)), base.endS - options.minLengthS)
+    return { startS: Math.max(0, startS), endS: base.endS }
+  }
+  const endS = Math.max(Math.min(maxS, snap(base.endS + deltaS)), base.startS + options.minLengthS)
+  return { startS: base.startS, endS }
+}

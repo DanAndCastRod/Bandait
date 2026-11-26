@@ -18,7 +18,7 @@
  */
 import assert from 'node:assert/strict'
 import sessionFixtureV2 from '../../bandait-protocol/fixtures/studio_session_v2.json' with { type: 'json' }
-import { parseSession, type DrumsParams, type StudioMidiClip, type StudioSession, type StudioMarker } from '../src/services/studio/session.ts'
+import { parseSession, sessionEndSeconds, type DrumsParams, type StudioMidiClip, type StudioSession, type StudioMarker } from '../src/services/studio/session.ts'
 import {
   ENVELOPE_MIN_ATTACK_S,
   ENVELOPE_TAIL_FACTOR,
@@ -74,7 +74,11 @@ import {
   scopeIsEmpty,
 } from '../src/services/studio/engine.ts'
 import { beatsPerBarFromSignature, parseSmf, writeSmf } from '../src/services/studio/smf.ts'
-import { rebeatMarkers } from '../src/services/studio/jobs.ts'
+import { rebeatMarkers, soundingClipNotes } from '../src/services/studio/jobs.ts'
+import { bounceRange, bounceTrackIds } from '../src/services/studio/bounce.ts'
+import { trackHasSound } from '../src/services/studio/graph.ts'
+import { toggleClipsActive } from '../src/services/studio/sessionOps.ts'
+import { FADER_MARKS, dbToFader, faderToDb, ledLitCount, ledSegmentCount, ledZone } from '../src/services/studio/faderScale.ts'
 import { StudioMidiInput, isInsideDialog, type MidiAccessLike, type MidiInputPortLike } from '../src/services/studio/midiInput.ts'
 import { DESTRUCTIVE_TOOLS, bulkApplicable, isDestructiveCommand, type PendingAssistantCommand } from '../src/services/studio/assistantTools.ts'
 import type { ScheduledClips } from '../src/services/studio/types.ts'
@@ -245,6 +249,67 @@ async function main() {
     assert.equal(midiEndSeconds(s), 18)
     assert.equal(midiEndSeconds(s, new Set(['trk_3'])), 4)
     assert.equal(midiEndSeconds(s, new Set(['trk_1'])), 0)
+  })
+
+  await check('silencio MIDI (STUDIO_V2.md 2.4): un clip con muted no suena al escuchar ni al exportar ni para el asistente', () => {
+    const s = fixtureSession()
+    const sampler = new Set(['trk_4'])
+    // mid_s9 (beats 40..44 = 20..22 s a 120 BPM) viene silenciado en el fixture.
+    assert.equal(planMidiNotes(s, { fromS: 20, toS: 22, chase: true, trackIds: sampler }).length, 0, 'el programador de notas lo salta (escucha y bounce pasan por aqui)')
+    const unmuted = toggleClipsActive(s, ['mid_s9'])
+    assert.deepEqual(planMidiNotes(unmuted, { fromS: 20, toS: 22, chase: false, trackIds: sampler }).map((n) => [n.pitch, n.startS]), [[60, 20], [67, 21]])
+    // El motor reprograma solo la pista cuyo clip cambio de silencio.
+    assert.equal(midiClipsEqual(s, unmuted), false)
+    assert.deepEqual([...(midiChangedTrackIds(s, unmuted) as Set<string>)], ['trk_4'])
+    // Fin de lo que suena: el clip silenciado no alarga ni la escucha ni el archivo exportado.
+    assert.equal(midiEndSeconds(s), 18)
+    assert.equal(midiEndSeconds(unmuted), 22)
+    assert.equal(sessionEndSeconds(s), sessionEndSeconds(toggleClipsActive(unmuted, ['mid_s9'])))
+    // Una pista cuyos clips estan todos en silencio no tiene sonido: no se exporta como pista.
+    const onlyMuted = { ...s, tracks: s.tracks.map((t) => (t.id === 'trk_4' ? { ...t, midiClips: t.midiClips.filter((c) => c.id === 'mid_s9') } : t)) }
+    assert.equal(trackHasSound(onlyMuted.tracks[3]), false)
+    assert.ok(!bounceTrackIds(onlyMuted).includes('trk_4'))
+    assert.ok(bounceTrackIds(toggleClipsActive(onlyMuted, ['mid_s9'])).includes('trk_4'))
+    const silentOnly = { ...onlyMuted, tracks: [onlyMuted.tracks[3]] }
+    assert.equal(bounceRange(silentOnly, undefined, false), null, 'nada que exportar')
+    // El asistente: las notas que suenan de un clip silenciado son ninguna.
+    const muted = s.tracks[3].midiClips.find((c) => c.id === 'mid_s9')
+    assert.ok(muted)
+    assert.deepEqual(soundingClipNotes(muted, 0, 100), [])
+    assert.equal(soundingClipNotes({ ...muted, muted: undefined }, 0, 100).length, 2)
+  })
+
+  await check('escala del fader de +12 a -60 dB: 0 dB a tres cuartos, ida y vuelta, marcas y LEDs del vumetro', () => {
+    assert.equal(dbToFader(-60), 0)
+    assert.equal(dbToFader(-200), 0)
+    assert.equal(dbToFader(Number.NEGATIVE_INFINITY), 0)
+    assert.equal(dbToFader(Number.NaN), 0)
+    assert.equal(dbToFader(12), 1)
+    assert.equal(dbToFader(30), 1)
+    assert.equal(dbToFader(0), 0.75)
+    assert.equal(dbToFader(-12), 0.45)
+    for (const db of [-60, -40, -30, -24, -18, -12, -9, -6, -3, 0, 3, 6, 9, 12]) close(faderToDb(dbToFader(db)), db, 0.01)
+    assert.equal(faderToDb(-1), -60)
+    assert.equal(faderToDb(2), 12)
+    // La curva sube siempre: mas recorrido, mas dB.
+    let last = -Infinity
+    for (let p = 0; p <= 1.0001; p += 0.01) {
+      const db = faderToDb(p)
+      assert.ok(db >= last, `no monotona en ${p}`)
+      last = db
+    }
+    assert.deepEqual([FADER_MARKS[0], FADER_MARKS[FADER_MARKS.length - 1]], [12, -60], 'la escala impresa cubre el recorrido entero')
+    // LEDs: 35 en 140 px; el de arriba es rojo (por encima de 0 dB), ambar desde -6, el resto verde.
+    const count = ledSegmentCount(140)
+    assert.equal(count, 35)
+    assert.equal(ledSegmentCount(0), 0)
+    assert.equal(ledZone(count - 1, count), 'over')
+    assert.equal(ledZone(0, count), 'ok')
+    const zones = Array.from({ length: count }, (_, i) => ledZone(i, count))
+    assert.ok(zones.indexOf('hot') > zones.lastIndexOf('ok') && zones.indexOf('over') > zones.lastIndexOf('hot'), 'verde, ambar y rojo, en ese orden')
+    assert.equal(ledLitCount(0, count), 0)
+    assert.equal(ledLitCount(1, count), count)
+    assert.equal(ledLitCount(dbToFader(0), count), Math.round(0.75 * count))
   })
 
   console.log('instruments/core.ts: caja de ritmos, sampler y sesion')

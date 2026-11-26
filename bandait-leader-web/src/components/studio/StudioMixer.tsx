@@ -10,13 +10,12 @@ import {
   STUDIO_REVERB_RETURN_DB_MIN,
   STUDIO_REVERB_SEND_DB_MAX,
   STUDIO_REVERB_SEND_DB_MIN,
-  STUDIO_VOLUME_DB_MAX,
-  STUDIO_VOLUME_DB_MIN,
   type StudioFx,
   type StudioFxType,
   type StudioSession,
   type StudioTrack,
 } from '../../services/studio/session'
+import { dbToFader, FADER_MARKS, faderToDb, LED_GAP_PX, ledLitCount, ledSegmentCount, ledZone, type LedZone } from '../../services/studio/faderScale'
 import { updateMaster } from '../../services/studio/sessionOps'
 import { StudioEqCurve } from './StudioInspector'
 import { errorText, formatDb, formatPan, trackColor, useStudio, withFx, type StudioController, type StudioFxSelection, type StudioPanelProps } from './studioState'
@@ -29,57 +28,16 @@ interface Props extends StudioPanelProps {
 }
 
 // ---------------------------------------------------------------------------
-// Escala del fader
+// Escala del fader (services/studio/faderScale.ts: de +12 a -60 dB, 0 dB a tres cuartos)
 // ---------------------------------------------------------------------------
 
-/**
- * Recorrido del fader (0 abajo, 1 arriba) contra dB. No es lineal: como en una consola, la zona
- * de trabajo (de -12 a +6 dB) ocupa casi la mitad del recorrido y 0 dB queda a tres cuartos.
- * El medidor usa la misma escala, asi el nivel y el fader se leen contra las mismas marcas.
- */
-const FADER_POINTS: readonly (readonly [number, number])[] = [
-  [0, -60],
-  [0.1, -40],
-  [0.25, -24],
-  [0.45, -12],
-  [0.6, -6],
-  [0.75, 0],
-  [0.875, 6],
-  [1, 12],
-]
-const FADER_MARKS: readonly number[] = [12, 6, 0, -6, -12, -24, -40]
 const FADER_STEPS = 1000
 const FADER_STEP = 5
-
-function dbToFader(db: number): number {
-  if (!Number.isFinite(db) || db <= STUDIO_VOLUME_DB_MIN) return 0
-  if (db >= STUDIO_VOLUME_DB_MAX) return 1
-  for (let i = 1; i < FADER_POINTS.length; i++) {
-    const [p1, d1] = FADER_POINTS[i]
-    if (db <= d1) {
-      const [p0, d0] = FADER_POINTS[i - 1]
-      return p0 + ((db - d0) / (d1 - d0)) * (p1 - p0)
-    }
-  }
-  return 1
-}
-
-function faderToDb(position: number): number {
-  const p = Math.min(1, Math.max(0, position))
-  for (let i = 1; i < FADER_POINTS.length; i++) {
-    const [p1, d1] = FADER_POINTS[i]
-    if (p <= p1) {
-      const [p0, d0] = FADER_POINTS[i - 1]
-      return Math.round((d0 + ((p - p0) / (p1 - p0)) * (d1 - d0)) * 100) / 100
-    }
-  }
-  return STUDIO_VOLUME_DB_MAX
-}
 
 const faderValue = (db: number) => Math.round((dbToFader(db) * FADER_STEPS) / FADER_STEP) * FADER_STEP
 
 // ---------------------------------------------------------------------------
-// Medidores (un solo requestAnimationFrame para todo el mezclador)
+// Medidores LED (un solo requestAnimationFrame para todo el mezclador)
 // ---------------------------------------------------------------------------
 
 interface MeterState {
@@ -88,6 +46,29 @@ interface MeterState {
   lastPeak: number
   lastRms: number
   lastHold: number
+}
+
+/**
+ * Colores de los LED por zona, los mismos de la paleta del Estudio (--stu-play, --stu-warn,
+ * --stu-rec): encendido por el RMS, atenuado entre el RMS y el pico, apagado arriba.
+ */
+const LED_COLORS: Readonly<Record<LedZone, { on: string; dim: string }>> = {
+  ok: { on: '#5CC8C2', dim: 'rgba(92, 200, 194, 0.32)' },
+  hot: { on: '#D9A24E', dim: 'rgba(217, 162, 78, 0.36)' },
+  over: { on: '#D96459', dim: 'rgba(217, 100, 89, 0.42)' },
+}
+const LED_OFF = '#1D2127'
+
+/** Zona de cada LED por cantidad de LEDs: se calcula una vez por alto de medidor. */
+const ledZonesCache = new Map<number, LedZone[]>()
+
+function ledZones(count: number): LedZone[] {
+  let zones = ledZonesCache.get(count)
+  if (!zones) {
+    zones = Array.from({ length: count }, (_, i) => ledZone(i, count))
+    ledZonesCache.set(count, zones)
+  }
+  return zones
 }
 
 function paintMeter(canvas: HTMLCanvasElement, state: MeterState, peakDb: number, rmsDb: number, now: number): void {
@@ -101,34 +82,35 @@ function paintMeter(canvas: HTMLCanvasElement, state: MeterState, peakDb: number
     canvas.height = h
     resized = true
   }
-  const peak = dbToFader(peakDb)
-  const rms = dbToFader(rmsDb)
+  const count = ledSegmentCount(canvas.clientHeight)
+  if (count === 0) return
+  const peak = ledLitCount(dbToFader(peakDb), count)
+  const rms = ledLitCount(dbToFader(rmsDb), count)
   if (peak >= state.hold) {
     state.hold = peak
     state.holdUntil = now + 900
   } else if (now > state.holdUntil) {
-    state.hold = Math.max(peak, state.hold - 0.02)
+    state.hold = Math.max(peak, state.hold - 0.5)
   }
+  const hold = Math.round(state.hold)
   // Sin cambios no se repinta: una pista en silencio no gasta nada.
-  if (!resized && Math.abs(peak - state.lastPeak) < 0.004 && Math.abs(rms - state.lastRms) < 0.004 && Math.abs(state.hold - state.lastHold) < 0.004) return
+  if (!resized && peak === state.lastPeak && rms === state.lastRms && hold === state.lastHold) return
   state.lastPeak = peak
   state.lastRms = rms
-  state.lastHold = state.hold
+  state.lastHold = hold
   const ctx = canvas.getContext('2d')
   if (!ctx) return
-  const over = peakDb > 0
-  const zero = dbToFader(0)
+  const zones = ledZones(count)
+  const pitch = h / count
+  const gap = Math.max(1, Math.round(LED_GAP_PX * dpr))
   ctx.clearRect(0, 0, w, h)
-  ctx.fillStyle = over ? '#D96459' : '#3C6E6B'
-  ctx.fillRect(0, h - peak * h, w, peak * h)
-  ctx.fillStyle = over ? '#D96459' : '#5CC8C2'
-  ctx.fillRect(0, h - rms * h, w, rms * h)
-  if (state.hold > 0.01) {
-    ctx.fillStyle = state.hold > zero ? '#D96459' : '#D5DAE0'
-    ctx.fillRect(0, Math.max(0, h - state.hold * h - dpr), w, Math.max(1, dpr))
+  for (let i = 0; i < count; i++) {
+    const colors = LED_COLORS[zones[i]]
+    ctx.fillStyle = i < rms ? colors.on : i < peak ? colors.dim : i === hold - 1 ? colors.on : LED_OFF
+    const y0 = Math.round(h - (i + 1) * pitch)
+    const y1 = Math.round(h - i * pitch) - gap
+    ctx.fillRect(0, y0, w, Math.max(1, y1 - y0))
   }
-  ctx.fillStyle = '#2E343D'
-  ctx.fillRect(0, h - zero * h, w, Math.max(1, dpr))
 }
 
 function loudnessText(value: number): string {
@@ -305,7 +287,7 @@ const TrackStrip: React.FC<StripProps> = React.memo(({ controller, track, index,
   const eq = track.fx.find((item) => item.type === 'eq')
   const picked = selectedFx?.targetId === track.id ? selectedFx.type : null
   return (
-    <div className="stu-strip" role="group" aria-label={`Canal ${index + 1}: ${track.name}`} style={{ ['--stu-track' as string]: trackColor(index) }} data-testid={`studio-strip-${track.id}`}>
+    <div className="stu-strip" role="group" aria-label={`Canal ${index + 1}: ${track.name}`} style={{ ['--stu-track' as string]: trackColor(index, track.role) }} data-testid={`studio-strip-${track.id}`}>
       <div className="stu-strip-head">
         <span className="stu-strip-name" title={track.name}>
           {track.name}

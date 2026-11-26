@@ -886,6 +886,8 @@ export function splitMidiClip(session: StudioSession, args: SplitMidiClipArgs): 
     loop: false,
     loopBeats: rightLength,
     notes: normalizeNotes(rightNotes, rightLength),
+    // La mitad derecha de un clip silenciado sigue en silencio.
+    ...(clip.muted ? { muted: true } : {}),
   }
   ensureNoteRoom(session, Math.max(left.notes.length, right.notes.length), left.notes.length + right.notes.length - clip.notes.length)
   const midiClips = loc.track.midiClips.slice()
@@ -1181,7 +1183,8 @@ export function joinClips(session: StudioSession, clipIds: readonly string[]): {
       )
       const before = picked.reduce((sum, c) => sum + c.notes.length, 0)
       ensureNoteRoom(next, notes.length, notes.length - before)
-      const merged: StudioMidiClip = { id: first.id, startBeat: first.startBeat, lengthBeats, loop: false, loopBeats: lengthBeats, notes }
+      // Unido queda en silencio solo si todos lo estaban: unir con uno que suena hace sonar todo.
+      const merged: StudioMidiClip = { id: first.id, startBeat: first.startBeat, lengthBeats, loop: false, loopBeats: lengthBeats, notes, ...(picked.every((c) => c.muted) ? { muted: true } : {}) }
       const drop = new Set(picked.slice(1).map((c) => c.id))
       const index = next.tracks.findIndex((t) => t.id === track.id)
       const current = next.tracks[index]
@@ -1256,9 +1259,12 @@ export function fadeClipsAt(session: StudioSession, clipIds: readonly string[], 
  * apaga a las que se le solapan). Los clips MIDI se ignoran.
  */
 export function toggleClipsActive(session: StudioSession, clipIds: readonly string[]): StudioSession {
-  const audio = [...new Set(clipIds)].map((id) => findClip(session, id)).filter((loc): loc is ClipLocation => loc !== null)
-  if (audio.length === 0) return session
-  const silence = audio.some((loc) => loc.clip.active)
+  const ids = [...new Set(clipIds)]
+  const audio = ids.map((id) => findClip(session, id)).filter((loc): loc is ClipLocation => loc !== null)
+  const midi = ids.map((id) => findMidiClip(session, id)).filter((loc): loc is MidiClipLocation => loc !== null)
+  if (audio.length === 0 && midi.length === 0) return session
+  // Con algo que suene entre los elegidos se silencia todo; si todo estaba en silencio, vuelve a sonar.
+  const silence = audio.some((loc) => loc.clip.active) || midi.some((loc) => !loc.clip.muted)
   let next = session
   for (const { clip } of audio) {
     if (silence) {
@@ -1268,7 +1274,21 @@ export function toggleClipsActive(session: StudioSession, clipIds: readonly stri
       next = setActiveTake(next, { clipId: clip.id })
     }
   }
+  for (const { clip } of midi) {
+    const loc = findMidiClip(next, clip.id)
+    if (!loc || Boolean(loc.clip.muted) === silence) continue
+    next = replaceMidiClip(next, loc, setMidiClipMuted(loc.clip, silence))
+  }
   return next
+}
+
+/** El clip con `muted` puesto o quitado: suena = sin la clave, igual que en el cable (STUDIO_V2.md 2.4). */
+export function setMidiClipMuted(clip: StudioMidiClip, muted: boolean): StudioMidiClip {
+  if (muted) return clip.muted === true ? clip : { ...clip, muted: true }
+  if (clip.muted === undefined) return clip
+  const rest: StudioMidiClip = { ...clip }
+  delete rest.muted
+  return rest
 }
 
 export interface DuplicateTrackArgs {

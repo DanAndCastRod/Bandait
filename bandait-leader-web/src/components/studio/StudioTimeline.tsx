@@ -22,6 +22,7 @@ import {
   type StudioTrack,
 } from '../../services/studio/session'
 import { expandMidiClipNotes, moveClip, moveClipsBy, moveMidiClip, resizeMidiClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
+import { clipsInMarquee, dragLoopRegion, marqueeFromPoints, marqueeSelection, type LoopDragPart, type MarqueeClipBox, type MarqueeRect } from '../../services/studio/timelineMath'
 import type { AssetPeaks, LoopRegionS, PeakColumns, SnapMode } from '../../services/studio/types'
 import { StudioPianoRoll } from './StudioPianoRoll'
 import { StudioTrackHeader } from './StudioTrackHeader'
@@ -93,6 +94,8 @@ interface Scene {
   selectedTrackId: string | null
   /** Tramo de la toma en curso, para marcarlo en las pistas armadas. */
   recBand: LoopRegionS | null
+  /** Rectangulo de seleccion en curso (coordenadas del contenido), o null. */
+  marquee: MarqueeRect | null
   getPeaks: (assetId: string) => AssetPeaks | null
 }
 
@@ -299,6 +302,8 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
   const box = midiClipBox(clip, bpm, row, view)
   if (box.x > view.width || box.x + box.w < 0) return
   const selected = scene.selectedIds.has(clip.id)
+  // Silenciado (tecla 0): mismo dibujo que un clip de audio en silencio, atenuado y con borde punteado.
+  const muted = clip.muted === true
   const x = Math.max(box.x, -2)
   const w = Math.min(box.x + box.w, view.width + 2) - x
   const beatPx = beatsToSeconds(1, bpm) * view.zoom
@@ -307,7 +312,7 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
   ctx.beginPath()
   ctx.rect(x, box.y, w, box.h)
   ctx.clip()
-  ctx.fillStyle = withAlpha(color, selected ? 0.24 : 0.12)
+  ctx.fillStyle = withAlpha(color, muted ? (selected ? 0.12 : 0.05) : selected ? 0.24 : 0.12)
   ctx.fillRect(x, box.y, w, box.h)
 
   // Vueltas del patron: lineas punteadas donde vuelve a empezar.
@@ -339,7 +344,7 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
     const top = box.y + MIDI_LABEL_H
     const area = box.h - MIDI_LABEL_H - 4
     const noteH = Math.max(1.5, Math.min(5, area / span))
-    ctx.fillStyle = withAlpha(color, 0.92)
+    ctx.fillStyle = withAlpha(color, muted ? 0.32 : 0.92)
     for (const n of notes) {
       const nx = box.x + n.start * beatPx
       const nw = Math.max(1.5, Math.min(n.length, clip.lengthBeats - n.start) * beatPx - 1)
@@ -352,21 +357,23 @@ function paintMidiClip(ctx: CanvasRenderingContext2D, scene: Scene, track: Studi
   if (w > 34) {
     const instrument = track.instrument
     const name = instrument ? STUDIO_INSTRUMENT_TYPE_LABELS[instrument.type].toUpperCase() : 'MIDI'
-    const text = `MIDI  ${name}  ${clip.notes.length}${clip.loop ? '  LOOP' : ''}`
+    const text = `${muted ? 'SILENCIO  ' : ''}MIDI  ${name}  ${clip.notes.length}${clip.loop ? '  LOOP' : ''}`
     ctx.font = FONT
     ctx.textBaseline = 'top'
     const tx = Math.max(box.x, 0) + 6
     const ty = box.y + 5
     ctx.fillStyle = 'rgba(15, 17, 20, 0.72)'
     ctx.fillRect(tx - 3, ty - 2, ctx.measureText(text).width + 6, 14)
-    ctx.fillStyle = withAlpha('#D5DAE0', 0.92)
+    ctx.fillStyle = withAlpha('#D5DAE0', muted ? 0.7 : 0.92)
     ctx.fillText(text, tx, ty)
   }
   ctx.restore()
 
-  ctx.strokeStyle = selected ? '#D5DAE0' : withAlpha(color, 0.75)
+  ctx.strokeStyle = selected ? '#D5DAE0' : withAlpha(color, muted ? 0.4 : 0.75)
   ctx.lineWidth = selected ? 1.5 : 1
+  if (muted) ctx.setLineDash([4, 3])
   ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1)
+  ctx.setLineDash([])
   // Bordes que se arrastran para recortar, en el clip elegido.
   if (selected && box.w > 24) {
     ctx.fillStyle = '#D5DAE0'
@@ -440,7 +447,7 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
   session.tracks.forEach((track, index) => {
     const row = rows[index]
     if (!row) return
-    const color = trackColor(index)
+    const color = trackColor(index, track.role)
     if (track.kind === 'instrument') {
       let selectedMidi: StudioMidiClip | null = null
       for (const clip of track.midiClips) {
@@ -484,6 +491,21 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     })
   }
 
+  // Rectangulo de seleccion (arrastre en una zona vacia)
+  if (scene.marquee) {
+    const mx = scene.marquee.startS * zoom - scrollX
+    const mw = Math.max(1, (scene.marquee.endS - scene.marquee.startS) * zoom)
+    const my = scene.marquee.top
+    const mh = Math.max(1, scene.marquee.bottom - scene.marquee.top)
+    ctx.fillStyle = 'rgba(122, 165, 214, 0.12)'
+    ctx.fillRect(mx, my, mw, mh)
+    ctx.strokeStyle = '#7AA5D6'
+    ctx.lineWidth = 1
+    ctx.setLineDash([4, 3])
+    ctx.strokeRect(Math.round(mx) + 0.5, Math.round(my) + 0.5, Math.round(mw) - 1, Math.round(mh) - 1)
+    ctx.setLineDash([])
+  }
+
   // Regla (siempre visible: se dibuja en el scroll vertical del cuerpo)
   const ry = view.scrollTop
   ctx.fillStyle = '#1A1E23'
@@ -518,6 +540,9 @@ function paintTimeline(ctx: CanvasRenderingContext2D, scene: Scene, view: View, 
     ctx.fillRect(lx, ry + SECTION_BAND_H, lw, RULER_H - SECTION_BAND_H)
     ctx.fillStyle = '#5CC8C2'
     ctx.fillRect(lx, ry + RULER_H - 3, lw, 3)
+    // Tiradores de los bordes: se arrastran para estirar o encoger la repeticion; el centro la mueve.
+    ctx.fillRect(Math.round(lx), ry + SECTION_BAND_H + 2, 3, RULER_H - SECTION_BAND_H - 2)
+    ctx.fillRect(Math.round(lx + lw) - 3, ry + SECTION_BAND_H + 2, 3, RULER_H - SECTION_BAND_H - 2)
   }
   for (let bar = startBar; bar * barS <= t1; bar += barStep) {
     const x = Math.round(bar * barS * zoom - scrollX)
@@ -562,6 +587,7 @@ type MidiPart = 'body' | 'start' | 'end'
 
 type Hit =
   | { kind: 'section'; section: SectionSpan }
+  | { kind: 'loop'; part: LoopDragPart }
   | { kind: 'ruler' }
   | { kind: 'clip'; clipId: string; part: ClipPart }
   | { kind: 'midi'; clipId: string; part: MidiPart }
@@ -580,6 +606,14 @@ function hitTest(scene: Scene, view: View, px: number, py: number): Hit {
       const time = (view.scrollX + px) / view.zoom
       const section = scene.sections.find((s) => time >= s.startSec && time < s.endSec)
       if (section) return { kind: 'section', section }
+    } else if (scene.loop) {
+      // Banda de compases con repeticion: bordes para estirarla, centro para moverla.
+      const lx0 = scene.loop.startS * view.zoom - view.scrollX
+      const lx1 = scene.loop.endS * view.zoom - view.scrollX
+      const edge = Math.min(EDGE_PX, Math.max(2, (lx1 - lx0) / 4))
+      if (Math.abs(px - lx0) <= edge) return { kind: 'loop', part: 'start' }
+      if (Math.abs(px - lx1) <= edge) return { kind: 'loop', part: 'end' }
+      if (px > lx0 && px < lx1) return { kind: 'loop', part: 'body' }
     }
     return { kind: 'ruler' }
   }
@@ -641,8 +675,35 @@ const MIDI_LABEL: Record<MidiPart, string> = { body: 'Mover clip MIDI', start: '
  */
 type Drag =
   | { kind: 'ruler'; startPx: number; startS: number; moved: boolean }
+  | { kind: 'loop'; part: LoopDragPart; base: LoopRegionS; startPx: number; startS: number; moved: boolean }
+  /** Rectangulo de seleccion desde una zona vacia; sin moverse es un clic (cabezal y pista). */
+  | { kind: 'marquee'; startPx: number; startPy: number; startS: number; trackId: string | null; additive: boolean; before: readonly string[]; moved: boolean }
   | { kind: 'clip'; part: ClipPart; clipId: string; base: StudioSession; grabS: number; startPx: number; startPy: number; moved: boolean; group: readonly string[] | null }
   | { kind: 'midi'; part: MidiPart; clipId: string; base: StudioSession; grabBeat: number; startPx: number; startPy: number; moved: boolean; group: readonly string[] | null }
+
+/**
+ * Cajas de todos los clips en coordenadas del contenido (segundos y px verticales), para el
+ * rectangulo de seleccion. Las tomas inactivas se eligen en su carril, donde se dibujan.
+ */
+function marqueeBoxes(session: StudioSession, rows: readonly TrackRowLayout[], view: View): MarqueeClipBox[] {
+  const boxes: MarqueeClipBox[] = []
+  session.tracks.forEach((track, index) => {
+    const row = rows[index]
+    if (!row) return
+    for (const clip of track.clips) {
+      const box = clipBox(clip, row, view)
+      boxes.push({ id: clip.id, startS: clip.startS, endS: clip.startS + clip.lengthS, top: box.y, bottom: box.y + box.h })
+    }
+    for (const clip of track.midiClips) {
+      const box = midiClipBox(clip, session.bpm, row, view)
+      boxes.push({ id: clip.id, startS: beatsToSeconds(clip.startBeat, session.bpm), endS: beatsToSeconds(clip.startBeat + clip.lengthBeats, session.bpm), top: box.y, bottom: box.y + box.h })
+    }
+  })
+  return boxes
+}
+
+/** Vista neutra: la geometria vertical de los clips no depende del scroll ni del zoom. */
+const NO_VIEW: View = { scrollX: 0, scrollTop: 0, width: 0, height: 0, zoom: 1 }
 
 /** Ancho visible de los carriles: el del cuerpo menos la columna fija de cabeceras (su primer hijo). */
 function laneWidth(body: HTMLElement): number {
@@ -679,6 +740,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
   const zoomRef = useRef(DEFAULT_ZOOM)
   const draftRef = useRef<StudioSession | null>(null)
   const loopDraftRef = useRef<LoopRegionS | null>(null)
+  const marqueeRef = useRef<MarqueeRect | null>(null)
   const dragRef = useRef<Drag | null>(null)
   const hoverRef = useRef<string | null>(null)
   /** Tiempo que debe quedar bajo `px` tras cambiar el zoom. */
@@ -733,11 +795,20 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
     const current = controller.snapshot()
     const shown = draftRef.current ?? current.session
     const fromS = controller.recordingFromS()
+    const rowsShown = layoutTracks(shown)
+    // Durante el rectangulo, los clips que toca se ven elegidos antes de soltar.
+    const marquee = marqueeRef.current
+    const drag = dragRef.current
+    const selectedIds =
+      marquee && drag?.kind === 'marquee'
+        ? new Set(marqueeSelection(drag.before, clipsInMarquee(marqueeBoxes(shown, rowsShown, NO_VIEW), marquee), drag.additive))
+        : new Set(current.selectedClipIds)
     return {
       session: shown,
-      rows: layoutTracks(shown),
+      rows: rowsShown,
       selectedClipId: current.selectedClipId,
-      selectedIds: new Set(current.selectedClipIds),
+      selectedIds,
+      marquee,
       hoverClipId: hoverRef.current,
       sections: current.sections,
       loop: loopDraftRef.current ?? current.engine.loop,
@@ -895,6 +966,12 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
+    if (hit.kind === 'loop') {
+      if (!scene.loop) return
+      dragRef.current = { kind: 'loop', part: hit.part, base: scene.loop, startPx: at.px, startS: timeS, moved: false }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      return
+    }
     if (hit.kind === 'clip' || hit.kind === 'midi') {
       // Shift o Ctrl (Cmd) + clic: agrega o quita el clip de la seleccion, sin arrastrar.
       if (event.shiftKey || event.ctrlKey || event.metaKey) {
@@ -920,9 +997,18 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
-    controller.select(null)
-    if (hit.trackId) controller.selectTrack(hit.trackId)
-    controller.seek(timeS)
+    // Zona vacia: un clic deja el cabezal ahi y elige la pista; arrastrar dibuja un rectangulo que
+    // elige los clips que toca. Con Shift o Ctrl (Cmd) el rectangulo suma a la seleccion y el
+    // cabezal no se mueve.
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey
+    const before = controller.snapshot().selectedClipIds
+    if (!additive) {
+      controller.select(null)
+      if (hit.trackId) controller.selectTrack(hit.trackId)
+      controller.seek(timeS)
+    }
+    dragRef.current = { kind: 'marquee', startPx: at.px, startPy: at.py, startS: timeS, trackId: hit.trackId, additive, before, moved: false }
+    event.currentTarget.setPointerCapture(event.pointerId)
   }
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -948,7 +1034,11 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
               : MIDI_CURSOR[hit.part]
             : hit.kind === 'empty'
               ? 'default'
-              : 'pointer'
+              : hit.kind === 'loop'
+                ? hit.part === 'body'
+                  ? 'grab'
+                  : 'ew-resize'
+                : 'pointer'
       return
     }
     const current = controller.snapshot()
@@ -959,6 +1049,26 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       const a = snapTime(current.session, { timeS: drag.startS, mode })
       const b = snapTime(current.session, { timeS, mode })
       loopDraftRef.current = { startS: Math.min(a, b), endS: Math.max(a, b) }
+      dirtyRef.current = true
+      return
+    }
+    if (drag.kind === 'loop') {
+      if (!drag.moved && Math.abs(at.px - drag.startPx) < DRAG_THRESHOLD_PX) return
+      drag.moved = true
+      loopDraftRef.current = dragLoopRegion(drag.base, drag.part, timeS - drag.startS, {
+        minLengthS: MIN_LOOP_S,
+        maxS: STUDIO_MAX_SESSION_SECONDS,
+        snap: mode === 'off' ? undefined : (s) => snapTime(current.session, { timeS: s, mode }),
+      })
+      event.currentTarget.style.cursor = drag.part === 'body' ? 'grabbing' : 'ew-resize'
+      dirtyRef.current = true
+      return
+    }
+    if (drag.kind === 'marquee') {
+      if (!drag.moved && Math.hypot(at.px - drag.startPx, at.py - drag.startPy) < DRAG_THRESHOLD_PX) return
+      drag.moved = true
+      marqueeRef.current = marqueeFromPoints({ timeS: drag.startS, y: drag.startPy }, { timeS, y: Math.max(RULER_H, at.py) })
+      event.currentTarget.style.cursor = 'crosshair'
       dirtyRef.current = true
       return
     }
@@ -1035,6 +1145,25 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
       if (!commit) return
       if (!drag.moved) controller.seek(drag.startS)
       else if (region && region.endS - region.startS >= MIN_LOOP_S) controller.setLoop(region)
+      return
+    }
+    if (drag.kind === 'loop') {
+      const region = loopDraftRef.current
+      loopDraftRef.current = null
+      if (!commit) return
+      if (!drag.moved) controller.seek(drag.startS)
+      else if (region) controller.setLoop(region)
+      return
+    }
+    if (drag.kind === 'marquee') {
+      const rect = marqueeRef.current
+      marqueeRef.current = null
+      if (!commit || !drag.moved || !rect) return
+      const session = controller.snapshot().session
+      const picked = clipsInMarquee(marqueeBoxes(session, layoutTracks(session), NO_VIEW), rect)
+      const ids = marqueeSelection(drag.before, picked, drag.additive)
+      // El principal es el ultimo que entro: el inspector y el piano roll muestran ese.
+      controller.selectClips(ids, picked[picked.length - 1])
       return
     }
     const draft = draftRef.current
@@ -1226,7 +1355,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
             : selected
             ? `${selected.clip.active ? 'CLIP' : selected.clip.takeGroup === null ? 'SILENCIADO' : 'TOMA'} ${selected.track.name} · ${formatTimecode(selected.clip.startS)} · ${selected.clip.lengthS.toFixed(2)} s`
             : selectedMidi
-              ? `MIDI ${selectedMidi.track.name} · ${formatBarBeat(selectedMidi.clip.startBeat, session.beatsPerBar)} · ${(selectedMidi.clip.lengthBeats / session.beatsPerBar).toFixed(2)} compases · ${selectedMidi.clip.notes.length} notas`
+              ? `${selectedMidi.clip.muted ? 'SILENCIADO ' : ''}MIDI ${selectedMidi.track.name} · ${formatBarBeat(selectedMidi.clip.startBeat, session.beatsPerBar)} · ${(selectedMidi.clip.lengthBeats / session.beatsPerBar).toFixed(2)} compases · ${selectedMidi.clip.notes.length} notas`
               : 'Sin clip elegido'}
         </span>
 
@@ -1368,7 +1497,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed }) =
               style={{ height: `${contentHeight}px` }}
               tabIndex={0}
               role="application"
-              aria-label="Clips de la sesión. Flechas: mover el clip elegido o el cabezal. Enter: usar la toma elegida. Inicio: volver al principio. Doble clic en un clip MIDI: abrirlo en el piano roll; en una pista de instrumento vacía: crear un clip MIDI."
+              aria-label="Clips de la sesión. Flechas: mover el clip elegido o el cabezal. Enter: usar la toma elegida. Inicio: volver al principio. Arrastrar en una zona vacía: elegir los clips del rectángulo (Shift o Ctrl suma). 0: silenciar los clips elegidos. Doble clic en un clip MIDI: abrirlo en el piano roll; en una pista de instrumento vacía: crear un clip MIDI."
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={(event) => endDrag(event, true)}

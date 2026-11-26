@@ -434,7 +434,7 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
   const contentWidth = KEYS_W + Math.ceil((lengthBeats + TAIL_BEATS) * pxPerBeat)
   const contentHeight = RULER_H + rows.pitches.length * rowH
   const selectionCount = piano.selection.length
-  const color = trackColor(loc?.trackIndex ?? 0)
+  const color = trackColor(loc?.trackIndex ?? 0, loc?.track.role)
 
   useEffect(() => {
     dirtyRef.current = true
@@ -491,7 +491,7 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
       notes,
       selection: new Set(draft?.selection ?? current.piano.selection),
       rows: rowsFor(location.track.instrument?.type === 'drums', notes),
-      color: trackColor(location.trackIndex),
+      color: trackColor(location.trackIndex, location.track.role),
       gridStep: controller.pianoGridBeats(),
       beatsPerBar: current.session.beatsPerBar,
       rubber: rubberRef.current,
@@ -700,7 +700,7 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
       }
       const inSelection = selection.includes(hit.index)
       let picked: number[]
-      if (event.shiftKey) {
+      if (event.shiftKey || event.ctrlKey || event.metaKey) {
         picked = inSelection ? selection.filter((i) => i !== hit.index) : [...selection, hit.index]
         controller.selectNotes(picked)
         if (inSelection) return
@@ -730,8 +730,8 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
       return
     }
     if (tool === 'select' || tool === 'velocity') {
-      dragRef.current = { kind: 'rubber', base: scene.notes, additive: event.shiftKey ? [...selection] : [], startBeat: hit.beat, startRow: hit.row, startPx: at.px, startPy: at.py, moved: false }
-      if (!event.shiftKey) controller.clearNoteSelection()
+      dragRef.current = { kind: 'rubber', base: scene.notes, additive: event.shiftKey || event.ctrlKey || event.metaKey ? [...selection] : [], startBeat: hit.beat, startRow: hit.row, startPx: at.px, startPy: at.py, moved: false }
+      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) controller.clearNoteSelection()
       capture()
       return
     }

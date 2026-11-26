@@ -1662,6 +1662,46 @@
   font-size: 10px;
   color: var(--stu-dim);
 }
+/* Selector de sonido dentro de la cabecera: el borde y el fondo los pone .stu-head-inst. */
+.stu-head-inst[data-picker='true'] {
+  align-items: center;
+  cursor: default;
+}
+.stu-head-inst[data-picker='true']:active {
+  transform: none;
+}
+.stu-head-inst[data-picker='true']:focus-within {
+  border-color: var(--stu-sel);
+}
+.stu-head-inst-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--stu-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 150ms var(--stu-ease);
+}
+.stu-head-inst-select:hover {
+  color: var(--stu-text);
+}
+.stu-head-inst-select:focus-visible {
+  outline: none;
+  color: var(--stu-text);
+}
+.stu-head-inst-select:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.stu-head-inst-select option {
+  background: var(--stu-panel);
+  color: var(--stu-text);
+}
 
 /* Piano roll: ocupa el lugar de la linea de tiempo dentro de .stu-tl. */
 .stu-pr {

@@ -150,7 +150,8 @@ Estudio, LT = línea de tiempo, PR = piano roll.
 | Ctrl+A | LT | Elegir todos los clips que suenan (en el piano roll, todas las notas) |
 | Supr, Q, S, flechas | LT | Actúan sobre todos los clips elegidos. S sin clips elegidos divide los de la pista elegida bajo el cabezal |
 | Shift+J | LT | Unir clips MIDI de una pista (o trozos seguidos de un mismo audio) |
-| 0 | LT | Silenciar o hacer sonar el clip de audio (`active`). Los clips MIDI no tienen silencio propio |
+| 0 | LT | Silenciar o hacer sonar los clips elegidos: audio con `active`, MIDI con `muted` (desde el 2026-11-25, STUDIO_V2.md 2.4) |
+| Arrastre en zona vacía | LT | Rectángulo de selección: elige los clips que toca; con Shift o Ctrl suma a la selección (2026-11-25) |
 | Alt+[ / Alt+] | LT | Recortar el inicio o el final del clip al cabezal |
 | (paleta) | LT | Fundido de entrada hasta el cabezal y de salida desde el cabezal (clips de audio) |
 | Fin | G | Ir al final de la sesión |

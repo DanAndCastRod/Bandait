@@ -74,6 +74,10 @@ import {
   takeClipWindows,
   adjacentMarkerBeat,
   tapTempo,
+  clipsInMarquee,
+  dragLoopRegion,
+  marqueeFromPoints,
+  marqueeSelection,
 } from '../src/services/studio/timelineMath.ts'
 import {
   JOB_DEFAULT_TARGET_LUFS,
@@ -3054,14 +3058,50 @@ async function verifyStudioV2() {
     assert.equal(fadeClipsAt(s, ['mid_p1'], 'in', 10), s)
   })
 
-  await check('silenciar clips de audio (active false) y volver a hacerlos sonar; los MIDI se ignoran', () => {
+  await check('silenciar clips (0): audio con active false y MIDI con muted; volver a hacerlos sonar', () => {
     const s = baseV2()
     const muted = toggleClipsActive(s, ['clp_1', 'mid_p1'])
     assert.equal(clip(muted, 'clp_1').active, false)
-    assert.equal(midiClip(muted, 'mid_p1'), midiClip(s, 'mid_p1'))
-    const back = toggleClipsActive(muted, ['clp_1'])
+    assert.equal(midiClip(muted, 'mid_p1').muted, true)
+    assert.equal(midiClip(muted, 'mid_p1').notes, midiClip(s, 'mid_p1').notes, 'las notas no se tocan')
+    const back = toggleClipsActive(muted, ['clp_1', 'mid_p1'])
     assert.equal(clip(back, 'clp_1').active, true)
-    assert.equal(toggleClipsActive(s, ['mid_p1']), s)
+    assert.ok(!('muted' in midiClip(back, 'mid_p1')), 'sonar = sin la clave, como en el cable')
+    // Mezcla: con uno que suena se silencian todos; el que ya estaba en silencio no cambia.
+    const mixed = toggleClipsActive(s, ['mid_s9', 'mid_s1'])
+    assert.equal(midiClip(mixed, 'mid_s1').muted, true)
+    assert.equal(midiClip(mixed, 'mid_s9'), midiClip(s, 'mid_s9'))
+    // Todos en silencio: vuelven a sonar.
+    assert.ok(!('muted' in midiClip(toggleClipsActive(s, ['mid_s9']), 'mid_s9')))
+    assert.equal(toggleClipsActive(s, ['nada']), s)
+    // El cable: true se escribe al final del clip; false o ausente no se escribe.
+    const wire = serializeSession(muted) as unknown as { tracks: { midi_clips?: Record<string, unknown>[] }[] }
+    const pad = wire.tracks[1].midi_clips?.[0]
+    assert.ok(pad)
+    assert.deepStrictEqual(Object.keys(pad), ['id', 'start_beat', 'length_beats', 'loop', 'loop_beats', 'notes', 'muted'])
+    assert.ok(!('muted' in (serializeSession(back) as unknown as { tracks: { midi_clips?: Record<string, unknown>[] }[] }).tracks[1].midi_clips![0]))
+    type WireDoc = { tracks: { midi_clips?: Record<string, unknown>[] }[] }
+    assert.equal(midiClip(baseV2(), 'mid_s9').muted, true, 'el fixture trae un clip silenciado')
+    const off = structuredClone(fixtureV2) as unknown as WireDoc
+    off.tracks[3].midi_clips![1].muted = false
+    assert.ok(!('muted' in midiClip(parseSession(off), 'mid_s9')), 'muted false se normaliza a ausente')
+    const bad = structuredClone(fixtureV2) as unknown as WireDoc
+    bad.tracks[3].midi_clips![0].muted = 'si'
+    sessionError(() => parseSession(bad), 'bad_type', 'tracks[3].midi_clips[0].muted')
+  })
+
+  await check('silencio MIDI: dividir conserva muted en las dos mitades; unir queda en silencio solo si todos lo estaban', () => {
+    const s = toggleClipsActive(baseV2(), ['mid_p1'])
+    const split = splitMidiClip(s, { clipId: 'mid_p1', atBeat: 24, newClipId: 'mid_p2' })
+    assert.equal(midiClip(split, 'mid_p1').muted, true)
+    assert.equal(midiClip(split, 'mid_p2').muted, true)
+    const joinedMuted = joinClips(split, ['mid_p1', 'mid_p2'])
+    assert.equal(midiClip(joinedMuted.session, 'mid_p1').muted, true)
+    const half = toggleClipsActive(split, ['mid_p2'])
+    const joinedMixed = joinClips(half, ['mid_p1', 'mid_p2'])
+    assert.ok(!midiClip(joinedMixed.session, 'mid_p1').muted)
+    const copy = duplicateMidiClip(s, { clipId: 'mid_p1', newClipId: 'mid_px' })
+    assert.equal(midiClip(copy, 'mid_px').muted, true)
   })
 
   await check('duplicar y mover pistas', () => {
@@ -3107,6 +3147,41 @@ async function verifyStudioV2() {
     assert.equal(adjacentMarkerBeat(marks, 16, -1), 0)
     assert.equal(adjacentMarkerBeat(marks, 48, 1), null)
     assert.equal(adjacentMarkerBeat(marks, 0, -1), null)
+  })
+
+  await check('rectangulo de seleccion: elige los clips que toca (borde incluido) y suma con Shift/Ctrl', () => {
+    const boxes = [
+      { id: 'a', startS: 0, endS: 4, top: 50, bottom: 110 },
+      { id: 'b', startS: 6, endS: 10, top: 50, bottom: 110 },
+      { id: 'c', startS: 2, endS: 8, top: 130, bottom: 190 },
+    ]
+    // Arrastre de derecha a izquierda y de abajo arriba: el rectangulo se normaliza.
+    const rect = marqueeFromPoints({ timeS: 7, y: 140 }, { timeS: 3, y: 60 })
+    assert.deepStrictEqual(rect, { startS: 3, endS: 7, top: 60, bottom: 140 })
+    assert.deepStrictEqual(clipsInMarquee(boxes, rect), ['a', 'b', 'c'], 'tocar basta, no hace falta encerrar')
+    assert.deepStrictEqual(clipsInMarquee(boxes, { startS: 4.5, endS: 5.5, top: 0, bottom: 300 }), ['c'], 'el hueco entre a y b no elige ninguno de los dos')
+    assert.deepStrictEqual(clipsInMarquee(boxes, { startS: 4, endS: 4, top: 110, bottom: 110 }), ['a'], 'tocar el borde cuenta')
+    assert.deepStrictEqual(clipsInMarquee(boxes, { startS: 0, endS: 10, top: 115, bottom: 125 }), [], 'entre dos filas no hay clips')
+    assert.deepStrictEqual(marqueeSelection(['x', 'a'], ['a', 'b'], false), ['a', 'b'])
+    assert.deepStrictEqual(marqueeSelection(['x', 'a'], ['a', 'b'], true), ['x', 'a', 'b'], 'suma sin repetir y conserva el orden')
+    assert.deepStrictEqual(marqueeSelection(['x'], [], false), [])
+  })
+
+  await check('region de repeticion arrastrable: bordes con largo minimo, centro sin cambiar el largo, siempre en [0, fin]', () => {
+    const base = { startS: 4, endS: 8 }
+    const opts = { minLengthS: 0.1, maxS: 100 }
+    assert.deepStrictEqual(dragLoopRegion(base, 'body', 2, opts), { startS: 6, endS: 10 })
+    assert.deepStrictEqual(dragLoopRegion(base, 'body', -10, opts), { startS: 0, endS: 4 }, 'no pasa del segundo 0')
+    assert.deepStrictEqual(dragLoopRegion(base, 'body', 200, opts), { startS: 96, endS: 100 }, 'ni del final')
+    assert.deepStrictEqual(dragLoopRegion(base, 'start', -1, opts), { startS: 3, endS: 8 })
+    assert.deepStrictEqual(dragLoopRegion(base, 'start', 10, opts), { startS: 7.9, endS: 8 }, 'el borde no cruza al otro')
+    assert.deepStrictEqual(dragLoopRegion(base, 'end', 1.5, opts), { startS: 4, endS: 9.5 })
+    assert.deepStrictEqual(dragLoopRegion(base, 'end', -10, opts), { startS: 4, endS: 4.1 })
+    // Con rejilla de 2 s (compas a 120 bpm en 4/4): el borde cae en la linea mas cercana.
+    const snap = (t: number) => Math.round(t / 2) * 2
+    assert.deepStrictEqual(dragLoopRegion(base, 'end', 0.7, { ...opts, snap }), { startS: 4, endS: 8 })
+    assert.deepStrictEqual(dragLoopRegion(base, 'end', 1.2, { ...opts, snap }), { startS: 4, endS: 10 })
+    assert.deepStrictEqual(dragLoopRegion(base, 'body', 1.1, { ...opts, snap }), { startS: 6, endS: 10 })
   })
 
   // =========================================================================
