@@ -183,4 +183,10 @@ export interface ExcelMasterWorkbook {
 
 ---
 
+## 7. Requerimientos de Bandait Web 3.0 y Fidelidad del Estudio DAW
+
+Los requerimientos vigentes del Web Admin Hub 3.0 (apariencia configurable sin botones cuadrados aislada por músico, shell escritorio/móvil, motor de audio global persistente, criterios obligatorios de fidelidad visual y funcional del Estudio DAW frente a la implementación real, DSP Time-Stretch/Pitch-Shift/Speed Ramp, cola `Drop & Split` y limpieza de huérfanos en R2) están especificados en [`docs/REQUERIMIENTOS_WEB_3.0.md`](REQUERIMIENTOS_WEB_3.0.md).
+
+---
+
 *Documento consolidado en `docs/PLAN_BANDAIT_3.0_MASTER.md` y respaldado en control de versiones Git.*
