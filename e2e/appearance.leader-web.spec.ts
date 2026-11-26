@@ -29,6 +29,9 @@ function wav(seconds: number, freq: number, rate = 8000): Buffer {
   return Buffer.concat([h, data]);
 }
 
+/** uiPreferences.waveform por defecto (WORKSPACE_V2.md seccion 8): el aspecto de siempre. */
+const DEFAULT_WAVEFORM = { version: 1, style: 'filled', layout: 'mirrored', data: 'peak', scale: 'linear', color: 'track', gain: 1, barWidth: 2, barGap: 1 };
+
 async function enterDemo(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
@@ -138,7 +141,7 @@ test.describe('Web Admin Hub - apariencia', () => {
       const key = Object.keys(localStorage).find((k) => k.startsWith('bandait_workspace_'));
       return key ? JSON.parse(localStorage.getItem(key) || '{}').uiPreferences : null;
     });
-    expect(stored).toEqual({ version: 1, theme: 'light-estudio', accent: '#E06C9F', radius: 16 });
+    expect(stored).toEqual({ version: 2, theme: 'light-estudio', accent: '#E06C9F', radius: 16, waveform: DEFAULT_WAVEFORM });
 
     // Sin el bundle (main.tsx bloqueado) el script de index.html ya aplico tema, acento y redondez.
     await page.route('**/src/main.tsx*', (route) => route.abort());
@@ -206,6 +209,48 @@ test.describe('Web Admin Hub - apariencia', () => {
     await expect(page.locator('[data-testid="stem-track"][data-status="ok"]')).toHaveCount(1, { timeout: 15000 });
     expect(await radiusOf(page, 'stem-play')).toBe('9999px');
     expect(await radiusOf(page, 'stem-stop')).toBe('9999px');
+  });
+
+  test('forma de onda: se elige en APARIENCIA con vista previa, se guarda en uiPreferences y se restablece', async ({ page }) => {
+    await enterDemo(page);
+    await openAppearance(page);
+    const section = page.getByTestId('appearance-waveform-section');
+    await expect(section).toBeVisible();
+    await expect(page.getByTestId('appearance-waveform-preview')).toBeVisible();
+    // Por defecto: relleno, espejo, pico, lineal, color de pista; ancho y separacion solo valen con barras.
+    await expect(page.getByTestId('appearance-waveform-style-filled')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('appearance-waveform-bar-width')).toBeDisabled();
+    const before = await page.getByTestId('appearance-waveform-preview').evaluate((c: HTMLCanvasElement) => c.toDataURL());
+
+    await page.getByTestId('appearance-waveform-style-bars').click();
+    await page.getByTestId('appearance-waveform-data-peak-rms').click();
+    await page.getByTestId('appearance-waveform-scale-db').click();
+    await page.getByTestId('appearance-waveform-color-accent').click();
+    await page.getByTestId('appearance-waveform-layout-bottom').click();
+    await expect(page.getByTestId('appearance-waveform-bar-width')).toBeEnabled();
+    await page.getByTestId('appearance-waveform-bar-width').fill('4');
+    await page.getByTestId('appearance-waveform-gain').fill('2');
+    // La vista previa se repinta con lo elegido.
+    await expect.poll(() => page.getByTestId('appearance-waveform-preview').evaluate((c: HTMLCanvasElement) => c.toDataURL())).not.toBe(before);
+
+    const stored = () =>
+      page.evaluate(() => {
+        const key = Object.keys(localStorage).find((k) => k.startsWith('bandait_workspace_'));
+        return key ? JSON.parse(localStorage.getItem(key) || '{}').uiPreferences?.waveform : null;
+      });
+    await expect
+      .poll(stored)
+      .toEqual({ version: 1, style: 'bars', layout: 'bottom', data: 'peak-rms', scale: 'db', color: 'accent', gain: 2, barWidth: 4, barGap: 1 });
+
+    // Sigue igual al recargar.
+    await page.reload();
+    await openAppearance(page);
+    await expect(page.getByTestId('appearance-waveform-style-bars')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('appearance-waveform-scale-db')).toHaveAttribute('aria-checked', 'true');
+
+    await page.getByTestId('appearance-waveform-reset').click();
+    await expect.poll(stored).toEqual(DEFAULT_WAVEFORM);
+    await expect(page.getByTestId('appearance-waveform-reset')).toBeDisabled();
   });
 
   test('lienzos del Estudio con Light Estudio: carriles y regla claros; repinta al cambiar el tema', async ({ page }) => {
@@ -287,7 +332,7 @@ test.describe('Web Admin Hub - apariencia', () => {
 
     await expect
       .poll(() => fake.workspaces[0].workspace.uiPreferences, { timeout: 10000 })
-      .toEqual({ version: 1, theme: 'light-estudio', accent: null, radius: 24 });
+      .toEqual({ version: 2, theme: 'light-estudio', accent: null, radius: 24, waveform: DEFAULT_WAVEFORM });
     expect(JSON.stringify(fake.bands[0].content)).toBe(bandBefore);
     expect(fake.bands[0].content.uiPreferences).toBeUndefined();
     expect(patches.filter((p) => p.endsWith('/bandait_bands'))).toEqual([]);

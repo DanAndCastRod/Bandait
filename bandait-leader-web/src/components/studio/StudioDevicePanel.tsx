@@ -77,7 +77,7 @@ const InputLevel: React.FC<{ controller: StudioController; channel: 0 | 1 }> = (
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '64px minmax(0, 1fr)', alignItems: 'center', gap: '8px' }}>
       <span className="stu-label">Entrada {channel + 1}</span>
-      <canvas ref={canvasRef} aria-hidden="true" style={{ display: 'block', width: '100%', height: '8px', borderRadius: '2px', background: 'var(--stu-well)' }} />
+      <canvas ref={canvasRef} aria-hidden="true" style={{ display: 'block', width: '100%', height: '8px', borderRadius: '9999px', background: 'var(--stu-well)' }} />
     </div>
   )
 }

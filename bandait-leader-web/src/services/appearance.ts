@@ -7,9 +7,23 @@
  *
  * Las preferencias (`uiPreferences`) son de cada musico: viajan en su workspace personal
  * (`bandait_workspaces`), nunca en una banda compartida (`bandait_bands.content`).
+ *
+ * Version 2 (2026-11-26): agrega el bloque `waveform` (forma de onda, `waveform.ts`). Un
+ * documento v1 sin el bloque se lee con la forma de onda por defecto; un hub v1 lee un v2 con
+ * los campos que conoce.
  */
+import {
+  WAVEFORM_KEY_COUNT,
+  defaultWaveformPreferences,
+  parseWaveformPreferences,
+  waveformPreferencesEqual,
+  waveformPreferencesWarnings,
+  type WaveformPreferences,
+} from './waveform.ts'
 
-export const UI_PREFERENCES_VERSION = 1
+export type { WaveformPreferences }
+
+export const UI_PREFERENCES_VERSION = 2
 
 export type ThemeId = 'dark-grafito' | 'light-estudio'
 
@@ -32,6 +46,8 @@ export interface UiPreferences {
   accent: string | null
   /** Redondez de los botones en px, de RADIUS_MIN a RADIUS_MAX (pildora). */
   radius: number
+  /** Forma de onda de los clips de audio (estilo, datos, escala, color, zoom vertical). */
+  waveform: WaveformPreferences
 }
 
 export const RADIUS_MIN = 8
@@ -64,7 +80,7 @@ export const ACCENT_PRESETS: ReadonlyArray<{ hex: string; name: string }> = [
 ]
 
 export function defaultUiPreferences(): UiPreferences {
-  return { version: UI_PREFERENCES_VERSION, theme: DEFAULT_THEME, accent: null, radius: RADIUS_DEFAULT }
+  return { version: UI_PREFERENCES_VERSION, theme: DEFAULT_THEME, accent: null, radius: RADIUS_DEFAULT, waveform: defaultWaveformPreferences() }
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +383,7 @@ export function parseUiPreferences(raw: unknown): UiPreferences | null {
     theme: isThemeId(raw.theme) ? raw.theme : d.theme,
     accent: normalizeHex(raw.accent),
     radius: raw.radius === undefined ? d.radius : clampRadius(raw.radius),
+    waveform: parseWaveformPreferences(raw.waveform),
   }
 }
 
@@ -386,6 +403,7 @@ export function uiPreferencesWarnings(raw: unknown, path = 'uiPreferences'): str
     const ok = typeof raw.radius === 'number' && Number.isFinite(raw.radius) && raw.radius >= RADIUS_MIN && raw.radius <= RADIUS_MAX
     if (!ok) out.push(`${path}.radius: debe ir de ${RADIUS_MIN} a ${RADIUS_MAX} px.`)
   }
+  out.push(...waveformPreferencesWarnings(raw.waveform, `${path}.waveform`))
   return out
 }
 
@@ -396,7 +414,21 @@ export function normalizeUiPreferences(prefs: Partial<UiPreferences> | null | un
 
 export function uiPreferencesEqual(a: UiPreferences | null | undefined, b: UiPreferences | null | undefined): boolean {
   if (!a || !b) return a === b
-  return a.version === b.version && a.theme === b.theme && a.accent === b.accent && a.radius === b.radius
+  return (
+    a.version === b.version &&
+    a.theme === b.theme &&
+    a.accent === b.accent &&
+    a.radius === b.radius &&
+    waveformPreferencesEqual(a.waveform, b.waveform)
+  )
+}
+
+/** Claves de un uiPreferences limpio (y del bloque waveform): withUiPreferences no reescribe si coinciden. */
+const UI_PREFERENCES_KEY_COUNT = Object.keys(defaultUiPreferences()).length
+
+function hasCleanShape(raw: unknown): boolean {
+  if (!isPlainObject(raw) || Object.keys(raw).length !== UI_PREFERENCES_KEY_COUNT) return false
+  return isPlainObject(raw.waveform) && Object.keys(raw.waveform).length === WAVEFORM_KEY_COUNT
 }
 
 /** Preferencias vigentes: las del workspace si las trae, si no las de respaldo, si no las de fabrica. */
@@ -412,7 +444,7 @@ export function withUiPreferences<T extends object>(ws: T, prefs: UiPreferences)
   const clean = normalizeUiPreferences(prefs)
   const current = parseUiPreferences((ws as Record<string, unknown>).uiPreferences)
   const raw = (ws as Record<string, unknown>).uiPreferences
-  if (current && uiPreferencesEqual(current, clean) && isPlainObject(raw) && Object.keys(raw).length === 4) return ws
+  if (current && uiPreferencesEqual(current, clean) && hasCleanShape(raw) && (raw as Record<string, unknown>).version === clean.version) return ws
   return { ...ws, uiPreferences: clean }
 }
 

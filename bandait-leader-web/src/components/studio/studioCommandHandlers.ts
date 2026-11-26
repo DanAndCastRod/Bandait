@@ -89,6 +89,14 @@ export interface StudioCommandUi {
   pickMidiFile: () => void
   /** Muestra u oculta la ventana del asistente (Alt+A). */
   toggleAssistant: () => void
+  /** Pliega o despliega la consola de mezcla (Alt+M). */
+  toggleMixer: () => void
+  /** Pliega o despliega el panel lateral (Alt+P). */
+  toggleSidePanel: () => void
+  /** Abre el panel lateral en una pestana. */
+  showPanel: (tab: 'inspector' | 'device' | 'jobs') => void
+  /** Abre el acceso rapido a la forma de onda. */
+  openWaveform: () => void
 }
 
 export type StudioRegistry = CommandRegistry<StudioCommandCtx>
@@ -107,6 +115,10 @@ export class StudioUiBridge implements StudioCommandUi {
     openExport: () => {},
     pickMidiFile: () => {},
     toggleAssistant: () => {},
+    toggleMixer: () => {},
+    toggleSidePanel: () => {},
+    showPanel: () => {},
+    openWaveform: () => {},
   }
 
   set(patch: Partial<StudioCommandUi>): void {
@@ -139,6 +151,22 @@ export class StudioUiBridge implements StudioCommandUi {
 
   toggleAssistant(): void {
     this.state.toggleAssistant()
+  }
+
+  toggleMixer(): void {
+    this.state.toggleMixer()
+  }
+
+  toggleSidePanel(): void {
+    this.state.toggleSidePanel()
+  }
+
+  showPanel(tab: 'inspector' | 'device' | 'jobs'): void {
+    this.state.showPanel(tab)
+  }
+
+  openWaveform(): void {
+    this.state.openWaveform()
   }
 }
 
@@ -694,6 +722,12 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'view.command_palette': { run: () => ui.openPalette() },
     'view.shortcuts': { run: () => ui.openShortcuts() },
     'view.toggle_assistant': { run: () => ui.toggleAssistant() },
+    'view.toggle_mixer': { run: () => ui.toggleMixer() },
+    'view.toggle_side_panel': { run: () => ui.toggleSidePanel() },
+    'view.show_inspector': { run: () => ui.showPanel('inspector') },
+    'view.show_device': { run: () => ui.showPanel('device') },
+    'view.show_jobs': { run: () => ui.showPanel('jobs') },
+    'view.waveform': { run: () => ui.openWaveform() },
 
     // ---- archivo ----
     'file.save_cloud': { run: () => void controller.saveToCloud() },

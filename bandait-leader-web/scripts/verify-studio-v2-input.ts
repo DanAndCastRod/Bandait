@@ -80,15 +80,12 @@ import {
 import { STUDIO_COMMAND_SPECS, createCommandRegistry } from '../src/services/studio/commands.ts'
 import {
   ASSISTANT_CHAT_MAX_STORED,
-  ASSISTANT_DOCK_MAX_W,
-  ASSISTANT_DOCK_MIN_W,
   ASSISTANT_EDGE_PX,
   ASSISTANT_FLOAT_MIN_H,
   ASSISTANT_FLOAT_MIN_W,
   assistantContextChips,
   auditionZone,
   barRangeText,
-  clampDockWidth,
   clampFloatRect,
   defaultAssistantLayout,
   parseAssistantLayout,
@@ -1027,23 +1024,30 @@ async function main() {
     assert.ok([junk.x, junk.y, junk.w, junk.h].every(Number.isFinite))
   })
 
-  await check('columna acoplada: ancho entre el minimo y el 60 % del navegador', () => {
-    assert.equal(clampDockWidth(100, VP), ASSISTANT_DOCK_MIN_W)
-    assert.equal(clampDockWidth(9999, VP), ASSISTANT_DOCK_MAX_W)
-    assert.equal(clampDockWidth(9999, { width: 800, height: 600 }), 480)
-    assert.equal(clampDockWidth(410.6, VP), 411)
+  await check('layout del asistente: solo flotante o minimizado; un "docked" guardado vuelve flotante', () => {
+    // Modo acoplado retirado (ola 2 de Web 3.0): lo guardado por la version anterior se migra.
+    const legacy = JSON.stringify({ mode: 'docked', lastOpen: 'docked', dockWidth: 420, float: { x: 300, y: 120, w: 440, h: 520 } })
+    const migrated = parseAssistantLayout(legacy, VP)
+    assert.deepEqual(migrated, { mode: 'floating', float: { x: 300, y: 120, w: 440, h: 520 } })
+    assert.deepEqual(Object.keys(JSON.parse(serializeAssistantLayout(migrated))).sort(), ['float', 'mode'])
+    // Minimizado con "lastOpen: docked": sigue minimizado y Alt+A lo abre flotante.
+    const legacyHidden = parseAssistantLayout(JSON.stringify({ mode: 'minimized', lastOpen: 'docked', dockWidth: 380 }), VP)
+    assert.equal(legacyHidden.mode, 'minimized')
+    assert.equal(toggleAssistantLayout(legacyHidden).mode, 'floating')
   })
 
-  await check('layout del asistente: se guarda, se restaura saneado y Alt+A alterna con el ultimo modo', () => {
+  await check('layout del asistente: se guarda, se restaura saneado y Alt+A alterna flotante y minimizado', () => {
     const base = defaultAssistantLayout(VP)
     assert.equal(base.mode, 'minimized')
     const floating = withAssistantMode({ ...base, float: { x: 200, y: 100, w: 500, h: 600 } }, 'floating')
-    assert.equal(floating.lastOpen, 'floating')
+    assert.equal(floating.mode, 'floating')
+    assert.equal(withAssistantMode(floating, 'floating'), floating, 'mismo modo: mismo objeto')
     const restored = parseAssistantLayout(serializeAssistantLayout(floating), VP)
     assert.deepEqual(restored, floating)
-    // Alt+A: minimiza y vuelve al flotante, no al acoplado.
+    // Alt+A: minimiza y vuelve al flotante.
     const hidden = toggleAssistantLayout(floating)
-    assert.deepEqual([hidden.mode, hidden.lastOpen], ['minimized', 'floating'])
+    assert.equal(hidden.mode, 'minimized')
+    assert.deepEqual(hidden.float, floating.float, 'la ventana recuerda donde estaba')
     assert.equal(toggleAssistantLayout(hidden).mode, 'floating')
     // Restaurar en un navegador mas chico acota la ventana.
     const shrunk = parseAssistantLayout(serializeAssistantLayout({ ...floating, float: { x: 1300, y: 800, w: 500, h: 600 } }), { width: 800, height: 600 })
@@ -1051,7 +1055,7 @@ async function main() {
     // Basura: valores por defecto.
     assert.deepEqual(parseAssistantLayout('{no es json', VP), base)
     assert.deepEqual(parseAssistantLayout(null, VP), base)
-    assert.equal(parseAssistantLayout(JSON.stringify({ mode: 'gigante', dockWidth: 'x' }), VP).mode, 'minimized')
+    assert.equal(parseAssistantLayout(JSON.stringify({ mode: 'gigante', float: 'x' }), VP).mode, 'minimized')
   })
 
   const toolCall = (id: string, name: string, args: Record<string, unknown>): StudioChatToolCall => ({ id, name, arguments: args, signature: 'firma' })

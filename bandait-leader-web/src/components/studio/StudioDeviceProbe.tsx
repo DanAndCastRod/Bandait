@@ -281,7 +281,7 @@ const OutcomeBadge: React.FC<{ outcome: Outcome }> = ({ outcome }) => {
         fontSize: '11px',
         fontWeight: 700,
         padding: '2px 8px',
-        borderRadius: '3px',
+        borderRadius: 'var(--b-radius-field)',
         background: tone.bg,
         color: tone.fg,
         border: `1px solid ${tone.border}`,
@@ -821,7 +821,7 @@ export const StudioDeviceProbe: React.FC = () => {
         </div>
         {busy === 'drops' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ flex: 1, height: '4px', borderRadius: '2px', background: colors.borderSoft, overflow: 'hidden' }}>
+            <div style={{ flex: 1, height: '4px', borderRadius: '9999px', background: colors.borderSoft, overflow: 'hidden' }}>
               <div ref={progressFillRef} style={{ height: '100%', background: colors.orange, transformOrigin: 'left center', transform: 'scaleX(0)' }} />
             </div>
             <span ref={progressTextRef} style={{ fontFamily: mono, fontSize: '12px', color: colors.muted, minWidth: '96px', textAlign: 'right' }}>
@@ -927,7 +927,7 @@ export const StudioDeviceProbe: React.FC = () => {
               padding: '12px',
               background: colors.input,
               border: `1px solid ${colors.border}`,
-              borderRadius: '4px',
+              borderRadius: 'var(--b-radius-field)',
               fontFamily: mono,
               fontSize: '12px',
               lineHeight: 1.5,

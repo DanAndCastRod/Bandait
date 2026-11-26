@@ -2,10 +2,21 @@
   "schemaVersion": 2,
   "activeBandId": "band_01",
   "uiPreferences": {
-    "version": 1,
+    "version": 2,
     "theme": "light-estudio",
     "accent": "#E06C9F",
-    "radius": 12
+    "radius": 12,
+    "waveform": {
+      "version": 1,
+      "style": "bars",
+      "layout": "mirrored",
+      "data": "peak-rms",
+      "scale": "db",
+      "color": "track",
+      "gain": 1.5,
+      "barWidth": 3,
+      "barGap": 1
+    }
   },
   "bands": [
     {

@@ -514,9 +514,11 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(page.getByTestId('studio-chat-continue')).toBeVisible();
   });
 
-  test('asistente: Alt+A lo muestra y lo oculta, pasa a flotante, se arrastra sin salir de la ventana y recuerda el modo', async ({ page }) => {
+  test('asistente: Alt+A lo muestra flotante y lo minimiza a la pildora, se arrastra sin salir de la ventana y recuerda donde estaba', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await enterDemo(page);
+    // Un layout guardado por la version anterior en modo acoplado se abre flotante.
+    await page.evaluate(() => localStorage.setItem('bandait_studio_assistant', JSON.stringify({ mode: 'minimized', lastOpen: 'docked', dockWidth: 400 })));
     await openStudioHome(page);
     await createFreeSession(page, 'Ventana e2e');
     const assistant = page.getByTestId('studio-assistant');
@@ -527,7 +529,10 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await blur(page);
     await page.keyboard.press('Alt+a');
     await expect(assistant).toBeVisible();
-    await expect(assistant).toHaveAttribute('data-mode', 'docked');
+    await expect(assistant).toHaveAttribute('data-mode', 'floating');
+    // Sin modo acoplado: no hay boton para acoplar ni separador de columna.
+    await expect(page.getByTestId('studio-assistant-dock')).toHaveCount(0);
+    await expect(page.getByTestId('studio-assistant-dock-resize')).toHaveCount(0);
     await expect(pill).toHaveCount(0);
     // Sin nube el asistente lo dice en su ventana, y los pedidos rapidos quedan bloqueados.
     await expect(page.getByTestId('studio-chat-blocked')).toBeVisible();
@@ -539,9 +544,6 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await expect(assistant).toBeHidden();
     await expect(pill).toBeFocused();
     await pill.click();
-    await expect(assistant).toHaveAttribute('data-mode', 'docked');
-
-    await page.getByTestId('studio-assistant-float').click();
     await expect(assistant).toHaveAttribute('data-mode', 'floating');
     // Arrastrada por la barra muy afuera arriba a la izquierda: queda pegada al borde, entera.
     const bar = page.getByTestId('studio-assistant-bar');
@@ -565,11 +567,12 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     expect(corner.y + corner.height).toBeLessThanOrEqual(900);
 
     // Esc minimiza el flotante (sin texto escrito en el mensaje).
-    await page.getByTestId('studio-assistant-dock').focus();
+    await page.getByTestId('studio-assistant-minimize').focus();
     await page.keyboard.press('Escape');
     await expect(pill).toBeVisible();
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bandait_studio_assistant') ?? 'null'));
-    expect(saved).toMatchObject({ mode: 'minimized', lastOpen: 'floating' });
+    expect(saved).toMatchObject({ mode: 'minimized' });
+    expect(Object.keys(saved).sort()).toEqual(['float', 'mode']);
     expect(saved.float.x + saved.float.w).toBeLessThanOrEqual(1440);
     // La pastilla lo devuelve flotante, en la misma esquina.
     await pill.click();
@@ -613,8 +616,8 @@ test.describe('Web Admin Hub - Estudio Bandait v2', () => {
     await openStudioHome(page);
     await page.getByTestId('studio-open').first().click();
     await expect(page.getByTestId('studio-workspace')).toBeVisible();
-    // La ventana tambien se recuerda: vuelve acoplada, como estaba.
-    await expect(page.getByTestId('studio-assistant')).toHaveAttribute('data-mode', 'docked');
+    // La ventana tambien se recuerda: vuelve abierta (flotante), como estaba.
+    await expect(page.getByTestId('studio-assistant')).toHaveAttribute('data-mode', 'floating');
     await expect(page.getByTestId('studio-chat-restored')).toBeVisible();
     await expect(page.getByTestId('studio-chat-log')).toContainText('Propongo marcar el coro');
     await expect(call).toHaveAttribute('data-state', 'pending');
