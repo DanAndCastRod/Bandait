@@ -315,6 +315,8 @@ export function planMidiNotes(session: StudioSession, options: PlanMidiOptions):
     if (options.trackIds && !options.trackIds.has(track.id)) continue
     const chase = options.chase && track.instrument.type !== 'drums'
     for (const clip of track.midiClips ?? []) {
+      // Clip silenciado (STUDIO_V2.md 2.4): no suena ni al escuchar ni al exportar, que pasan por aqui.
+      if (clip.muted) continue
       for (const span of clipNoteSpans(clip, fromBeat, toBeat, chase)) {
         const startS = beatsToSeconds(span.startBeat, bpm)
         if (startS >= untilS) continue
@@ -328,12 +330,12 @@ export function planMidiNotes(session: StudioSession, options: PlanMidiOptions):
   return planned
 }
 
-/** Segundo en que termina el ultimo clip MIDI de las pistas dadas (o de todas); 0 sin clips. */
+/** Segundo en que termina el ultimo clip MIDI que suena de las pistas dadas (o de todas); 0 sin clips. */
 export function midiEndSeconds(session: StudioSession, trackIds?: ReadonlySet<string>): number {
   let end = 0
   for (const track of session.tracks) {
     if (trackIds && !trackIds.has(track.id)) continue
-    for (const clip of track.midiClips ?? []) end = Math.max(end, beatsToSeconds(clip.startBeat + clip.lengthBeats, session.bpm))
+    for (const clip of track.midiClips ?? []) if (!clip.muted) end = Math.max(end, beatsToSeconds(clip.startBeat + clip.lengthBeats, session.bpm))
   }
   return end
 }
@@ -485,7 +487,15 @@ export function midiClipsEqual(a: StudioSession, b: StudioSession): boolean {
       const p = x[i]
       const q = y[i]
       if (p === q) continue
-      if (p.id !== q.id || p.startBeat !== q.startBeat || p.lengthBeats !== q.lengthBeats || p.loop !== q.loop || p.loopBeats !== q.loopBeats || p.notes !== q.notes) {
+      if (
+        p.id !== q.id ||
+        p.startBeat !== q.startBeat ||
+        p.lengthBeats !== q.lengthBeats ||
+        p.loop !== q.loop ||
+        p.loopBeats !== q.loopBeats ||
+        p.notes !== q.notes ||
+        Boolean(p.muted) !== Boolean(q.muted)
+      ) {
         return false
       }
     }

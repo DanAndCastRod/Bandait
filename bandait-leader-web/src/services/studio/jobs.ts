@@ -823,6 +823,8 @@ export function composeRoleForTrack(track: StudioTrack): ComposeRole | 'other' {
  * con la repeticion (`loop`) desplegada y cada nota recortada al final del clip (STUDIO_V2.md 2.4).
  */
 export function soundingClipNotes(clip: StudioMidiClip, fromBeat: number, toBeat: number): StudioMidiNote[] {
+  // Un clip silenciado no suena (STUDIO_V2.md 2.4).
+  if (clip.muted) return []
   const clipEnd = clip.startBeat + clip.lengthBeats
   const lo = Math.max(fromBeat, clip.startBeat)
   const hi = Math.min(toBeat, clipEnd)

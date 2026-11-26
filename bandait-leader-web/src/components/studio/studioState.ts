@@ -371,8 +371,28 @@ export function formatPan(pan: number): string {
 
 const TRACK_COLORS: readonly string[] = ['#5CC8C2', '#7AA5D6', '#B8CF7A', '#D9A24E', '#B48EDB', '#7AC4D6', '#D98E73', '#9AA6E0']
 
-/** Color de una pista segun su posicion (cabecera y clips usan el mismo). */
-export function trackColor(index: number): string {
+/**
+ * Color por rol (fidelidad DAW, REQUERIMIENTOS_WEB_3.0.md seccion 4.2): la misma paleta, fija por
+ * rol, para que la voz o la bateria se reconozcan de un vistazo en cualquier sesion. Los roles
+ * genericos (otro, instrumental, sin asignar) toman el color de su posicion.
+ */
+const ROLE_COLORS: Readonly<Partial<Record<StemRole, string>>> = {
+  vocals: '#D98E73',
+  backing_vocals: '#B48EDB',
+  drums: '#D9A24E',
+  bass: '#7AA5D6',
+  guitar: '#B8CF7A',
+  keys: '#5CC8C2',
+  strings: '#9AA6E0',
+  wind: '#7AC4D6',
+  click: '#8E97A3',
+  guide: '#8E97A3',
+}
+
+/** Color de una pista: el de su rol, o el de su posicion (cabecera, clips, canal y piano roll usan el mismo). */
+export function trackColor(index: number, role?: StemRole): string {
+  const byRole = role ? ROLE_COLORS[role] : undefined
+  if (byRole) return byRole
   return TRACK_COLORS[((index % TRACK_COLORS.length) + TRACK_COLORS.length) % TRACK_COLORS.length]
 }
 
@@ -1373,16 +1393,21 @@ export class StudioController {
     if (this.snap.session === before) this.notify('info', 'Pon el cabezal dentro de un clip de audio: el fundido va del borde del clip al cabezal.')
   }
 
-  /** 0: silencia los clips de audio elegidos, o los vuelve a hacer sonar. */
+  /** 0: silencia los clips elegidos (audio y MIDI), o los vuelve a hacer sonar. */
   toggleSelectedClipsMute(): void {
+    const session = this.snap.session
     const ids = this.selectedClips()
-    const audio = ids.filter((id) => findClip(this.snap.session, id))
-    if (audio.length === 0) {
-      this.notify('info', 'Silenciar es para clips de audio: elige uno. Un clip MIDI no tiene silencio propio (usa el mute de la pista, M).')
+    if (ids.length === 0) {
+      this.notify('info', 'Elige uno o más clips para silenciarlos (0).')
       return
     }
-    const silence = audio.some((id) => findClip(this.snap.session, id)?.clip.active)
-    this.run(silence ? 'Silenciar clip' : 'Hacer sonar clip', (session) => toggleClipsActive(session, audio))
+    const silence = ids.some((id) => {
+      const audio = findClip(session, id)
+      if (audio) return audio.clip.active
+      const midi = findMidiClip(session, id)
+      return midi !== null && !midi.clip.muted
+    })
+    this.run(this.clipsLabel(silence ? 'Silenciar' : 'Hacer sonar', ids), (current) => toggleClipsActive(current, ids))
   }
 
   /** Ctrl+L: loop con el rango de la seleccion (clips elegidos, o notas elegidas en el piano roll). */
@@ -2646,11 +2671,12 @@ export class StudioController {
   /** Todas las pistas de instrumento como archivo .mid (una pista del archivo por pista). null si no hay notas. */
   exportSessionMidi(): { blob: Blob; name: string } | null {
     const session = this.snap.session
+    // Los clips silenciados no suenan: tampoco entran al .mid (STUDIO_V2.md 2.4).
     const clips = session.tracks
-      .filter((track) => track.kind === 'instrument' && track.midiClips.some((clip) => clip.notes.length > 0))
+      .filter((track) => track.kind === 'instrument' && track.midiClips.some((clip) => !clip.muted && clip.notes.length > 0))
       .map((track) => ({
         name: track.name,
-        notes: track.midiClips.flatMap((clip) => midiClipExportNotes(clip)),
+        notes: track.midiClips.flatMap((clip) => (clip.muted ? [] : midiClipExportNotes(clip))),
         channel: track.instrument?.type === 'drums' ? SMF_DRUM_CHANNEL : 0,
       }))
     if (clips.length === 0) return null

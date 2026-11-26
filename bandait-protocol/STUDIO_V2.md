@@ -314,6 +314,11 @@ loop          boolean
 loop_beats    número 0.0625..5200. Largo del patrón que se repite cuando `loop` es true. Con
               `loop` false se conserva (el editor lo recuerda) pero no se usa
 notes         Note[], 0..4096
+muted         boolean, OPCIONAL (2026-11-25). true = el clip está silenciado: ninguna de sus
+              notas suena al escuchar, al exportar (mezcla, pistas, rango) ni en el MIDI
+              exportado, y no cuenta como notas que suenan para el asistente. Ausente = suena.
+              Quien escribe el documento lo pone solo cuando es true y siempre después de
+              `notes`; `false` se acepta al leer y se normaliza a ausente
 ```
 
 Note (claves en este orden):
@@ -345,6 +350,11 @@ Reglas:
   distinto `pitch` se solapan libremente (acordes).
 - **Orden.** El orden de `notes` no es significativo. `serializeSession` las escribe ordenadas por
   `start` y, a igual `start`, por `pitch`; `parseSession` devuelve ese mismo orden.
+- **Silencio.** Un clip con `muted` true sigue ocupando su lugar (se ve, se edita, se mueve y
+  cuenta para los topes y para `session_too_long`), pero no suena ni alarga lo que se exporta:
+  es el equivalente MIDI de un clip de audio con `active` false fuera de un grupo de tomas. Copiar, duplicar, dividir o
+  mover un clip silenciado conserva `muted`. Un Worker anterior a este campo rechaza el
+  documento que lo trae (`unknown_field`): el Worker se despliega antes que el Hub.
 - **Clips solapados.** Dos clips MIDI de la misma pista pueden solaparse; ambos suenan. Si una
   misma nota suena en los dos, el instrumento la trata como dos notas (dos voces).
 - **Topes.** 4096 notas por clip, 256 clips MIDI por pista y 16384 notas en toda la sesión (si

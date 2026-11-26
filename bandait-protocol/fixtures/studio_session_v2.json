@@ -280,6 +280,18 @@
             {"pitch": 67, "start": 2, "length": 1, "velocity": 92},
             {"pitch": 72, "start": 3, "length": 1, "velocity": 100}
           ]
+        },
+        {
+          "id": "mid_s9",
+          "start_beat": 40,
+          "length_beats": 4,
+          "loop": false,
+          "loop_beats": 4,
+          "notes": [
+            {"pitch": 60, "start": 0, "length": 2, "velocity": 100},
+            {"pitch": 67, "start": 2, "length": 2, "velocity": 100}
+          ],
+          "muted": true
         }
       ],
       "frozen_asset_id": null
