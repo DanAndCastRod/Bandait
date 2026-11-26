@@ -71,7 +71,7 @@ async function enterDemo(page: Page) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByTestId('hub-logo').first()).toBeVisible();
 }
 
 /** Carga dos stems de 20 s a "Medianoche en Pereira" en PISTAS y espera a que decodifiquen. */

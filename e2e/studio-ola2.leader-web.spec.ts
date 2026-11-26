@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openView } from './support/hubNav';
 
 /**
  * E2E del Estudio en la ola 2 de Web 3.0 (maqueta Estudio.dc.html): consola y panel lateral
@@ -33,8 +34,8 @@ async function enterStudio(page: Page, title: string) {
   await page.goto('/');
   await page.getByTestId('demo-toggle').click();
   await page.getByTestId('demo-profiles').getByRole('button', { name: /Carlos Mendoza/ }).click();
-  await expect(page.getByText('BANDAIT', { exact: true }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+  await expect(page.getByTestId('hub-logo').first()).toBeVisible();
+  await openView(page, 'studio');
   await expect(page.getByTestId('studio-create')).toBeEnabled();
   await page.getByTestId('studio-new-title').fill(title);
   await page.getByTestId('studio-create').click();
@@ -82,7 +83,7 @@ test.describe('Web Admin Hub - Estudio, ola 2 de Web 3.0', () => {
 
     // Volver a la sesion: la disposicion sigue como quedo, y la linea de tiempo toma el alto libre.
     await page.reload();
-    await page.getByRole('button', { name: 'ESTUDIO', exact: true }).first().click();
+    await openView(page, 'studio');
     await page.getByTestId('studio-open').first().click();
     await expect(page.getByTestId('studio-workspace')).toBeVisible();
     await expect(page.getByTestId('studio-mixer')).toHaveAttribute('data-collapsed', 'true');
@@ -127,7 +128,7 @@ test.describe('Web Admin Hub - Estudio, ola 2 de Web 3.0', () => {
     await expect(popover).toHaveCount(0);
 
     // Es la misma preferencia que APARIENCIA.
-    await page.locator('nav.hub-desktop-nav').getByRole('button', { name: 'AJUSTES' }).click();
+    await openView(page, 'settings');
     await page.getByRole('tab', { name: 'APARIENCIA' }).click();
     await expect(page.getByTestId('appearance-waveform-style-bars')).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByTestId('appearance-waveform-data-peak-rms')).toHaveAttribute('aria-checked', 'true');

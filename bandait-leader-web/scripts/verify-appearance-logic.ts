@@ -424,8 +424,8 @@ check('regla global: todo boton usa --b-radius-control (>= 8px) con !important; 
   assert.match(globalCss, /--b-radius-control:\s*max\(8px,\s*var\(--b-radius\)\);/)
   assert.match(globalCss, /--b-radius-transport:\s*9999px;/)
   assert.match(globalCss, /button,\n\[role='button'\],[\s\S]*?\{\n\s*border-radius: var\(--b-radius-control\) !important;/)
-  const transport = /\.b-transport,\nbutton\.b-transport,\n\.stu-key,\nbutton\.stu-key \{\n\s*border-radius: var\(--b-radius-transport\) !important;/
-  assert.match(globalCss, transport, 'transporte del Hub (.b-transport) y del Estudio (.stu-key) circulares')
+  const transport = /\.b-transport,\nbutton\.b-transport,\n\.stu-key,\nbutton\.stu-key,\nbutton\.ga-play,\nbutton\.ga-round \{\n\s*border-radius: var\(--b-radius-transport\) !important;/
+  assert.match(globalCss, transport, 'transporte del Hub (.b-transport), del Estudio (.stu-key) y de stems y ensayo (.ga-play, .ga-round) circulares')
   assert.ok(globalCss.indexOf('.b-transport,') > globalCss.indexOf("button,\n[role='button']"), 'la regla del transporte va despues')
   const key = radiusRules(studioCss).find((r) => r.selector === '.stu-key')
   assert.equal(key?.value, 'var(--b-radius-transport)')

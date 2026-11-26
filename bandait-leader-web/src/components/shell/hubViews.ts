@@ -43,18 +43,33 @@ export function viewDef(id: HubView): HubViewDef | undefined {
 /** Estado del rail (244 px o 72 px), por navegador. */
 export const RAIL_STORAGE_KEY = 'bandait_hub_rail'
 
-export function readRailCollapsed(): boolean {
+/**
+ * El Estudio recuerda su propio estado del rail y arranca plegado (72 px): la linea de tiempo y
+ * el piano roll son lo principal y a 1280 px el rail abierto les quitaba casi un tercio del ancho.
+ */
+export const RAIL_STUDIO_STORAGE_KEY = 'bandait_hub_rail_studio'
+
+export type RailScope = 'hub' | 'studio'
+
+function railKey(scope: RailScope): string {
+  return scope === 'studio' ? RAIL_STUDIO_STORAGE_KEY : RAIL_STORAGE_KEY
+}
+
+export function readRailCollapsed(scope: RailScope = 'hub'): boolean {
+  const fallback = scope === 'studio'
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem(RAIL_STORAGE_KEY) === 'collapsed'
+    if (typeof localStorage === 'undefined') return fallback
+    const stored = localStorage.getItem(railKey(scope))
+    return stored === null ? fallback : stored === 'collapsed'
   } catch {
-    // Navegacion privada o almacenamiento bloqueado: rail abierto.
-    return false
+    // Navegacion privada o almacenamiento bloqueado: el valor por defecto de cada ambito.
+    return fallback
   }
 }
 
-export function writeRailCollapsed(collapsed: boolean): void {
+export function writeRailCollapsed(collapsed: boolean, scope: RailScope = 'hub'): void {
   try {
-    localStorage.setItem(RAIL_STORAGE_KEY, collapsed ? 'collapsed' : 'expanded')
+    localStorage.setItem(railKey(scope), collapsed ? 'collapsed' : 'expanded')
   } catch {
     // Sin almacenamiento: el estado dura lo que la pestana.
   }

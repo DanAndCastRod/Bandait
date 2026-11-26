@@ -154,7 +154,22 @@ export const GlobalAudioProvider: React.FC<{ children: React.ReactNode }> = ({ c
       toggle: () => core.toggle(),
       stop: () => core.stop(),
       progress: () => core.progress(),
-      subscribeNowPlaying: (listener) => core.subscribe(listener),
+      // El aviso va en una microtarea: StemStudio pide el reproductor (acquireStem) mientras se
+      // renderiza, y avisar en el acto actualizaria otro componente (el mini reproductor de
+      // App) en medio de ese render, cosa que React prohibe. useSyncExternalStore relee la foto
+      // vigente al recibir el aviso, asi que no se pierde ningun cambio.
+      subscribeNowPlaying: (listener) => {
+        let active = true
+        const off = core.subscribe(() => {
+          queueMicrotask(() => {
+            if (active) listener()
+          })
+        })
+        return () => {
+          active = false
+          off()
+        }
+      },
       getNowPlaying: () => core.nowPlaying(),
     }),
     [core, scope]

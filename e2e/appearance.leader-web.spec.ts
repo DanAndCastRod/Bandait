@@ -166,8 +166,7 @@ test.describe('Web Admin Hub - apariencia', () => {
     await openAppearance(page);
     const radius = page.getByTestId('appearance-radius-input');
 
-    // Estudio: Stop, Play y Grabar (.stu-key). Al salir del Estudio se vuelve a su inicio, asi que
-    // cada pasada abre una maqueta nueva.
+    // Estudio: Stop, Play y Grabar (.stu-key).
     const keys = page.locator('[data-testid="studio-transport"] .stu-key');
     for (const r of ['8', '999']) {
       await openView(page, 'settings');
@@ -175,10 +174,14 @@ test.describe('Web Admin Hub - apariencia', () => {
       await radius.fill(r);
       await radius.press('Enter');
       await openView(page, 'studio');
-      await expect(page.getByTestId('studio-home')).toBeVisible();
-      await expect(page.getByTestId('studio-create')).toBeEnabled();
-      await page.getByTestId('studio-new-title').fill(`Apariencia ${r}`);
-      await page.getByTestId('studio-create').click();
+      // Con el audio global la sesion sigue abierta fuera del Estudio: la primera pasada la crea y
+      // la segunda vuelve a ella con la redondez nueva.
+      if (r === '8') {
+        await expect(page.getByTestId('studio-home')).toBeVisible();
+        await expect(page.getByTestId('studio-create')).toBeEnabled();
+        await page.getByTestId('studio-new-title').fill(`Apariencia ${r}`);
+        await page.getByTestId('studio-create').click();
+      }
       await expect(page.getByTestId('studio-workspace')).toBeVisible();
       await expect(keys).toHaveCount(3);
       const shapes = await keys.evaluateAll((els) =>

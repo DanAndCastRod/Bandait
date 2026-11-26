@@ -17,6 +17,7 @@ import {
   viewDef,
   writeRailCollapsed,
   type HubView,
+  type RailScope,
 } from './hubViews'
 
 interface Props {
@@ -52,7 +53,10 @@ function flagFromUrl(...keys: Array<[string, string]>): boolean {
 export const HubShell: React.FC<Props> = ({ view, onSelectView, onUploadAudio, hasMiniPlayer, overlay, children }) => {
   const { user, logout, exportWorkspaceJson } = useHub()
   const desktop = useMediaQuery(DESKTOP_QUERY)
-  const [collapsed, setCollapsed] = useState(readRailCollapsed)
+  const railScope: RailScope = view === 'studio' ? 'studio' : 'hub'
+  const [hubCollapsed, setHubCollapsed] = useState(() => readRailCollapsed('hub'))
+  const [studioCollapsed, setStudioCollapsed] = useState(() => readRailCollapsed('studio'))
+  const collapsed = railScope === 'studio' ? studioCollapsed : hubCollapsed
   const [sheetOpen, setSheetOpen] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const [showNewBand, setShowNewBand] = useState(false)
@@ -60,10 +64,10 @@ export const HubShell: React.FC<Props> = ({ view, onSelectView, onUploadAudio, h
   const [showCloud, setShowCloud] = useState(() => flagFromUrl(['cloud', '1'], ['supabase', '1']))
 
   const toggleRail = () => {
-    setCollapsed((prev) => {
-      writeRailCollapsed(!prev)
-      return !prev
-    })
+    const next = !collapsed
+    writeRailCollapsed(next, railScope)
+    if (railScope === 'studio') setStudioCollapsed(next)
+    else setHubCollapsed(next)
   }
 
   const modals = (

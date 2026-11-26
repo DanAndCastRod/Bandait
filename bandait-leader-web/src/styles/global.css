@@ -156,7 +156,9 @@ button.b-block,
 .b-transport,
 button.b-transport,
 .stu-key,
-button.stu-key {
+button.stu-key,
+button.ga-play,
+button.ga-round {
   border-radius: var(--b-radius-transport) !important;
 }
 
