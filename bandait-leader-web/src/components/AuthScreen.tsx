@@ -21,9 +21,9 @@ import { SupabaseConfigModal } from './SupabaseConfigModal'
 const mono = "'IBM Plex Mono', monospace"
 
 const sectionStyle: React.CSSProperties = {
-  background: '#181B20',
-  border: '1px solid #2E343D',
-  borderRadius: '6px',
+  background: 'var(--b-input)',
+  border: '1px solid var(--b-border)',
+  borderRadius: 'var(--b-radius-card)',
   padding: '18px 20px',
   display: 'flex',
   flexDirection: 'column',
@@ -34,28 +34,28 @@ const sectionTitleStyle: React.CSSProperties = {
   fontSize: '12px',
   fontWeight: 700,
   fontFamily: mono,
-  color: '#D5DAE0',
+  color: 'var(--b-text)',
   display: 'flex',
   alignItems: 'center',
   gap: '8px',
 }
 
-const helpStyle: React.CSSProperties = { margin: 0, fontSize: '11px', color: '#8E97A3', lineHeight: 1.5 }
+const helpStyle: React.CSSProperties = { margin: 0, fontSize: '11px', color: 'var(--b-muted)', lineHeight: 1.5 }
 
 const disabledExplainStyle: React.CSSProperties = {
-  background: '#20252B',
-  border: '1px dashed #2E343D',
-  borderRadius: '4px',
+  background: 'var(--b-modal)',
+  border: '1px dashed var(--b-border)',
+  borderRadius: 'var(--b-radius-field)',
   padding: '10px 12px',
   fontSize: '11px',
-  color: '#8E97A3',
+  color: 'var(--b-muted)',
   lineHeight: 1.5,
 }
 
 const linkButtonStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
-  color: '#5CC8C2',
+  color: 'var(--b-accent)',
   textDecoration: 'underline',
   cursor: 'pointer',
   padding: 0,
@@ -64,11 +64,11 @@ const linkButtonStyle: React.CSSProperties = {
 }
 
 const inputStyle: React.CSSProperties = {
-  background: '#15181C',
-  border: '1px solid #2E343D',
-  borderRadius: '4px',
+  background: 'var(--b-bg)',
+  border: '1px solid var(--b-border)',
+  borderRadius: 'var(--b-radius-field)',
   padding: '10px 12px',
-  color: '#D5DAE0',
+  color: 'var(--b-text)',
   fontSize: '13px',
   outline: 'none',
   boxSizing: 'border-box',
@@ -193,14 +193,14 @@ export const AuthScreen: React.FC = () => {
       style={{
         minHeight: '100vh',
         width: '100%',
-        background: 'radial-gradient(circle at 50% 15%, #20252B 0%, #15181C 80%)',
+        background: 'radial-gradient(circle at 50% 15%, var(--b-modal) 0%, var(--b-bg) 80%)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '24px 16px',
         boxSizing: 'border-box',
-        color: '#D5DAE0',
+        color: 'var(--b-text)',
         fontFamily: "'Space Grotesk', -apple-system, sans-serif",
       }}
     >
@@ -208,11 +208,11 @@ export const AuthScreen: React.FC = () => {
         style={{
           width: '100%',
           maxWidth: '560px',
-          background: 'linear-gradient(180deg, #1B1F24 0%, #181B20 100%)',
-          border: '1px solid #2E343D',
-          borderRadius: '8px',
+          background: 'linear-gradient(180deg, var(--b-card) 0%, var(--b-input) 100%)',
+          border: '1px solid var(--b-border)',
+          borderRadius: 'var(--b-radius-card)',
           padding: 'clamp(20px, 5vw, 36px) clamp(16px, 4vw, 32px)',
-          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.7)',
+          boxShadow: 'var(--b-shadow)',
           display: 'flex',
           flexDirection: 'column',
           gap: '20px',
@@ -228,20 +228,20 @@ export const AuthScreen: React.FC = () => {
             left: 0,
             right: 0,
             height: '3px',
-            background: 'linear-gradient(90deg, #5CC8C2, #7AA5D6)',
+            background: 'linear-gradient(90deg, var(--b-accent), var(--b-cobalt))',
             borderRadius: '8px 8px 0 0',
           }}
         />
 
         {/* HEADER */}
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontFamily: mono, fontSize: '11px', fontWeight: 700, color: '#5CC8C2', letterSpacing: '2px', marginBottom: '6px' }}>
+          <div style={{ fontFamily: mono, fontSize: '11px', fontWeight: 700, color: 'var(--b-accent)', letterSpacing: '2px', marginBottom: '6px' }}>
             [BANDAIT 3.0 // CLOUD & WEB ADMIN HUB]
           </div>
-          <h1 style={{ fontSize: '30px', fontWeight: 800, letterSpacing: '-0.5px', margin: '0 0 8px 0', color: '#D5DAE0' }}>
+          <h1 style={{ fontSize: '30px', fontWeight: 800, letterSpacing: '-0.5px', margin: '0 0 8px 0', color: 'var(--b-text)' }}>
             Acceso a tu Workspace
           </h1>
-          <p style={{ fontSize: '13px', color: '#8E97A3', margin: 0, lineHeight: 1.5 }}>
+          <p style={{ fontSize: '13px', color: 'var(--b-muted)', margin: 0, lineHeight: 1.5 }}>
             Administra agrupaciones, setlists, stems y ruteo. Solo la cuenta de nube sincroniza entre dispositivos; los
             perfiles locales guardan todo en este navegador.
           </p>
@@ -251,11 +251,11 @@ export const AuthScreen: React.FC = () => {
               type="button"
               onClick={() => setShowManualModal(true)}
               style={{
-                background: 'rgba(122, 165, 214, 0.08)',
-                border: '1px solid rgba(122, 165, 214, 0.35)',
-                color: '#7AC4D6',
+                background: 'color-mix(in srgb, var(--b-cobalt) 8%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--b-cobalt) 35%, transparent)',
+                color: 'var(--b-cyan)',
                 padding: '7px 14px',
-                borderRadius: '4px',
+                borderRadius: 'var(--b-radius-field)',
                 fontFamily: mono,
                 fontSize: '11px',
                 fontWeight: 700,
@@ -278,11 +278,11 @@ export const AuthScreen: React.FC = () => {
             role="status"
             data-testid="auth-notice"
             style={{
-              background: 'rgba(217, 162, 78, 0.12)',
-              border: '1px solid #D9A24E',
-              borderRadius: '4px',
+              background: 'color-mix(in srgb, var(--b-warning) 12%, transparent)',
+              border: '1px solid var(--b-warning)',
+              borderRadius: 'var(--b-radius-field)',
               padding: '10px 14px',
-              color: '#E3C07A',
+              color: 'var(--b-warning-text)',
               fontSize: '12px',
               fontFamily: mono,
               display: 'flex',
@@ -291,7 +291,7 @@ export const AuthScreen: React.FC = () => {
             }}
           >
             <span>[AVISO // AUTH]: {authNotice}</span>
-            <button type="button" onClick={dismissAuthNotice} style={{ ...linkButtonStyle, color: '#E3C07A' }}>
+            <button type="button" onClick={dismissAuthNotice} style={{ ...linkButtonStyle, color: 'var(--b-warning-text)' }}>
               CERRAR
             </button>
           </div>
@@ -303,11 +303,11 @@ export const AuthScreen: React.FC = () => {
             role="alert"
             data-testid="auth-error"
             style={{
-              background: 'rgba(217, 100, 89, 0.15)',
-              border: '1px solid #D96459',
-              borderRadius: '4px',
+              background: 'color-mix(in srgb, var(--b-danger) 15%, transparent)',
+              border: '1px solid var(--b-danger)',
+              borderRadius: 'var(--b-radius-field)',
               padding: '10px 14px',
-              color: '#E8A49B',
+              color: 'var(--b-danger-text)',
               fontSize: '12px',
               fontFamily: mono,
             }}
@@ -317,16 +317,16 @@ export const AuthScreen: React.FC = () => {
         )}
 
         {/* 1. CLOUD ACCOUNT: GOOGLE VIA SUPABASE AUTH */}
-        <section style={{ ...sectionStyle, border: '1px solid rgba(184, 207, 122, 0.45)' }} aria-label="Cuenta de nube">
+        <section style={{ ...sectionStyle, border: '1px solid color-mix(in srgb, var(--b-success) 45%, transparent)' }} aria-label="Cuenta de nube">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
             <div style={sectionTitleStyle}>
-              <Cloud size={14} style={{ color: '#B8CF7A' }} />
+              <Cloud size={14} style={{ color: 'var(--b-success)' }} />
               <span>CUENTA DE NUBE // GOOGLE VIA SUPABASE</span>
             </div>
             <button
               type="button"
               onClick={() => setShowCloudModal(true)}
-              style={{ ...linkButtonStyle, color: '#7AA5D6', fontFamily: mono, fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              style={{ ...linkButtonStyle, color: 'var(--b-cobalt)', fontFamily: mono, fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
             >
               <Settings size={12} />
               <span>{cloud.configured ? 'Ver configuración' : 'Configurar Supabase'}</span>
@@ -347,10 +347,10 @@ export const AuthScreen: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '10px',
-              background: cloudDisabledReason ? '#232830' : '#D5DAE0',
-              color: cloudDisabledReason ? '#7C8591' : '#15181C',
-              border: '1px solid #2E343D',
-              borderRadius: '4px',
+              background: cloudDisabledReason ? 'var(--b-elevated)' : 'var(--b-text)',
+              color: cloudDisabledReason ? 'var(--b-faint)' : 'var(--b-bg)',
+              border: '1px solid var(--b-border)',
+              borderRadius: 'var(--b-radius-field)',
               padding: '11px 18px',
               fontSize: '13px',
               fontWeight: 700,
@@ -364,7 +364,7 @@ export const AuthScreen: React.FC = () => {
           </button>
           {cloudDisabledReason && (
             <div style={disabledExplainStyle} data-testid="cloud-disabled-reason">
-              <span style={{ color: '#D96459', fontWeight: 700 }}>Nube no disponible: </span>
+              <span style={{ color: 'var(--b-danger)', fontWeight: 700 }}>Nube no disponible: </span>
               {cloudDisabledReason}{' '}
               <button type="button" onClick={() => setShowCloudModal(true)} style={linkButtonStyle}>
                 Configurar Supabase
@@ -372,9 +372,9 @@ export const AuthScreen: React.FC = () => {
             </div>
           )}
           {/* Served under /hub/ in production, so ../privacidad/ is the landing's /privacidad/. */}
-          <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#8E97A3', fontFamily: mono }} data-testid="privacy-note">
+          <p style={{ margin: '10px 0 0', fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }} data-testid="privacy-note">
             Al continuar con Google aceptas la{' '}
-            <a href="../privacidad/" style={{ color: '#7AC4D6' }}>
+            <a href="../privacidad/" style={{ color: 'var(--b-cyan)' }}>
               política de privacidad
             </a>
             .
@@ -394,7 +394,7 @@ export const AuthScreen: React.FC = () => {
                 setClientIdError(null)
                 setShowClientIdModal(true)
               }}
-              style={{ ...linkButtonStyle, color: '#7AA5D6', fontFamily: mono, fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              style={{ ...linkButtonStyle, color: 'var(--b-cobalt)', fontFamily: mono, fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
               title="Configurar Google Client ID"
             >
               <Settings size={12} />
@@ -409,7 +409,7 @@ export const AuthScreen: React.FC = () => {
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
               <div ref={googleBtnRef} style={{ minHeight: '44px' }}>
                 {gisState !== 'ready' && (
-                  <div style={{ fontSize: '12px', color: '#8E97A3' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--b-muted)' }}>
                     {gisState === 'error' ? 'No se pudo cargar Google Identity Services.' : 'Cargando servicio de Google...'}
                   </div>
                 )}
@@ -427,10 +427,10 @@ export const AuthScreen: React.FC = () => {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '10px',
-                  background: '#232830',
-                  color: '#7C8591',
-                  border: '1px solid #2E343D',
-                  borderRadius: '4px',
+                  background: 'var(--b-elevated)',
+                  color: 'var(--b-faint)',
+                  border: '1px solid var(--b-border)',
+                  borderRadius: 'var(--b-radius-field)',
                   padding: '11px 18px',
                   fontSize: '13px',
                   fontWeight: 700,
@@ -442,7 +442,7 @@ export const AuthScreen: React.FC = () => {
                 <span>CONTINUAR CON GOOGLE (PERFIL LOCAL)</span>
               </button>
               <div style={disabledExplainStyle}>
-                <span style={{ color: '#7AA5D6', fontWeight: 700 }}>Deshabilitado: </span>
+                <span style={{ color: 'var(--b-cobalt)', fontWeight: 700 }}>Deshabilitado: </span>
                 no hay un Google Client ID configurado (VITE_GOOGLE_CLIENT_ID).{' '}
                 <button
                   type="button"
@@ -461,9 +461,9 @@ export const AuthScreen: React.FC = () => {
         </section>
 
         {/* 3. LOCAL PROFILE (NAME + EMAIL LABEL) */}
-        <form onSubmit={handleLocalSubmit} style={{ ...sectionStyle, background: '#1B1F24' }} aria-label="Perfil local">
+        <form onSubmit={handleLocalSubmit} style={{ ...sectionStyle, background: 'var(--b-card)' }} aria-label="Perfil local">
           <div style={sectionTitleStyle}>
-            <HardDrive size={14} style={{ color: '#D9A24E' }} />
+            <HardDrive size={14} style={{ color: 'var(--b-warning)' }} />
             <span>PERFIL LOCAL // SOLO ESTE NAVEGADOR</span>
           </div>
           <p style={helpStyle}>
@@ -472,7 +472,7 @@ export const AuthScreen: React.FC = () => {
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label htmlFor="local-name" style={{ fontSize: '11px', color: '#8E97A3', fontFamily: mono }}>
+            <label htmlFor="local-name" style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>
               NOMBRE O ALIAS DE MÚSICO
             </label>
             <input
@@ -487,7 +487,7 @@ export const AuthScreen: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label htmlFor="local-email" style={{ fontSize: '11px', color: '#8E97A3', fontFamily: mono }}>
+            <label htmlFor="local-email" style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>
               CORREO (ETIQUETA, NO SE VERIFICA)
             </label>
             <input
@@ -508,10 +508,10 @@ export const AuthScreen: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px',
-              background: '#7AA5D6',
-              color: '#15181C',
+              background: 'var(--b-cobalt)',
+              color: 'var(--b-on-strong)',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: 'var(--b-radius-field)',
               padding: '12px 18px',
               fontSize: '13px',
               fontWeight: 700,
@@ -538,10 +538,10 @@ export const AuthScreen: React.FC = () => {
               justifyContent: 'center',
               gap: '8px',
               background: 'transparent',
-              border: '1px dashed #5CC8C2',
-              borderRadius: '4px',
+              border: '1px dashed var(--b-accent)',
+              borderRadius: 'var(--b-radius-field)',
               padding: '9px 14px',
-              color: '#5CC8C2',
+              color: 'var(--b-accent)',
               fontFamily: mono,
               fontSize: '11px',
               fontWeight: 700,
@@ -568,11 +568,11 @@ export const AuthScreen: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    background: '#20252B',
-                    border: '1px solid #2B313A',
-                    borderRadius: '6px',
+                    background: 'var(--b-modal)',
+                    border: '1px solid var(--b-hover)',
+                    borderRadius: 'var(--b-radius-card)',
                     padding: '10px 14px',
-                    color: '#D5DAE0',
+                    color: 'var(--b-text)',
                     cursor: 'pointer',
                     textAlign: 'left',
                   }}
@@ -585,17 +585,17 @@ export const AuthScreen: React.FC = () => {
                     />
                     <div>
                       <div style={{ fontWeight: 700, fontSize: '13px' }}>{prof.name}</div>
-                      <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: mono }}>{prof.email}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>{prof.email}</div>
                     </div>
                   </div>
                   <div
                     style={{
                       fontFamily: mono,
                       fontSize: '10px',
-                      color: '#5CC8C2',
-                      border: '1px solid #5CC8C2',
+                      color: 'var(--b-accent)',
+                      border: '1px solid var(--b-accent)',
                       padding: '2px 6px',
-                      borderRadius: '3px',
+                      borderRadius: 'var(--b-radius-field)',
                     }}
                   >
                     {prof.id === 'usr_director_01' ? 'DEMO OWNER' : prof.id === 'usr_foh_02' ? 'DEMO FOH' : 'DEMO BATERISTA'}
@@ -609,27 +609,27 @@ export const AuthScreen: React.FC = () => {
         {/* TECHNICAL PILLARS FOOTER */}
         <div
           style={{
-            borderTop: '1px solid #2E343D',
+            borderTop: '1px solid var(--b-border)',
             paddingTop: '16px',
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
             gap: '10px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#8E97A3' }}>
-            <ListMusic size={15} style={{ color: '#5CC8C2' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--b-muted)' }}>
+            <ListMusic size={15} style={{ color: 'var(--b-accent)' }} />
             <span>Setlists & Transición</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#8E97A3' }}>
-            <Sliders size={15} style={{ color: '#7AA5D6' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--b-muted)' }}>
+            <Sliders size={15} style={{ color: 'var(--b-cobalt)' }} />
             <span>Stems & Limitador dBFS</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#8E97A3' }}>
-            <Users size={15} style={{ color: '#B8CF7A' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--b-muted)' }}>
+            <Users size={15} style={{ color: 'var(--b-success)' }} />
             <span>Múltiples Bandas & Roles</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#8E97A3' }}>
-            <Radio size={15} style={{ color: '#D9A24E' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--b-muted)' }}>
+            <Radio size={15} style={{ color: 'var(--b-warning)' }} />
             <span>Racks ASIO & In-Ear RF</span>
           </div>
         </div>
@@ -641,7 +641,7 @@ export const AuthScreen: React.FC = () => {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.85)',
+            background: 'var(--b-overlay)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -652,9 +652,9 @@ export const AuthScreen: React.FC = () => {
         >
           <div
             style={{
-              background: '#20252B',
-              border: '1px solid #2E343D',
-              borderRadius: '8px',
+              background: 'var(--b-modal)',
+              border: '1px solid var(--b-border)',
+              borderRadius: 'var(--b-radius-card)',
               padding: '24px',
               width: '100%',
               maxWidth: '480px',
@@ -664,25 +664,25 @@ export const AuthScreen: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Key size={18} style={{ color: '#7AA5D6' }} />
+              <Key size={18} style={{ color: 'var(--b-cobalt)' }} />
               <h3 style={{ margin: 0, fontSize: '16px', fontFamily: mono }}>GOOGLE CLIENT ID (PERFIL LOCAL)</h3>
             </div>
 
-            <p style={{ margin: 0, fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--b-muted)', lineHeight: 1.5 }}>
               OAuth 2.0 Client ID (tipo Aplicación web) de Google Cloud Console, con este dominio en "Orígenes de
               JavaScript autorizados". Se guarda solo en este navegador y tiene prioridad sobre VITE_GOOGLE_CLIENT_ID.
               Recuerda: este botón crea un perfil local; la nube usa el login de Supabase.
             </p>
 
             {clientIdError && (
-              <div role="alert" style={{ fontSize: '12px', color: '#E8A49B', fontFamily: mono }}>
+              <div role="alert" style={{ fontSize: '12px', color: 'var(--b-danger-text)', fontFamily: mono }}>
                 [ERROR]: {clientIdError}
               </div>
             )}
 
             <form onSubmit={handleSaveClientId} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
-                <label htmlFor="gis-client-id" style={{ fontSize: '11px', color: '#8E97A3', fontFamily: mono }}>
+                <label htmlFor="gis-client-id" style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>
                   CLIENT ID (VACÍO PARA QUITAR EL OVERRIDE)
                 </label>
                 <input
@@ -700,11 +700,11 @@ export const AuthScreen: React.FC = () => {
                   type="button"
                   onClick={() => setShowClientIdModal(false)}
                   style={{
-                    background: '#232830',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
+                    background: 'var(--b-elevated)',
+                    border: '1px solid var(--b-border)',
+                    borderRadius: 'var(--b-radius-field)',
                     padding: '8px 14px',
-                    color: '#8E97A3',
+                    color: 'var(--b-muted)',
                     cursor: 'pointer',
                     fontSize: '12px',
                     fontFamily: mono,
@@ -715,11 +715,11 @@ export const AuthScreen: React.FC = () => {
                 <button
                   type="submit"
                   style={{
-                    background: '#7AA5D6',
+                    background: 'var(--b-cobalt)',
                     border: 'none',
-                    borderRadius: '4px',
+                    borderRadius: 'var(--b-radius-field)',
                     padding: '8px 16px',
-                    color: '#15181C',
+                    color: 'var(--b-on-strong)',
                     cursor: 'pointer',
                     fontSize: '12px',
                     fontWeight: 700,

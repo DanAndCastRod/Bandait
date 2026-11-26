@@ -14,6 +14,7 @@ import type {
 import type { EngineStatus, SyncBackup, SyncNotice } from '../services/workspaceSync'
 import type { RoleChangeCheck } from '../services/roles'
 import type { SupabaseConfigSource } from '../services/supabaseClient'
+import type { UiPreferences } from '../services/appearance'
 
 /** Estado de sincronizacion que muestra la UI. */
 export type HubSyncStatus = { state: 'local_only'; detail: string } | EngineStatus
@@ -147,6 +148,12 @@ export interface HubContextType {
   exportWorkspaceJson: () => void
   /** Reemplaza el workspace por el de un JSON exportado (se migra y valida). */
   importWorkspaceJson: (text: string) => { ok: boolean; message: string }
+
+  // Apariencia (del musico, no de la banda)
+  /** Tema, acento y redondez vigentes (del workspace personal, o de la cache sin sesion). */
+  uiPreferences: UiPreferences
+  /** Guarda la apariencia en el workspace personal; nunca en una banda compartida. */
+  setUiPreferences: (prefs: UiPreferences) => void
 }
 
 export const HubContext = createContext<HubContextType | undefined>(undefined)

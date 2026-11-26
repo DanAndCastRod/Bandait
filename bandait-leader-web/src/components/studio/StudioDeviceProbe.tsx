@@ -4,7 +4,7 @@ import { STUDIO_SAMPLE_RATES } from '../../services/studio/session.ts'
 import { StudioRecorder, recorderWarningMessage, type RoundTripMeasurement, type TakeStats } from '../../services/studio/recorder.ts'
 import { deleteSession } from '../../services/studio/studioStore.ts'
 import type { KeyValueStorage, RecorderSettingsReport, StudioInputDevice } from '../../services/studio/types.ts'
-import { cardStyle, colors, ghostButton, labelStyle, mono, primaryButton, smallInputStyle } from '../hubStyles'
+import { canvasPalette, cardStyle, colors, ghostButton, labelStyle, mono, primaryButton, smallInputStyle } from '../hubStyles'
 
 /**
  * Prueba de interfaz del Estudio (docs/PLAN_ESTUDIO_BANDAIT.md, fase 0). Panel autonomo: crea su
@@ -395,6 +395,8 @@ export const StudioDeviceProbe: React.FC = () => {
       const recorder = recorderRef.current
       const left = 46
       const span = Math.max(10, width - left - 86)
+      // El canvas no entiende var(--b-*): colores del tema resueltos en cada cuadro.
+      const pal = canvasPalette()
       g.clearRect(0, 0, width, METER_HEIGHT)
       g.font = `600 11px ${mono}`
       g.textBaseline = 'middle'
@@ -406,20 +408,20 @@ export const StudioDeviceProbe: React.FC = () => {
         hold[ch] = Math.max(peakDb, hold[ch] - 18 * dt, METER_FLOOR_DB)
         if (peakDb >= -0.1) clipUntil[ch] = now + 1500
         const y = 6 + ch * 26
-        g.fillStyle = colors.muted
+        g.fillStyle = pal.muted
         g.textAlign = 'left'
         g.fillText(`IN ${ch + 1}`, 0, y + 9)
-        g.fillStyle = colors.elevated
+        g.fillStyle = pal.elevated
         g.fillRect(left, y, span, 18)
-        g.fillStyle = hold[ch] > -6 ? colors.warning : colors.orange
+        g.fillStyle = hold[ch] > -6 ? pal.warning : pal.orange
         g.fillRect(left, y, xOf(rmsDb, span), 18)
-        g.fillStyle = now < clipUntil[ch] ? colors.danger : colors.text
+        g.fillStyle = now < clipUntil[ch] ? pal.danger : pal.text
         g.fillRect(left + xOf(hold[ch], span) - 1, y, 2, 18)
         // Marcas de -18 y -6 dB.
-        g.fillStyle = colors.border
+        g.fillStyle = pal.border
         g.fillRect(left + xOf(-18, span), y, 1, 18)
         g.fillRect(left + xOf(-6, span), y, 1, 18)
-        g.fillStyle = now < clipUntil[ch] ? colors.danger : colors.text
+        g.fillStyle = now < clipUntil[ch] ? pal.danger : pal.text
         g.textAlign = 'right'
         g.fillText(now < clipUntil[ch] ? 'SATURA' : Number.isFinite(peakDb) ? `${peakDb.toFixed(1)} dB` : '-inf dB', width, y + 9)
       }

@@ -50,7 +50,7 @@ export const ChordProPreview: React.FC<Props> = ({
     : {
         background: colors.oled,
         border: `1px solid ${colors.borderSoft}`,
-        borderRadius: '4px',
+        borderRadius: 'var(--b-radius-field)',
         padding: '10px 12px',
         fontFamily: mono,
         fontSize: size,

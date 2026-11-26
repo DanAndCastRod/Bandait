@@ -434,7 +434,7 @@ const DraftView: React.FC<DraftViewProps> = (p) => {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {draft.sections.map((s, i) => (
-          <div key={i} data-testid="analysis-section" style={{ border: `1px solid ${colors.borderSoft}`, borderRadius: '4px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+          <div key={i} data-testid="analysis-section" style={{ border: `1px solid ${colors.borderSoft}`, borderRadius: 'var(--b-radius-field)', padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
             <div style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>
               <strong style={{ color: colors.text }}>{s.label}</strong> · {SECTION_KIND_LABELS[s.kind]} · c. {s.start_bar}-{s.start_bar + s.bars - 1} ({s.bars} compases)
             </div>

@@ -326,7 +326,7 @@ function chipStyle(active: boolean): React.CSSProperties {
     fontSize: '11px',
     fontWeight: 700,
     padding: '6px 10px',
-    borderRadius: '4px',
+    borderRadius: 'var(--b-radius-field)',
     border: `1px solid ${active ? colors.cyan : colors.border}`,
     background: active ? colors.cyan : colors.elevated,
     color: active ? colors.onAccent : colors.muted,
@@ -944,7 +944,7 @@ const RehearsalPrompter: React.FC<PrompterProps> = ({
           </button>
           <button
             type="button"
-            className="stx-btn"
+            className="stx-btn b-transport"
             data-testid="rehearsal-focus-play"
             aria-label={api.playing ? 'Pausa' : 'Reproducir'}
             disabled={!api.ready}

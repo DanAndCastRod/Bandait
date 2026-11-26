@@ -70,7 +70,7 @@ export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
             show.
           </p>
         </div>
-        <button type="button" onClick={() => setEditing('new')} style={{ ...primaryButton(), boxShadow: '0 0 12px rgba(92, 200, 194, 0.3)' }}>
+        <button type="button" onClick={() => setEditing('new')} style={{ ...primaryButton(), boxShadow: '0 0 12px color-mix(in srgb, var(--b-accent) 30%, transparent)' }}>
           <Plus size={14} /> NUEVA CANCIÓN
         </button>
       </div>
@@ -118,7 +118,7 @@ export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
                 </span>
                 {song.key && <span style={{ color: colors.cobalt, fontWeight: 700 }}>{song.key}</span>}
                 {song.camelot && (
-                  <span style={{ background: '#2B313A', border: '1px solid #363D47', padding: '0 5px', borderRadius: '3px', color: '#D5DAE0' }}>
+                  <span style={{ background: 'var(--b-hover)', border: '1px solid var(--b-border-strong)', padding: '0 5px', borderRadius: 'var(--b-radius-field)', color: 'var(--b-text)' }}>
                     {song.camelot}
                   </span>
                 )}
@@ -178,7 +178,7 @@ export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
               ¿Eliminar <strong style={{ color: colors.text }}>{deleting.title}</strong> de la librería de {activeBand?.name}?
             </div>
             {deletingUsage.length > 0 ? (
-              <div style={{ border: `1px solid ${colors.warning}`, borderRadius: '4px', padding: '10px', color: colors.warning }}>
+              <div style={{ border: `1px solid ${colors.warning}`, borderRadius: 'var(--b-radius-field)', padding: '10px', color: colors.warning }}>
                 <div style={{ fontWeight: 700, marginBottom: '6px' }}>Está en {deletingUsage.length} setlist(s); se quitará de:</div>
                 <ul data-testid="song-delete-usage" style={{ margin: 0, paddingLeft: '18px' }}>
                   {deletingUsage.map((u) => (

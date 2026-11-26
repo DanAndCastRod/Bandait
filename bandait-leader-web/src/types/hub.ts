@@ -2,6 +2,7 @@
  * Bandait Cloud & Web Admin Hub Types
  * Multi-band, Google Auth, Setlists, Stems & Technical Equipment
  */
+import type { UiPreferences } from '../services/appearance.ts'
 
 export type MemberRole = 'Owner' | 'MusicDirector' | 'Musician' | 'Substitute' | 'SoundEngineer'
 
@@ -195,6 +196,12 @@ export interface WorkspaceStore {
   stemsMap: Record<string, SongStems>
   songsMap: Record<string, Song[]>
   voiceMap: Record<string, VoiceConfig>
+  /**
+   * Apariencia del musico (tema, acento, redondez). Opcional y versionado; solo vive en el
+   * workspace personal (nunca en una banda compartida). Se lee con parseUiPreferences
+   * (services/appearance.ts), que tolera valores danados. WORKSPACE_V2.md seccion 8.
+   */
+  uiPreferences?: UiPreferences
 }
 
 /** Forma minima aceptada al cargar (v1 o v2, antes de migrar). */

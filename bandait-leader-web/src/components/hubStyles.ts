@@ -1,18 +1,47 @@
 import type React from 'react'
 
-/** Estilos compartidos de las vistas del Hub: paleta Grafito (2026-10-30), la misma del lider y la PWA. */
+/**
+ * Estilos compartidos de las vistas del Hub. Los colores son variables CSS (--b-*, global.css)
+ * para que sigan el tema del musico (Dark Grafito / Light Estudio) y su acento; los valores de
+ * cada tema viven en THEME_TOKENS (services/appearance.ts).
+ *
+ * Un `var(...)` no sirve en un <canvas>: para dibujar usa `hexColors` (paleta Grafito fija).
+ */
 export const mono = "'IBM Plex Mono', monospace"
 
 export const colors = {
-  oled: '#15181C',
-  card: '#1B1F24',
-  cardAlt: '#1A1E23',
-  modal: '#20252B',
-  input: '#181B20',
-  elevated: '#232830',
-  border: '#2E343D',
-  borderSoft: '#2B313A',
-  text: '#D5DAE0',
+  oled: 'var(--b-bg)',
+  card: 'var(--b-card)',
+  cardAlt: 'var(--b-surface)',
+  modal: 'var(--b-modal)',
+  input: 'var(--b-input)',
+  elevated: 'var(--b-elevated)',
+  border: 'var(--b-border)',
+  borderSoft: 'var(--b-border-soft)',
+  text: 'var(--b-text)',
+  muted: 'var(--b-muted)',
+  disabled: 'var(--b-disabled)',
+  /** Acento del musico (el nombre es historico: hoy es el turquesa Grafito o el que el elija). */
+  orange: 'var(--b-accent)',
+  cobalt: 'var(--b-cobalt)',
+  success: 'var(--b-success)',
+  warning: 'var(--b-warning)',
+  danger: 'var(--b-danger)',
+  violet: 'var(--b-violet)',
+  cyan: 'var(--b-cyan)',
+  /** Texto sobre un fondo de color semantico (cobalto, exito, aviso, peligro, violeta, cian). */
+  onAccent: 'var(--b-on-strong)',
+  /** Texto sobre el acento del musico: tinta calculada con contraste WCAG >= 4,5:1. */
+  onBrand: 'var(--b-on-accent)',
+}
+
+/** Paleta Grafito en hexadecimal, solo para dibujar en <canvas> (no admite variables CSS). */
+export const hexColors = {
+  oled: '#111316',
+  card: '#1A1D22',
+  elevated: '#262A31',
+  border: '#FFFFFF14',
+  text: '#E4E7EB',
   muted: '#8E97A3',
   disabled: '#4A525D',
   orange: '#5CC8C2',
@@ -20,10 +49,32 @@ export const colors = {
   success: '#B8CF7A',
   warning: '#D9A24E',
   danger: '#D96459',
-  violet: '#B48EDB',
-  cyan: '#7AC4D6',
-  /** Texto sobre un fondo de acento: los acentos Grafito son claros. */
-  onAccent: '#15181C',
+}
+
+export type CanvasPalette = Record<keyof typeof hexColors, string>
+
+/**
+ * Colores del tema vigente resueltos a valores concretos, para dibujar en <canvas>. Sin DOM
+ * (o si una variable falta) devuelve la paleta Grafito fija.
+ */
+export function canvasPalette(): CanvasPalette {
+  const out = { ...hexColors }
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return out
+  const style = getComputedStyle(document.documentElement)
+  for (const key of Object.keys(hexColors) as Array<keyof typeof hexColors>) {
+    const name = /^var\((--[a-z-]+)\)$/.exec(colors[key])?.[1]
+    const value = name ? style.getPropertyValue(name).trim() : ''
+    if (value) out[key] = value
+  }
+  return out
+}
+
+/** Redondez: botones con la del musico (>= 8px), campos y tarjetas topados (global.css). */
+export const radius = {
+  control: 'var(--b-radius-control)',
+  field: 'var(--b-radius-field)',
+  card: 'var(--b-radius-card)',
+  transport: 'var(--b-radius-transport)',
 }
 
 export const labelStyle: React.CSSProperties = {
@@ -37,7 +88,7 @@ export const inputStyle: React.CSSProperties = {
   width: '100%',
   background: colors.input,
   border: `1px solid ${colors.border}`,
-  borderRadius: '4px',
+  borderRadius: radius.field,
   padding: '8px 10px',
   color: colors.text,
   marginTop: '4px',
@@ -48,7 +99,7 @@ export const inputStyle: React.CSSProperties = {
 export const smallInputStyle: React.CSSProperties = {
   background: colors.elevated,
   border: `1px solid ${colors.border}`,
-  borderRadius: '4px',
+  borderRadius: radius.field,
   padding: '4px 6px',
   color: colors.text,
   fontFamily: mono,
@@ -60,7 +111,7 @@ export const smallInputStyle: React.CSSProperties = {
 export const cardStyle: React.CSSProperties = {
   background: colors.card,
   border: `1px solid ${colors.border}`,
-  borderRadius: '6px',
+  borderRadius: radius.card,
 }
 
 export function primaryButton(color: string = colors.orange): React.CSSProperties {
@@ -71,9 +122,9 @@ export function primaryButton(color: string = colors.orange): React.CSSPropertie
     gap: '6px',
     background: color,
     border: 'none',
-    borderRadius: '4px',
+    borderRadius: radius.control,
     padding: '8px 16px',
-    color: colors.text,
+    color: color === colors.orange ? colors.onBrand : colors.onAccent,
     fontSize: '12px',
     fontFamily: mono,
     fontWeight: 700,
@@ -88,7 +139,7 @@ export const ghostButton: React.CSSProperties = {
   gap: '6px',
   background: colors.elevated,
   border: `1px solid ${colors.border}`,
-  borderRadius: '4px',
+  borderRadius: radius.control,
   padding: '8px 14px',
   color: colors.text,
   fontSize: '12px',
@@ -104,7 +155,7 @@ export function iconButton(color: string = colors.text, disabled = false): React
     background: colors.elevated,
     border: `1px solid ${colors.border}`,
     color: disabled ? colors.disabled : color,
-    borderRadius: '3px',
+    borderRadius: radius.control,
     padding: '5px 7px',
     cursor: disabled ? 'not-allowed' : 'pointer',
   }

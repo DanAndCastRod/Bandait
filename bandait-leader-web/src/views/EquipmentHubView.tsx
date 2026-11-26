@@ -110,7 +110,7 @@ export const EquipmentHubView: React.FC = () => {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                <div style={{ background: colors.elevated, padding: '6px', borderRadius: '4px', display: 'flex' }}>{categoryIcons[item.category]}</div>
+                <div style={{ background: colors.elevated, padding: '6px', borderRadius: 'var(--b-radius-field)', display: 'flex' }}>{categoryIcons[item.category]}</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 800, fontSize: '15px', color: colors.text, overflowWrap: 'anywhere' }}>{item.name}</div>
                   <div style={{ fontSize: '11px', color: colors.muted, fontFamily: mono, overflowWrap: 'anywhere' }}>{item.model}</div>
@@ -137,7 +137,7 @@ export const EquipmentHubView: React.FC = () => {
               style={{
                 background: colors.input,
                 border: `1px solid ${colors.border}`,
-                borderRadius: '4px',
+                borderRadius: 'var(--b-radius-field)',
                 padding: '10px 12px',
                 display: 'flex',
                 flexDirection: 'column',

@@ -24,6 +24,7 @@ equipmentMap    { [bandId]: EquipmentItem[] } (sin cambios)
 stemsMap        { [songId]: SongStems }       (sin cambios)
 songsMap        { [bandId]: Song[] }          NUEVO: librería de canciones por banda
 voiceMap        { [bandId]: VoiceConfig }     NUEVO: conteos y avisos de voz
+uiPreferences   UiPreferences                 OPCIONAL (2026-11-25): apariencia del músico, ver 8
 _sync           objeto interno del motor de sincronización del hub (no lo usa el líder)
 ```
 
@@ -183,3 +184,29 @@ va vacío: los stems son de cada cuenta.
 El hub y el líder leen cada fila por separado y la agregan a la lista de bandas del
 workspace personal. Una banda compartida cuyo id coincide con el de una personal se ignora.
 El líder nunca escribe en estas tablas.
+
+## 8. UiPreferences (apariencia del músico; opcional)
+
+Fecha: 2026-11-25 (Web 3.0, `docs/REQUERIMIENTOS_WEB_3.0.md` sección 1). Campo de la raíz,
+solo del hub; el líder lo conserva como campo desconocido y no lo usa.
+
+```
+uiPreferences {
+  version   1                                   entero; un hub más nuevo puede subirlo
+  theme     "dark-grafito" | "light-estudio"     por defecto "dark-grafito"
+  accent    "#RRGGBB" | null                     null = el acento del tema
+  radius    entero 8..999                        redondez de los botones en px (999 = píldora)
+}
+```
+
+- Es del músico, no de la banda: vive **solo** en el workspace personal
+  (`bandait_workspaces`). Nunca se escribe en `bandait_bands.content` (sección 7), así que un
+  integrante con rol de solo lectura en una banda compartida puede cambiarla.
+- Ausente = valores por defecto. Un documento sin el campo migra sin agregarlo (no provoca
+  escrituras).
+- Lectura tolerante: un valor dañado (tema desconocido, color inválido, radio fuera de rango)
+  toma su valor por defecto campo por campo; `validateWorkspace` lo informa como advertencia,
+  nunca como error.
+- `accent` guarda el color elegido. La tinta de contraste y, si hace falta, el acento ajustado
+  (ninguna tinta llega a 4,5:1) se calculan al aplicarlo (`services/appearance.ts`).
+- Importar un JSON conserva la apariencia de quien importa.

@@ -27,11 +27,11 @@ const InviteLinkBox: React.FC<{ link: string }> = ({ link }) => {
         style={{
           flex: '1 1 220px',
           minWidth: 0,
-          background: '#181B20',
-          border: '1px solid #2E343D',
-          borderRadius: '4px',
+          background: 'var(--b-input)',
+          border: '1px solid var(--b-border)',
+          borderRadius: 'var(--b-radius-field)',
           padding: '8px 10px',
-          color: '#D5DAE0',
+          color: 'var(--b-text)',
           fontFamily: MONO,
           fontSize: '11px',
         }}
@@ -43,11 +43,11 @@ const InviteLinkBox: React.FC<{ link: string }> = ({ link }) => {
           display: 'flex',
           alignItems: 'center',
           gap: '6px',
-          background: '#232830',
-          border: '1px solid #2E343D',
-          borderRadius: '4px',
+          background: 'var(--b-elevated)',
+          border: '1px solid var(--b-border)',
+          borderRadius: 'var(--b-radius-field)',
           padding: '8px 12px',
-          color: copied ? '#B8CF7A' : '#D5DAE0',
+          color: copied ? 'var(--b-success)' : 'var(--b-text)',
           fontFamily: MONO,
           fontSize: '11px',
           fontWeight: 700,
@@ -62,22 +62,22 @@ const InviteLinkBox: React.FC<{ link: string }> = ({ link }) => {
 }
 
 const resultBox = (result: HubActionResult): React.CSSProperties => ({
-  background: result.ok ? 'rgba(184, 207, 122, 0.1)' : 'rgba(217, 100, 89, 0.12)',
-  border: `1px solid ${result.ok ? 'rgba(184, 207, 122, 0.4)' : '#D96459'}`,
-  borderRadius: '4px',
+  background: result.ok ? 'color-mix(in srgb, var(--b-success) 10%, transparent)' : 'color-mix(in srgb, var(--b-danger) 12%, transparent)',
+  border: `1px solid ${result.ok ? 'color-mix(in srgb, var(--b-success) 40%, transparent)' : 'var(--b-danger)'}`,
+  borderRadius: 'var(--b-radius-field)',
   padding: '10px 14px',
-  color: result.ok ? '#C8DB9F' : '#E8A49B',
+  color: result.ok ? 'var(--b-success-text)' : 'var(--b-danger-text)',
   fontSize: '12px',
   fontFamily: MONO,
   lineHeight: 1.5,
 })
 
 const noteBox: React.CSSProperties = {
-  background: 'rgba(217, 162, 78, 0.1)',
-  border: '1px solid rgba(217, 162, 78, 0.4)',
-  borderRadius: '4px',
+  background: 'color-mix(in srgb, var(--b-warning) 10%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--b-warning) 40%, transparent)',
+  borderRadius: 'var(--b-radius-field)',
   padding: '10px 14px',
-  color: '#E3C07A',
+  color: 'var(--b-warning-text)',
   fontSize: '12px',
   fontFamily: MONO,
   lineHeight: 1.5,
@@ -172,11 +172,11 @@ export const BandMembersHubView: React.FC = () => {
   }
 
   const roleColors: Record<MemberRole, string> = {
-    Owner: '#D96459',
-    MusicDirector: '#5CC8C2',
-    SoundEngineer: '#7AA5D6',
-    Musician: '#B8CF7A',
-    Substitute: '#D9A24E',
+    Owner: 'var(--b-danger)',
+    MusicDirector: 'var(--b-accent)',
+    SoundEngineer: 'var(--b-cobalt)',
+    Musician: 'var(--b-success)',
+    Substitute: 'var(--b-warning)',
   }
 
   return (
@@ -189,18 +189,18 @@ export const BandMembersHubView: React.FC = () => {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '16px',
-          borderBottom: '1px solid #2E343D',
+          borderBottom: '1px solid var(--b-border)',
           paddingBottom: '16px',
         }}
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Users size={22} style={{ color: '#B8CF7A' }} />
+            <Users size={22} style={{ color: 'var(--b-success)' }} />
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>
               Integrantes & Matriz de Roles
             </h2>
           </div>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8E97A3' }}>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--b-muted)' }}>
             Gestiona los miembros de {activeBand?.name}, asigna roles y permisos de acceso para ensayo y show en vivo.
           </p>
         </div>
@@ -214,16 +214,16 @@ export const BandMembersHubView: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            background: '#B8CF7A',
+            background: 'var(--b-success)',
             border: 'none',
-            borderRadius: '4px',
+            borderRadius: 'var(--b-radius-field)',
             padding: '10px 18px',
-            color: '#15181C',
+            color: 'var(--b-on-strong)',
             fontFamily: "'IBM Plex Mono', monospace",
             fontSize: '12px',
             fontWeight: 700,
             cursor: canInvite ? 'pointer' : 'not-allowed',
-            boxShadow: '0 0 12px rgba(184, 207, 122, 0.3)',
+            boxShadow: '0 0 12px color-mix(in srgb, var(--b-success) 30%, transparent)',
           }}
         >
           <UserPlus size={16} />
@@ -235,12 +235,12 @@ export const BandMembersHubView: React.FC = () => {
       <div
         data-testid="role-guard-note"
         style={{
-          background: '#181B20',
-          border: '1px solid #2E343D',
-          borderRadius: '4px',
+          background: 'var(--b-input)',
+          border: '1px solid var(--b-border)',
+          borderRadius: 'var(--b-radius-field)',
           padding: '10px 14px',
           fontSize: '11px',
-          color: '#8E97A3',
+          color: 'var(--b-muted)',
           fontFamily: "'IBM Plex Mono', monospace",
           lineHeight: 1.5,
         }}
@@ -254,9 +254,9 @@ export const BandMembersHubView: React.FC = () => {
       <div
         data-testid="sharing-panel"
         style={{
-          background: '#1B1F24',
-          border: `1px solid ${isShared ? 'rgba(184, 207, 122, 0.4)' : '#2E343D'}`,
-          borderRadius: '6px',
+          background: 'var(--b-card)',
+          border: `1px solid ${isShared ? 'color-mix(in srgb, var(--b-success) 40%, transparent)' : 'var(--b-border)'}`,
+          borderRadius: 'var(--b-radius-card)',
           padding: '14px 16px',
           display: 'flex',
           flexDirection: 'column',
@@ -264,20 +264,20 @@ export const BandMembersHubView: React.FC = () => {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <Share2 size={16} style={{ color: isShared ? '#B8CF7A' : '#8E97A3' }} />
+          <Share2 size={16} style={{ color: isShared ? 'var(--b-success)' : 'var(--b-muted)' }} />
           <strong style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '1px' }}>
             {isShared ? `BANDA COMPARTIDA · TU ROL: ${activeBandRole ?? '-'}` : 'BANDA SOLO EN TU CUENTA'}
           </strong>
         </div>
         {isShared ? (
           <>
-            <p style={{ margin: 0, fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--b-muted)', lineHeight: 1.5 }}>
               Cada integrante entra al Hub con "Continuar con Google" usando el correo invitado y ve las mismas canciones y
               setlists. Bandait no envía correos: manda este enlace por el chat de la banda.
             </p>
             {sharing.activeLink && <InviteLinkBox key={sharing.activeLink} link={sharing.activeLink} />}
             {!sharing.activeCanEdit && (
-              <p style={{ margin: 0, fontSize: '12px', color: '#D9A24E', fontFamily: MONO }}>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--b-warning)', fontFamily: MONO }}>
                 Tu rol es de solo lectura: puedes estudiar el repertorio pero no editarlo.
               </p>
             )}
@@ -291,10 +291,10 @@ export const BandMembersHubView: React.FC = () => {
                   alignItems: 'center',
                   gap: '6px',
                   background: 'transparent',
-                  border: '1px solid #2E343D',
-                  borderRadius: '4px',
+                  border: '1px solid var(--b-border)',
+                  borderRadius: 'var(--b-radius-field)',
                   padding: '6px 12px',
-                  color: '#8E97A3',
+                  color: 'var(--b-muted)',
                   fontFamily: MONO,
                   fontSize: '11px',
                   cursor: 'pointer',
@@ -306,7 +306,7 @@ export const BandMembersHubView: React.FC = () => {
           </>
         ) : sharing.cloudSignedIn ? (
           <>
-            <p style={{ margin: 0, fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--b-muted)', lineHeight: 1.5 }}>
               Al compartirla, {activeBand?.name} pasa a la nube como banda propia: los integrantes de esta lista que tengan correo
               quedan invitados y podrás invitar a más. En el líder, vuelve a elegirla en Cuenta &gt; Elegir banda.
             </p>
@@ -321,11 +321,11 @@ export const BandMembersHubView: React.FC = () => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                background: '#7AA5D6',
+                background: 'var(--b-cobalt)',
                 border: 'none',
-                borderRadius: '4px',
+                borderRadius: 'var(--b-radius-field)',
                 padding: '8px 14px',
-                color: '#15181C',
+                color: 'var(--b-on-strong)',
                 fontFamily: MONO,
                 fontSize: '12px',
                 fontWeight: 700,
@@ -336,11 +336,11 @@ export const BandMembersHubView: React.FC = () => {
               <Share2 size={14} /> {shareBusy ? 'COMPARTIENDO...' : 'COMPARTIR BANDA'}
             </button>
             {sharing.available === false && sharing.error && (
-              <p style={{ margin: 0, fontSize: '11px', color: '#E8A49B', fontFamily: MONO }}>{sharing.error}</p>
+              <p style={{ margin: 0, fontSize: '11px', color: 'var(--b-danger-text)', fontFamily: MONO }}>{sharing.error}</p>
             )}
           </>
         ) : (
-          <p style={{ margin: 0, fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--b-muted)', lineHeight: 1.5 }}>
             Para compartir esta banda con otros integrantes entra con "Continuar con Google (nube)". Con un perfil local los
             datos viven solo en este navegador.
           </p>
@@ -362,11 +362,11 @@ export const BandMembersHubView: React.FC = () => {
           role="alert"
           data-testid="role-error"
           style={{
-            background: 'rgba(217, 100, 89, 0.12)',
-            border: '1px solid #D96459',
-            borderRadius: '4px',
+            background: 'color-mix(in srgb, var(--b-danger) 12%, transparent)',
+            border: '1px solid var(--b-danger)',
+            borderRadius: 'var(--b-radius-field)',
             padding: '10px 14px',
-            color: '#E8A49B',
+            color: 'var(--b-danger-text)',
             fontSize: '12px',
             fontFamily: "'IBM Plex Mono', monospace",
           }}
@@ -379,9 +379,9 @@ export const BandMembersHubView: React.FC = () => {
       <div
         className="touch-scroll-x"
         style={{
-          background: '#1B1F24',
-          border: '1px solid #2E343D',
-          borderRadius: '6px',
+          background: 'var(--b-card)',
+          border: '1px solid var(--b-border)',
+          borderRadius: 'var(--b-radius-card)',
           overflowX: 'auto',
           WebkitOverflowScrolling: 'touch',
         }}
@@ -390,11 +390,11 @@ export const BandMembersHubView: React.FC = () => {
           <thead>
             <tr
               style={{
-                borderBottom: '1px solid #2E343D',
-                background: '#232830',
+                borderBottom: '1px solid var(--b-border)',
+                background: 'var(--b-elevated)',
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: '10px',
-                color: '#8E97A3',
+                color: 'var(--b-muted)',
                 letterSpacing: '1px',
               }}
             >
@@ -413,25 +413,25 @@ export const BandMembersHubView: React.FC = () => {
                 key={member.id}
                 data-testid={`member-row-${member.id}`}
                 style={{
-                  borderBottom: '1px solid #2B313A',
-                  background: idx % 2 === 0 ? '#1B1F24' : '#1A1E23',
+                  borderBottom: '1px solid var(--b-hover)',
+                  background: idx % 2 === 0 ? 'var(--b-card)' : 'var(--b-surface)',
                 }}
               >
                 {/* NAME */}
                 <td style={{ padding: '14px 16px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: '#D5DAE0' }}>{member.name}</div>
-                  <div style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--b-text)' }}>{member.name}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
                     {member.email}
                   </div>
                 </td>
 
                 {/* INSTRUMENT */}
-                <td style={{ padding: '14px 16px', fontSize: '13px', color: '#D5DAE0', fontWeight: 600 }}>
+                <td style={{ padding: '14px 16px', fontSize: '13px', color: 'var(--b-text)', fontWeight: 600 }}>
                   {member.instrument}
                 </td>
 
                 {/* CONTACT */}
-                <td style={{ padding: '14px 16px', fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: '#8E97A3' }}>
+                <td style={{ padding: '14px 16px', fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: 'var(--b-muted)' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Mail size={11} /> {member.email}
@@ -454,11 +454,11 @@ export const BandMembersHubView: React.FC = () => {
                     aria-label={`Rol de ${member.name}`}
                     style={{
                       opacity: blockReason ? 0.55 : 1,
-                      background: '#232830',
-                      border: `1px solid ${roleColors[member.role] || '#2E343D'}`,
-                      borderRadius: '4px',
+                      background: 'var(--b-elevated)',
+                      border: `1px solid ${roleColors[member.role] || 'var(--b-border)'}`,
+                      borderRadius: 'var(--b-radius-field)',
                       padding: '6px 10px',
-                      color: roleColors[member.role] || '#D5DAE0',
+                      color: roleColors[member.role] || 'var(--b-text)',
                       fontFamily: "'IBM Plex Mono', monospace",
                       fontSize: '11px',
                       fontWeight: 700,
@@ -484,11 +484,11 @@ export const BandMembersHubView: React.FC = () => {
                       fontFamily: "'IBM Plex Mono', monospace",
                       fontSize: '10px',
                       whiteSpace: 'nowrap',
-                      color: isShared ? '#B8CF7A' : '#8E97A3',
-                      background: isShared ? 'rgba(184, 207, 122, 0.1)' : 'transparent',
-                      border: `1px solid ${isShared ? 'rgba(184, 207, 122, 0.3)' : '#2E343D'}`,
+                      color: isShared ? 'var(--b-success)' : 'var(--b-muted)',
+                      background: isShared ? 'color-mix(in srgb, var(--b-success) 10%, transparent)' : 'transparent',
+                      border: `1px solid ${isShared ? 'color-mix(in srgb, var(--b-success) 30%, transparent)' : 'var(--b-border)'}`,
                       padding: '2px 8px',
-                      borderRadius: '3px',
+                      borderRadius: 'var(--b-radius-field)',
                     }}
                   >
                     {isShared && <CheckCircle2 size={11} />}
@@ -506,10 +506,10 @@ export const BandMembersHubView: React.FC = () => {
                         alignItems: 'center',
                         gap: '4px',
                         background: 'transparent',
-                        border: '1px solid #2E343D',
-                        borderRadius: '3px',
+                        border: '1px solid var(--b-border)',
+                        borderRadius: 'var(--b-radius-field)',
                         padding: '2px 8px',
-                        color: '#E8A49B',
+                        color: 'var(--b-danger-text)',
                         fontFamily: MONO,
                         fontSize: '10px',
                         cursor: 'pointer',
@@ -529,19 +529,19 @@ export const BandMembersHubView: React.FC = () => {
       {/* PERMISSIONS MATRIX */}
       <div
         style={{
-          background: '#1B1F24',
-          border: '1px solid #2E343D',
-          borderRadius: '6px',
+          background: 'var(--b-card)',
+          border: '1px solid var(--b-border)',
+          borderRadius: 'var(--b-radius-card)',
           padding: '18px 20px',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-          <Shield size={16} style={{ color: '#7AA5D6' }} />
+          <Shield size={16} style={{ color: 'var(--b-cobalt)' }} />
           <h4 style={{ margin: 0, fontSize: '13px', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '1px' }}>
             MATRIZ DE PRIVILEGIOS POR ROL
           </h4>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', fontSize: '11px', color: '#8E97A3' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', fontSize: '11px', color: 'var(--b-muted)' }}>
           <div>• <strong>Owner / Director:</strong> Control total, edición de setlist, ruteo multicanal y borrado.</div>
           <div>• <strong>SoundEngineer:</strong> Ajuste de salidas ASIO, vúmetros y mezcla PA.</div>
           <div>• <strong>Musician:</strong> Control de mezcla personal in-ear y lectura de acordes.</div>
@@ -554,17 +554,17 @@ export const BandMembersHubView: React.FC = () => {
         <div
           data-testid="danger-zone"
           style={{
-            background: '#1B1F24',
-            border: '1px solid rgba(217, 100, 89, 0.4)',
-            borderRadius: '6px',
+            background: 'var(--b-card)',
+            border: '1px solid color-mix(in srgb, var(--b-danger) 40%, transparent)',
+            borderRadius: 'var(--b-radius-card)',
             padding: '14px 16px',
             display: 'flex',
             flexDirection: 'column',
             gap: '10px',
           }}
         >
-          <strong style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '1px', color: '#E8A49B' }}>ZONA DE PELIGRO</strong>
-          <p style={{ margin: 0, fontSize: '12px', color: '#8E97A3', lineHeight: 1.5 }}>
+          <strong style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '1px', color: 'var(--b-danger-text)' }}>ZONA DE PELIGRO</strong>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--b-muted)', lineHeight: 1.5 }}>
             {isShared
               ? `Borrar ${activeBand?.name ?? 'la banda'} la elimina para todos los integrantes. Si solo quieres dejar de verla, pásale el rol de Owner a otro integrante y sal de la banda.`
               : `Borrar ${activeBand?.name ?? 'la banda'} elimina sus canciones, setlists y equipos de tu cuenta. Exporta un JSON antes si quieres conservar una copia.`}
@@ -580,10 +580,10 @@ export const BandMembersHubView: React.FC = () => {
               alignItems: 'center',
               gap: '6px',
               background: 'transparent',
-              border: '1px solid #D96459',
-              borderRadius: '4px',
+              border: '1px solid var(--b-danger)',
+              borderRadius: 'var(--b-radius-field)',
               padding: '8px 14px',
-              color: '#E8A49B',
+              color: 'var(--b-danger-text)',
               fontFamily: MONO,
               fontSize: '12px',
               fontWeight: 700,
@@ -610,7 +610,7 @@ export const BandMembersHubView: React.FC = () => {
             left: 0,
             width: '100vw',
             height: '100vh',
-            background: 'rgba(0, 0, 0, 0.85)',
+            background: 'var(--b-overlay)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -621,9 +621,9 @@ export const BandMembersHubView: React.FC = () => {
         >
           <div
             style={{
-              background: '#20252B',
-              border: '1px solid #2E343D',
-              borderRadius: '8px',
+              background: 'var(--b-modal)',
+              border: '1px solid var(--b-border)',
+              borderRadius: 'var(--b-radius-card)',
               padding: 'clamp(16px, 4vw, 24px)',
               width: '100%',
               maxWidth: '440px',
@@ -644,7 +644,7 @@ export const BandMembersHubView: React.FC = () => {
                 </div>
               )}
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
                   NOMBRE COMPLETO
                 </label>
                 <input
@@ -655,11 +655,11 @@ export const BandMembersHubView: React.FC = () => {
                   required
                   style={{
                     width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
+                    background: 'var(--b-input)',
+                    border: '1px solid var(--b-border)',
+                    borderRadius: 'var(--b-radius-field)',
                     padding: '8px 10px',
-                    color: '#D5DAE0',
+                    color: 'var(--b-text)',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -667,7 +667,7 @@ export const BandMembersHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
                   CORREO ELECTRÓNICO (GOOGLE ACCOUNT)
                 </label>
                 <input
@@ -678,11 +678,11 @@ export const BandMembersHubView: React.FC = () => {
                   required
                   style={{
                     width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
+                    background: 'var(--b-input)',
+                    border: '1px solid var(--b-border)',
+                    borderRadius: 'var(--b-radius-field)',
                     padding: '8px 10px',
-                    color: '#D5DAE0',
+                    color: 'var(--b-text)',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -690,7 +690,7 @@ export const BandMembersHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
                   INSTRUMENTO O FUNCIÓN
                 </label>
                 <input
@@ -701,11 +701,11 @@ export const BandMembersHubView: React.FC = () => {
                   required
                   style={{
                     width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
+                    background: 'var(--b-input)',
+                    border: '1px solid var(--b-border)',
+                    borderRadius: 'var(--b-radius-field)',
                     padding: '8px 10px',
-                    color: '#D5DAE0',
+                    color: 'var(--b-text)',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -713,7 +713,7 @@ export const BandMembersHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: '#8E97A3', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
                   ROL ASIGNADO
                 </label>
                 <select
@@ -721,11 +721,11 @@ export const BandMembersHubView: React.FC = () => {
                   onChange={(e) => setInviteRole(e.target.value as MemberRole)}
                   style={{
                     width: '100%',
-                    background: '#181B20',
-                    border: '1px solid #2E343D',
-                    borderRadius: '4px',
+                    background: 'var(--b-input)',
+                    border: '1px solid var(--b-border)',
+                    borderRadius: 'var(--b-radius-field)',
                     padding: '8px 10px',
-                    color: '#D5DAE0',
+                    color: 'var(--b-text)',
                     marginTop: '4px',
                     boxSizing: 'border-box',
                   }}
@@ -755,10 +755,10 @@ export const BandMembersHubView: React.FC = () => {
                   onClick={() => setShowInviteModal(false)}
                   style={{
                     background: 'transparent',
-                    border: '1px solid #2E343D',
-                    color: '#8E97A3',
+                    border: '1px solid var(--b-border)',
+                    color: 'var(--b-muted)',
                     padding: '8px 16px',
-                    borderRadius: '4px',
+                    borderRadius: 'var(--b-radius-field)',
                     cursor: 'pointer',
                   }}
                 >
@@ -768,11 +768,11 @@ export const BandMembersHubView: React.FC = () => {
                   type="submit"
                   disabled={inviteBusy}
                   style={{
-                    background: '#B8CF7A',
+                    background: 'var(--b-success)',
                     border: 'none',
-                    color: '#15181C',
+                    color: 'var(--b-on-strong)',
                     padding: '8px 20px',
-                    borderRadius: '4px',
+                    borderRadius: 'var(--b-radius-field)',
                     fontWeight: 700,
                     cursor: inviteBusy ? 'wait' : 'pointer',
                     opacity: inviteBusy ? 0.6 : 1,

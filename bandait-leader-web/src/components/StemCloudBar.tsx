@@ -87,7 +87,7 @@ export const StemCloudBar: React.FC<Props> = (props) => {
             fontSize: '11px',
             fontWeight: 700,
             padding: '2px 8px',
-            borderRadius: '3px',
+            borderRadius: 'var(--b-radius-field)',
             background: tone.bg,
             color: tone.fg,
             border: `1px solid ${tone.border}`,

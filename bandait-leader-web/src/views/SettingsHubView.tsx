@@ -1,17 +1,19 @@
 import React, { useState } from 'react'
-import { Mic, Radio, Settings } from 'lucide-react'
+import { Mic, Palette, Radio, Settings } from 'lucide-react'
 import { VoiceHubView } from './VoiceHubView'
 import { EquipmentHubView } from './EquipmentHubView'
-import { colors, mono } from '../components/hubStyles'
+import { AppearanceSettings } from '../components/AppearanceSettings'
+import { colors, mono, radius } from '../components/hubStyles'
 
-export type SettingsSection = 'voice' | 'equipment'
+export type SettingsSection = 'voice' | 'equipment' | 'appearance'
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: React.ReactNode; accent: string }> = [
   { id: 'voice', label: 'VOZ Y CONTEOS', icon: <Mic size={14} />, accent: colors.cyan },
   { id: 'equipment', label: 'EQUIPAMIENTO', icon: <Radio size={14} />, accent: colors.warning },
+  { id: 'appearance', label: 'APARIENCIA', icon: <Palette size={14} />, accent: colors.orange },
 ]
 
-/** AJUSTES: agrupa VOZ Y CONTEOS y EQUIPAMIENTO, como en el lider 2.3. */
+/** AJUSTES: agrupa VOZ Y CONTEOS, EQUIPAMIENTO (como en el lider 2.3) y APARIENCIA (Web 3.0). */
 export const SettingsHubView: React.FC = () => {
   const [section, setSection] = useState<SettingsSection>('voice')
 
@@ -45,7 +47,7 @@ export const SettingsHubView: React.FC = () => {
                   alignItems: 'center',
                   gap: '6px',
                   padding: '7px 12px',
-                  borderRadius: '4px',
+                  borderRadius: radius.control,
                   border: `1px solid ${active ? s.accent : colors.border}`,
                   background: active ? colors.elevated : 'transparent',
                   color: active ? colors.text : colors.muted,
@@ -62,7 +64,7 @@ export const SettingsHubView: React.FC = () => {
           })}
         </div>
       </div>
-      {section === 'voice' ? <VoiceHubView /> : <EquipmentHubView />}
+      {section === 'voice' ? <VoiceHubView /> : section === 'equipment' ? <EquipmentHubView /> : <AppearanceSettings />}
     </div>
   )
 }

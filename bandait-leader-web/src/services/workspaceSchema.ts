@@ -26,6 +26,7 @@ import type {
   WorkspaceStore,
 } from '../types/hub.ts'
 import { isWorkspaceShape } from '../types/hub.ts'
+import { uiPreferencesWarnings } from './appearance.ts'
 
 export const SCHEMA_VERSION = 2
 
@@ -598,6 +599,8 @@ export function validateWorkspace(value: unknown): ValidationResult {
   const voiceMap = isPlainObject(ws.voiceMap) ? ws.voiceMap : null
   if (!songsMap) errors.push('songsMap: falta o no es un objeto.')
   if (!voiceMap) errors.push('voiceMap: falta o no es un objeto.')
+  // Apariencia (opcional, seccion 8): nunca bloquea una importacion; lo danado se lee por defecto.
+  warnings.push(...uiPreferencesWarnings((ws as unknown as Record<string, unknown>).uiPreferences))
 
   const songIdsByBand = new Map<string, Set<string>>()
   const seenAcrossBands = new Map<string, string>()
