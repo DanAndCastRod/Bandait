@@ -77,6 +77,7 @@ import { STUDIO_MAX_TITLE } from '../services/studio/session'
 import type { CommandContext, Keymap } from '../services/studio/types'
 import * as studioCloud from '../services/studio/studioCloud'
 import * as studioStore from '../services/studio/studioStore'
+import { readStudioPrefs, shouldStopRecordingOnLeave } from '../services/studio/studioPrefs'
 import type { Song } from '../types/hub'
 import '../styles/studio.css'
 
@@ -720,6 +721,15 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
 
   // Salir de la pestana ya no cierra nada: motor, grabador y contexto de audio los libera el audio
   // global (context/GlobalAudioContext.tsx) al cerrar la sesion, al cambiar de banda o de usuario.
+  // Una toma en curso sigue grabando salvo que AJUSTES > ESTUDIO pida detenerla al salir
+  // (services/studio/studioPrefs.ts); detenerla deja lo grabado como clip, igual que REC.
+  useEffect(
+    () => () => {
+      const current = controllerRef.current
+      if (current && shouldStopRecordingOnLeave(readStudioPrefs(), current.snapshot().recording)) void current.stopRecording()
+    },
+    []
+  )
 
   const launch = (opened: OpenedSession, importStemsOf: string | null) => {
     const next = new StudioController({

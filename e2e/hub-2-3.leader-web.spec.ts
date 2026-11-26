@@ -76,7 +76,8 @@ test.describe('Web Admin Hub 2.3 - navegacion', () => {
 
     await openView(page, 'settings');
     await expect(page.getByTestId('tab-settings')).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO', 'APARIENCIA']);
+    // ESTUDIO solo aparece con el interruptor del Estudio (encendido en esta compilacion de pruebas).
+    await expect(page.getByRole('tab')).toHaveText(['VOZ Y CONTEOS', 'EQUIPAMIENTO', 'ESTUDIO', 'APARIENCIA']);
     await expect(page.getByRole('heading', { name: 'Voz y Conteos' })).toBeVisible();
     await page.getByRole('tab', { name: 'EQUIPAMIENTO' }).click();
     await expect(page.getByRole('tab', { name: 'EQUIPAMIENTO' })).toHaveAttribute('aria-selected', 'true');

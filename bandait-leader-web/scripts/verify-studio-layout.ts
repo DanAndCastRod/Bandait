@@ -27,6 +27,7 @@ import {
 import { EDGE_SCROLL_MAX_PX, EDGE_SCROLL_ZONE_PX, edgeScrollSpeed } from '../src/services/studio/timelineMath.ts'
 import { BROWSER_RESERVED_SHORTCUTS, STUDIO_COMMAND_SPECS, createStudioRegistry, defaultKeymap, findConflicts, findCommandSpec } from '../src/services/studio/commands.ts'
 import { midiClipMutedFlag } from '../src/services/studio/chatContext.ts'
+import { defaultStudioPrefs, parseStudioPrefs, shouldStopRecordingOnLeave } from '../src/services/studio/studioPrefs.ts'
 import { buildSessionSummary } from '../src/services/studio/jobs.ts'
 import { sessionSummaryToWire } from '../src/services/studio/studioCloud.ts'
 import { parseSession } from '../src/services/studio/session.ts'
@@ -194,6 +195,32 @@ check('el resumen que viaja marca el clip MIDI silenciado del fixture y no toca 
 check('contrato: STUDIO_V2.md documenta `muted` en midi_clips del resumen', () => {
   const contract = read('../../bandait-protocol/STUDIO_V2.md')
   assert.match(contract, /"digest" \(opcional\), "muted" \(opcional\)/)
+})
+
+console.log('Grabacion al salir del Estudio (AJUSTES > ESTUDIO)')
+
+check('por defecto la toma sigue grabando al salir (decision de Daniel Castaneda)', () => {
+  assert.equal(defaultStudioPrefs().recordingOnLeave, 'continue')
+  assert.equal(shouldStopRecordingOnLeave(defaultStudioPrefs(), true), false)
+})
+
+check('lectura tolerante: JSON danado, null o valores desconocidos dan el valor por defecto', () => {
+  for (const raw of [null, undefined, '', '{', '[]', 42, { recordingOnLeave: 'pause' }, JSON.stringify({ recordingOnLeave: 7 })]) {
+    assert.deepEqual(parseStudioPrefs(raw), defaultStudioPrefs())
+  }
+  assert.equal(parseStudioPrefs(JSON.stringify({ recordingOnLeave: 'stop' })).recordingOnLeave, 'stop')
+  assert.equal(parseStudioPrefs({ recordingOnLeave: 'continue', extra: true }).recordingOnLeave, 'continue')
+})
+
+check('con "detener" solo se detiene si hay una toma en curso', () => {
+  const stop = parseStudioPrefs({ recordingOnLeave: 'stop' })
+  assert.equal(shouldStopRecordingOnLeave(stop, true), true)
+  assert.equal(shouldStopRecordingOnLeave(stop, false), false)
+})
+
+check('la vista del Estudio aplica la preferencia al desmontarse', () => {
+  const view = read('../src/views/StudioHubView.tsx')
+  assert.match(view, /shouldStopRecordingOnLeave\(readStudioPrefs\(\), current\.snapshot\(\)\.recording\)\) void current\.stopRecording\(\)/)
 })
 
 console.log(`\n${passed} ok, ${failures.length} fallas`)
