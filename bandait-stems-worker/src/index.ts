@@ -17,6 +17,7 @@
 //   *      /v1/bands/{band}/studio/...                   Estudio: see src/studio.ts
 //   POST   /mcp                                          operator MCP (src/mcp.ts), Bearer from MCP_TOKENS
 //   cron   scheduled()                                   daily: drops Estudio events older than 30 days
+//          and sweeps orphan Estudio audios (src/studioCleanup.ts)
 //
 // {band} is a shared band uuid, or "me" for the caller's personal workspace (only the
 // caller can read or write it). Upload the files first, then the manifest: the
@@ -27,10 +28,11 @@ import { ASSEMBLER_VERSION, assemble } from './analysis.ts';
 import type { MusicAiResult } from './analysis.ts';
 import { assertSpender, defaultStudioDeps, studioRoute, tokenSubject } from './studio.ts';
 import { purgeEvents } from './events.ts';
+import { sweepOrphans } from './studioCleanup.ts';
 import { handleMcp } from './mcp.ts';
 import type { Env, ExecutionContextLike, FetchLike, R2Bucket, ScheduledControllerLike, StudioDeps } from './types.ts';
 
-export const VERSION = '1.3.0';
+export const VERSION = '1.4.0';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SONG = /^[A-Za-z0-9_-]{1,80}$/;
 const FILE = /^[A-Za-z0-9 ._()-]{1,120}$/;
@@ -544,11 +546,21 @@ export async function handle(
   return res;
 }
 
-/** Cron diario (wrangler.jsonc, `triggers.crons`): borra los eventos de mas de 30 dias. */
+/**
+ * Cron diario (wrangler.jsonc, `triggers.crons`): borra los eventos de mas de 30 dias (hasta 40
+ * operaciones de R2) y despues barre los audios huerfanos del Estudio (hasta 860, con cursor para
+ * seguir al dia siguiente; src/studioCleanup.ts). Un fallo en uno no impide el otro.
+ */
 export async function scheduled(controller: ScheduledControllerLike, env: Env, ctx?: ExecutionContextLike): Promise<void> {
-  const run = purgeEvents(env, new Date(controller.scheduledTime || Date.now())).then(() => {}, (err: unknown) => {
-    console.warn(`studio events: fallo la retencion (${err instanceof Error ? err.name : 'error'})`);
-  });
+  const now = new Date(controller.scheduledTime || Date.now());
+  const run = (async () => {
+    await purgeEvents(env, now).catch((err: unknown) => {
+      console.warn(`studio events: fallo la retencion (${err instanceof Error ? err.name : 'error'})`);
+    });
+    await sweepOrphans(env, { now: () => now, waitUntil: ctx ? (p) => ctx.waitUntil(p) : undefined }).catch((err: unknown) => {
+      console.warn(`studio cleanup: fallo el barrido de huerfanos (${err instanceof Error ? err.name : 'error'})`);
+    });
+  })();
   if (ctx) ctx.waitUntil(run);
   await run;
 }

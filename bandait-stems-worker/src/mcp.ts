@@ -16,6 +16,7 @@
 
 import { VERSION } from './index.ts';
 import { readLimited } from './studio.ts';
+import { cleanupScope } from './studioCleanup.ts';
 import { DEFAULT_RATES, globalBudget, monthlyBudget } from './studioJobs.ts';
 import { ID_RE } from './studioSession.ts';
 import { EVENTS_PREFIX, EVENT_RETENTION_DAYS, OpBudget, cleanText, eventDays, sanitizeDetail } from './events.ts';
@@ -30,8 +31,9 @@ const OPS_PER_CALL = 45;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const DATE = '^\\d{4}-\\d{2}-\\d{2}$';
 const MONTH = '^\\d{4}-\\d{2}$';
-const KINDS = ['master', 'separate', 'generate', 'assist', 'compose', 'analyze', 'chat'];
-const PROVIDERS = ['musicai', 'lyria', 'suno', 'urit', 'gemini', 'anthropic'];
+/** `cleanup` / `r2`: limpieza de audios huerfanos (src/studioCleanup.ts). */
+const KINDS = ['master', 'separate', 'generate', 'assist', 'compose', 'analyze', 'chat', 'cleanup'];
+const PROVIDERS = ['musicai', 'lyria', 'suno', 'urit', 'gemini', 'anthropic', 'r2'];
 const STATUSES = ['SUCCEEDED', 'FAILED', 'REJECTED', 'TRANSIENT'];
 const TRUNCATED_NOTICE = 'Respuesta incompleta: se alcanzo el tope de operaciones de R2 de una invocacion (plan gratuito). Acota el pedido (banda, fechas, limite) y vuelve a preguntar.';
 
@@ -125,6 +127,8 @@ function publicEvent(raw: unknown): Record<string, unknown> | null {
     at: s(e.at, 40), band: s(e.band), session: s(e.session), job: s(e.job), kind: s(e.kind, 20), provider: s(e.provider, 20),
     status: s(e.status, 20), http: num(e.http), provider_code: s(e.provider_code, 60), provider_detail: sanitizeDetail(e.provider_detail),
     urit_request_id: s(e.urit_request_id, 80), model: s(e.model, 80), duration_ms: num(e.duration_ms), cost_usd: num(e.cost_usd),
+    // Solo los eventos de limpieza de huerfanos traen cuantos audios y bytes se borraron.
+    ...(num(e.objects) !== null ? { objects: num(e.objects), bytes: num(e.bytes), trigger: s(e.trigger, 20) } : {}),
   };
 }
 
@@ -234,6 +238,9 @@ const CODES: Record<string, CodeInfo> = {
   job_failed: { http: null, donde: 'evento FAILED', cuando: 'el trabajo termino FAILED sin codigo del proveedor (respuesta ilegible, sin notas, Music AI FAILED); el texto esta en bandait_trabajo_ver', secciones: ['STUDIO_V1.md 6.5'] },
   job_gone: { http: 404, donde: 'evento FAILED', cuando: 'Music AI ya no tiene el trabajo', secciones: ['STUDIO_V1.md 6.5'] },
   incomplete: { http: null, donde: 'evento FAILED', cuando: 'el POST se corto antes de tener id del proveedor y pasaron 10 minutos; el costo queda anotado', secciones: ['STUDIO_V1.md 6.5'] },
+  session_unreadable: { http: null, donde: 'evento FAILED de cleanup; blocked de .../studio/_cleanup', cuando: 'la limpieza de huerfanos no pudo leer un session.json (o R2 fallo al listar): no se borro nada de esa banda', secciones: ['STUDIO_V2.md 3.1'] },
+  delete_failed: { http: null, donde: 'evento FAILED de cleanup', cuando: 'R2 fallo al borrar un lote de audios huerfanos; objects dice cuantos se alcanzaron a borrar', secciones: ['STUDIO_V2.md 3.1'] },
+  budget: { http: null, donde: 'evento FAILED de cleanup (cron)', cuando: 'una banda no cabe en el tope de operaciones del barrido diario y se salto; limpiarla con POST .../studio/_cleanup', secciones: ['STUDIO_V2.md 3.1'] },
   poll_http: { http: null, donde: 'evento TRANSIENT', cuando: 'el sondeo a Music AI respondio un error HTTP; el trabajo sigue en STARTED', secciones: ['STUDIO_V1.md 6.5'] },
   poll_network: { http: null, donde: 'evento TRANSIENT', cuando: 'el sondeo a Music AI no tuvo respuesta; el trabajo sigue en STARTED', secciones: ['STUDIO_V1.md 6.5'] },
   poll_unreadable: { http: null, donde: 'evento TRANSIENT', cuando: 'Music AI respondio un cuerpo ilegible al sondear', secciones: ['STUDIO_V1.md 6.5'] },
@@ -616,6 +623,24 @@ const TOOLS: Tool[] = [
             .map((o) => o.key.slice(`${base}jobs/`.length).replace(/\.json$/, '')),
         },
         ...truncation(truncated),
+      };
+    },
+  },
+  {
+    name: 'bandait_huerfanos',
+    title: 'Audios huerfanos del Estudio',
+    description: 'Cuantos audios del Estudio de una banda son huerfanos (ningun session.json los nombra, ningun trabajo en curso los usa y tienen mas de 2 horas) y cuantos bytes ocupan. Solo lectura: no borra nada (la limpieza la hace el cron diario, el guardado de una sesion o POST .../studio/_cleanup).',
+    properties: { band: { type: 'string', description: 'uuid de la banda, "bands/<uuid>" o "users/<uuid>".' } },
+    required: ['band'],
+    run: async (ctx, args) => {
+      const scope = scopeOf(str(args, 'band'));
+      const report = await cleanupScope(ctx.env, ctx.deps, `${scope}/studio/`, ctx.budget, { remove: false, trigger: 'mcp' });
+      return {
+        band: scope, huerfanos: report.orphans, bytes: report.bytes, sesiones: report.sessions,
+        sesiones_protegidas: report.protected_sessions,
+        bloqueado: report.status === 'error' ? 'session_unreadable' : null,
+        ...(report.status === 'error' ? { sesion_ilegible: report.error_session } : {}),
+        ...truncation(report.status === 'budget'),
       };
     },
   },

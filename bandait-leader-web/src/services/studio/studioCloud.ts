@@ -9,6 +9,8 @@
  *   GET    /v1/bands/{band}/studio/{session}/assets/{asset}     integrante
  *   POST   /v1/bands/{band}/studio/{session}/jobs[?estimate=1]  Owner / MusicDirector
  *   GET    /v1/bands/{band}/studio/{session}/jobs/{job}         integrante
+ *   GET    /v1/bands/{band}/studio/_cleanup                     integrante (audios sin usar, no borra)
+ *   POST   /v1/bands/{band}/studio/_cleanup                     Owner / MusicDirector (los borra)
  *
  * Es la frontera snake_case <-> camelCase de los trabajos de IA (el documento de sesion lo
  * traduce session.ts). Mismo patron que stemCloud.ts: la URL, el token y `fetch` llegan en el
@@ -61,7 +63,9 @@ import type {
   StudioAnalysisMarker,
   StudioChatMessage,
   StudioChatToolCall,
+  StudioCleanupReport,
   StudioCloudApi,
+  StudioCloudCleanupApi,
   StudioCloudJobsV2Api,
   StudioJobAsset,
   StudioJobEstimate,
@@ -330,6 +334,47 @@ export async function deleteSession(target: CloudTarget, sessionId: string): Pro
   } catch {
     return 0
   }
+}
+
+// ---------------------------------------------------------------------------
+// Limpieza de audios sin usar (STUDIO_V2.md 3.1)
+// ---------------------------------------------------------------------------
+
+function count(value: unknown): number {
+  return finite(value) && value >= 0 ? Math.floor(value) : 0
+}
+
+export function parseCleanupReport(raw: unknown, status: number): StudioCleanupReport {
+  if (!isObject(raw) || !finite(raw.orphans) || !finite(raw.bytes)) throw studioError('bad_response', status)
+  const blocked = raw.blocked === 'session_unreadable' || raw.blocked === 'incomplete' ? raw.blocked : null
+  return {
+    orphans: count(raw.orphans),
+    bytes: count(raw.bytes),
+    sample: Array.isArray(raw.sample) ? raw.sample.filter((s): s is string => typeof s === 'string').slice(0, 20) : [],
+    sessions: count(raw.sessions),
+    protectedSessions: count(raw.protected_sessions),
+    complete: raw.complete === true && blocked === null,
+    blocked,
+    deleted: count(raw.deleted),
+    deletedBytes: count(raw.deleted_bytes),
+  }
+}
+
+async function cleanupCall(target: CloudTarget, method: 'GET' | 'POST'): Promise<StudioCleanupReport> {
+  const headers = await auth(target)
+  const res = await request(target, `${studioUrl(target)}/_cleanup`, { method, headers, cache: 'no-store' })
+  if (!res.ok) throw await failure(res)
+  return parseCleanupReport(await jsonBody(res), res.status)
+}
+
+/** `GET .../studio/_cleanup`: cuantos audios sin usar hay en la nube de la banda. No borra nada. */
+export function inspectOrphans(target: CloudTarget): Promise<StudioCleanupReport> {
+  return cleanupCall(target, 'GET')
+}
+
+/** `POST .../studio/_cleanup`: borra los audios sin usar. Solo Owner o Director musical. */
+export function cleanOrphans(target: CloudTarget): Promise<StudioCleanupReport> {
+  return cleanupCall(target, 'POST')
 }
 
 // ---------------------------------------------------------------------------
@@ -948,6 +993,8 @@ export function watchJobV2(
 }
 
 void ({ startJobV2, estimateJobV2, getJobV2, watchJobV2 } satisfies StudioCloudJobsV2Api)
+
+void ({ inspectOrphans, cleanOrphans } satisfies StudioCloudCleanupApi)
 
 void ({
   studioUrl,

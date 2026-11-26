@@ -308,7 +308,8 @@ El Worker valida el documento con las reglas de la sección 2 (400 `bad_session`
 ser igual a `{session}` (400 `bad_session`). Cada audio de `assets` debe existir en
 `assets/<file>` con ese `size`: si no, 409 `missing_asset`. Luego pone `updated_at` (hora del
 Worker) y `updated_by` (el `sub` del token), guarda y responde el documento guardado con su
-`ETag`. Guardar el documento **no** borra audios que dejaron de estar listados.
+`ETag`. Guardar el documento **no** borra audios que dejaron de estar listados. (Desde el Worker
+1.4.0, después de responder corre una limpieza de huérfanos de más de 2 horas: STUDIO_V2.md 3.1.)
 
 Ante un 412 el Hub no pisa nada: avisa que otra persona guardó, y ofrece recargar o guardar
 como copia (sesión nueva con otro id).

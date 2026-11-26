@@ -28,7 +28,8 @@
     { "binding": "STEMS", "bucket_name": "bandait-stems" }
   ],
   // Una vez al dia (04:17 UTC): el handler `scheduled` borra los eventos del Estudio
-  // (studio/_events/AAAA-MM-DD/) de mas de 30 dias. Ver src/events.ts.
+  // (studio/_events/AAAA-MM-DD/) de mas de 30 dias (src/events.ts) y barre los audios huerfanos
+  // del Estudio, con cursor en studio/_cleanup/cursor.json (src/studioCleanup.ts).
   "triggers": { "crons": ["17 4 * * *"] },
   "vars": {
     "SUPABASE_URL": "https://xftzxzwopwzjmttrwtga.supabase.co",

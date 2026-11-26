@@ -2066,6 +2066,33 @@ export interface StudioJobEstimateV2 extends Omit<StudioJobEstimate, 'kind'> {
   listen?: boolean
 }
 
+/**
+ * Respuesta de `GET`/`POST .../studio/_cleanup` (STUDIO_V2.md 3.1): audios de la nube que ninguna
+ * sesion usa, ningun trabajo en curso necesita y tienen mas de 2 horas.
+ */
+export interface StudioCleanupReport {
+  orphans: number
+  bytes: number
+  /** Hasta 20 `<session>/<archivo>` de muestra. */
+  sample: string[]
+  sessions: number
+  /** Sesiones saltadas por un trabajo en curso. */
+  protectedSessions: number
+  /** false: no se pudo revisar todo y no se borro nada (ver `blocked`). */
+  complete: boolean
+  blocked: 'session_unreadable' | 'incomplete' | null
+  /** Solo en la limpieza (POST); en la inspeccion, 0. */
+  deleted: number
+  deletedBytes: number
+}
+
+export interface StudioCloudCleanupApi {
+  /** Cuenta los audios huerfanos de la banda sin borrar nada. Cualquier integrante. */
+  inspectOrphans(target: CloudTarget): Promise<StudioCleanupReport>
+  /** Borra los audios huerfanos. Solo Owner o Director musical (403 not_an_editor). */
+  cleanOrphans(target: CloudTarget): Promise<StudioCleanupReport>
+}
+
 export interface StudioCloudJobsV2Api {
   /** Como startJob, con los kind de v2. `chat` admite un cuerpo de hasta 192 KB. */
   startJobV2(target: CloudTarget, sessionId: string, request: StudioJobRequestV2, jobId?: string): Promise<StudioJobStateV2>
