@@ -1854,5 +1854,24 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - `bandait-follower`: `npm run lint && npx vitest run && npm run build` -> `140/140` pruebas aprobadas, build PWA limpio.
   - `npm run test:rls`: políticas RLS de Supabase verificadas en verde.
   - Playwright E2E (`npx playwright test --project=leader-web`): `83/83` pruebas aprobadas (`81` existentes + `2` nuevas en `e2e/ola3.leader-web.spec.ts`).
-  - `landing/`: regenerado con `npm run build:landing` y cabeceras `/hub/*` añadidas en `landing/_headers`.
-
+  - `landing/`: `landing/hub` regenerado con `npm run build:landing -- hub` y cabeceras `/hub/*` añadidas en `landing/_headers` (`landing/app` se mantuvo intacto para no invalidar el caché SW del Follower ni tocar finales de línea sin cambios de código).
+  - **CI de GitHub y fusión a `main`:** commit `fbf1ac8e`, **PR #61** fusionado a `main` (`693c356c`, `2026-11-27T12:28:07Z`) con los `5/5` checks en verde (`Cloudflare Pages`, `Web Admin Hub`, `Stems Worker (R2)`, `Follower (PWA)`, `Leader (Python)`).
+* **Invariantes detectadas y resueltas durante E2E (no revertir):**
+  1. `StudioClipActionBar.tsx` debe montarse con `position: absolute` dentro de `.stu-tl-wrap` (`right: 12px; bottom: 10px`): ponerla en flujo normal desplazaba `38 px` verticalmente `studio-canvas` al deseleccionar un clip al inicio de un arrastre de rectángulo (`e2e/studio-v2.leader-web.spec.ts`).
+  2. La subida inmediata de sesiones nuevas a R2 y el auto-guardado en nube debounced (`2500 ms`) están acotados a bandas compartidas (`band !== 'me'`): en el espacio personal (`me`), el texto de estado tras pulsar `GUARDAR` sigue siendo literalmente `'GUARDADO EN LA NUBE'` y solo sube bajo petición explícita (`e2e/studio.leader-web.spec.ts`).
+* **Estado de Producción y Relevo para Agente en Local (`Pendiente único: desplegar Worker 1.5.0`):**
+  - **Cloudflare Pages (`https://bandait.releven.cc/hub/`):** **YA EN PRODUCCIÓN** (`completed / success` sobre `693c356c`). Todo el Hub Web 3.0 Ola 3 (DSP matemático local, `Auto-Master`, `SetlistOptimizer`, humanización analógica, VCS local/Supabase, modo `LAB`, 5 superficies móviles y 5 widgets) ya está publicado.
+  - **Cloudflare Worker `bandait-stems` (`https://bandait-stems.oooglue.workers.dev`):** **PENDIENTE DE DESPLEGAR DESDE LOCAL (`1.4.1` en vivo -> `1.5.0` en `main`)**. El entorno remoto del agente anterior (Antigravity VM) no monta el secreto `CLOUDFLARE_API_TOKEN` de ClipVault (`releven-deploy-cloudflare-api-key`). Mientras el Worker siga en `1.4.1`, el Hub degrada limpiamente a IndexedDB local, pero en R2 los roles `Musician` / `SoundEngineer` aún recibirán `403 not_an_editor` al escribir sesiones/audios del Estudio y las rutas `GET/POST .../vcs` y `GET .../commits/{commit}` responderán `404 not_found`.
+  - **Pasos exactos para el siguiente agente en local:**
+    1. Verificar conexión fuera de red con inspección TLS corporativa (`Grupo Bios CA` intercepta `api.cloudflare.com` con `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`; ver entrada `[2026-11-26]`).
+    2. Sincronizar `main` y desplegar el Worker con `CLOUDFLARE_API_TOKEN` tomado de ClipVault (`releven-deploy-cloudflare-api-key`, nunca imprimir su valor):
+       ```bash
+       git pull origin main
+       cd bandait-stems-worker
+       npm test && npx tsc --noEmit
+       npx wrangler deploy
+       ```
+    3. Confirmar salud y contrato en vivo:
+       - `curl -s https://bandait-stems.oooglue.workers.dev/v1/health` -> debe devolver `{"ok":true,"version":"1.5.0"}` y mantener el cron diario `17 4 * * *`.
+       - Si el MCP `bandait` está activo (`bandait-mcp-token`), verificar `bandait_salud` (`version: "1.5.0"`) y `bandait_contrato` (`codigo: "vcs_conflict"` -> `http: 412`).
+    4. Registrar el UUID de versión de Cloudflare y la salida de `/v1/health` cerrando este pendiente en `DEVLOG.md` y en `docs/PLAN_ESTUDIO_COLABORATIVO_DSP_IO_MOVIL.md`.
