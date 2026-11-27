@@ -51,12 +51,14 @@ import {
   normalizeNotes,
   quantize,
   humanize,
+  humanizeClipContext,
   removeNotes,
   resizeNotes,
   setVelocity,
   splitNotesAt,
   transpose,
 } from '../../services/studio/midiOps'
+import { applyGrooveTemplate, describeGroove, grooveFromAudio, type GrooveGrid, type StudioGrooveTemplate } from '../../services/studio/groove'
 import { computePeaks, peaksHaveRms, PEAKS_BASE_BUCKET } from '../../services/studio/peaks'
 import { StudioRecorder } from '../../services/studio/recorder'
 import { midiClipExportNotes, parseSmf, SMF_DRUM_CHANNEL, writeSmf } from '../../services/studio/smf'
@@ -155,6 +157,7 @@ import type {
   EngineLoadProgress,
   EngineState,
   HumanizeOptions,
+  HumanizePresetId,
   LoopRegionS,
   MidiAccessStatus,
   MidiEditResult,
@@ -287,6 +290,10 @@ export interface PianoRollState {
   quantizeStrength: number
   /** Intensidad de humanizacion (tiempo, velocidad y duracion), 0..1. */
   humanizeAmount: number
+  /** Ultimo preset de humanizacion elegido en el popover (lo usa tambien H en la linea de tiempo). */
+  humanizePreset: HumanizePresetId | null
+  /** Plantilla de groove tomada de un clip de audio (en memoria, no viaja en la sesion). */
+  groove: StudioGrooveTemplate | null
   /** Largo de la nota que dibuja la herramienta de dibujar, en beats (el ultimo usado). */
   drawLength: number
 }
@@ -869,7 +876,7 @@ export class StudioController {
       selectedTrackId: null,
       editor: 'timeline',
       pianoClipId: null,
-      piano: { tool: 'draw', grid: '1/16', triplets: false, snap: true, selection: [], quantizeStrength: 1, humanizeAmount: 0.4, drawLength: 0.25 },
+      piano: { tool: 'draw', grid: '1/16', triplets: false, snap: true, selection: [], quantizeStrength: 1, humanizeAmount: 0.4, humanizePreset: null, groove: null, drawLength: 0.25 },
       midi: {
         access: midiSupported() ? 'prompt' : 'unsupported',
         devices: [],
@@ -1746,13 +1753,28 @@ export class StudioController {
     this.editNotes('Cuantizar notas', (notes, length) => (notes.length === 0 ? null : quantize(notes, selection, { grid, triplets, strength: quantizeStrength }, length)))
   }
 
+  /**
+   * Opciones por defecto de humanizar (boton del piano roll y H en la linea de tiempo): el ultimo
+   * preset elegido en el popover con la intensidad del deslizador.
+   */
+  private defaultHumanizeOptions(): HumanizeOptions {
+    const { humanizeAmount, humanizePreset } = this.snap.piano
+    return { amount: humanizeAmount, ...(humanizePreset ? { preset: humanizePreset } : {}) }
+  }
+
+  /** Recuerda el preset elegido en el popover (para H y el boton rapido). */
+  setHumanizePreset(preset: HumanizePresetId | null): void {
+    this.setPiano({ humanizePreset: preset })
+  }
+
   humanizeNotes(options?: HumanizeOptions): void {
-    const { humanizeAmount } = this.snap.piano
-    const opts: HumanizeOptions = options ?? { amount: humanizeAmount, beatsPerBar: this.snap.session.beatsPerBar }
+    const opts: HumanizeOptions = options ?? this.defaultHumanizeOptions()
     const selection = this.selectionOrAll()
-    this.editNotes('Humanizar notas', (notes, length) =>
-      notes.length === 0 ? null : humanize(notes, selection, { ...opts, beatsPerBar: opts.beatsPerBar ?? this.snap.session.beatsPerBar }, length),
-    )
+    const loc = this.pianoClip()
+    if (!loc) return
+    // Fase del clip en la sesion, tempo (ms -> beats), compas y bateria por instrumento.
+    const context = humanizeClipContext(this.snap.session, loc)
+    this.editNotes('Humanizar notas', (notes, length) => (notes.length === 0 ? null : humanize(notes, selection, { ...context, ...opts }, length)))
   }
 
   legatoNotes(): void {
@@ -1879,8 +1901,7 @@ export class StudioController {
       this.notify('info', 'Humanizar actúa sobre clips MIDI: elígelos en la línea de tiempo o abre uno en el piano roll.')
       return
     }
-    const { humanizeAmount } = this.snap.piano
-    const opts: HumanizeOptions = options ?? { amount: humanizeAmount, beatsPerBar: this.snap.session.beatsPerBar }
+    const opts: HumanizeOptions = options ?? this.defaultHumanizeOptions()
     this.run(midiIds.length === 1 ? 'Humanizar clip MIDI' : `Humanizar ${midiIds.length} clips MIDI`, (session) => {
       let next = session
       for (const clipId of midiIds) {
@@ -1888,8 +1909,112 @@ export class StudioController {
         if (!loc) continue
         next = updateMidiClip(next, {
           clipId,
-          patch: { notes: humanize(loc.clip.notes, null, { ...opts, beatsPerBar: opts.beatsPerBar ?? next.beatsPerBar }, loc.clip.lengthBeats).notes },
+          patch: { notes: humanize(loc.clip.notes, null, { ...humanizeClipContext(next, loc), ...opts }, loc.clip.lengthBeats).notes },
         })
+      }
+      return next
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // Groove de la banda: plantilla tomada de un clip de audio y aplicada a notas MIDI (groove.ts).
+
+  /** Clips de audio de la sesion de los que se puede tomar un groove (para el popover). */
+  grooveSourceClips(): Array<{ clipId: string; label: string }> {
+    const out: Array<{ clipId: string; label: string }> = []
+    const { session } = this.snap
+    for (const track of session.tracks) {
+      if (track.kind !== 'audio') continue
+      for (const clip of track.clips) {
+        if (clip.active === false) continue
+        const bar = Math.floor(secondsToBeats(clip.startS, session.bpm) / Math.max(1, session.beatsPerBar)) + 1
+        out.push({ clipId: clip.id, label: `${track.name} · compás ${bar} (${Math.round(clip.lengthS)} s)` })
+      }
+    }
+    return out
+  }
+
+  /**
+   * Toma el groove de un clip de audio (por id, o el clip de audio elegido en la linea de tiempo):
+   * ataques, desplazamiento mediano y velocidad relativa por paso de la rejilla, de hasta 60 s.
+   */
+  captureGrooveFromClip(clipId?: string, grid: GrooveGrid = '1/16'): StudioGrooveTemplate | null {
+    const session = this.snap.session
+    const id = clipId ?? this.selectedClips().find((c) => findClip(session, c) !== null)
+    const loc = id ? findClip(session, id) : null
+    if (!loc) {
+      this.notify('info', 'Elige un clip de audio (por ejemplo, la batería grabada) para tomar su groove.')
+      return null
+    }
+    const seg = this.getClipSegmentChannels(loc.clip)
+    if (!seg) {
+      this.notify('warn', 'El audio de ese clip todavía no está cargado.')
+      return null
+    }
+    const limit = Math.min(seg.channels[0].length, Math.round(seg.sampleRate * 60))
+    const mono = downmixMono(seg.channels.map((ch) => ch.subarray(0, limit)))
+    let template: StudioGrooveTemplate | null
+    try {
+      template = grooveFromAudio(mono, seg.sampleRate, {
+        clipStartS: loc.clip.startS,
+        bpm: session.bpm,
+        beatsPerBar: session.beatsPerBar,
+        grid,
+        label: loc.track.name,
+        sourceClipId: loc.clip.id,
+      })
+    } catch (err) {
+      this.fail(err)
+      return null
+    }
+    if (!template) {
+      this.notify('warn', 'No hay suficientes golpes claros en ese clip para tomar un groove (hacen falta al menos 8).')
+      return null
+    }
+    this.setPiano({ groove: template })
+    this.notify('info', `Groove tomado: ${describeGroove(template)}.`)
+    return template
+  }
+
+  /** Olvida la plantilla de groove. */
+  clearGroove(): void {
+    this.setPiano({ groove: null })
+  }
+
+  /**
+   * Aplica el groove tomado a las notas elegidas del piano roll (todas si no hay seleccion) o a
+   * los clips MIDI elegidos en la linea de tiempo. `strength` cuantiza hacia la plantilla (0..1).
+   */
+  applyGroove(options: { strength?: number; velocityStrength?: number } = {}): void {
+    const template = this.snap.piano.groove
+    if (!template) {
+      this.notify('info', 'Primero toma el groove de un clip de audio (Humanización > Groove de la banda).')
+      return
+    }
+    const strength = options.strength ?? 1
+    const velocityStrength = options.velocityStrength ?? 0.5
+    if (this.snap.editor === 'piano_roll') {
+      const loc = this.pianoClip()
+      if (!loc) return
+      const selection = this.selectionOrAll()
+      const bpm = this.snap.session.bpm
+      this.editNotes('Aplicar groove', (notes, length) =>
+        notes.length === 0 ? null : applyGrooveTemplate(notes, selection, template, { strength, velocityStrength, clipStartBeat: loc.clip.startBeat, bpm }, length),
+      )
+      return
+    }
+    const midiIds = this.selectedClips().filter((id) => findMidiClip(this.snap.session, id))
+    if (midiIds.length === 0) {
+      this.notify('info', 'El groove se aplica a clips MIDI: elígelos en la línea de tiempo o abre uno en el piano roll.')
+      return
+    }
+    this.run(midiIds.length === 1 ? 'Aplicar groove' : `Aplicar groove a ${midiIds.length} clips`, (session) => {
+      let next = session
+      for (const clipId of midiIds) {
+        const loc = findMidiClip(next, clipId)
+        if (!loc) continue
+        const notes = applyGrooveTemplate(loc.clip.notes, null, template, { strength, velocityStrength, clipStartBeat: loc.clip.startBeat, bpm: next.bpm }, loc.clip.lengthBeats).notes
+        next = updateMidiClip(next, { clipId, patch: { notes } })
       }
       return next
     })

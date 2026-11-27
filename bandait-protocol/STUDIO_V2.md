@@ -861,7 +861,7 @@ datos, reproduce, graba, exporta, guarda, borra la sesión ni lanza trabajos con
 | `replace_midi_notes` | `midi.replace_notes` | Reemplaza todas las notas de un clip MIDI |
 | `transpose_midi_clip` | `midi.transpose` | Transpone las notas de un clip MIDI |
 | `quantize_midi_clip` | `midi.quantize` | Cuantiza las notas de un clip MIDI |
-| `humanize_midi_clip` | `midi.humanize` | Humaniza las notas de un clip MIDI en tiempo (micro-timing), velocidad, duración, swing, acento métrico y strum |
+| `humanize_midi_clip` | `midi.humanize` | Humaniza las notas de un clip MIDI en tiempo (micro-timing), velocidad, duración, swing, acento métrico y strum (semántica en 7.4) |
 | `move_clip` | `clip.move` | Mueve un clip (audio o MIDI) a un beat y, opcionalmente, a otra pista del mismo `kind` |
 | `duplicate_clip` | `clip.duplicate` | Duplica un clip (por defecto, justo después del original) |
 | `split_clip` | `clip.split` | Divide un clip en un beat |
@@ -1072,4 +1072,13 @@ para generar. El cuerpo de `POST .../jobs` no cambia.
   - `fade_shape`: `'exp' | 'scurve'` (ausente cuando es `'linear'`).
 - Parámetro opcional en instrumentos `synth` y `drums` (`version: 2`):
   - `analog_drift`: `0..1` (def `0`; se omite en el cable cuando vale `0` para identidad exacta con documentos previos).
+  - Determinismo de `analog_drift` (cliente, sin cambio en el cable): la deriva de cada nota de un clip se siembra con su posición musical (segundo de sesión de la nota y id de la pista), nunca con la hora del `AudioContext`, así la reproducción y el export suenan igual. Tiene dos capas: tolerancia estática por nota (afinación, corte, decaimiento) y vagabundeo lento continuo de afinación y corte (unos pocos cents a lo largo de segundos), función del tiempo de sesión. Las notas tocadas en vivo, que no tienen posición musical, usan la hora del contexto.
+
+### 7.4 Humanización MIDI y groove (`humanize_midi_clip`)
+- `swing` (`0..0.5`): fracción del paso de `swing_grid` (`'1/8'` o `'1/16'`, def la del preset o `'1/16'`) que se atrasa la subdivisión impar: `0.33` = tresillo (66 %), `0.5` = puntillo (75 %). La subdivisión impar se coloca en `rejilla + swing * paso` (idempotente: aplicarlo dos veces no lo suma).
+- La fase del acento métrico y del swing es el beat de la sesión (`start_beat` del clip + `start` de la nota), con el compás de la sesión desde el beat 0.
+- Tiempos en milisegundos al tempo de la sesión: `timing_ms` (`0..60`) y `strum_ms` (`-60..60`). `timing_beats` y `strum_beats` siguen aceptándose (absolutos en beats); si llegan las dos formas, gana la de ms.
+- `amount` escala todo lo que sale del preset (micro-timing, velocidad, duración, swing, strum y acento) en proporción `amount / amount_del_preset`; un valor explícito es absoluto.
+- Pista con instrumento `drums`: humanización por pieza General MIDI (bombo y caja más ajustados, hi-hat con más variación de velocidad y acento en corcheas, sin strum). `laid_back_ms` (`0..30`, def `0`) atrasa la caja (notas 38, 39 y 40).
+- El "groove de la banda" (plantilla tomada de un clip de audio y aplicada a notas MIDI) es una herramienta local del editor: no viaja ni se guarda en la sesión; lo que queda en el documento son las notas ya movidas.
 

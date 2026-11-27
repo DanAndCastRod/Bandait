@@ -165,6 +165,8 @@ const SPECS = [
   spec('midi.transpose', 'Transponer un clip MIDI', 'midi', 'piano_roll', [], 'transpose_midi_clip'),
   spec('midi.quantize', 'Cuantizar un clip MIDI', 'midi', 'piano_roll', [], 'quantize_midi_clip'),
   spec('midi.humanize', 'Humanizar un clip MIDI (tiempo y velocidad)', 'midi', 'piano_roll', [], 'humanize_midi_clip'),
+  spec('midi.groove_capture', 'Tomar el groove de una pista (clip de audio elegido)', 'midi', 'global', []),
+  spec('midi.groove_apply', 'Aplicar el groove tomado a las notas o clips MIDI', 'midi', 'global', []),
   spec('midi.toggle_computer_keyboard', 'Teclado de la computadora como teclado musical', 'midi', 'global', []),
   spec('instrument.set', 'Cambiar el preset o los parámetros del instrumento', 'midi', 'global', [], 'set_instrument'),
   // Mezcla (asistente y optimizadores DSP/IO)
