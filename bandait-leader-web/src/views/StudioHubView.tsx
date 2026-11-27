@@ -360,7 +360,8 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, playlist
   }
 
   const activePeers = useMemo(
-    () => snap.collaborators.filter((peer) => !peer.sessionId || peer.sessionId === session.id),
+    // Solo quien tiene ESTA sesion abierta; quien mira la lista de sesiones no colabora aqui.
+    () => snap.collaborators.filter((peer) => peer.sessionId === session.id),
     [snap.collaborators, session.id],
   )
 

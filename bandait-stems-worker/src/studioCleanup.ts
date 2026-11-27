@@ -85,8 +85,19 @@ interface SessionScan {
   folder: string;
   /** etag del session.json leido; null si la carpeta no tiene documento. */
   etag: string | null;
+  /** etag del vcs.json leido; null si no existia (o no hizo falta leerlo: sin candidatos). */
+  vcsEtag: string | null;
   candidates: R2Object[];
   protected: boolean;
+}
+
+/** Opciones de lectura de una sesion. */
+interface ScanOptions {
+  /**
+   * Limpieza disparada por quien no administra la banda (Musician, SoundEngineer): ademas de
+   * `protected_assets`, protege todo `retired_assets` aunque su periodo de gracia haya vencido.
+   */
+  conservative?: boolean;
 }
 
 class NoBudget extends Error {}
@@ -154,7 +165,9 @@ async function listEvery(env: Env, budget: OpBudget, prefix: string, withCustom:
 }
 
 /** Lee una sesion y devuelve sus candidatos a huerfano. Lanza NoBudget o Unreadable. */
-async function scanSession(env: Env, budget: OpBudget, studioPrefix: string, session: string, nowMs: number): Promise<SessionScan> {
+async function scanSession(
+  env: Env, budget: OpBudget, studioPrefix: string, session: string, nowMs: number, scanOptions: ScanOptions = {},
+): Promise<SessionScan> {
   const folder = `${studioPrefix}${session}/`;
   let etag: string | null = null;
   let refs = { files: new Set<string>(), ids: new Set<string>() };
@@ -184,22 +197,29 @@ async function scanSession(env: Env, budget: OpBudget, studioPrefix: string, ses
     const at = uploadedMs(o);
     return Number.isFinite(at) && nowMs - at > ORPHAN_MIN_AGE_MS;
   });
-  if (!candidates.length) return { session, folder, etag, candidates, protected: false };
+  if (!candidates.length) return { session, folder, etag, vcsEtag: null, candidates, protected: false };
 
   // Control de versiones (`vcs.json`): solo se consulta si hay candidatos, protegiendo los audios
   // referenciados por snapshots y ramas sin gastar operaciones en sesiones sin candidatos.
+  // `protected_assets` guarda NOMBRES de archivo; el id se deduce quitando la extension.
+  let vcsEtag: string | null = null;
   try {
     const vcsObj = await op(budget, () => env.STEMS.get(`${folder}vcs.json`));
     if (vcsObj) {
+      vcsEtag = vcsObj.etag;
       const vcsRaw = JSON.parse(await vcsObj.text()) as Record<string, unknown>;
       if (!vcsRaw || typeof vcsRaw !== 'object' || !Array.isArray(vcsRaw.protected_assets)) throw new Unreadable();
       const vcsFiles = new Set<string>();
       const vcsIds = new Set<string>();
-      for (const item of vcsRaw.protected_assets) {
-        if (typeof item !== 'string' || !item) continue;
+      const protect = (item: unknown) => {
+        if (typeof item !== 'string' || !item) return;
         vcsFiles.add(item);
         const dot = item.lastIndexOf('.');
         vcsIds.add(dot > 0 ? item.slice(0, dot) : item);
+      };
+      for (const item of vcsRaw.protected_assets) protect(item);
+      if (scanOptions.conservative && Array.isArray(vcsRaw.retired_assets)) {
+        for (const r of vcsRaw.retired_assets) protect((r as Record<string, unknown> | null)?.file);
       }
       candidates = candidates.filter((o) => {
         const file = o.key.slice(`${folder}assets/`.length);
@@ -207,7 +227,7 @@ async function scanSession(env: Env, budget: OpBudget, studioPrefix: string, ses
         const id = dot > 0 ? file.slice(0, dot) : file;
         return !vcsFiles.has(file) && !vcsIds.has(id);
       });
-      if (!candidates.length) return { session, folder, etag, candidates, protected: false };
+      if (!candidates.length) return { session, folder, etag, vcsEtag, candidates, protected: false };
     }
   } catch (err) {
     if (err instanceof NoBudget) throw err;
@@ -238,7 +258,7 @@ async function scanSession(env: Env, budget: OpBudget, studioPrefix: string, ses
     if (err instanceof NoBudget) throw err;
     busy = true; // no se pudo saber: la sesion queda protegida
   }
-  return busy ? { session, folder, etag, candidates: [], protected: true } : { session, folder, etag, candidates, protected: false };
+  return busy ? { session, folder, etag, vcsEtag, candidates: [], protected: true } : { session, folder, etag, vcsEtag, candidates, protected: false };
 }
 
 /** Carpetas de sesion validas bajo `studio/` (sin `_usage`, `_cleanup` ni ids invalidos). */
@@ -268,14 +288,17 @@ function tally(report: CleanupReport, scans: SessionScan[]): void {
 }
 
 /**
- * Borra los candidatos de las sesiones dadas. Vuelve a pedir el etag de cada session.json y salta
- * las que cambiaron. Necesita `scans.length + lotes` operaciones; quien llama ya comprobo el cupo.
+ * Borra los candidatos de las sesiones dadas. Vuelve a pedir el etag de cada session.json y de
+ * cada vcs.json, y salta las sesiones donde alguno cambio (alguien guardo o creo una version
+ * mientras tanto). Necesita `2 * scans.length + lotes` operaciones; quien llama ya comprobo el cupo.
  */
 async function removeCandidates(env: Env, budget: OpBudget, scans: SessionScan[], report: CleanupReport): Promise<void> {
   const keep: SessionScan[] = [];
   for (const s of scans) {
     const head = await op(budget, () => env.STEMS.head(`${s.folder}session.json`));
-    if ((head?.etag ?? null) === s.etag) keep.push(s);
+    if ((head?.etag ?? null) !== s.etag) continue;
+    const vcsHead = await op(budget, () => env.STEMS.head(`${s.folder}vcs.json`));
+    if ((vcsHead?.etag ?? null) === s.vcsEtag) keep.push(s);
   }
   const objects = keep.flatMap((s) => s.candidates);
   for (let i = 0; i < objects.length; i += DELETE_BATCH) {
@@ -289,7 +312,7 @@ async function removeCandidates(env: Env, budget: OpBudget, scans: SessionScan[]
 function deleteOpsNeeded(scans: SessionScan[]): number {
   const withCandidates = scans.filter((s) => s.candidates.length);
   const objects = withCandidates.reduce((n, s) => n + s.candidates.length, 0);
-  return withCandidates.length + Math.ceil(objects / DELETE_BATCH);
+  return 2 * withCandidates.length + Math.ceil(objects / DELETE_BATCH);
 }
 
 /** Evento de una limpieza que borro algo o que se bloqueo (nunca en una inspeccion). */
@@ -370,9 +393,12 @@ export async function cleanupScope(
  * Limpieza oportunista despues de un `PUT .../session`: solo los huerfanos de esa sesion, como
  * mucho una vez cada 2 horas por banda. Va a waitUntil y nunca lanza. Devuelve lo que hizo (para
  * las pruebas): `skipped` si la banda ya se limpio hace menos de 2 horas u otra peticion gano.
+ * `conservative` (guardado de un Musician o SoundEngineer): no borra ningun audio que siga en
+ * `retired_assets` del control de versiones, aunque su periodo de gracia haya vencido.
  */
 export async function opportunisticCleanup(
   env: Env, deps: Pick<StudioDeps, 'now' | 'waitUntil'>, studioPrefix: string, session: string,
+  options: { conservative?: boolean } = {},
 ): Promise<CleanupReport | 'skipped'> {
   const budget = new OpBudget(CLEANUP_SAVE_MAX_OPS);
   const now = deps.now();
@@ -398,7 +424,7 @@ export async function opportunisticCleanup(
     if (!claimed) return 'skipped';
     let scan: SessionScan;
     try {
-      scan = await scanSession(env, budget, studioPrefix, session, now.getTime());
+      scan = await scanSession(env, budget, studioPrefix, session, now.getTime(), { conservative: options.conservative === true });
     } catch (err) {
       if (err instanceof NoBudget) {
         report.status = 'budget';

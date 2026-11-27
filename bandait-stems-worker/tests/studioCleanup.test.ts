@@ -424,16 +424,17 @@ test('cron: una banda que no cabe ni con el cupo entero se salta y queda anotada
   const { bucket, env, deps } = setup();
   for (let i = 0; i < 6; i++) seedSession(bucket, `bands/${BAND}/studio/`, `ses_${i}`, { 'ast_old.wav': OLD });
   seedSession(bucket, `bands/${BAND_2}/studio/`, 'ses_a', { 'ast_old.wav': OLD });
-  // 12 operaciones: la banda grande (6 sesiones, 3 lecturas cada una) no cabe; la chica (9 con el
-  // evento, mas cursor y lista de bandas) si cabe en una corrida propia.
-  const run = await sweepOrphans(env, deps, 12);
+  // 13 operaciones: la banda grande (6 sesiones, 3 lecturas cada una) no cabe; la chica (10 con el
+  // evento y la re-verificacion de session.json y vcs.json, mas cursor y lista de bandas) si cabe
+  // en una corrida propia.
+  const run = await sweepOrphans(env, deps, 13);
   assert.equal(run.blocked, 1);
   assert.equal(run.cursor, `bands/${BAND}/`, 'el cursor pasa la banda grande');
-  assert.ok(run.ops <= 12, `operaciones: ${run.ops}`);
+  assert.ok(run.ops <= 13, `operaciones: ${run.ops}`);
   const events = bucket.events();
   assert.deepEqual(events.map((e) => [e.status, e.provider_code, e.trigger]), [['FAILED', 'budget', 'cron']]);
   assert.equal([...bucket.objects.keys()].filter((k) => k.endsWith('ast_old.wav')).length, 7, 'no se borro nada de la banda grande');
-  const next = await sweepOrphans(env, deps, 12);
+  const next = await sweepOrphans(env, deps, 13);
   assert.equal(next.deleted, 1, 'la banda siguiente se limpia en la otra corrida');
   assert.ok(!bucket.has(`bands/${BAND_2}/studio/ses_a/assets/ast_old.wav`));
 });

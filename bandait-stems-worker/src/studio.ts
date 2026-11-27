@@ -9,6 +9,10 @@
 //   GET    /v1/bands/{band}/studio/{session}/assets/{asset}     integrante (admite Range)
 //   POST   /v1/bands/{band}/studio/{session}/jobs[?estimate=1]  Owner / MusicDirector (src/studioJobs.ts)
 //   GET    /v1/bands/{band}/studio/{session}/jobs/{job}         integrante
+//   GET    /v1/bands/{band}/studio/{session}/vcs                integrante (src/studioVcs.ts)
+//   POST   /v1/bands/{band}/studio/{session}/vcs                colaboradores (STUDIO_COLLABORATORS)
+//   DELETE /v1/bands/{band}/studio/{session}/vcs/branches/{b}   Owner / MusicDirector
+//   GET    /v1/bands/{band}/studio/{session}/commits/{commit}   integrante
 //   GET    /v1/bands/{band}/studio/_cleanup                     integrante: audios huerfanos, sin borrar
 //   POST   /v1/bands/{band}/studio/_cleanup                     Owner / MusicDirector: los borra (src/studioCleanup.ts)
 //
@@ -18,7 +22,7 @@
 // Este modulo e index.ts se importan entre si: aqui no se usa nada de index.ts al cargar el modulo,
 // solo dentro de funciones.
 
-import { ApiError, authorize, json, listAll, type AccessLevel } from './index.ts';
+import { ApiError, authorize, authorizeWithRole, isEditorRole, json, listAll, type AccessLevel } from './index.ts';
 import { OpBudget } from './events.ts';
 import { CLEANUP_REQUEST_MAX_OPS, cleanupScope, opportunisticCleanup } from './studioCleanup.ts';
 import type { CleanupReport } from './studioCleanup.ts';
@@ -27,7 +31,7 @@ import {
   ASSET_MAX_BYTES, ID_RE, SESSION_MAX_BYTES, SessionError, assetExtension, isAssetFile, validateSession,
 } from './studioSession.ts';
 import type { SessionDocument } from './studioSession.ts';
-import { getCommit, getVcs, postVcs } from './studioVcs.ts';
+import { deleteVcsBranch, getCommit, getVcs, isBranchName, postVcs } from './studioVcs.ts';
 import type { Env, FetchLike, R2Object, StudioDeps } from './types.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -64,6 +68,35 @@ export interface StudioContext {
   session: string;
   /** uuid del usuario (el `sub` del token), o null si el token no lo trae. */
   user: string | null;
+  /** Rol verificado por Supabase en la banda (`Owner` en el workspace personal). */
+  role: string;
+  /** Nombre visible sacado del token verificado (STUDIO_V2.md 7.2: `author_name`). */
+  userName: string;
+}
+
+/**
+ * Nombre visible del JWT de Supabase: `user_metadata.full_name`, `user_metadata.name` o la parte
+ * local del correo. Igual que tokenSubject, la firma ya la comprobo Supabase en authorize(): el
+ * nombre no lo elige el cliente en el cuerpo de la peticion.
+ */
+export function tokenDisplayName(req: Request): string {
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer /, '');
+  const payload = token.split('.')[1];
+  if (!payload) return 'Integrante';
+  try {
+    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)), (c) => c.charCodeAt(0));
+    const claims = JSON.parse(new TextDecoder().decode(bytes)) as { email?: unknown; user_metadata?: unknown };
+    const meta = claims.user_metadata && typeof claims.user_metadata === 'object' ? claims.user_metadata as Record<string, unknown> : {};
+    const pick = (v: unknown) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80) : '');
+    const name = pick(meta.full_name) || pick(meta.name);
+    if (name) return name;
+    const email = pick(claims.email);
+    const local = email.includes('@') ? email.slice(0, email.indexOf('@')) : '';
+    return local || 'Integrante';
+  } catch {
+    return 'Integrante';
+  }
 }
 
 /**
@@ -172,6 +205,11 @@ export async function studioRoute(
   } else if (what === 'vcs' && rest.length === 2) {
     if (method !== 'GET' && method !== 'POST') throw new ApiError(405, 'method_not_allowed');
     access = method === 'POST' ? 'collab' : false;
+  } else if (what === 'vcs' && rest.length === 4 && leaf === 'branches') {
+    // DELETE .../vcs/branches/{branch}: borrar una rama es de Owner y MusicDirector.
+    if (!isBranchName(rest[3])) throw new ApiError(400, 'bad_vcs');
+    if (method !== 'DELETE') throw new ApiError(405, 'method_not_allowed');
+    access = true;
   } else if (what === 'commits' && rest.length === 3) {
     if (!ID_RE.test(leaf)) throw new ApiError(400, 'bad_commit');
     if (method !== 'GET') throw new ApiError(405, 'method_not_allowed');
@@ -188,15 +226,17 @@ export async function studioRoute(
   }
 
   // Colaborar en sesion/audios/VCS: STUDIO_COLLABORATORS. Borrar sesion o lanzar trabajos IA: Owner y MusicDirector. Leer: cualquier integrante.
-  const prefix = await authorize(req, env, band, access, fetchFn);
+  const { prefix, role } = await authorizeWithRole(req, env, band, access, fetchFn);
   const studioPrefix = `${prefix}studio/`;
   const ctx: StudioContext = {
     env, fetchFn, deps, studioPrefix, sessionPrefix: `${studioPrefix}${session}/`, session, user: tokenSubject(req),
+    role, userName: tokenDisplayName(req),
   };
 
   if (rest.length === 1) return deleteSession(ctx);
   if (what === 'session') return method === 'GET' ? getSession(ctx) : putSession(req, ctx);
   if (what === 'assets') return method === 'GET' ? getAsset(req, ctx, leaf) : putAsset(req, ctx, leaf);
+  if (what === 'vcs' && rest.length === 4) return deleteVcsBranch(ctx, rest[3]);
   if (what === 'vcs') return method === 'GET' ? getVcs(ctx) : postVcs(req, ctx);
   if (what === 'commits') return getCommit(ctx, leaf);
   if (rest.length === 2) return startJob(req, ctx, url.searchParams.get('estimate') === '1', url.searchParams.get('job_id'));
@@ -299,7 +339,10 @@ async function putSession(req: Request, ctx: StudioContext): Promise<Response> {
   // Limpieza oportunista de los huerfanos de esta sesion (como mucho cada 2 h por banda), despues
   // de responder: va a waitUntil y nunca retrasa ni rompe el guardado.
   if (ctx.deps.waitUntil) {
-    ctx.deps.waitUntil(opportunisticCleanup(ctx.env, ctx.deps, ctx.studioPrefix, ctx.session).catch(() => {}));
+    // Quien no administra la banda (Musician, SoundEngineer) dispara una limpieza conservadora: no
+    // borra ningun audio que el control de versiones haya protegido alguna vez (retired_assets).
+    const conservative = !isEditorRole(ctx.role);
+    ctx.deps.waitUntil(opportunisticCleanup(ctx.env, ctx.deps, ctx.studioPrefix, ctx.session, { conservative }).catch(() => {}));
   }
   return json(200, doc, { ETag: stored.httpEtag });
 }

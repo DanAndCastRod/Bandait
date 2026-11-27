@@ -732,7 +732,7 @@ export const BandMembersHubView: React.FC = () => {
                 >
                   <option value="Musician">Músico (solo lectura)</option>
                   <option value="MusicDirector">Director Musical (edita)</option>
-                  <option value="SoundEngineer">Ingeniero FOH (solo lectura)</option>
+                  <option value="SoundEngineer">Ingeniero FOH (lectura; colabora en el Estudio)</option>
                   <option value="Substitute">Músico Suplente (solo lectura)</option>
                   {isShared && activeBandRole === 'Owner' && <option value="Owner">Dueño (Owner)</option>}
                 </select>
