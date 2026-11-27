@@ -315,11 +315,20 @@ input, select, textarea {
 .hub-shell[data-layout='desktop'][data-mini='true'] .hub-main {
   padding-bottom: 112px;
 }
+/* Movil: barra inferior + boton flotante HERRAMIENTAS (MobileWidgetTray, 44 px sobre la barra o
+   sobre el mini reproductor). El contenido deja ese alto libre al final y scroll-padding-bottom
+   hace que scrollIntoView (confirmaciones, foco) no deje un boton debajo de los flotantes. */
 .hub-shell[data-layout='mobile'] .hub-main {
-  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(124px + env(safe-area-inset-bottom, 0px));
 }
 .hub-shell[data-layout='mobile'][data-mini='true'] .hub-main {
-  padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(184px + env(safe-area-inset-bottom, 0px));
+}
+html:has(.hub-shell[data-layout='mobile']) {
+  scroll-padding-bottom: calc(124px + env(safe-area-inset-bottom, 0px));
+}
+html:has(.hub-shell[data-layout='mobile'][data-mini='true']) {
+  scroll-padding-bottom: calc(184px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Rail */

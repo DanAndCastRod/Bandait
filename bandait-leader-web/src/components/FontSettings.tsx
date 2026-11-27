@@ -98,7 +98,7 @@ export const FontSettings: React.FC<Props> = ({ value, onChange }) => {
         <span id="appearance-font-labels-title" style={{ fontFamily: mono, fontSize: '11px', color: colors.muted }}>
           Etiquetas, lecturas y cifras
         </span>
-        <div role="radiogroup" aria-labelledby="appearance-font-labels-title" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '8px' }}>
+        <div role="radiogroup" aria-labelledby="appearance-font-labels-title" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: '8px' }}>
           {LABEL_FONTS.map((font) => {
             const active = value.labels === font.id
             const stack = labelFontStack(font.id, value.ui)
@@ -114,7 +114,9 @@ export const FontSettings: React.FC<Props> = ({ value, onChange }) => {
                 onClick={() => setLabels(font.id)}
                 style={optionStyle(active)}
               >
-                <span style={{ fontFamily: stack, fontSize: '13px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>BPM 92 · 001.3 · -6.0 dB</span>
+                <span style={{ fontFamily: stack, fontSize: '13px', fontWeight: 700, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  92 BPM · 001.3 · -6 dB
+                </span>
                 <span style={{ fontFamily: uiFontStack(value.ui), fontSize: '12px', color: colors.muted }}>{font.label}</span>
               </button>
             )
