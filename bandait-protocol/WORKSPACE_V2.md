@@ -197,6 +197,17 @@ uiPreferences {
   accent    "#RRGGBB" | null                     null = el acento del tema
   radius    entero 8..999                        redondez de los botones en px (999 = píldora)
   waveform  Waveform                             OPCIONAL (v2, 2026-11-26): forma de onda
+  font      Font                                 OPCIONAL (2026-11-27, sin cambiar la versión):
+                                                tipografía
+}
+
+Font {
+  version   1                                   entero; propio del bloque
+  ui        "plex" | "inter" | "dm-sans" |      por defecto "plex" (IBM Plex Sans). Letra de
+            "jakarta" | "manrope" | "geist"     textos, títulos y botones
+  labels    "mono" | "geist-mono" | "sans"      por defecto "mono" (IBM Plex Mono). Letra de
+                                                etiquetas y cifras; "sans" usa la de la
+                                                interfaz con cifras tabulares
 }
 
 Waveform {
@@ -226,6 +237,9 @@ Waveform {
   ese hub, el bloque `waveform` se pierde (vuelve a los valores por defecto). No hay migración:
   el hub v2 lo escribe la próxima vez que el músico cambia algo.
 - Es solo visual y solo del hub: no viaja al líder ni a los followers.
+- `font` ausente o con un id desconocido = tipografía de fábrica (campo por campo, con
+  advertencia). Un hub sin el bloque lo pierde si el músico cambia la apariencia allí, igual que
+  `waveform`. Las familias que no son IBM Plex se descargan de Google Fonts al elegirlas.
 
 - Es del músico, no de la banda: vive **solo** en el workspace personal
   (`bandait_workspaces`). Nunca se escribe en `bandait_bands.content` (sección 7), así que un

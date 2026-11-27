@@ -9,7 +9,8 @@ import { APPEARANCE_EVENT } from '../services/appearanceDom'
  * Un `var(...)` no sirve en un <canvas>: para dibujar usa `canvasPalette()` (colores del tema
  * vigente, cacheados) o, en el Estudio, `useStudioCanvasPalette()`.
  */
-export const mono = "'IBM Plex Mono', monospace"
+/** Letra de etiquetas y cifras: la que elija el musico en APARIENCIA (services/fonts.ts). */
+export const mono = 'var(--font-mono)'
 
 export const colors = {
   oled: 'var(--b-bg)',

@@ -115,6 +115,17 @@
   --radius-lg: var(--b-radius-card);
 }
 
+/* Tipografia elegida en AJUSTES > APARIENCIA (services/fonts.ts). services/appearanceDom.ts pone
+   data-font-ui y data-font-labels en <html> y baja la familia de Google Fonts si hace falta. */
+html[data-font-ui='inter'] { --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='dm-sans'] { --font-ui: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='jakarta'] { --font-ui: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='manrope'] { --font-ui: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='geist'] { --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-labels='geist-mono'] { --font-mono: 'Geist Mono', 'SF Mono', Menlo, Consolas, monospace; }
+/* Etiquetas con la misma letra de la interfaz: las cifras siguen alineadas (tabulares). */
+html[data-font-labels='sans'] { --font-mono: var(--font-ui); font-variant-numeric: tabular-nums; }
+
 [data-theme='light-estudio'] {
   --b-overlay: color-mix(in srgb, #15181C 40%, transparent);
   --b-shadow: 0 14px 36px color-mix(in srgb, #15181C 18%, transparent);
@@ -1378,7 +1389,7 @@ input, select, textarea {
   display: inline-block;
   min-width: 18px;
   text-align: center;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
   padding: 2px 6px;

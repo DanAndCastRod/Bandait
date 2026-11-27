@@ -2,7 +2,7 @@ import React from 'react'
 import { AlertTriangle, X } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
 
-const mono = "'IBM Plex Mono', monospace"
+const mono = 'var(--font-mono)'
 
 /** Aviso de conflicto resuelto con respaldo local, y error de sincronizacion persistente. */
 export const SyncNoticeBanner: React.FC<{ onOpenCloud: () => void }> = ({ onOpenCloud }) => {

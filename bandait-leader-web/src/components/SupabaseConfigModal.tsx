@@ -14,7 +14,7 @@ interface Props {
   onClose: () => void
 }
 
-const mono = "'IBM Plex Mono', monospace"
+const mono = 'var(--font-mono)'
 
 const labelStyle: React.CSSProperties = { fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }
 

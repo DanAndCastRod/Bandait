@@ -18,7 +18,7 @@ import {
 import { UserManualModal } from './UserManualModal'
 import { SupabaseConfigModal } from './SupabaseConfigModal'
 
-const mono = "'IBM Plex Mono', monospace"
+const mono = 'var(--font-mono)'
 
 const sectionStyle: React.CSSProperties = {
   background: 'var(--b-input)',

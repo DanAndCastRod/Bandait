@@ -16,6 +16,11 @@
       "gain": 1.5,
       "barWidth": 3,
       "barGap": 1
+    },
+    "font": {
+      "version": 1,
+      "ui": "manrope",
+      "labels": "sans"
     }
   },
   "bands": [
