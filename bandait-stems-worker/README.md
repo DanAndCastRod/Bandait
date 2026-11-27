@@ -98,19 +98,23 @@ y leer `ETag`, `Content-Range` y `Accept-Ranges`.
 
 Sesiones, audios y trabajos de IA del Estudio Bandait. El contrato normativo, con cada campo,
 límite y código de error, es `bandait-protocol/STUDIO_V1.md` más lo que cambia en
-`bandait-protocol/STUDIO_V2.md` (pistas de instrumento, clips MIDI, marcas y los trabajos
-`compose`, `analyze` y `chat`); aquí va el resumen. Mismas reglas
-de autenticación: leer, cualquier integrante; escribir y lanzar trabajos, Owner y MusicDirector.
-El escenario (leader, follower) no usa estas rutas.
+`bandait-protocol/STUDIO_V2.md` (pistas de instrumento, clips MIDI, marcas, los trabajos
+`compose`, `analyze` y `chat`, colaboración y control de versiones VCS); aquí va el resumen.
+Autenticación: leer, cualquier integrante; editar sesión, audios y VCS, `STUDIO_COLLABORATORS`
+(`Owner`, `MusicDirector`, `Musician`, `SoundEngineer`); borrar sesión o lanzar trabajos con costo
+IA, `Owner` y `MusicDirector`. El escenario (leader, follower) no usa estas rutas.
 
 | Método y ruta | Quién | Respuesta |
 |---|---|---|
 | `GET /v1/bands/{band}/studio` | integrante | `{"sessions":[{"id","title","song_id","updated_at"}]}`, la más reciente primero |
 | `GET /v1/bands/{band}/studio/{session}/session` | integrante | documento, con `ETag`; 404 `no_session` |
-| `PUT /v1/bands/{band}/studio/{session}/session` | Owner, MusicDirector | documento guardado, con `ETag` nuevo |
-| `DELETE /v1/bands/{band}/studio/{session}` | Owner, MusicDirector | `{"deleted": n}` (documento, audios y trabajos) |
-| `PUT /v1/bands/{band}/studio/{session}/assets/{asset}` | Owner, MusicDirector | `{"file","size"}` |
+| `PUT /v1/bands/{band}/studio/{session}/session` | colaborador | documento guardado, con `ETag` nuevo |
+| `DELETE /v1/bands/{band}/studio/{session}` | Owner, MusicDirector | `{"deleted": n}` (documento, audios, VCS y trabajos) |
+| `PUT /v1/bands/{band}/studio/{session}/assets/{asset}` | colaborador | `{"file","size"}` |
 | `GET /v1/bands/{band}/studio/{session}/assets/{asset}` | integrante | bytes; 206 con `Range: bytes=a-b` |
+| `GET /v1/bands/{band}/studio/{session}/vcs` | integrante | índice VCS (`branches`, `commits`, `protected_assets`) |
+| `POST /v1/bands/{band}/studio/{session}/vcs` | colaborador | 201 `{"commit","vcs"}` (snapshot inmutable + actualización optimista) |
+| `GET /v1/bands/{band}/studio/{session}/commits/{commit}` | integrante | documento `SessionDocument` inmutable del commit |
 | `POST /v1/bands/{band}/studio/{session}/jobs` | Owner, MusicDirector | 202 `{"job_id","status":"STARTED","kind"}` |
 | `POST /v1/bands/{band}/studio/{session}/jobs?estimate=1` | Owner, MusicDirector | `{"kind","estimated_cost_usd","spent_usd","budget_usd","allowed"}`, sin lanzar nada |
 | `GET /v1/bands/{band}/studio/{session}/jobs/{job}` | integrante | estado del trabajo; 404 `no_job` |

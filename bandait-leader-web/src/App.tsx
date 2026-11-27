@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useState } from 'react'
 import { HubProvider } from './context/HubContext'
 import { GlobalAudioProvider } from './context/GlobalAudioContext'
 import { useHub } from './context/hubContextCore'
@@ -6,12 +6,15 @@ import { AuthScreen } from './components/AuthScreen'
 import { HubShell } from './components/shell/HubShell'
 import type { HubView, SongsSegment } from './components/shell/hubViews'
 import { MiniPlayer } from './components/MiniPlayer'
+import { SongUniverseBar } from './components/SongUniverseBar'
+import { MobileWidgetTray, type MobileWidgetId } from './components/widgets/MobileWidgetTray'
 import { useGlobalAudio, type AudioView } from './context/globalAudioContextCore'
 import { PlaylistsHubView } from './views/PlaylistsHubView'
 import { BandMembersHubView } from './views/BandMembersHubView'
 import { SongsStemsHubView } from './views/SongsStemsHubView'
 import { RehearsalHubView } from './views/RehearsalHubView'
 import { SettingsHubView } from './views/SettingsHubView'
+import { syncMediaSession } from './services/mediaSessionSync'
 import { studioEnabled } from './services/studio/flag'
 import { colors, ghostButton, mono, primaryButton, radius } from './components/hubStyles'
 import './styles/global.css'
@@ -19,6 +22,26 @@ import './styles/global.css'
 const STUDIO_ENABLED = studioEnabled()
 /** El Estudio se carga aparte: sin el interruptor, su codigo no entra en el arranque del Hub. */
 const StudioHubView = lazy(() => import('./views/StudioHubView').then((module) => ({ default: module.StudioHubView })))
+
+function readInitialUrlLaunch(): { view: HubView; widget: MobileWidgetId | null } {
+  try {
+    const p = new URLSearchParams(window.location.search)
+    const rawView = p.get('view')
+    const validViews: readonly HubView[] = ['studio', 'rehearsal', 'songs', 'setlists', 'band', 'settings']
+    const view: HubView =
+      rawView && (validViews as readonly string[]).includes(rawView) && (rawView !== 'studio' || STUDIO_ENABLED)
+        ? (rawView as HubView)
+        : 'setlists'
+    const rawWidget = p.get('widget')
+    const validWidgets: readonly MobileWidgetId[] = ['tuner', 'metronome', 'xypad', 'recorder', 'ab']
+    let widget: MobileWidgetId | null =
+      rawWidget && (validWidgets as readonly string[]).includes(rawWidget) ? (rawWidget as MobileWidgetId) : null
+    if (!widget && p.get('quick') === 'record') widget = 'recorder'
+    return { view, widget }
+  } catch {
+    return { view: 'setlists', widget: null }
+  }
+}
 
 const CenteredPanel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div
@@ -66,7 +89,8 @@ const HubMainContent: React.FC = () => {
   const { user, cloud, initialSyncBlocking, syncStatus, retrySync, continueOffline, logout } = useHub()
   /** Motor de audio global: lo que suena sigue sonando al cambiar de vista (mini reproductor). */
   const globalAudio = useGlobalAudio()
-  const [view, setView] = useState<HubView>('setlists')
+  const [initialLaunch] = useState(readInitialUrlLaunch)
+  const [view, setView] = useState<HubView>(initialLaunch.view)
   /** Segmento de Canciones y Stems; se recuerda mientras dure la sesion. */
   const [songsSegment, setSongsSegment] = useState<SongsSegment>('library')
   /** Cancion a abrir en el editor de la LIBRERIA (pedido desde ENSAYO); se olvida al cambiar de vista. */
@@ -75,12 +99,24 @@ const HubMainContent: React.FC = () => {
     setEditSongRequest(null)
     setView(next)
   }
+  const navigateUniverse = (nextView: HubView, nextSeg?: SongsSegment) => {
+    setEditSongRequest(null)
+    if (nextSeg) setSongsSegment(nextSeg)
+    setView(nextView)
+  }
   /** "Abrir pistas" de Ensayo y la CTA "+ Subir o separar audio": Canciones y Stems > STEMS Y PISTAS. */
   const openStems = () => {
     setEditSongRequest(null)
     setSongsSegment('stems')
     setView('songs')
   }
+
+  useEffect(() => {
+    syncMediaSession(globalAudio.nowPlaying, {
+      toggle: globalAudio.toggle,
+      stop: globalAudio.stop,
+    })
+  }, [globalAudio.nowPlaying, globalAudio.toggle, globalAudio.stop])
 
   // Cuenta de nube guardada: esperar a que Supabase confirme la sesion antes de mostrar datos.
   if (user?.authProvider === 'supabase' && !cloud.authReady) {
@@ -155,15 +191,28 @@ const HubMainContent: React.FC = () => {
       onUploadAudio={openStems}
       hasMiniPlayer={showMiniPlayer}
       overlay={
-        showMiniPlayer && (
-          <MiniPlayer
-            nowPlaying={nowPlaying}
-            onToggle={globalAudio.toggle}
-            onOpenStudio={STUDIO_ENABLED ? () => selectView('studio') : undefined}
+        <>
+          {showMiniPlayer && (
+            <MiniPlayer
+              nowPlaying={nowPlaying}
+              onToggle={globalAudio.toggle}
+              onOpenStudio={STUDIO_ENABLED ? () => selectView('studio') : undefined}
+            />
+          )}
+          <MobileWidgetTray
+            initialWidget={initialLaunch.widget}
+            offsetBottomPx={view === 'studio' || showMiniPlayer ? 128 : 68}
+            onOpenStudio={() => selectView('studio')}
           />
-        )
+        </>
       }
     >
+      <SongUniverseBar
+        currentView={view}
+        currentSegment={songsSegment}
+        studioEnabled={STUDIO_ENABLED}
+        onNavigate={navigateUniverse}
+      />
       {/*
         Sin Escenario a proposito: el Hub se sirve por HTTPS (https://bandait.releven.cc/hub/) y una
         pagina HTTPS no puede abrir ws:// hacia un lider en la LAN (el navegador lo bloquea como

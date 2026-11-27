@@ -511,3 +511,21 @@ test('tras guardar: dos guardados a la vez limpian una sola vez; un fallo no rom
   assert.ok(failed !== 'skipped' && failed.status === 'error');
   assert.ok(bucket.has(`${P}ses_a/assets/ast_x.wav`));
 });
+
+test('control de versiones: vcs.json protege los audios de ramas y snapshots frente al barrido de huerfanos', async () => {
+  const { bucket, call } = setup();
+  seedSession(bucket, P, 'ses_a', { 'ast_branch.wav': OLD, 'ast_orphan.wav': OLD });
+  bucket.write(`${P}ses_a/vcs.json`, {
+    version: 1,
+    branches: { main: 'cmt_1', acustico: 'cmt_2' },
+    commits: [],
+    protected_assets: ['ast_branch.wav'],
+  });
+  const res = await call('POST', '/_cleanup', OWNER);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.deleted, 1);
+  assert.ok(bucket.has(`${P}ses_a/assets/ast_branch.wav`), 'el audio de la rama/commit se protege');
+  assert.ok(!bucket.has(`${P}ses_a/assets/ast_orphan.wav`), 'el huerfano real se borra');
+});
+

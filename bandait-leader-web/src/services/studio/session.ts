@@ -83,7 +83,10 @@ export const STUDIO_MASTER_ID = 'master'
 export const STUDIO_ASSET_EXTENSIONS = ['wav', 'flac', 'mp3'] as const
 export const STUDIO_ASSET_KINDS = ['recording', 'import', 'stem', 'generated', 'bounce', 'master'] as const
 export const STUDIO_PROVIDERS = ['musicai', 'lyria', 'suno'] as const
-export const STUDIO_FX_TYPES = ['eq', 'compressor', 'limiter'] as const
+export const STUDIO_FX_TYPES_V1 = ['eq', 'compressor', 'limiter'] as const
+export const STUDIO_FX_TYPES = ['eq', 'compressor', 'de_esser', 'saturator', 'stereo_imager', 'limiter'] as const
+export const STUDIO_CLIP_FADE_SHAPES = ['linear', 'exp', 'scurve'] as const
+export type StudioClipFadeShape = (typeof STUDIO_CLIP_FADE_SHAPES)[number]
 
 /** Frecuencias fijas del EQ (STUDIO_V1.md 2.6). */
 export const STUDIO_EQ_LOW_SHELF_HZ = 120
@@ -181,6 +184,24 @@ export interface CompressorParams {
   makeupDb: number
 }
 
+export interface DeEsserParams {
+  freqHz: number
+  thresholdDb: number
+  reductionDb: number
+}
+
+export interface SaturatorParams {
+  driveDb: number
+  toneDb: number
+  mix: number
+  outputDb: number
+}
+
+export interface StereoImagerParams {
+  width: number
+  monoBassHz: number
+}
+
 export interface LimiterParams {
   ceilingDb: number
   releaseMs: number
@@ -189,6 +210,9 @@ export interface LimiterParams {
 export interface StudioFxParamsByType {
   eq: EqParams
   compressor: CompressorParams
+  de_esser: DeEsserParams
+  saturator: SaturatorParams
+  stereo_imager: StereoImagerParams
   limiter: LimiterParams
 }
 
@@ -204,6 +228,24 @@ export interface CompressorFx {
   params: CompressorParams
 }
 
+export interface DeEsserFx {
+  type: 'de_esser'
+  bypass: boolean
+  params: DeEsserParams
+}
+
+export interface SaturatorFx {
+  type: 'saturator'
+  bypass: boolean
+  params: SaturatorParams
+}
+
+export interface StereoImagerFx {
+  type: 'stereo_imager'
+  bypass: boolean
+  params: StereoImagerParams
+}
+
 /** Solo valido en el master, y de ultimo. */
 export interface LimiterFx {
   type: 'limiter'
@@ -211,7 +253,7 @@ export interface LimiterFx {
   params: LimiterParams
 }
 
-export type StudioFx = EqFx | CompressorFx | LimiterFx
+export type StudioFx = EqFx | CompressorFx | DeEsserFx | SaturatorFx | StereoImagerFx | LimiterFx
 
 export interface StudioClip {
   id: string
@@ -229,6 +271,10 @@ export interface StudioClip {
   takeGroup: string | null
   /** Un clip inactivo no suena ni se exporta. */
   active: boolean
+  /** Inversion de polaridad (180 grados). Ausente o false = fase normal. */
+  phaseInvert?: boolean
+  /** Forma matematica de los fundidos de entrada y salida. Por defecto 'linear'. */
+  fadeShape?: StudioClipFadeShape
 }
 
 // --- Instrumentos (STUDIO_V2.md 2.3) ---
@@ -275,6 +321,8 @@ export interface SynthParams {
   lfoDepth: number
   velocitySens: number
   gainDb: number
+  /** Micro-deriva analogica determinista por voz, 0..1 (se omite en el cable cuando es 0). */
+  analogDrift: number
 }
 
 export const STUDIO_DRUM_VOICES = ['kick', 'snare', 'clap', 'hat_closed', 'hat_open', 'tom_low', 'tom_mid', 'tom_high', 'cymbal'] as const
@@ -286,11 +334,11 @@ export type DrumVoiceKey = SnakeToCamel<DrumVoice>
 
 /**
  * Parametros de la caja de ritmos (STUDIO_V2.md 2.3.2): por voz `<voz>LevelDb` (-60..6),
- * `<voz>Tune` (semitonos, -12..12) y `<voz>Decay` (multiplicador, 0.25..4); mas `gainDb`.
+ * `<voz>Tune` (semitonos, -12..12) y `<voz>Decay` (multiplicador, 0.25..4); mas `gainDb` y `analogDrift`.
  */
 export type DrumsParams = { [V in DrumVoiceKey as `${V}LevelDb`]: number } & { [V in DrumVoiceKey as `${V}Tune`]: number } & {
   [V in DrumVoiceKey as `${V}Decay`]: number
-} & { gainDb: number }
+} & { gainDb: number; analogDrift: number }
 
 /** Parametros del sampler (STUDIO_V2.md 2.3.3). */
 export interface SamplerParams {
@@ -517,6 +565,8 @@ export interface WireStudioClip {
   fade_out_s: number
   take_group: string | null
   active: boolean
+  phase_invert?: true
+  fade_shape?: 'exp' | 'scurve'
 }
 
 export type WireInstrumentParams = Record<string, number | string>
@@ -696,7 +746,7 @@ export interface StudioFxParamSpec {
   def: number
 }
 
-/** Tabla de STUDIO_V1.md 2.6. La interfaz arma sus controles desde aqui. */
+/** Tabla de STUDIO_V1.md 2.6 + STUDIO_V2.md 7.3. La interfaz arma sus controles desde aqui. */
 export const STUDIO_FX_PARAM_SPECS: Readonly<Record<StudioFxType, readonly StudioFxParamSpec[]>> = {
   eq: [
     { key: 'hpfHz', wire: 'hpf_hz', min: 0, max: 1000, def: 0 },
@@ -713,6 +763,21 @@ export const STUDIO_FX_PARAM_SPECS: Readonly<Record<StudioFxType, readonly Studi
     { key: 'releaseMs', wire: 'release_ms', min: 10, max: 1000, def: 150 },
     { key: 'kneeDb', wire: 'knee_db', min: 0, max: 40, def: 6 },
     { key: 'makeupDb', wire: 'makeup_db', min: 0, max: 24, def: 0 },
+  ],
+  de_esser: [
+    { key: 'freqHz', wire: 'freq_hz', min: 2000, max: 10000, def: 6500 },
+    { key: 'thresholdDb', wire: 'threshold_db', min: -48, max: 0, def: -24 },
+    { key: 'reductionDb', wire: 'reduction_db', min: 0, max: 18, def: 6 },
+  ],
+  saturator: [
+    { key: 'driveDb', wire: 'drive_db', min: 0, max: 24, def: 6 },
+    { key: 'toneDb', wire: 'tone_db', min: -12, max: 12, def: 0 },
+    { key: 'mix', wire: 'mix', min: 0, max: 1, def: 1 },
+    { key: 'outputDb', wire: 'output_db', min: -12, max: 12, def: 0 },
+  ],
+  stereo_imager: [
+    { key: 'width', wire: 'width', min: 0, max: 2, def: 1 },
+    { key: 'monoBassHz', wire: 'mono_bass_hz', min: 0, max: 300, def: 120 },
   ],
   limiter: [
     { key: 'ceilingDb', wire: 'ceiling_db', min: -12, max: 0, def: -1 },
@@ -757,6 +822,8 @@ export interface StudioNumberParamSpec {
   def: number
   /** true = debe ser entero. */
   integer: boolean
+  /** true = se omite en el cable cuando vale `def` (identidad con documentos previos). */
+  omitDefault?: boolean
 }
 
 export interface StudioEnumParamSpec {
@@ -783,8 +850,8 @@ function camelOf(wire: string): string {
   return wire.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase())
 }
 
-function numSpec(wire: string, min: number, max: number, def: number, integer = false): StudioNumberParamSpec {
-  return { kind: 'number', key: camelOf(wire), wire, min, max, def, integer }
+function numSpec(wire: string, min: number, max: number, def: number, integer = false, omitDefault = false): StudioNumberParamSpec {
+  return omitDefault ? { kind: 'number', key: camelOf(wire), wire, min, max, def, integer, omitDefault: true } : { kind: 'number', key: camelOf(wire), wire, min, max, def, integer }
 }
 
 function enumSpec(wire: string, values: readonly string[], def: string): StudioEnumParamSpec {
@@ -820,9 +887,10 @@ export const STUDIO_SYNTH_PARAM_SPECS: readonly StudioInstrumentParamSpec[] = [
   numSpec('lfo_depth', 0, 1, 0),
   numSpec('velocity_sens', 0, 1, 0.7),
   numSpec('gain_db', -24, 12, -6),
+  numSpec('analog_drift', 0, 1, 0, false, true),
 ]
 
-/** STUDIO_V2.md 2.3.2: por voz level_db, tune y decay, en el orden de las voces; al final gain_db. */
+/** STUDIO_V2.md 2.3.2: por voz level_db, tune y decay, en el orden de las voces; al final gain_db y analog_drift. */
 export const STUDIO_DRUMS_PARAM_SPECS: readonly StudioInstrumentParamSpec[] = [
   ...STUDIO_DRUM_VOICES.flatMap((voice) => [
     numSpec(`${voice}_level_db`, -60, 6, 0),
@@ -830,6 +898,7 @@ export const STUDIO_DRUMS_PARAM_SPECS: readonly StudioInstrumentParamSpec[] = [
     numSpec(`${voice}_decay`, 0.25, 4, 1),
   ]),
   numSpec('gain_db', -24, 12, -6),
+  numSpec('analog_drift', 0, 1, 0, false, true),
 ]
 
 /** STUDIO_V2.md 2.3.3. */
@@ -1125,7 +1194,7 @@ export function sortNotes(notes: readonly StudioMidiNote[]): StudioMidiNote[] {
   return [...notes].sort(compareNotes)
 }
 
-function compareMarkers(a: { beat: number; id: string }, b: { beat: number; id: string }): number {
+export function compareMarkers(a: { beat: number; id: string }, b: { beat: number; id: string }): number {
   return a.beat - b.beat || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 }
 
@@ -1273,10 +1342,10 @@ export function defaultFx<T extends StudioFxType>(type: T): Extract<StudioFx, { 
 }
 
 /** Valida y traduce un efecto del cable. No comprueba en que cadena va (eso lo hace parseSession). */
-export function parseFx(raw: unknown, path = 'fx'): StudioFx {
+export function parseFx(raw: unknown, path = 'fx', version: 1 | 2 = 2): StudioFx {
   const o = asObject(raw, path)
   checkKeys(o, path, ['type', 'bypass', 'params'])
-  const type = oneOf(o, 'type', path, STUDIO_FX_TYPES)
+  const type = oneOf(o, 'type', path, version === 1 ? STUDIO_FX_TYPES_V1 : STUDIO_FX_TYPES)
   const bypass = bool(o, 'bypass', path)
   const params = readFxParams(type, o.params, join(path, 'params'), false)
   return { type, bypass, params } as unknown as StudioFx
@@ -1286,8 +1355,8 @@ export function serializeFx(fx: StudioFx): WireStudioFx {
   return { type: fx.type, bypass: fx.bypass, params: fxParamsToWire(fx.type, fx.params as Partial<StudioFxParamsByType[typeof fx.type]>) }
 }
 
-function parseFxChain(raw: unknown[], path: string, where: 'track' | 'master'): StudioFx[] {
-  const chain = raw.map((item, i) => parseFx(item, `${path}[${i}]`))
+function parseFxChain(raw: unknown[], path: string, where: 'track' | 'master', version: 1 | 2 = 2): StudioFx[] {
+  const chain = raw.map((item, i) => parseFx(item, `${path}[${i}]`, version))
   const seen = new Set<StudioFxType>()
   chain.forEach((fx, i) => {
     const p = `${path}[${i}]`
@@ -1338,13 +1407,15 @@ export function partialInstrumentParamsFromWire<T extends StudioParamInstrumentT
   return readInstrumentParams(STUDIO_INSTRUMENT_PARAM_SPECS[type], raw, path, true) as unknown as Partial<StudioInstrumentParamsByType[T]>
 }
 
-/** Parametros de un instrumento del Hub al cable, en el orden de la tabla. Solo los definidos. */
+/** Parametros de un instrumento del Hub al cable, en el orden de la tabla. Solo los definidos (y omitDefault cuando vale def). */
 export function instrumentParamsToWire<T extends StudioParamInstrumentType>(type: T, params: Partial<StudioInstrumentParamsByType[T]>): WireInstrumentParams {
   const source = params as unknown as Record<string, unknown>
   const out: WireInstrumentParams = {}
   for (const spec of STUDIO_INSTRUMENT_PARAM_SPECS[type]) {
     const v = source[spec.key]
-    if (v !== undefined) out[spec.wire] = v as number | string
+    if (v === undefined) continue
+    if (spec.kind === 'number' && spec.omitDefault && v === spec.def) continue
+    out[spec.wire] = v as number | string
   }
   return out
 }
@@ -1403,9 +1474,16 @@ function parseAsset(raw: unknown, path: string): StudioAsset {
   }
 }
 
-function parseClip(raw: unknown, path: string, assets: ReadonlyMap<string, StudioAsset>): StudioClip {
+function parseClip(raw: unknown, path: string, assets: ReadonlyMap<string, StudioAsset>, version: 1 | 2 = 2): StudioClip {
   const o = asObject(raw, path)
-  checkKeys(o, path, ['id', 'asset_id', 'start_s', 'offset_s', 'length_s', 'gain_db', 'fade_in_s', 'fade_out_s', 'take_group', 'active'])
+  checkKeys(
+    o,
+    path,
+    ['id', 'asset_id', 'start_s', 'offset_s', 'length_s', 'gain_db', 'fade_in_s', 'fade_out_s', 'take_group', 'active'],
+    version === 2 ? ['phase_invert', 'fade_shape'] : [],
+  )
+  const phaseInvert = version === 2 && o.phase_invert !== undefined ? bool(o, 'phase_invert', path) : false
+  const fadeShape = version === 2 && o.fade_shape !== undefined ? oneOf(o, 'fade_shape', path, STUDIO_CLIP_FADE_SHAPES) : 'linear'
   const clip: StudioClip = {
     id: id(o, 'id', path),
     assetId: id(o, 'asset_id', path),
@@ -1418,6 +1496,8 @@ function parseClip(raw: unknown, path: string, assets: ReadonlyMap<string, Studi
     takeGroup: nullableId(o, 'take_group', path),
     active: bool(o, 'active', path),
   }
+  if (phaseInvert) clip.phaseInvert = true
+  if (fadeShape !== 'linear') clip.fadeShape = fadeShape
   const asset = assets.get(clip.assetId)
   if (!asset) fail('unknown_asset', join(path, 'asset_id'), `El clip usa el audio "${clip.assetId}", que no está en la sesión`)
   if (clip.offsetS + clip.lengthS > asset.durationS + STUDIO_TIME_EPSILON_S) {
@@ -1583,7 +1663,7 @@ function parseTrack(
   if (kind === 'audio') {
     const clipsPath = join(path, 'clips')
     clips = list(o, 'clips', path, STUDIO_MAX_CLIPS_PER_TRACK).map((item, i) => {
-      const clip = parseClip(item, `${clipsPath}[${i}]`, assets)
+      const clip = parseClip(item, `${clipsPath}[${i}]`, assets, version)
       if (counters.clipIds.has(clip.id)) fail('duplicate_id', `${clipsPath}[${i}].id`, `El id de clip "${clip.id}" está repetido`)
       counters.clipIds.add(clip.id)
       return clip
@@ -1613,7 +1693,7 @@ function parseTrack(
     mute: bool(o, 'mute', path),
     solo: bool(o, 'solo', path),
     reverbSendDb: num(o, 'reverb_send_db', path, STUDIO_REVERB_SEND_DB_MIN, STUDIO_REVERB_SEND_DB_MAX),
-    fx: parseFxChain(list(o, 'fx', path, 2), join(path, 'fx'), 'track'),
+    fx: parseFxChain(list(o, 'fx', path, version === 1 ? 2 : 5), join(path, 'fx'), 'track', version),
     clips,
     instrument,
     midiClips,
@@ -1667,7 +1747,7 @@ function parseChords(raw: unknown, bpm: number): StudioChord[] {
   return chords.sort(compareChords)
 }
 
-function parseMaster(raw: unknown, path: string): StudioMaster {
+function parseMaster(raw: unknown, path: string, version: 1 | 2 = 2): StudioMaster {
   const o = asObject(raw, path)
   checkKeys(o, path, ['volume_db', 'fx', 'reverb'])
   const reverbPath = join(path, 'reverb')
@@ -1675,7 +1755,7 @@ function parseMaster(raw: unknown, path: string): StudioMaster {
   checkKeys(r, reverbPath, ['decay_s', 'return_db'])
   return {
     volumeDb: num(o, 'volume_db', path, STUDIO_VOLUME_DB_MIN, STUDIO_VOLUME_DB_MAX),
-    fx: parseFxChain(list(o, 'fx', path, 3), join(path, 'fx'), 'master'),
+    fx: parseFxChain(list(o, 'fx', path, version === 1 ? 3 : 6), join(path, 'fx'), 'master', version),
     reverb: {
       decayS: num(r, 'decay_s', reverbPath, STUDIO_REVERB_DECAY_S_MIN, STUDIO_REVERB_DECAY_S_MAX),
       returnDb: num(r, 'return_db', reverbPath, STUDIO_REVERB_RETURN_DB_MIN, STUDIO_REVERB_RETURN_DB_MAX),
@@ -1767,7 +1847,7 @@ export function parseSession(raw: unknown): StudioSession {
     tracks,
     markers,
     ...(chords.length > 0 ? { chords } : {}),
-    master: parseMaster(o.master, 'master'),
+    master: parseMaster(o.master, 'master', version),
   }
 }
 
@@ -1827,7 +1907,7 @@ function midiClipToWire(c: StudioMidiClip): WireStudioMidiClip {
 }
 
 function clipToWire(c: StudioClip): WireStudioClip {
-  return {
+  const wire: WireStudioClip = {
     id: c.id,
     asset_id: c.assetId,
     start_s: c.startS,
@@ -1839,6 +1919,9 @@ function clipToWire(c: StudioClip): WireStudioClip {
     take_group: c.takeGroup,
     active: c.active,
   }
+  if (c.phaseInvert === true) wire.phase_invert = true
+  if (c.fadeShape === 'exp' || c.fadeShape === 'scurve') wire.fade_shape = c.fadeShape
+  return wire
 }
 
 function trackToWire(t: StudioTrack): WireStudioTrack {
@@ -1957,7 +2040,7 @@ export function parseSessionJson(json: string): StudioSession {
 // Sesiones nuevas y ayudas
 // ---------------------------------------------------------------------------
 
-export type StudioIdPrefix = 'ses' | 'ast' | 'trk' | 'clp' | 'tk' | 'job' | 'mid' | 'mk'
+export type StudioIdPrefix = 'ses' | 'ast' | 'trk' | 'clp' | 'tk' | 'job' | 'mid' | 'mk' | 'cmt' | 'sec' | 'song'
 
 /** Id nuevo con prefijo: "trk_3fa9c2d1" (8 hexadecimales al azar). */
 export function newStudioId(prefix: StudioIdPrefix): string {

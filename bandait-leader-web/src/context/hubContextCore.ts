@@ -15,6 +15,7 @@ import type { EngineStatus, SyncBackup, SyncNotice } from '../services/workspace
 import type { RoleChangeCheck } from '../services/roles'
 import type { SupabaseConfigSource } from '../services/supabaseClient'
 import type { UiPreferences } from '../services/appearance'
+import type { EcosystemBandVcs } from '../services/versionControl'
 
 /** Estado de sincronizacion que muestra la UI. */
 export type HubSyncStatus = { state: 'local_only'; detail: string } | EngineStatus
@@ -51,6 +52,8 @@ export interface SharingInfo {
   activeShared: boolean
   /** El rol permite editar canciones y setlists de la banda activa (siempre true en bandas personales). */
   activeCanEdit: boolean
+  /** El rol permite crear, editar y versionar sesiones en el Estudio DAW colaborativo (Owner, MusicDirector, Musician, SoundEngineer). */
+  activeCanCollaborateStudio: boolean
   activeCanInvite: boolean
   /** Enlace para mandar a los invitados de la banda activa (solo si es compartida). */
   activeLink: string | null
@@ -72,8 +75,14 @@ export interface HubContextType {
   equipment: EquipmentItem[]
   /** Libreria de canciones de la banda activa (songsMap[bandId]). */
   songs: Song[]
+  /** Cancion activa transversal entre Libreria, Stems, Ensayo, Estudio DAW y Setlists. */
+  activeSongId: string | null
+  activeSong: Song | null
+  setActiveSongId: (songId: string | null) => void
   /** Conteos y avisos de voz de la banda activa (voiceMap[bandId]). */
   voiceConfig: VoiceConfig
+  /** Historial de versiones musical (ramas y snapshots) de Canciones y Setlists de la banda activa. */
+  bandVcs: EcosystemBandVcs
 
   // Identidad
   googleClientId: string
@@ -129,9 +138,11 @@ export interface HubContextType {
   setActivePlaylist: (playlist: Playlist) => void
   updatePlaylistSong: (songId: string, updates: Partial<PlaylistSong>) => void
   reorderSongs: (fromIndex: number, toIndex: number) => void
+  replaceActivePlaylistSongs: (songs: PlaylistSong[]) => void
   addSongToPlaylist: (song: Omit<PlaylistSong, 'id' | 'orderIndex'>) => void
   removeSongFromPlaylist: (songId: string) => void
   updateStemTrackVolume: (channel: number, volumeDb: number) => void
+  registerSongStemsInWorkspace: (songId: string, title: string, bpm: number, tracks: Array<{ label: string; role: string }>) => void
   addEquipment: (item: Omit<EquipmentItem, 'id' | 'bandId'>) => void
   /** Reemplaza los datos de un equipo de la banda activa (mismo id). */
   updateEquipment: (id: string, item: Omit<EquipmentItem, 'id' | 'bandId'>) => void
@@ -144,6 +155,13 @@ export interface HubContextType {
   /** Borra la cancion y los items de setlist que la usan. */
   deleteSong: (songId: string) => void
   updateVoiceConfig: (updates: Partial<VoiceConfig>) => void
+  /** Control de versiones musical en Canciones y Setlists. */
+  commitSongVersion: (songId: string, message: string, branch?: string) => void
+  switchSongBranch: (songId: string, branch: string) => void
+  restoreSongCommit: (songId: string, commitId: string) => void
+  commitPlaylistVersion: (playlistId: string, message: string, branch?: string) => void
+  switchPlaylistBranch: (playlistId: string, branch: string) => void
+  restorePlaylistCommit: (playlistId: string, commitId: string) => void
   /** Descarga la banda activa como JSON, con el workspace v2 completo en `workspace`. */
   exportWorkspaceJson: () => void
   /** Reemplaza el workspace por el de un JSON exportado (se migra y valida). */

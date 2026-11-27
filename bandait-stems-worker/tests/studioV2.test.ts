@@ -135,7 +135,7 @@ test('documento: el fixture v2 valida y vuelve identico; el v1 se guarda como v1
   assert.equal(v1.version, 1);
   assert.ok(!('markers' in v1));
   assert.ok(!('kind' in v1.tracks[0]));
-  assert.equal(VERSION, '1.4.1');
+  assert.equal(VERSION, '1.5.0');
 
   // Tolerancias: markers ausente es [], parametros ausentes toman el valor de la tabla, las notas y
   // las marcas salen ordenadas.
@@ -241,7 +241,7 @@ test('documento v2: PUT guarda un v2 tal cual llega (normalizado) y comprueba co
 // --------------------------------------------------------------------------- herramientas
 
 test('herramientas: la lista que se manda al modelo es la del fixture, sin command_id', () => {
-  assert.equal(CHAT_TOOLS.length, 19);
+  assert.equal(CHAT_TOOLS.length, 23);
   assert.deepEqual(CHAT_TOOLS, TOOLS.tools.map((t: Record<string, unknown>) => ({ name: t.name, description: t.description, parameters: t.parameters })));
   for (const t of CHAT_TOOLS) assert.match(t.name, /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/);
   assert.equal(classifyToolCall({ name: 'set_track_mix', arguments: { track_id: 'trk_1', volume_db: -3 } }), 'ok');
@@ -462,7 +462,7 @@ test('chat con gemini directo: functionDeclarations, firma de pensamiento ida y 
   const sent = bodies[0] as { contents: { role: string; parts: Record<string, unknown>[] }[]; tools: { functionDeclarations: Record<string, unknown>[] }[]; toolConfig?: unknown };
   assert.deepEqual(sent.contents[1].parts[1], { functionCall: { name: 'set_track_mix', args: { track_id: 'trk_1', volume_db: -3 } }, thoughtSignature: 'firma-opaca' });
   assert.deepEqual(sent.contents[2], { role: 'user', parts: [{ functionResponse: { name: 'set_track_mix', response: { status: 'applied', message: 'Aplicado.' } } }] });
-  assert.equal(sent.tools[0].functionDeclarations.length, 19);
+  assert.equal(sent.tools[0].functionDeclarations.length, 23);
   assert.deepEqual(sent.tools[0].functionDeclarations[0], { name: CHAT_TOOLS[0].name, description: CHAT_TOOLS[0].description, parametersJsonSchema: providerSchema(CHAT_TOOLS[0].parameters) });
   assert.ok(!('toolConfig' in sent), 'auto: sin toolConfig');
   const done = await get('job_t1');
@@ -898,3 +898,37 @@ test('chat: un fragmento que falta es 404 no_asset; uno de mas de 1 MiB o de mas
   }
   assert.equal(external().length, 0);
 });
+
+test('documento v2 extendido: saturator, stereo_imager, de_esser, phase_invert, fade_shape y analog_drift', () => {
+  const raw = structuredClone(FIXTURE_V2);
+  raw.tracks[0].clips[0].phase_invert = true;
+  raw.tracks[0].clips[0].fade_shape = 'scurve';
+  raw.tracks[0].fx = [
+    { type: 'eq', bypass: false, params: {} },
+    { type: 'de_esser', bypass: false, params: { freq_hz: 7000 } },
+    { type: 'saturator', bypass: false, params: { drive_db: 8, mix: 0.7 } },
+  ];
+  raw.tracks[1].instrument.params.analog_drift = 0.25;
+  raw.master.fx = [
+    { type: 'eq', bypass: false, params: {} },
+    { type: 'compressor', bypass: false, params: {} },
+    { type: 'saturator', bypass: false, params: {} },
+    { type: 'stereo_imager', bypass: false, params: { width: 1.25, mono_bass_hz: 120 } },
+    { type: 'limiter', bypass: false, params: { ceiling_db: -0.5, release_ms: 80 } },
+  ];
+  const valid = validateSession(raw);
+  assert.equal(valid.tracks[0].clips![0].phase_invert, true);
+  assert.equal(valid.tracks[0].clips![0].fade_shape, 'scurve');
+  assert.equal((valid.tracks[1].instrument as { params: Record<string, unknown> }).params.analog_drift, 0.25);
+  assert.equal(valid.master.fx.length, 5);
+
+  // analog_drift = 0 y fade_shape = 'linear' se normalizan a ausente.
+  raw.tracks[0].clips[0].phase_invert = false;
+  raw.tracks[0].clips[0].fade_shape = 'linear';
+  raw.tracks[1].instrument.params.analog_drift = 0;
+  const cleaned = validateSession(raw);
+  assert.ok(!('phase_invert' in cleaned.tracks[0].clips![0]));
+  assert.ok(!('fade_shape' in cleaned.tracks[0].clips![0]));
+  assert.ok(!('analog_drift' in (cleaned.tracks[1].instrument as { params: Record<string, unknown> }).params));
+});
+

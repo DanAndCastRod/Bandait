@@ -458,6 +458,9 @@ function signedDb(value: number): string {
 const FX_NAMES: Record<StudioFxType, string> = {
   eq: 'EQ',
   compressor: 'compresor',
+  de_esser: 'de-esser',
+  saturator: 'saturador',
+  stereo_imager: 'imagen estéreo',
   limiter: 'limitador',
 }
 

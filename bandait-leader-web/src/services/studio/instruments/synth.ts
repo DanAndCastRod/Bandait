@@ -18,6 +18,13 @@ import type { Voice, VoiceEngine } from './voices.ts'
 const LFO_PITCH_CENTS = 100
 const LFO_FILTER_CENTS = 2400
 
+/** Hash determinista en [-1, 1] por voz/oscilador para tolerancia analogica reproducible en bounce offline. */
+function voiceDriftBipolar(pitch: number, startS: number, salt: number): number {
+  let h = (Math.imul(pitch | 0, 374761393) ^ Math.imul(Math.round(startS * 1000), 668265263) ^ Math.imul(salt, 2246822519)) >>> 0
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0
+  return ((h ^ (h >>> 16)) >>> 0) / 2147483648 - 1
+}
+
 export class SynthEngine implements VoiceEngine {
   readonly type = 'synth' as const
   private readonly ctx: BaseAudioContext
@@ -42,14 +49,17 @@ export class SynthEngine implements VoiceEngine {
     const ctx = this.ctx
     const p = this.params
     if (!(p.osc1Level > 0) && !(p.osc2Level > 0) && !(p.noiseLevel > 0)) return false
-    const amp = adsrFromMs(p.ampAttackMs, p.ampDecayMs, p.ampSustain, p.ampReleaseMs)
-    const fenv = adsrFromMs(p.filterAttackMs, p.filterDecayMs, p.filterSustain, p.filterReleaseMs)
+    const drift = Math.max(0, Math.min(1, p.analogDrift ?? 0))
+    const decayScale = drift > 0 ? 1 + voiceDriftBipolar(voice.pitch, start, 7) * drift * 0.12 : 1
+    const amp = adsrFromMs(p.ampAttackMs, p.ampDecayMs * decayScale, p.ampSustain, p.ampReleaseMs)
+    const fenv = adsrFromMs(p.filterAttackMs, p.filterDecayMs * decayScale, p.filterSustain, p.filterReleaseMs)
     const peak = velocityGain(voice.velocity, p.velocitySens)
 
     // --- filtro ---
     const filter = ctx.createBiquadFilter()
     filter.type = p.filterType
-    const cutoff = Math.min(FILTER_MAX_HZ, Math.max(FILTER_MIN_HZ, p.filterCutoffHz))
+    const filterDriftRatio = drift > 0 ? Math.pow(2, (voiceDriftBipolar(voice.pitch, start, 3) * drift * 110) / 1200) : 1
+    const cutoff = Math.min(FILTER_MAX_HZ, Math.max(FILTER_MIN_HZ, p.filterCutoffHz * filterDriftRatio))
     filter.frequency.value = Math.min(cutoff, ctx.sampleRate / 2)
     filter.Q.value = biquadQ(p.filterType, p.filterResonance)
     voice.addNode(filter)
@@ -99,16 +109,17 @@ export class SynthEngine implements VoiceEngine {
     tail.connect(voice.killGain)
 
     // --- osciladores y ruido ---
-    const oscillators: Array<[SynthParams['osc1Wave'], number, number, number]> = [
-      [p.osc1Wave, p.osc1Octave, p.osc1DetuneCents, p.osc1Level],
-      [p.osc2Wave, p.osc2Octave, p.osc2DetuneCents, p.osc2Level],
+    const oscillators: Array<[SynthParams['osc1Wave'], number, number, number, number]> = [
+      [p.osc1Wave, p.osc1Octave, p.osc1DetuneCents, p.osc1Level, 11],
+      [p.osc2Wave, p.osc2Octave, p.osc2DetuneCents, p.osc2Level, 29],
     ]
-    for (const [wave, octave, detune, level] of oscillators) {
+    for (const [wave, octave, detune, level, salt] of oscillators) {
       if (!(level > 0)) continue
       const osc = ctx.createOscillator()
       osc.type = wave
       osc.frequency.value = noteFrequency(voice.pitch) * Math.pow(2, octave)
-      osc.detune.value = detune
+      const driftCents = drift > 0 ? voiceDriftBipolar(voice.pitch, start, salt) * drift * 9 : 0
+      osc.detune.value = detune + driftCents
       if (lfoGain && p.lfoTarget === 'pitch') lfoGain.connect(osc.detune)
       const gain = ctx.createGain()
       gain.gain.value = level

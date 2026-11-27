@@ -44,6 +44,7 @@ import {
   normalizeNotes,
   notesInRange,
   quantize,
+  humanize,
   removeNotes,
   resizeNotes,
   setVelocity,
@@ -2579,6 +2580,34 @@ async function verifyStudioV2() {
     assert.deepStrictEqual(sel.selection, [0])
   })
 
+  await check('humanize: varia micro-timing (tiempo), velocidad (volumen) y duracion, respeta seleccion y limites', () => {
+    const chord = [note(60, 1, 0.5, 90), note(64, 1, 0.5, 90), note(67, 1, 0.5, 90), note(72, 2, 0.5, 90)]
+    // Con amount = 0 no cambia nada.
+    assert.deepStrictEqual(humanize(chord, null, { amount: 0, seed: 42 }, 4).notes, chord)
+    // Con amount = 0.8 y semilla fija es determinista y cambia TANTO tiempo como velocidad y duracion.
+    const a = humanize(chord, null, { amount: 0.8, seed: 12345 }, 4)
+    const b = humanize(chord, null, { amount: 0.8, seed: 12345 }, 4)
+    assert.deepStrictEqual(a, b)
+    assert.ok(a.notes.some((n, i) => n.start !== chord[i].start), 'debe variar el tiempo (micro-timing)')
+    assert.ok(a.notes.some((n, i) => n.velocity !== chord[i].velocity), 'debe variar la velocidad (volumen)')
+    assert.ok(a.notes.some((n, i) => n.length !== chord[i].length), 'debe variar sutilmente la duracion')
+    for (const n of a.notes) {
+      assert.ok(n.start >= 0 && n.start < 4)
+      assert.ok(n.velocity >= 1 && n.velocity <= 127)
+      assert.ok(n.length > 0)
+    }
+    // Solo la seleccion se humaniza; la nota 0 queda intacta.
+    const sel = humanize([note(60, 1, 0.5, 90), note(62, 2, 0.5, 90)], [1], { amount: 1, seed: 99 }, 4)
+    const untouched = sel.notes.find((n) => n.pitch === 60)
+    assert.deepStrictEqual(untouched, note(60, 1, 0.5, 90))
+    // Bordes: start en 0 y velocity en 127 nunca salen de rango.
+    const edge = humanize([note(60, 0, 0.5, 1), note(62, 3.99, 0.5, 127)], null, { amount: 1, seed: 7 }, 4)
+    for (const n of edge.notes) {
+      assert.ok(n.start >= 0 && n.start < 4)
+      assert.ok(n.velocity >= 1 && n.velocity <= 127)
+    }
+  })
+
   await check('legato: cada nota llega al inicio de la siguiente de la seleccion; la ultima no cambia', () => {
     const notes = [note(60, 0, 0.5), note(64, 0, 0.25), note(67, 1, 0.5), note(72, 3, 0.5)]
     assert.deepStrictEqual(legato(notes, null, 4).notes, [note(60, 0, 1), note(64, 0, 1), note(67, 1, 2), note(72, 3, 0.5)])
@@ -3300,9 +3329,9 @@ async function verifyStudioV2() {
     }
   })
 
-  await check('herramientas del asistente: las 19 del fixture tienen su comando con el mismo command_id', () => {
+  await check('herramientas del asistente: las 23 del fixture tienen su comando con el mismo command_id', () => {
     const tools = chatToolsFixture.tools as Array<{ name: string; command_id: string }>
-    assert.equal(tools.length, 19)
+    assert.equal(tools.length, 23)
     for (const tool of tools) {
       const c = specs.find((s) => s.id === tool.command_id)
       assert.ok(c, `falta el comando ${tool.command_id}`)

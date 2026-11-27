@@ -31,8 +31,11 @@ export type AssetExtension = (typeof ASSET_EXTENSIONS)[number];
 const ASSET_KINDS = ['recording', 'import', 'stem', 'generated', 'bounce', 'master'] as const;
 const PROVIDERS = ['musicai', 'lyria', 'suno'] as const;
 const SAMPLE_RATES = [44100, 48000, 88200, 96000];
-export const FX_TYPES = ['eq', 'compressor', 'limiter'] as const;
+export const FX_TYPES_V1 = ['eq', 'compressor', 'limiter'] as const;
+export const FX_TYPES = ['eq', 'compressor', 'de_esser', 'saturator', 'stereo_imager', 'limiter'] as const;
 export type FxType = (typeof FX_TYPES)[number];
+export const CLIP_FADE_SHAPES = ['linear', 'exp', 'scurve'] as const;
+export type ClipFadeShape = (typeof CLIP_FADE_SHAPES)[number];
 
 /** Roles de bandait-protocol/fixtures/stem_names.json, mas `unknown`. */
 export const ROLES: readonly string[] = [
@@ -42,7 +45,7 @@ export const ROLES: readonly string[] = [
 
 export interface FxParamSpec { key: string; min: number; max: number; def: number }
 
-/** Tabla de STUDIO_V1.md 2.6. */
+/** Tabla de STUDIO_V1.md 2.6 + STUDIO_V2.md 7.3. */
 export const FX_PARAM_SPECS: Readonly<Record<FxType, readonly FxParamSpec[]>> = {
   eq: [
     { key: 'hpf_hz', min: 0, max: 1000, def: 0 },
@@ -59,6 +62,21 @@ export const FX_PARAM_SPECS: Readonly<Record<FxType, readonly FxParamSpec[]>> = 
     { key: 'release_ms', min: 10, max: 1000, def: 150 },
     { key: 'knee_db', min: 0, max: 40, def: 6 },
     { key: 'makeup_db', min: 0, max: 24, def: 0 },
+  ],
+  de_esser: [
+    { key: 'freq_hz', min: 2000, max: 10000, def: 6500 },
+    { key: 'threshold_db', min: -48, max: 0, def: -24 },
+    { key: 'reduction_db', min: 0, max: 18, def: 6 },
+  ],
+  saturator: [
+    { key: 'drive_db', min: 0, max: 24, def: 6 },
+    { key: 'tone_db', min: -12, max: 12, def: 0 },
+    { key: 'mix', min: 0, max: 1, def: 1 },
+    { key: 'output_db', min: -12, max: 12, def: 0 },
+  ],
+  stereo_imager: [
+    { key: 'width', min: 0, max: 2, def: 1 },
+    { key: 'mono_bass_hz', min: 0, max: 300, def: 120 },
   ],
   limiter: [
     { key: 'ceiling_db', min: -12, max: 0, def: -1 },
@@ -78,6 +96,9 @@ export interface SessionAsset {
 export interface SessionClip {
   id: string; asset_id: string; start_s: number; offset_s: number; length_s: number; gain_db: number;
   fade_in_s: number; fade_out_s: number; take_group: string | null; active: boolean;
+  /** STUDIO_V2.md 7.3: solo en v2 y omitidos cuando son por defecto. */
+  phase_invert?: true;
+  fade_shape?: 'exp' | 'scurve';
 }
 
 export type TrackKind = 'audio' | 'instrument';
@@ -161,14 +182,16 @@ export const DRUM_GM_MAP: Readonly<Record<number, string>> = {
 };
 
 export type InstrumentParamSpec =
-  | { kind: 'number'; key: string; min: number; max: number; def: number; integer: boolean }
+  | { kind: 'number'; key: string; min: number; max: number; def: number; integer: boolean; omitDefault?: boolean }
   | { kind: 'enum'; key: string; values: readonly string[]; def: string };
 
-const numSpec = (key: string, min: number, max: number, def: number, integer = false): InstrumentParamSpec => ({ kind: 'number', key, min, max, def, integer });
+const numSpec = (key: string, min: number, max: number, def: number, integer = false, omitDefault = false): InstrumentParamSpec => (
+  omitDefault ? { kind: 'number', key, min, max, def, integer, omitDefault: true } : { kind: 'number', key, min, max, def, integer }
+);
 const enumSpec = (key: string, values: readonly string[], def: string): InstrumentParamSpec => ({ kind: 'enum', key, values, def });
 const WAVES = ['sine', 'triangle', 'sawtooth', 'square'] as const;
 
-/** Tablas de STUDIO_V2.md 2.3.1 a 2.3.3, en el orden en que se serializan. */
+/** Tablas de STUDIO_V2.md 2.3.1 a 2.3.3 y 7.3, en el orden en que se serializan. */
 export const INSTRUMENT_PARAM_SPECS: Readonly<Record<'synth' | 'drums' | 'sampler', readonly InstrumentParamSpec[]>> = {
   synth: [
     enumSpec('osc1_wave', WAVES, 'sawtooth'), numSpec('osc1_octave', -2, 2, 0, true), numSpec('osc1_detune_cents', -100, 100, 0),
@@ -180,11 +203,11 @@ export const INSTRUMENT_PARAM_SPECS: Readonly<Record<'synth' | 'drums' | 'sample
     numSpec('amp_attack_ms', 0, 10000, 5), numSpec('amp_decay_ms', 0, 10000, 200), numSpec('amp_sustain', 0, 1, 0.7),
     numSpec('amp_release_ms', 0, 10000, 250), enumSpec('lfo_wave', WAVES, 'sine'), numSpec('lfo_rate_hz', 0.01, 20, 5),
     enumSpec('lfo_target', ['off', 'pitch', 'filter', 'amp'], 'off'), numSpec('lfo_depth', 0, 1, 0), numSpec('velocity_sens', 0, 1, 0.7),
-    numSpec('gain_db', -24, 12, -6),
+    numSpec('gain_db', -24, 12, -6), numSpec('analog_drift', 0, 1, 0, false, true),
   ],
   drums: [
     ...DRUM_VOICES.flatMap((voice) => [numSpec(`${voice}_level_db`, -60, 6, 0), numSpec(`${voice}_tune`, -12, 12, 0), numSpec(`${voice}_decay`, 0.25, 4, 1)]),
-    numSpec('gain_db', -24, 12, -6),
+    numSpec('gain_db', -24, 12, -6), numSpec('analog_drift', 0, 1, 0, false, true),
   ],
   sampler: [
     numSpec('amp_attack_ms', 0, 10000, 2), numSpec('amp_decay_ms', 0, 10000, 0), numSpec('amp_sustain', 0, 1, 1),
@@ -296,13 +319,14 @@ export function validateFxParams(type: FxType, raw: unknown, path: string, parti
   return out;
 }
 
-/** Cadena de efectos de una pista (`track`: eq y compressor) o del master (ademas limiter, de ultimo). */
-export function validateFxChain(raw: unknown[], path: string, where: 'track' | 'master'): SessionFx[] {
+/** Cadena de efectos de una pista o del master (limiter solo en master, y de ultimo). */
+export function validateFxChain(raw: unknown[], path: string, where: 'track' | 'master', version: 1 | 2 = 2): SessionFx[] {
+  const allowed = version === 1 ? FX_TYPES_V1 : FX_TYPES;
   const chain = raw.map((item, i): SessionFx => {
     const p = `${path}[${i}]`;
     const o = asObject(item, p);
     checkKeys(o, p, ['type', 'bypass', 'params']);
-    const type = oneOf(o, 'type', p, FX_TYPES) as FxType;
+    const type = oneOf(o, 'type', p, allowed) as FxType;
     return { type, bypass: bool(o, 'bypass', p), params: validateFxParams(type, o.params, join(p, 'params'), false) };
   });
   const seen = new Set<string>();
@@ -357,9 +381,16 @@ function validateAsset(raw: unknown, path: string): SessionAsset {
   return { id: assetId, file, kind, label, channels, sample_rate: sampleRate, duration_s: duration, size, source };
 }
 
-function validateClip(raw: unknown, path: string, assets: ReadonlyMap<string, SessionAsset>): SessionClip {
+function validateClip(raw: unknown, path: string, assets: ReadonlyMap<string, SessionAsset>, version: 1 | 2): SessionClip {
   const o = asObject(raw, path);
-  checkKeys(o, path, ['id', 'asset_id', 'start_s', 'offset_s', 'length_s', 'gain_db', 'fade_in_s', 'fade_out_s', 'take_group', 'active']);
+  checkKeys(
+    o,
+    path,
+    ['id', 'asset_id', 'start_s', 'offset_s', 'length_s', 'gain_db', 'fade_in_s', 'fade_out_s', 'take_group', 'active'],
+    version === 2 ? ['phase_invert', 'fade_shape'] : [],
+  );
+  const phaseInvert = version === 2 && o.phase_invert !== undefined ? bool(o, 'phase_invert', path) : false;
+  const fadeShape = version === 2 && o.fade_shape !== undefined ? oneOf(o, 'fade_shape', path, CLIP_FADE_SHAPES) as ClipFadeShape : 'linear';
   const clip: SessionClip = {
     id: id(o, 'id', path),
     asset_id: id(o, 'asset_id', path),
@@ -372,6 +403,8 @@ function validateClip(raw: unknown, path: string, assets: ReadonlyMap<string, Se
     take_group: nullableId(o, 'take_group', path),
     active: bool(o, 'active', path),
   };
+  if (phaseInvert) clip.phase_invert = true;
+  if (fadeShape !== 'linear') clip.fade_shape = fadeShape;
   const asset = assets.get(clip.asset_id);
   if (!asset) fail('unknown_asset', join(path, 'asset_id'));
   if (clip.offset_s + clip.length_s > asset.duration_s + TIME_EPSILON_S) fail('clip_out_of_asset', join(path, 'length_s'));
@@ -391,11 +424,15 @@ export function validateInstrumentParams(type: 'synth' | 'drums' | 'sampler', ra
   const out: Record<string, number | string> = {};
   for (const spec of specs) {
     if (o[spec.key] === undefined) {
-      if (!partial) out[spec.key] = spec.def;
+      if (!partial && !(spec.kind === 'number' && spec.omitDefault)) out[spec.key] = spec.def;
       continue;
     }
-    if (spec.kind === 'enum') out[spec.key] = oneOf(o, spec.key, path, spec.values);
-    else out[spec.key] = spec.integer ? int(o, spec.key, path, spec.min, spec.max) : num(o, spec.key, path, spec.min, spec.max);
+    if (spec.kind === 'enum') {
+      out[spec.key] = oneOf(o, spec.key, path, spec.values);
+    } else {
+      const val = spec.integer ? int(o, spec.key, path, spec.min, spec.max) : num(o, spec.key, path, spec.min, spec.max);
+      if (partial || !spec.omitDefault || val !== spec.def) out[spec.key] = val;
+    }
   }
   return out;
 }
@@ -526,7 +563,7 @@ function validateTrack(
     mute: bool(o, 'mute', path),
     solo: bool(o, 'solo', path),
     reverb_send_db: num(o, 'reverb_send_db', path, -60, 0),
-    fx: validateFxChain(list(o, 'fx', path, 2), join(path, 'fx'), 'track'),
+    fx: validateFxChain(list(o, 'fx', path, version === 1 ? 2 : 5), join(path, 'fx'), 'track', version),
   };
   const addClipId = (clipId: string, at: string) => {
     if (counters.clipIds.has(clipId)) fail('duplicate_id', `${at}.id`);
@@ -535,7 +572,7 @@ function validateTrack(
   if (kind === 'audio') {
     const clipsPath = join(path, 'clips');
     const clips = list(o, 'clips', path, MAX_CLIPS_PER_TRACK).map((item, i) => {
-      const clip = validateClip(item, `${clipsPath}[${i}]`, assets);
+      const clip = validateClip(item, `${clipsPath}[${i}]`, assets, version);
       addClipId(clip.id, `${clipsPath}[${i}]`);
       return clip;
     });
@@ -661,7 +698,7 @@ export function validateSession(raw: unknown): SessionDocument {
     ...(chords.length ? { chords } : {}),
     master: {
       volume_db: num(m, 'volume_db', 'master', VOLUME_DB_MIN, VOLUME_DB_MAX),
-      fx: validateFxChain(list(m, 'fx', 'master', 3), 'master.fx', 'master'),
+      fx: validateFxChain(list(m, 'fx', 'master', version === 1 ? 3 : 6), 'master.fx', 'master', version),
       reverb: { decay_s: num(r, 'decay_s', 'master.reverb', 0.2, 10), return_db: num(r, 'return_db', 'master.reverb', -60, 12) },
     },
   };

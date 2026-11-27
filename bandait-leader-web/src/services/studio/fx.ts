@@ -15,8 +15,11 @@ import {
   STUDIO_EQ_LOW_SHELF_HZ,
   STUDIO_LIMITER_LOOKAHEAD_MS,
   type CompressorParams,
+  type DeEsserParams,
   type EqParams,
   type LimiterParams,
+  type SaturatorParams,
+  type StereoImagerParams,
   type StudioFx,
   type StudioFxType,
 } from './session.ts'
@@ -46,11 +49,29 @@ export function limiterLatencySeconds(sampleRate: number): number {
   return limiterLookaheadFrames(sampleRate, STUDIO_LIMITER_LOOKAHEAD_MS) / sampleRate
 }
 
-/** Retardo de una unidad de efecto. El EQ (filtros IIR) no retrasa. */
+/** Retardo de una unidad de efecto. El EQ, el saturador y el stereo_imager no retrasan; de_esser usa compresor de banda. */
 export function fxLatencySeconds(type: StudioFxType, sampleRate: number, limiterWorklet: boolean): number {
-  if (type === 'compressor') return compressorLatencySeconds(sampleRate)
+  if (type === 'compressor' || type === 'de_esser') return compressorLatencySeconds(sampleRate)
   if (type === 'limiter') return limiterWorklet ? limiterLatencySeconds(sampleRate) : compressorLatencySeconds(sampleRate)
   return 0
+}
+
+/**
+ * Curva sigmoide tipo cinta analogica (con ligera asimetria de segundo armonico par + tanh de tercer
+ * armonico impar) para `WaveShaperNode` con `oversample = '4x'`.
+ */
+export function buildTapeSaturatorCurve(driveDb: number, points = 2049): Float32Array<ArrayBuffer> {
+  const curve = new Float32Array(points)
+  const drive = dbToGain(Math.max(0, Math.min(24, driveDb)))
+  const norm = Math.tanh(drive) || 1
+  for (let i = 0; i < points; i++) {
+    const x = (i / (points - 1)) * 2 - 1
+    // Ligera polarizacion asimetrica para generar calidez par sin desplazamiento DC notable.
+    const asym = x + 0.06 * x * x - 0.03
+    const shaped = (Math.tanh(asym * drive) - Math.tanh(-0.03 * drive)) / norm
+    curve[i] = Math.max(-1, Math.min(1, shaped))
+  }
+  return curve
 }
 
 export interface EqBand {
@@ -349,6 +370,177 @@ function createFallbackLimiterUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit 
   return { type: 'limiter', input: path.input, output: path.output, latencyS, update, dispose: () => disconnectAll([pre, compressor, clip, post, ...path.nodes]) }
 }
 
+function createDeEsserUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
+  // Topologia split-band coherente en fase:
+  //   - Banda grave/media: lowpass en freqHz + retardo igual a la anticipacion del compresor
+  //   - Banda sibilante: highpass en freqHz -> DynamicsCompressorNode rapido
+  const splitIn = ctx.createGain()
+  const sumOut = ctx.createGain()
+  const lowFilter = ctx.createBiquadFilter()
+  lowFilter.type = 'lowpass'
+  lowFilter.Q.value = 0.707
+  const highFilter = ctx.createBiquadFilter()
+  highFilter.type = 'highpass'
+  highFilter.Q.value = 0.707
+  const sibilantComp = ctx.createDynamicsCompressor()
+  sibilantComp.attack.value = 0.001
+  sibilantComp.release.value = 0.045
+  sibilantComp.knee.value = 6
+
+  const latencyS = compressorLatencySeconds(ctx.sampleRate)
+  const nodes: AudioNode[] = [splitIn, sumOut, lowFilter, highFilter, sibilantComp]
+  splitIn.connect(lowFilter)
+  if (latencyS > 0) {
+    const lowDelay = ctx.createDelay(Math.max(0.05, latencyS * 2))
+    lowDelay.delayTime.value = latencyS
+    lowFilter.connect(lowDelay)
+    lowDelay.connect(sumOut)
+    nodes.push(lowDelay)
+  } else {
+    lowFilter.connect(sumOut)
+  }
+  splitIn.connect(highFilter)
+  highFilter.connect(sibilantComp)
+  sibilantComp.connect(sumOut)
+
+  const path = wetDry(ctx, splitIn, sumOut, latencyS)
+  const nyquist = ctx.sampleRate / 2 - 10
+  const update = (next: StudioFx, immediate: boolean) => {
+    if (next.type !== 'de_esser') return
+    const p = next.params as DeEsserParams
+    const freq = Math.max(2000, Math.min(nyquist, p.freqHz))
+    setParam(ctx, lowFilter.frequency, freq, immediate)
+    setParam(ctx, highFilter.frequency, freq, immediate)
+    setParam(ctx, sibilantComp.threshold, p.thresholdDb, immediate)
+    // reductionDb 0..18 dB mapea la relacion de compresion de 1 (apagado) hasta 16:1.
+    const ratio = 1 + (Math.max(0, Math.min(18, p.reductionDb)) / 18) * 15
+    setParam(ctx, sibilantComp.ratio, ratio, immediate)
+    setBypass(ctx, path, next.bypass, immediate)
+  }
+  update(fx, true)
+  return { type: 'de_esser', input: path.input, output: path.output, latencyS, update, dispose: () => disconnectAll([...nodes, ...path.nodes]) }
+}
+
+function createSaturatorUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
+  const splitIn = ctx.createGain()
+  const sumMix = ctx.createGain()
+  const wetGain = ctx.createGain()
+  const dryMixGain = ctx.createGain()
+  const shaper = ctx.createWaveShaper()
+  shaper.oversample = '4x'
+  const toneFilter = ctx.createBiquadFilter()
+  toneFilter.type = 'highshelf'
+  toneFilter.frequency.value = Math.min(4500, ctx.sampleRate / 2 - 10)
+  const postGain = ctx.createGain()
+
+  splitIn.connect(shaper)
+  shaper.connect(toneFilter)
+  toneFilter.connect(postGain)
+  postGain.connect(wetGain)
+  wetGain.connect(sumMix)
+
+  splitIn.connect(dryMixGain)
+  dryMixGain.connect(sumMix)
+
+  const path = wetDry(ctx, splitIn, sumMix, 0)
+  let currentDriveKey = Number.NaN
+
+  const update = (next: StudioFx, immediate: boolean) => {
+    if (next.type !== 'saturator') return
+    const p = next.params as SaturatorParams
+    const driveKey = Math.round(p.driveDb * 10) / 10
+    if (driveKey !== currentDriveKey) {
+      shaper.curve = buildTapeSaturatorCurve(driveKey)
+      currentDriveKey = driveKey
+    }
+    const mix = Math.max(0, Math.min(1, p.mix))
+    setParam(ctx, toneFilter.gain, p.toneDb, immediate)
+    setParam(ctx, postGain.gain, dbToGain(p.outputDb), immediate)
+    setParam(ctx, wetGain.gain, mix, immediate)
+    setParam(ctx, dryMixGain.gain, 1 - mix, immediate)
+    setBypass(ctx, path, next.bypass, immediate)
+  }
+  update(fx, true)
+  return {
+    type: 'saturator',
+    input: path.input,
+    output: path.output,
+    latencyS: 0,
+    update,
+    dispose: () => disconnectAll([splitIn, sumMix, wetGain, dryMixGain, shaper, toneFilter, postGain, ...path.nodes]),
+  }
+}
+
+function createStereoImagerUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
+  // Matriz Mid/Side exacta:
+  //   M = 0.5 * (L + R)
+  //   S = 0.5 * (L - R) -> Pasa-altos (monoBassHz) -> ganancia width
+  //   L' = M + S', R' = M - S'
+  const stereoIn = ctx.createGain()
+  stereoIn.channelCount = 2
+  stereoIn.channelCountMode = 'explicit'
+  const splitter = ctx.createChannelSplitter(2)
+  const merger = ctx.createChannelMerger(2)
+
+  const midL = ctx.createGain()
+  midL.gain.value = 0.5
+  const midR = ctx.createGain()
+  midR.gain.value = 0.5
+  const midSum = ctx.createGain()
+
+  const sideL = ctx.createGain()
+  sideL.gain.value = 0.5
+  const sideR = ctx.createGain()
+  sideR.gain.value = -0.5
+  const sideSum = ctx.createGain()
+  const sideHpf = ctx.createBiquadFilter()
+  sideHpf.type = 'highpass'
+  sideHpf.Q.value = 20 * Math.log10(STUDIO_EQ_HPF_Q)
+  const sideWidth = ctx.createGain()
+  const sideInv = ctx.createGain()
+  sideInv.gain.value = -1
+
+  stereoIn.connect(splitter)
+  splitter.connect(midL, 0)
+  splitter.connect(midR, 1)
+  midL.connect(midSum)
+  midR.connect(midSum)
+
+  splitter.connect(sideL, 0)
+  splitter.connect(sideR, 1)
+  sideL.connect(sideSum)
+  sideR.connect(sideSum)
+  sideSum.connect(sideHpf)
+  sideHpf.connect(sideWidth)
+  sideWidth.connect(sideInv)
+
+  // L' = M + S', R' = M - S'
+  midSum.connect(merger, 0, 0)
+  sideWidth.connect(merger, 0, 0)
+  midSum.connect(merger, 0, 1)
+  sideInv.connect(merger, 0, 1)
+
+  const path = wetDry(ctx, stereoIn, merger, 0)
+  const nyquist = ctx.sampleRate / 2 - 10
+  const update = (next: StudioFx, immediate: boolean) => {
+    if (next.type !== 'stereo_imager') return
+    const p = next.params as StereoImagerParams
+    setParam(ctx, sideWidth.gain, Math.max(0, Math.min(2, p.width)), immediate)
+    setParam(ctx, sideHpf.frequency, Math.max(0, Math.min(nyquist, p.monoBassHz)), immediate)
+    setBypass(ctx, path, next.bypass, immediate)
+  }
+  update(fx, true)
+  return {
+    type: 'stereo_imager',
+    input: path.input,
+    output: path.output,
+    latencyS: 0,
+    update,
+    dispose: () =>
+      disconnectAll([stereoIn, splitter, merger, midL, midR, midSum, sideL, sideR, sideSum, sideHpf, sideWidth, sideInv, ...path.nodes]),
+  }
+}
+
 export interface CreatedFxUnit {
   unit: FxUnit
   /** Solo tiene sentido en el limitador: true si quedo el worklet, false si quedo el respaldo. */
@@ -362,6 +554,9 @@ export interface CreatedFxUnit {
 export function createFxUnit(ctx: BaseAudioContext, fx: StudioFx, limiterWorklet: boolean): CreatedFxUnit {
   if (fx.type === 'eq') return { unit: createEqUnit(ctx, fx), worklet: false }
   if (fx.type === 'compressor') return { unit: createCompressorUnit(ctx, fx), worklet: false }
+  if (fx.type === 'de_esser') return { unit: createDeEsserUnit(ctx, fx), worklet: false }
+  if (fx.type === 'saturator') return { unit: createSaturatorUnit(ctx, fx), worklet: false }
+  if (fx.type === 'stereo_imager') return { unit: createStereoImagerUnit(ctx, fx), worklet: false }
   if (limiterWorklet && typeof AudioWorkletNode !== 'undefined') {
     try {
       return { unit: createWorkletLimiterUnit(ctx, fx), worklet: true }

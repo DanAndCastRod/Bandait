@@ -861,6 +861,7 @@ datos, reproduce, graba, exporta, guarda, borra la sesión ni lanza trabajos con
 | `replace_midi_notes` | `midi.replace_notes` | Reemplaza todas las notas de un clip MIDI |
 | `transpose_midi_clip` | `midi.transpose` | Transpone las notas de un clip MIDI |
 | `quantize_midi_clip` | `midi.quantize` | Cuantiza las notas de un clip MIDI |
+| `humanize_midi_clip` | `midi.humanize` | Humaniza las notas de un clip MIDI en tiempo (micro-timing), velocidad, duración, swing, acento métrico y strum |
 | `move_clip` | `clip.move` | Mueve un clip (audio o MIDI) a un beat y, opcionalmente, a otra pista del mismo `kind` |
 | `duplicate_clip` | `clip.duplicate` | Duplica un clip (por defecto, justo después del original) |
 | `split_clip` | `clip.split` | Divide un clip en un beat |
@@ -868,6 +869,9 @@ datos, reproduce, graba, exporta, guarda, borra la sesión ni lanza trabajos con
 | `set_clip_gain` | `clip.set_gain` | Ganancia de un clip de audio |
 | `add_marker` | `marker.add` | Agrega una marca |
 | `remove_marker` | `marker.remove` | Quita una marca |
+| `auto_master_session` | `master.auto` | Aplica cadena de masterización DSP local sobre el bus master por perfil LUFS/dBTP |
+| `unmask_mix_tracks` | `mix.unmask` | Ejecuta el optimizador matemático anti-enmascaramiento espectral en bandas Bark |
+| `generate_click_guide` | `studio.click_guide` | Genera pista de metrónomo acentuado alineada al compás y estructura |
 
 Reglas de aplicación en el Hub:
 
@@ -1044,3 +1048,28 @@ para generar. El cuerpo de `POST .../jobs` no cambia.
 - VST nativos (plan, sección 8). El lugar del congelado (`frozen_asset_id`) ya está reservado.
 - Lyria en tiempo real (`lyria-realtime-exp`, WebSocket) y salida WAV de `lyria-3.5`: URiT no las
   ofrece todavía.
+
+## 7. Colaboración, Control de Versiones (`/vcs`) y Extensiones DSP (v2 extendido)
+
+### 7.1 Permisos colaborativos en `/v1/bands/{band}/studio`
+- **Lectura** (`GET .../studio`, `GET .../session`, `GET .../assets/{asset}`, `GET .../jobs/{job}`, `GET .../vcs`, `GET .../commits/{commit}`, `GET .../_cleanup`): cualquier integrante de la banda.
+- **Edición colaborativa de estudio** (`PUT .../session`, `PUT .../assets/{asset}`, `POST .../vcs`): roles `Owner`, `MusicDirector`, `Musician` y `SoundEngineer` (`STUDIO_COLLABORATORS`). El rol `Substitute` permanece en solo lectura.
+- **Administración y gasto de IA** (`DELETE .../studio/{session}`, `POST .../_cleanup`, `POST .../jobs`): exclusivo de `Owner` y `MusicDirector` (`EDITORS`).
+
+### 7.2 Control de versiones en R2 (`vcs.json` y `commits/`)
+- `GET /v1/bands/{band}/studio/{session}/vcs`: devuelve `{ branches: Record<string, string>, commits: VcsCommitMeta[], protected_assets: string[] }` (o un grafo vacío si aún no hay commits), con cabecera `ETag`.
+- `POST /v1/bands/{band}/studio/{session}/vcs`: cuerpo `{ branch: string, message: string, author_name?: string, session: SessionDocument }`. Valida `session`, verifica que sus `assets` existan en R2, escribe el snapshot inmutable en `studio/<session>/commits/<commit_id>.json` y actualiza `studio/<session>/vcs.json` acumulando en `protected_assets` los nombres de archivo e ids de `assets` referenciados por todos los commits retenidos (máximo 128 commits por sesión).
+- `GET /v1/bands/{band}/studio/{session}/commits/{commit}`: devuelve el `SessionDocument` guardado en ese commit.
+- `studioCleanup.ts` lee `studio/<session>/vcs.json` (1 operación R2 adicional por sesión) y protege todos los `protected_assets` contra el barrido de huérfanos.
+
+### 7.3 Efectos DSP adicionales, polaridad/curvas de clip y `analog_drift` (solo `version: 2`)
+- Nuevos tipos de `fx` admitidos en `version: 2` (hasta 5 efectos en pista, hasta 6 en master con `limiter` de último):
+  - `de_esser`: `freq_hz` (`2000..10000`, def `6500`), `threshold_db` (`-48..0`, def `-24`), `reduction_db` (`0..18`, def `6`).
+  - `saturator`: `drive_db` (`0..24`, def `6`), `tone_db` (`-12..12`, def `0`), `mix` (`0..1`, def `1`), `output_db` (`-12..12`, def `0`).
+  - `stereo_imager`: `width` (`0..2`, def `1`), `mono_bass_hz` (`0..300`, def `120`).
+- Campos opcionales en clips de audio (`version: 2`, omitidos en el cable cuando valen el valor por defecto):
+  - `phase_invert`: `true` (ausente cuando es `false`).
+  - `fade_shape`: `'exp' | 'scurve'` (ausente cuando es `'linear'`).
+- Parámetro opcional en instrumentos `synth` y `drums` (`version: 2`):
+  - `analog_drift`: `0..1` (def `0`; se omite en el cable cuando vale `0` para identidad exacta con documentos previos).
+

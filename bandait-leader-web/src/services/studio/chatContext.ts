@@ -280,3 +280,37 @@ export interface ChatSummaryExtras {
   /** Ultima medicion de mezcla y la version actual del documento. */
   mix?: { measurement: ChatMixMeasurement | null; version: number } | null
 }
+
+export interface ChatMathTelemetry {
+  phaseCorrelation?: number | null
+  lraLu?: number | null
+  plrDb?: number | null
+  topBarkCollisions?: ReadonlyArray<{ pair: string; hz: number; score: number }>
+}
+
+/**
+ * Formatea un bloque compacto de telemetria matematica local (correlacion de fase de Pearson, LRA,
+ * factor de cresta PLR y colisiones en bandas Bark) para adjuntarlo al contexto del mensaje al Co-Piloto IA.
+ */
+export function formatMathTelemetryNote(telemetry: ChatMathTelemetry | null | undefined): string {
+  if (!telemetry) return ''
+  const parts: string[] = []
+  if (typeof telemetry.phaseCorrelation === 'number' && Number.isFinite(telemetry.phaseCorrelation)) {
+    parts.push(`fase Pearson r=${round(telemetry.phaseCorrelation, 2)}`)
+  }
+  if (typeof telemetry.lraLu === 'number' && Number.isFinite(telemetry.lraLu)) {
+    parts.push(`LRA=${round(telemetry.lraLu, 1)} LU`)
+  }
+  if (typeof telemetry.plrDb === 'number' && Number.isFinite(telemetry.plrDb)) {
+    parts.push(`PLR=${round(telemetry.plrDb, 1)} dB`)
+  }
+  if (telemetry.topBarkCollisions && telemetry.topBarkCollisions.length > 0) {
+    const top = telemetry.topBarkCollisions
+      .slice(0, 3)
+      .map((c) => `${c.pair} @ ${c.hz} Hz`)
+      .join('; ')
+    parts.push(`colisiones Bark: ${top}`)
+  }
+  return parts.length > 0 ? `[Telemetría DSP local: ${parts.join(', ')}]` : ''
+}
+

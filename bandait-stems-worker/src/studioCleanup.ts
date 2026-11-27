@@ -175,7 +175,7 @@ async function scanSession(env: Env, budget: OpBudget, studioPrefix: string, ses
     if (err instanceof NoBudget) throw err;
     throw new Unreadable();
   }
-  const candidates = assets.filter((o) => {
+  let candidates = assets.filter((o) => {
     const file = o.key.slice(`${folder}assets/`.length);
     if (!file || file.includes('/')) return false;
     const dot = file.lastIndexOf('.');
@@ -185,6 +185,34 @@ async function scanSession(env: Env, budget: OpBudget, studioPrefix: string, ses
     return Number.isFinite(at) && nowMs - at > ORPHAN_MIN_AGE_MS;
   });
   if (!candidates.length) return { session, folder, etag, candidates, protected: false };
+
+  // Control de versiones (`vcs.json`): solo se consulta si hay candidatos, protegiendo los audios
+  // referenciados por snapshots y ramas sin gastar operaciones en sesiones sin candidatos.
+  try {
+    const vcsObj = await op(budget, () => env.STEMS.get(`${folder}vcs.json`));
+    if (vcsObj) {
+      const vcsRaw = JSON.parse(await vcsObj.text()) as Record<string, unknown>;
+      if (!vcsRaw || typeof vcsRaw !== 'object' || !Array.isArray(vcsRaw.protected_assets)) throw new Unreadable();
+      const vcsFiles = new Set<string>();
+      const vcsIds = new Set<string>();
+      for (const item of vcsRaw.protected_assets) {
+        if (typeof item !== 'string' || !item) continue;
+        vcsFiles.add(item);
+        const dot = item.lastIndexOf('.');
+        vcsIds.add(dot > 0 ? item.slice(0, dot) : item);
+      }
+      candidates = candidates.filter((o) => {
+        const file = o.key.slice(`${folder}assets/`.length);
+        const dot = file.lastIndexOf('.');
+        const id = dot > 0 ? file.slice(0, dot) : file;
+        return !vcsFiles.has(file) && !vcsIds.has(id);
+      });
+      if (!candidates.length) return { session, folder, etag, candidates, protected: false };
+    }
+  } catch (err) {
+    if (err instanceof NoBudget) throw err;
+    throw new Unreadable();
+  }
 
   // Trabajos: solo hace falta mirarlos si hay algo que borrar.
   let busy = false;

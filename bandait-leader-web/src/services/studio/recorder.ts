@@ -27,8 +27,9 @@ import {
   saveCalibration,
   takeStartSeconds,
 } from './latency.ts'
+import { encodeWav24 } from '../wav.ts'
 import { STUDIO_MAX_ASSET_BYTES, assetFileName, newStudioId, type StudioAsset } from './session.ts'
-import { STUDIO_OPFS_ROOT, deleteAsset } from './studioStore.ts'
+import { STUDIO_OPFS_ROOT, deleteAsset, putAsset, storageBackend } from './studioStore.ts'
 import type { WriterCommand, WriterEvent, WriterFileSpec } from './opfsWriter.worker.ts'
 import type { CaptureCommand, CaptureEvent, CaptureRecycleMessage, CaptureSinkMessage } from './recorder.worklet.ts'
 import type {
@@ -233,6 +234,18 @@ interface TakeFile {
   file: string
 }
 
+/** Limite de grabacion en memoria para moviles y navegadores sin OPFS (3 minutos). */
+export const MAX_MOBILE_TAKE_SECONDS = 180
+
+interface MemoryTakeSink {
+  port: MessagePort
+  ch0Chunks: Float32Array[]
+  ch1Chunks: Float32Array[]
+  frames: number
+  maxFrames: number
+  truncated: boolean
+}
+
 interface ActiveTake {
   takeId: string
   files: TakeFile[]
@@ -240,6 +253,7 @@ interface ActiveTake {
   playStart: PlayStart
   roundTripSeconds: number
   calibrated: boolean
+  memorySink?: MemoryTakeSink
 }
 
 export class StudioRecorder implements StudioRecorderApi {
@@ -643,6 +657,114 @@ export class StudioRecorder implements StudioRecorderApi {
     for (const f of files) await deleteAsset(this.sessionId, f.file).catch(() => undefined)
   }
 
+  private async beginMemoryTake(takeId: string): Promise<{ firstBlockCtxTime: number; sink: MemoryTakeSink }> {
+    const channel = new MessageChannel()
+    const maxFrames = Math.ceil(MAX_MOBILE_TAKE_SECONDS * this.ctx.sampleRate)
+    const sink: MemoryTakeSink = {
+      port: channel.port1,
+      ch0Chunks: [],
+      ch1Chunks: [],
+      frames: 0,
+      maxFrames,
+      truncated: false,
+    }
+    channel.port1.onmessage = (event: MessageEvent) => {
+      const message = event.data as CaptureSinkMessage
+      if (!message || message.type !== 'block') return
+      const remaining = sink.maxFrames - sink.frames
+      if (remaining > 0) {
+        const take = Math.min(message.frames, remaining)
+        const c0 = new Float32Array(take)
+        c0.set(new Float32Array(message.ch0, 0, take))
+        const c1 = new Float32Array(take)
+        c1.set(new Float32Array(message.ch1, 0, take))
+        sink.ch0Chunks.push(c0)
+        sink.ch1Chunks.push(c1)
+        sink.frames += take
+        if (take < message.frames) sink.truncated = true
+      } else {
+        sink.truncated = true
+      }
+      const recycle: CaptureRecycleMessage = { type: 'recycle', buffers: [message.ch0, message.ch1] }
+      channel.port1.postMessage(recycle, [message.ch0, message.ch1])
+    }
+
+    const started = waitEvent(
+      this.captureListeners,
+      (event) => (event.type === 'started' && event.takeId === takeId ? event.firstTime : undefined),
+      START_TIMEOUT_MS,
+      'El motor de audio no está corriendo: no llegó audio de la entrada.',
+    )
+    this.postCapture({ type: 'start', takeId, sink: channel.port2 }, [channel.port2])
+    try {
+      const firstBlockCtxTime = await started
+      return { firstBlockCtxTime, sink }
+    } catch (err) {
+      channel.port1.close()
+      this.postCapture({ type: 'stop', takeId })
+      throw err
+    }
+  }
+
+  private async endMemoryTake(
+    takeId: string,
+    files: TakeFile[],
+    sink: MemoryTakeSink,
+  ): Promise<{ stopped: StoppedEvent | null; closed: ClosedEvent }> {
+    const stoppedWait = waitEvent(
+      this.captureListeners,
+      (event) => (event.type === 'stopped' && event.takeId === takeId ? event : undefined),
+      STOP_TIMEOUT_MS,
+      'sin respuesta del worklet',
+    ).catch(() => null)
+    this.postCapture({ type: 'stop', takeId })
+    const stopped = await stoppedWait
+    sink.port.close()
+
+    const mergeChunks = (chunks: Float32Array[], total: number): Float32Array => {
+      const out = new Float32Array(total)
+      let offset = 0
+      for (const ch of chunks) {
+        out.set(ch, offset)
+        offset += ch.length
+      }
+      return out
+    }
+
+    const writtenFiles: ClosedEvent['files'] = []
+    if (sink.frames > 0 && files.length > 0) {
+      const ch0 = mergeChunks(sink.ch0Chunks, sink.frames)
+      const ch1 = mergeChunks(sink.ch1Chunks, sink.frames)
+      for (const f of files) {
+        const channels = f.arm.channel === 'stereo' ? [ch0, ch1] : [f.arm.channel === 1 ? ch1 : ch0]
+        const wavBytes = encodeWav24(channels, this.ctx.sampleRate)
+        const blob = new Blob([wavBytes], { type: 'audio/wav' })
+        await putAsset(this.sessionId, f.file, blob)
+        writtenFiles.push({
+          file: f.file,
+          frames: sink.frames,
+          bytes: blob.size,
+          channels: channels.length === 2 ? 2 : 1,
+        })
+      }
+    }
+
+    return {
+      stopped,
+      closed: {
+        type: 'closed',
+        takeId,
+        files: writtenFiles,
+        blocks: sink.ch0Chunks.length,
+        missingBlocks: 0,
+        gapFrames: 0,
+        failedBlocks: 0,
+        truncated: sink.truncated,
+        error: null,
+      },
+    }
+  }
+
   private async startTake(resolvePlayStart: (firstBlockCtxTime: number) => Promise<PlayStart>): Promise<RecordingStart> {
     if (!this.capture || !this.track) throw new Error('Abre una entrada antes de grabar.')
     if (this.take) throw new Error('Ya hay una grabación en curso.')
@@ -652,22 +774,53 @@ export class StudioRecorder implements StudioRecorderApi {
     try {
       // El worklet solo corre con el contexto activo. Debe llamarse desde un gesto del usuario.
       if (this.ctx.state !== 'running') await this.ctx.resume()
+      const backend = await storageBackend()
+      const useMemory = backend !== 'opfs'
+      if (useMemory && this.arms.length > 1) {
+        throw new Error('En modo móvil / respaldo local se graba una sola pista a la vez (máx. 3 min).')
+      }
       const takeId = newStudioId('tk')
       const files: TakeFile[] = this.arms.map((arm) => {
         const assetId = newStudioId('ast')
         return { arm, assetId, file: assetFileName(assetId, 'wav') }
       })
-      const firstBlockCtxTime = await this.beginTake(takeId, files)
+
+      let firstBlockCtxTime: number
+      let memorySink: MemoryTakeSink | undefined
+      if (useMemory) {
+        const mem = await this.beginMemoryTake(takeId)
+        firstBlockCtxTime = mem.firstBlockCtxTime
+        memorySink = mem.sink
+      } else {
+        try {
+          firstBlockCtxTime = await this.beginTake(takeId, files)
+        } catch {
+          if (this.arms.length > 1) throw new Error('El almacenamiento OPFS falló y hay múltiples pistas armadas.')
+          const mem = await this.beginMemoryTake(takeId)
+          firstBlockCtxTime = mem.firstBlockCtxTime
+          memorySink = mem.sink
+        }
+      }
+
       let playStart: PlayStart
       try {
         playStart = await resolvePlayStart(firstBlockCtxTime)
       } catch (err) {
-        await this.endTake(takeId).catch(() => null)
+        if (memorySink) await this.endMemoryTake(takeId, [], memorySink).catch(() => null)
+        else await this.endTake(takeId).catch(() => null)
         await this.discardFiles(files)
         throw err
       }
       const roundTrip = this.currentRoundTrip()
-      this.take = { takeId, files, firstBlockCtxTime, playStart, roundTripSeconds: roundTrip.seconds, calibrated: roundTrip.calibrated }
+      this.take = {
+        takeId,
+        files,
+        firstBlockCtxTime,
+        playStart,
+        roundTripSeconds: roundTrip.seconds,
+        calibrated: roundTrip.calibrated,
+        memorySink,
+      }
       this.setStatus('recording')
       return { ...playStart, roundTripSeconds: roundTrip.seconds, calibrated: roundTrip.calibrated }
     } finally {
@@ -701,7 +854,9 @@ export class StudioRecorder implements StudioRecorderApi {
     this.busy = true
     this.setStatus('stopping')
     try {
-      const { stopped, closed } = await this.endTake(take.takeId)
+      const { stopped, closed } = take.memorySink
+        ? await this.endMemoryTake(take.takeId, take.files, take.memorySink)
+        : await this.endTake(take.takeId)
       const droppedBlocks = (stopped?.droppedQuanta ?? 0) + closed.missingBlocks + closed.failedBlocks
       this.lastTakeStats = {
         capturedFrames: stopped?.frames ?? 0,

@@ -342,6 +342,7 @@ function rawZone(pending: Pick<PendingAssistantCommand, 'name' | 'args'>, sessio
     case 'replace_midi_notes':
     case 'transpose_midi_clip':
     case 'quantize_midi_clip':
+    case 'humanize_midi_clip':
       return clipId ? clipRange(session, clipId) : null
     case 'add_marker': {
       const beat = num(a.beat)

@@ -158,6 +158,7 @@ const SYNTH_UI: Readonly<Record<string, ParamUi>> = {
   lfoRateHz: { label: 'Velocidad del LFO', step: 0.01, curve: 'log', format: hertz },
   lfoDepth: { label: 'Profundidad', step: 0.01, format: percent },
   velocitySens: { label: 'Sensibilidad a la velocidad', step: 0.01, format: percent },
+  analogDrift: { label: 'Deriva analógica', step: 0.01, format: percent },
   gainDb: { label: 'Ganancia de salida', step: 0.5, format: signedDb },
 }
 
@@ -197,7 +198,7 @@ const SYNTH_GROUPS: readonly { title: string; keys: readonly string[] }[] = [
   { title: 'Filtro', keys: ['filterType', 'filterCutoffHz', 'filterResonance', 'filterEnvOctaves', 'filterAttackMs', 'filterDecayMs', 'filterSustain', 'filterReleaseMs'] },
   { title: 'Volumen (ADSR)', keys: ['ampAttackMs', 'ampDecayMs', 'ampSustain', 'ampReleaseMs', 'velocitySens'] },
   { title: 'LFO', keys: ['lfoWave', 'lfoTarget', 'lfoRateHz', 'lfoDepth'] },
-  { title: 'Salida', keys: ['gainDb'] },
+  { title: 'Carácter y salida', keys: ['analogDrift', 'gainDb'] },
 ]
 
 function specOf(specs: readonly StudioInstrumentParamSpec[], key: string): StudioInstrumentParamSpec | null {
@@ -314,6 +315,7 @@ const DrumsEditor: React.FC<EditorProps<StudioDrumsInstrument>> = ({ controller,
   }
   const numberSpec = (key: string) => specOf(STUDIO_DRUMS_PARAM_SPECS, key) as StudioNumberParamSpec | null
   const camel = (voice: DrumVoice) => voice.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase())
+  const drift = numberSpec('analogDrift')
   const gain = numberSpec('gainDb')
   return (
     <fieldset className="stu-inst-group">
@@ -352,6 +354,9 @@ const DrumsEditor: React.FC<EditorProps<StudioDrumsInstrument>> = ({ controller,
           )
         })}
       </div>
+      {drift && (
+        <InstrumentSlider label="Deriva analógica" value={params.analogDrift ?? drift.def} min={drift.min} max={drift.max} step={0.01} format={percent} resetTo={drift.def} disabled={disabled} onLive={(v) => live('analogDrift', v)} onCommit={() => controller.commitLive('Deriva analógica de batería')} testId="studio-drums-analogDrift" />
+      )}
       {gain && (
         <InstrumentSlider label="Ganancia de salida" value={params.gainDb} min={gain.min} max={gain.max} step={0.5} format={signedDb} resetTo={gain.def} disabled={disabled} onLive={(v) => live('gainDb', v)} onCommit={() => controller.commitLive('Ganancia de la caja de ritmos')} testId="studio-drums-gainDb" />
       )}

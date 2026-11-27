@@ -16,9 +16,11 @@ import {
   transitionEntryNotice,
 } from '../services/workspaceSchema'
 import { SetlistAddSongModal } from '../components/SetlistAddSongModal'
+import { EntityHistoryModal } from '../components/EntityHistoryModal'
+import { SetlistOptimizerModal } from '../components/SetlistOptimizerModal'
 import { CommitInput } from '../components/CommitInput'
 import { colors, mono } from '../components/hubStyles'
-import { ListMusic, Plus, ArrowUp, ArrowDown, Trash2, Clock, Music, Radio, AlertTriangle, Info, Copy, Lock } from 'lucide-react'
+import { ListMusic, Plus, ArrowUp, ArrowDown, Trash2, Clock, Music, Radio, AlertTriangle, Info, Copy, Lock, GitBranch, Sparkles } from 'lucide-react'
 
 const MODE_COLOR: Record<TransitionMode, string> = {
   manual_cue: colors.warning,
@@ -38,6 +40,7 @@ export const PlaylistsHubView: React.FC = () => {
     playlists,
     activePlaylist,
     songs,
+    setActiveSongId,
     createPlaylist,
     setActivePlaylist,
     updatePlaylistSong,
@@ -52,6 +55,8 @@ export const PlaylistsHubView: React.FC = () => {
   } = useHub()
 
   const [showAddSongModal, setShowAddSongModal] = useState(false)
+  const [showOptimizer, setShowOptimizer] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const [showCopy, setShowCopy] = useState(false)
   const [copyTarget, setCopyTarget] = useState('')
   const [copyResult, setCopyResult] = useState<{ ok: boolean; message: string } | null>(null)
@@ -204,6 +209,62 @@ export const PlaylistsHubView: React.FC = () => {
           >
             <Plus size={14} />
             <span>AÑADIR CANCIÓN</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="open-setlist-optimizer"
+            onClick={() => setShowOptimizer(true)}
+            disabled={!activePlaylist || activePlaylist.songs.length < 2}
+            title={
+              !activePlaylist
+                ? 'Crea primero un setlist'
+                : activePlaylist.songs.length < 2
+                  ? 'Añade al menos 2 canciones para optimizar el orden'
+                  : 'Optimizar orden por Camelot, BPM, fatiga vocal y arco dramático (Simulated Annealing)'
+            }
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'var(--b-elevated)',
+              border: '1px solid var(--b-border)',
+              borderRadius: 'var(--b-radius-field)',
+              padding: '8px 14px',
+              color: 'var(--b-text)',
+              fontSize: '12px',
+              fontFamily: "'IBM Plex Mono', monospace",
+              cursor: activePlaylist && activePlaylist.songs.length >= 2 ? 'pointer' : 'not-allowed',
+              opacity: activePlaylist && activePlaylist.songs.length >= 2 ? 1 : 0.5,
+            }}
+          >
+            <Sparkles size={14} />
+            <span>OPTIMIZAR (IA/IO)</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="open-setlist-versions"
+            onClick={() => setShowHistory(true)}
+            disabled={!activePlaylist}
+            title={activePlaylist ? 'Ramas, variantes y snapshots de este setlist' : 'Crea primero un setlist'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'var(--b-elevated)',
+              border: '1px solid transparent',
+              borderRadius: 'var(--b-radius-field)',
+              padding: '8px 14px',
+              color: 'var(--b-text)',
+              fontSize: '12px',
+              fontFamily: "'IBM Plex Mono', monospace",
+              cursor: activePlaylist ? 'pointer' : 'not-allowed',
+              opacity: activePlaylist ? 1 : 0.5,
+            }}
+          >
+            <GitBranch size={14} />
+            <span>VERSIONES</span>
           </button>
 
           <button
@@ -476,7 +537,13 @@ export const PlaylistsHubView: React.FC = () => {
                     </td>
 
                     {/* TITLE + LIBRERIA */}
-                    <td style={{ padding: '12px 14px', minWidth: '160px' }}>
+                    <td
+                      style={{ padding: '12px 14px', minWidth: '160px', cursor: song ? 'pointer' : 'default' }}
+                      onClick={() => {
+                        if (song) setActiveSongId(song.id)
+                      }}
+                      title={song ? 'Fijar como canción activa transversal' : undefined}
+                    >
                       <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--b-text)' }}>{song?.title ?? item.title}</div>
                       <div style={{ fontSize: '11px', color: 'var(--b-muted)' }}>{song?.artist ?? item.artist}</div>
                       <div style={{ fontSize: '10px', fontFamily: mono, marginTop: '3px' }}>
@@ -847,6 +914,14 @@ export const PlaylistsHubView: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {showOptimizer && activePlaylist && (
+        <SetlistOptimizerModal playlist={activePlaylist} onClose={() => setShowOptimizer(false)} />
+      )}
+
+      {showHistory && activePlaylist && (
+        <EntityHistoryModal target={{ kind: 'playlist', entity: activePlaylist }} onClose={() => setShowHistory(false)} />
       )}
     </div>
   )

@@ -101,6 +101,7 @@ const SPECS = [
   spec('edit.select_all', 'Seleccionar todo', 'edicion', 'global', ['Ctrl+A']),
   spec('edit.split', 'Dividir en el cabezal', 'edicion', 'global', ['S']),
   spec('edit.quantize', 'Cuantizar la selección', 'edicion', 'global', ['Q']),
+  spec('edit.humanize', 'Humanizar tiempo y velocidad', 'edicion', 'global', ['H']),
   // Shift+J y no Ctrl+Shift+J: Chrome abre la consola con Ctrl+Shift+J (BROWSER_RESERVED_SHORTCUTS).
   spec('edit.join', 'Unir clips', 'edicion', 'timeline', ['Shift+J']),
   // Pistas
@@ -163,12 +164,22 @@ const SPECS = [
   spec('midi.replace_notes', 'Reemplazar las notas de un clip MIDI', 'midi', 'piano_roll', [], 'replace_midi_notes'),
   spec('midi.transpose', 'Transponer un clip MIDI', 'midi', 'piano_roll', [], 'transpose_midi_clip'),
   spec('midi.quantize', 'Cuantizar un clip MIDI', 'midi', 'piano_roll', [], 'quantize_midi_clip'),
+  spec('midi.humanize', 'Humanizar un clip MIDI (tiempo y velocidad)', 'midi', 'piano_roll', [], 'humanize_midi_clip'),
   spec('midi.toggle_computer_keyboard', 'Teclado de la computadora como teclado musical', 'midi', 'global', []),
   spec('instrument.set', 'Cambiar el preset o los parámetros del instrumento', 'midi', 'global', [], 'set_instrument'),
-  // Mezcla (asistente)
+  // Mezcla (asistente y optimizadores DSP/IO)
   spec('track.set_mix', 'Mezcla de una pista', 'mezcla', 'mixer', [], 'set_track_mix'),
   spec('track.set_fx', 'Efecto de una pista o del master', 'mezcla', 'mixer', [], 'set_track_fx'),
   spec('master.set', 'Master y reverb compartida', 'mezcla', 'mixer', [], 'set_master'),
+  spec('master.auto', 'Auto-Master local instantáneo (LUFS / True Peak)', 'mezcla', 'global', [], 'auto_master_session'),
+  spec('mix.unmask', 'Desenmascarar mezcla por bandas Bark', 'mezcla', 'global', [], 'unmask_mix_tracks'),
+  spec('studio.click_guide', 'Generar pista de clic y guía por compases', 'pistas', 'global', [], 'generate_click_guide'),
+  spec('clip.normalize', 'Normalizar el clip seleccionado (-14 LUFS)', 'edicion', 'timeline', []),
+  spec('clip.strip_silence', 'Recortar silencios del clip (Strip Silence)', 'edicion', 'timeline', []),
+  spec('clip.reverse', 'Invertir audio en reversa', 'edicion', 'timeline', []),
+  spec('clip.phase_invert', 'Invertir polaridad (180 grados) del clip', 'edicion', 'timeline', []),
+  spec('clip.align_phase', 'Alinear fase y tiempo respecto a otra pista', 'edicion', 'timeline', []),
+  spec('studio.detect_local', 'Detectar BPM, tonalidad y acordes localmente (0 IA)', 'herramientas', 'global', []),
   spec('session.set_meta', 'Título, tempo, tonalidad y compás de la sesión', 'archivo', 'global', [], 'set_session_meta'),
   // Marcas
   spec('marker.add', 'Agregar una marca', 'marcas', 'global', [], 'add_marker'),
@@ -193,11 +204,14 @@ const SPECS = [
   spec('view.show_device', 'Abrir el panel del dispositivo de audio', 'vista', 'global', []),
   spec('view.show_jobs', 'Abrir los trabajos de IA', 'vista', 'global', []),
   spec('view.waveform', 'Forma de onda: estilo, datos, escala y color', 'vista', 'global', []),
-  // Archivo
+  spec('widgets.toggle', 'Abrir o cerrar herramientas rápidas (Afinador, Pad XY, Tap)', 'herramientas', 'global', ['Alt+W']),
+  // Archivo y Control de Versiones
   spec('file.save_cloud', 'Guardar en la nube', 'archivo', 'global', ['Ctrl+S']),
   spec('file.export', 'Exportar', 'archivo', 'global', ['Ctrl+E']),
   spec('file.import_midi', 'Importar un archivo MIDI', 'archivo', 'global', []),
   spec('file.export_midi', 'Exportar a archivo MIDI', 'archivo', 'global', []),
+  spec('vcs.snapshot', 'Guardar snapshot en Control de Versiones', 'archivo', 'global', ['Alt+G']),
+  spec('vcs.toggle_ab', 'Alternar escucha A/B con versión de referencia', 'archivo', 'global', ['Shift+B']),
 ] as const
 
 /** Ids de los comandos del Estudio. */

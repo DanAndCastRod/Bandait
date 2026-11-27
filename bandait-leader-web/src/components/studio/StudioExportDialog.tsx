@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { zipSync } from 'fflate'
-import { CircleCheck, CloudUpload, Download, FileArchive, X } from 'lucide-react'
+import { CircleCheck, CloudUpload, Download, FileArchive, HardDriveDownload, X } from 'lucide-react'
+import { useHub } from '../../context/hubContextCore'
 import { slugify } from '../../services/download'
 import { CLOUD_MAX_FILE_BYTES, CLOUD_MAX_STEMS, getManifest, isCloudSongId, uploadStems } from '../../services/stemCloud'
 import { cloudStemsChanged } from '../../services/stemCloudEvents'
 import { formatBytes } from '../../services/stemImport'
 import type { StemRole } from '../../services/stemNames'
-import type { StemSongRecord } from '../../services/stemStore'
+import { saveStemSong, type StemSongRecord } from '../../services/stemStore'
 import { bounce } from '../../services/studio/bounce'
 import { trackHasSound } from '../../services/studio/graph'
 import type { BounceFile, LoopRegionS, WavBitDepth } from '../../services/studio/types'
@@ -43,7 +44,7 @@ type Phase =
   | { kind: 'checking'; result: Exported }
   | { kind: 'confirm'; result: Exported; cloudCount: number | null }
   | { kind: 'publishing'; result: Exported; done: number; total: number }
-  | { kind: 'published'; result: Exported; count: number }
+  | { kind: 'published'; result: Exported; count: number; localOnly?: boolean }
   | { kind: 'failed'; message: string; result: Exported | null }
 
 function saveBlob(name: string, blob: Blob): void {
@@ -65,10 +66,11 @@ function loudness(file: BounceFile): string {
 
 /**
  * EXPORTAR: mezcla estereo o pistas por separado, en WAV de 16 o 24 bits, con el mismo grafo que
- * suena en el Estudio (bounce.ts). El resultado se descarga o se publica como stems de la cancion
- * de la sesion (uploadStems), tras una confirmacion que avisa que reemplaza los stems actuales.
+ * suena en el Estudio (bounce.ts). El resultado se descarga, se guarda en stems locales (IndexedDB)
+ * o se publica en la nube de la banda (IndexedDB + R2), tras confirmacion.
  */
 export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose }) => {
+  const { sharing, registerSongStemsInWorkspace } = useHub()
   const snap = useStudio(controller)
   const { session } = snap
   const loop = snap.engine.loop
@@ -166,18 +168,54 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
     })()
   }
 
-  /** Motivo por el que no se puede publicar este resultado, o null si se puede. */
-  const publishBlock = (result: Exported): string | null => {
+  const buildStemRecord = (result: Exported, songId: string): { record: StemSongRecord; blobs: Map<string, Blob> } => {
+    const blobs = new Map<string, Blob>()
+    const tracks = result.files.map((item, index) => {
+      const id = `studio_${index}`
+      blobs.set(id, item.file.blob)
+      return { id, role: item.role, label: item.label, fileName: item.name, size: item.file.blob.size, mimeType: 'audio/wav' }
+    })
+    const record: StemSongRecord = { songId, offsetMs: 0, updatedAt: new Date().toISOString(), tracks }
+    return { record, blobs }
+  }
+
+  const localStemBlock = (result: Exported): string | null => {
     if (!song) return 'Esta sesión no parte de una canción de la librería.'
+    if (result.missingAudio > 0) return 'Faltan audios por cargar en este equipo.'
+    if (!result.fullRange) return 'Exporta desde el compás 1 para guardar como stems.'
+    return null
+  }
+
+  /** Motivo por el que no se puede publicar este resultado en la nube R2, o null si se puede. */
+  const publishBlock = (result: Exported): string | null => {
+    const localReason = localStemBlock(result)
+    if (localReason) return localReason
     if (!controller.cloud) return 'Entra con tu cuenta de nube para publicar stems.'
-    if (!snap.canEditCloud) return 'Solo el Owner o el Director musical pueden publicar stems.'
-    if (!isCloudSongId(song.id)) return 'Esta canción no se puede usar en la nube de stems.'
-    // El motor salta los clips sin audio: publicar eso dejaria stems incompletos en el leader.
-    if (result.missingAudio > 0) return 'A esta exportación le faltan audios que no se pudieron cargar: recarga la sesión y exporta de nuevo antes de publicar.'
-    if (!result.fullRange) return 'Exporta la sesión completa: los stems deben empezar en el compás 1.'
+    if (!sharing.activeCanEdit) return 'Solo el Owner o el Director musical pueden publicar stems oficiales en la nube.'
+    if (!song || !isCloudSongId(song.id)) return 'Esta canción no se puede usar en la nube de stems.'
     if (result.files.length > CLOUD_MAX_STEMS) return `La nube admite hasta ${CLOUD_MAX_STEMS} stems por canción.`
     if (result.files.some((item) => item.file.blob.size > CLOUD_MAX_FILE_BYTES)) return 'Un archivo pasa de 200 MB. Exporta en 16 bits.'
     return null
+  }
+
+  const saveLocalStems = async (result: Exported) => {
+    if (!song) return
+    setPhase({ kind: 'publishing', result, done: 0, total: result.files.length })
+    try {
+      const newTracks = result.files.map((item) => ({
+        role: item.role,
+        label: item.label,
+        fileName: item.name,
+        blob: item.file.blob,
+      }))
+      const saved = await saveStemSong(song.id, newTracks, 'replace', 0)
+      if (sharing.activeCanEdit) {
+        registerSongStemsInWorkspace(song.id, song.title, session.bpm, saved.tracks)
+      }
+      setPhase({ kind: 'published', result, count: saved.tracks.length, localOnly: true })
+    } catch (err) {
+      setPhase({ kind: 'failed', message: errorText(err, 'No se pudieron guardar los stems en este equipo.'), result })
+    }
   }
 
   const askPublish = async (result: Exported) => {
@@ -198,24 +236,26 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
     if (!cloud || !song) return
     setPhase({ kind: 'publishing', result, done: 0, total: result.files.length })
     try {
-      const blobs = new Map<string, Blob>()
-      const tracks = result.files.map((item, index) => {
-        const id = `studio_${index}`
-        blobs.set(id, item.file.blob)
-        return { id, role: item.role, label: item.label, fileName: item.name, size: item.file.blob.size, mimeType: 'audio/wav' }
-      })
-      // El compas 1 de la sesion esta en 0 s y el archivo empieza ahi: offset 0.
-      const record: StemSongRecord = { songId: song.id, offsetMs: 0, updatedAt: new Date().toISOString(), tracks }
+      const { record, blobs } = buildStemRecord(result, song.id)
+      const newTracks = result.files.map((item) => ({
+        role: item.role,
+        label: item.label,
+        fileName: item.name,
+        blob: item.file.blob,
+      }))
+      await saveStemSong(song.id, newTracks, 'replace', 0)
       // `existing: null` obliga a subir todo: una mezcla nueva puede pesar lo mismo que la anterior.
       const manifest = await uploadStems(cloud, song.id, { record, blobs, existing: null }, (done, total) => setPhase({ kind: 'publishing', result, done, total }))
+      registerSongStemsInWorkspace(song.id, song.title, session.bpm, record.tracks)
       cloudStemsChanged({ band: cloud.band, songId: song.id, manifest })
-      setPhase({ kind: 'published', result, count: manifest.stems.length })
+      setPhase({ kind: 'published', result, count: manifest.stems.length, localOnly: false })
     } catch (err) {
       setPhase({ kind: 'failed', message: errorText(err, 'No se pudieron publicar los stems.'), result })
     }
   }
 
   const result = 'result' in phase ? phase.result : null
+  const localBlock = result ? localStemBlock(result) : null
   const block = result ? publishBlock(result) : null
 
   return (
@@ -383,7 +423,7 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
               <p className="stu-ok-note" role="status" data-testid="studio-publish-done">
                 <CircleCheck size={14} aria-hidden="true" />
                 <span>
-                  {phase.count} {phase.count === 1 ? 'stem publicado' : 'stems publicados'} en <strong>{song.title}</strong>.
+                  {phase.count} {phase.count === 1 ? 'stem' : 'stems'} {phase.localOnly ? 'guardados en este equipo para' : 'publicados en este equipo y en la nube para'} <strong>{song.title}</strong>.
                 </span>
               </p>
             )}
@@ -393,12 +433,25 @@ export const StudioExportDialog: React.FC<Props> = ({ controller, song, onClose 
                 <button type="button" className="stu-btn" data-tone="ghost" disabled={busy} onClick={() => setPhase({ kind: 'setup' })}>
                   OTRA EXPORTACIÓN
                 </button>
+                {song && (
+                  <button
+                    type="button"
+                    className="stu-btn"
+                    disabled={busy || localBlock !== null || phase.kind === 'published'}
+                    onClick={() => void saveLocalStems(result)}
+                    title={localBlock ?? 'Guarda estos WAV en IndexedDB para Ensayo y Stems en este equipo'}
+                    data-testid="studio-save-local-stems"
+                  >
+                    <HardDriveDownload size={13} />
+                    STEMS LOCALES
+                  </button>
+                )}
                 <button
                   type="button"
                   className="stu-btn"
                   disabled={busy || block !== null || phase.kind === 'published'}
                   onClick={() => void askPublish(result)}
-                  title={block ?? 'Sube el resultado como stems de la canción de esta sesión'}
+                  title={block ?? 'Guarda en este equipo y sube los stems oficiales de la canción a la nube R2'}
                   data-testid="studio-publish"
                 >
                   <CloudUpload size={13} />

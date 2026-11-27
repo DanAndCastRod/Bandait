@@ -30,6 +30,7 @@ import { createFxUnit, createReverbUnit, fxLatencySeconds, setParam, type FxUnit
 import { instrumentKey } from './instruments/core.ts'
 import { EMPTY_PREPARATION, createInstrument } from './instruments/factory.ts'
 import { STUDIO_REVERB_RETURN_DB_MIN, STUDIO_REVERB_SEND_DB_MIN, type StudioClip, type StudioFx, type StudioSession, type StudioTrack } from './session.ts'
+import { evaluateFadeCurve } from './waveOps.ts'
 import type {
   GraphApi,
   GraphCapabilities,
@@ -57,23 +58,29 @@ export interface EnvelopePoint {
 }
 
 /**
- * Factor de fade (0..1) de un clip en el instante `tInClipS` medido desde su inicio. Fades
- * lineales: es la misma curva que programa el motor, para que la interfaz la dibuje igual.
+ * Factor de fade (0..1) de un clip en el instante `tInClipS` medido desde su inicio. Admite curvas
+ * lineales, exponenciales y coseno elevado (scurve): es la misma curva que programa el motor y dibuja el lienzo.
  */
-export function clipFadeFactor(clip: Pick<StudioClip, 'lengthS' | 'fadeInS' | 'fadeOutS'>, tInClipS: number): number {
+export function clipFadeFactor(clip: Pick<StudioClip, 'lengthS' | 'fadeInS' | 'fadeOutS' | 'fadeShape'>, tInClipS: number): number {
   const t = Math.max(0, Math.min(tInClipS, clip.lengthS))
-  const fadeIn = clip.fadeInS > 0 ? Math.min(1, t / clip.fadeInS) : 1
-  const fadeOut = clip.fadeOutS > 0 ? Math.min(1, (clip.lengthS - t) / clip.fadeOutS) : 1
+  const shape = clip.fadeShape ?? 'linear'
+  const fadeIn = clip.fadeInS > 0 ? evaluateFadeCurve(Math.min(1, t / clip.fadeInS), shape) : 1
+  const fadeOut = clip.fadeOutS > 0 ? evaluateFadeCurve(Math.min(1, (clip.lengthS - t) / clip.fadeOutS), shape) : 1
   return Math.max(0, Math.min(fadeIn, fadeOut))
 }
 
 /**
- * Curva de ganancia (ganancia de clip por fades) del tramo de un clip que va de `skipS` a
- * `skipS + durationS`, ambos medidos desde el inicio del clip. Si el tramo no empieza en el
- * inicio del clip o no llega a su final, agrega un micro-fade de DECLICK_S en ese borde.
+ * Curva de ganancia (ganancia de clip por fades y polaridad) del tramo de un clip que va de `skipS`
+ * a `skipS + durationS`, ambos medidos desde el inicio del clip. Si el tramo no empieza en el inicio
+ * del clip o no llega a su final, agrega un micro-fade de DECLICK_S en ese borde.
  */
-export function clipEnvelope(clip: Pick<StudioClip, 'lengthS' | 'fadeInS' | 'fadeOutS' | 'gainDb'>, skipS: number, durationS: number): EnvelopePoint[] {
-  const gain = dbToGain(clip.gainDb)
+export function clipEnvelope(
+  clip: Pick<StudioClip, 'lengthS' | 'fadeInS' | 'fadeOutS' | 'gainDb' | 'phaseInvert' | 'fadeShape'>,
+  skipS: number,
+  durationS: number,
+): EnvelopePoint[] {
+  const polarity = clip.phaseInvert === true ? -1 : 1
+  const gain = dbToGain(clip.gainDb) * polarity
   const start = Math.max(0, skipS)
   const end = Math.min(clip.lengthS, start + Math.max(0, durationS))
   const span = end - start
@@ -84,6 +91,20 @@ export function clipEnvelope(clip: Pick<StudioClip, 'lengthS' | 'fadeInS' | 'fad
   const marks = [start, end, clip.fadeInS, clip.lengthS - clip.fadeOutS]
   if (declickIn > 0) marks.push(start + declickIn)
   if (declickOut > 0) marks.push(end - declickOut)
+
+  // Con curvas no lineales ('exp' o 'scurve'), muestrear 8 segmentos por fade para rampa fiel (< 0,1 dB).
+  const shape = clip.fadeShape ?? 'linear'
+  if (shape !== 'linear') {
+    const steps = 8
+    if (clip.fadeInS > 0) {
+      for (let k = 1; k < steps; k++) marks.push((clip.fadeInS * k) / steps)
+    }
+    if (clip.fadeOutS > 0) {
+      const foStart = clip.lengthS - clip.fadeOutS
+      for (let k = 1; k < steps; k++) marks.push(foStart + (clip.fadeOutS * k) / steps)
+    }
+  }
+
   const times = marks.filter((t) => t >= start && t <= end).sort((a, b) => a - b)
   const points: EnvelopePoint[] = []
   for (const t of times) {
@@ -92,7 +113,8 @@ export function clipEnvelope(clip: Pick<StudioClip, 'lengthS' | 'fadeInS' | 'fad
     let factor = clipFadeFactor(clip, t)
     if (declickIn > 0) factor *= Math.min(1, (t - start) / declickIn)
     if (declickOut > 0) factor *= Math.min(1, (end - t) / declickOut)
-    points.push({ tS, gain: gain * Math.max(0, factor) })
+    const g = gain * Math.max(0, factor)
+    points.push({ tS, gain: Object.is(g, -0) ? 0 : g })
   }
   return points
 }
@@ -183,7 +205,9 @@ function sameClip(a: StudioClip, b: StudioClip): boolean {
       a.gainDb === b.gainDb &&
       a.fadeInS === b.fadeInS &&
       a.fadeOutS === b.fadeOutS &&
-      a.active === b.active)
+      a.active === b.active &&
+      (a.phaseInvert === true) === (b.phaseInvert === true) &&
+      (a.fadeShape ?? 'linear') === (b.fadeShape ?? 'linear'))
   )
 }
 

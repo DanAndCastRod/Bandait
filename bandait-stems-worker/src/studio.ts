@@ -18,7 +18,7 @@
 // Este modulo e index.ts se importan entre si: aqui no se usa nada de index.ts al cargar el modulo,
 // solo dentro de funciones.
 
-import { ApiError, authorize, json, listAll } from './index.ts';
+import { ApiError, authorize, json, listAll, type AccessLevel } from './index.ts';
 import { OpBudget } from './events.ts';
 import { CLEANUP_REQUEST_MAX_OPS, cleanupScope, opportunisticCleanup } from './studioCleanup.ts';
 import type { CleanupReport } from './studioCleanup.ts';
@@ -27,6 +27,7 @@ import {
   ASSET_MAX_BYTES, ID_RE, SESSION_MAX_BYTES, SessionError, assetExtension, isAssetFile, validateSession,
 } from './studioSession.ts';
 import type { SessionDocument } from './studioSession.ts';
+import { getCommit, getVcs, postVcs } from './studioVcs.ts';
 import type { Env, FetchLike, R2Object, StudioDeps } from './types.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -157,30 +158,37 @@ export async function studioRoute(
   if (!ID_RE.test(session) || session.startsWith('_')) throw new ApiError(400, 'bad_session_id');
   const what = rest[1];
   const leaf = rest[2];
-  let write: boolean;
+  let access: AccessLevel;
   if (rest.length === 1) {
     if (method !== 'DELETE') throw new ApiError(405, 'method_not_allowed');
-    write = true;
+    access = true;
   } else if (what === 'session' && rest.length === 2) {
     if (method !== 'GET' && method !== 'PUT') throw new ApiError(405, 'method_not_allowed');
-    write = method === 'PUT';
+    access = method === 'PUT' ? 'collab' : false;
   } else if (what === 'assets' && rest.length === 3) {
     if (!isAssetFile(leaf)) throw new ApiError(400, 'bad_asset');
     if (method !== 'GET' && method !== 'PUT') throw new ApiError(405, 'method_not_allowed');
-    write = method === 'PUT';
+    access = method === 'PUT' ? 'collab' : false;
+  } else if (what === 'vcs' && rest.length === 2) {
+    if (method !== 'GET' && method !== 'POST') throw new ApiError(405, 'method_not_allowed');
+    access = method === 'POST' ? 'collab' : false;
+  } else if (what === 'commits' && rest.length === 3) {
+    if (!ID_RE.test(leaf)) throw new ApiError(400, 'bad_commit');
+    if (method !== 'GET') throw new ApiError(405, 'method_not_allowed');
+    access = false;
   } else if (what === 'jobs' && rest.length === 2) {
     if (method !== 'POST') throw new ApiError(405, 'method_not_allowed');
-    write = true;
+    access = true;
   } else if (what === 'jobs' && rest.length === 3) {
     if (!ID_RE.test(leaf)) throw new ApiError(400, 'bad_job');
     if (method !== 'GET') throw new ApiError(405, 'method_not_allowed');
-    write = false;
+    access = false;
   } else {
     throw new ApiError(404, 'not_found');
   }
 
-  // Escribir y lanzar trabajos (gastan creditos): Owner y MusicDirector. Leer: cualquier integrante.
-  const prefix = await authorize(req, env, band, write, fetchFn);
+  // Colaborar en sesion/audios/VCS: STUDIO_COLLABORATORS. Borrar sesion o lanzar trabajos IA: Owner y MusicDirector. Leer: cualquier integrante.
+  const prefix = await authorize(req, env, band, access, fetchFn);
   const studioPrefix = `${prefix}studio/`;
   const ctx: StudioContext = {
     env, fetchFn, deps, studioPrefix, sessionPrefix: `${studioPrefix}${session}/`, session, user: tokenSubject(req),
@@ -189,6 +197,8 @@ export async function studioRoute(
   if (rest.length === 1) return deleteSession(ctx);
   if (what === 'session') return method === 'GET' ? getSession(ctx) : putSession(req, ctx);
   if (what === 'assets') return method === 'GET' ? getAsset(req, ctx, leaf) : putAsset(req, ctx, leaf);
+  if (what === 'vcs') return method === 'GET' ? getVcs(ctx) : postVcs(req, ctx);
+  if (what === 'commits') return getCommit(ctx, leaf);
   if (rest.length === 2) return startJob(req, ctx, url.searchParams.get('estimate') === '1', url.searchParams.get('job_id'));
   return jobStatus(ctx, leaf);
 }

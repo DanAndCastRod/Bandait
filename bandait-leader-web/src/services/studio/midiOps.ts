@@ -36,7 +36,17 @@ import {
   roundBeat,
   type StudioMidiNote,
 } from './session.ts'
-import type { MidiEditResult, MidiOpsApi, NoteRange, NoteSelection, QuantizeGrid, QuantizeOptions, VelocityMode } from './types.ts'
+import type {
+  HumanizeOptions,
+  HumanizePresetId,
+  MidiEditResult,
+  MidiOpsApi,
+  NoteRange,
+  NoteSelection,
+  QuantizeGrid,
+  QuantizeOptions,
+  VelocityMode,
+} from './types.ts'
 
 // ---------------------------------------------------------------------------
 // Ayudas
@@ -273,6 +283,217 @@ export function quantize(notes: readonly StudioMidiNote[], selection: NoteSelect
   })
 }
 
+/** PRNG determinista Mulberry32 para que las pruebas y semillas sean reproducibles. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Distribucion triangular en [-1, 1] centrada en 0 (mas organica que ruido uniforme). */
+function triRandom(rng: () => number): number {
+  return rng() + rng() - 1
+}
+
+export interface HumanizePresetSpec {
+  id: HumanizePresetId
+  label: string
+  description: string
+  amount: number
+  timingBeats: number
+  velocityRange: number
+  lengthRatio: number
+  swing: number
+  swingGrid: '1/8' | '1/16'
+  strumBeats: number
+  accentStrength: number
+}
+
+export const STUDIO_HUMANIZE_PRESETS: readonly HumanizePresetSpec[] = [
+  {
+    id: 'pocket',
+    label: 'Pocket Batería',
+    description: 'Groove ajustado con acento métrico y swing de semicorchea.',
+    amount: 0.45,
+    timingBeats: 0.022,
+    velocityRange: 18,
+    lengthRatio: 0.04,
+    swing: 0.14,
+    swingGrid: '1/16',
+    strumBeats: 0,
+    accentStrength: 0.45,
+  },
+  {
+    id: 'keys',
+    label: 'Teclista Vivo',
+    description: 'Micro-apertura en acordes, respiración de frase y dinámica natural.',
+    amount: 0.5,
+    timingBeats: 0.032,
+    velocityRange: 20,
+    lengthRatio: 0.1,
+    swing: 0.06,
+    swingGrid: '1/16',
+    strumBeats: 0.018,
+    accentStrength: 0.3,
+  },
+  {
+    id: 'strum',
+    label: 'Rasgueo Guitarra',
+    description: 'Desplazamiento progresivo grave-a-agudo en acordes simultáneos.',
+    amount: 0.55,
+    timingBeats: 0.028,
+    velocityRange: 16,
+    lengthRatio: 0.08,
+    swing: 0.08,
+    swingGrid: '1/8',
+    strumBeats: 0.045,
+    accentStrength: 0.35,
+  },
+  {
+    id: 'analog',
+    label: 'Secuenciador Analógico',
+    description: 'Pulso cálido con micro-deriva de reloj y acento sutil.',
+    amount: 0.4,
+    timingBeats: 0.015,
+    velocityRange: 12,
+    lengthRatio: 0.06,
+    swing: 0.18,
+    swingGrid: '1/16',
+    strumBeats: 0,
+    accentStrength: 0.25,
+  },
+]
+
+export function findHumanizePreset(id: unknown): HumanizePresetSpec | null {
+  return typeof id === 'string' ? (STUDIO_HUMANIZE_PRESETS.find((p) => p.id === id) ?? null) : null
+}
+
+export function humanize(notes: readonly StudioMidiNote[], selection: NoteSelection | null, options: HumanizeOptions, clipLengthBeats: number): MidiEditResult {
+  const clipLen = clipLength(clipLengthBeats)
+  const preset = findHumanizePreset(options.preset)
+  const amount =
+    options.amount !== undefined
+      ? Math.min(1, Math.max(0, finite(options.amount, 'amount')))
+      : (preset?.amount ?? 0.5)
+  const timingBeats =
+    options.timingBeats !== undefined
+      ? Math.min(0.25, Math.max(0, finite(options.timingBeats, 'timing_beats')))
+      : preset
+        ? preset.timingBeats * (amount / Math.max(0.01, preset.amount))
+        : amount * 0.04
+  const velocityRange =
+    options.velocityRange !== undefined
+      ? Math.min(64, Math.max(0, finite(options.velocityRange, 'velocity_range')))
+      : preset
+        ? Math.round(preset.velocityRange * (amount / Math.max(0.01, preset.amount)))
+        : Math.round(amount * 24)
+  const lengthRatio =
+    options.lengthRatio !== undefined
+      ? Math.min(0.5, Math.max(0, finite(options.lengthRatio, 'length_ratio')))
+      : preset
+        ? preset.lengthRatio * (amount / Math.max(0.01, preset.amount))
+        : amount * 0.08
+  const swing =
+    options.swing !== undefined
+      ? Math.min(0.75, Math.max(0, finite(options.swing, 'swing')))
+      : (preset?.swing ?? 0)
+  const swingGrid = options.swingGrid === '1/8' ? '1/8' : options.swingGrid === '1/16' ? '1/16' : (preset?.swingGrid ?? '1/16')
+  const strumBeats =
+    options.strumBeats !== undefined
+      ? Math.min(0.12, Math.max(-0.12, finite(options.strumBeats, 'strum_beats')))
+      : (preset?.strumBeats ?? 0)
+  const accentStrength =
+    options.accentStrength !== undefined
+      ? Math.min(1, Math.max(0, finite(options.accentStrength, 'accent_strength')))
+      : (preset?.accentStrength ?? 0)
+  const bpb = options.beatsPerBar !== undefined ? Math.max(1, Math.round(finite(options.beatsPerBar, 'beats_per_bar'))) : 4
+
+  const rng = options.seed === undefined ? Math.random : mulberry32(Math.trunc(finite(options.seed, 'seed')))
+  const lastStart = Math.max(0, clipLen - STUDIO_MIDI_MIN_NOTE_BEATS)
+  const set = selectedSet(notes.length, selection)
+
+  // Agrupar notas seleccionadas casi simultaneas (<= 0.025 beats) para rasgueo (strum) y misma inercia de mano.
+  const selectedIndices = [...set].sort((a, b) => notes[a].start - notes[b].start || notes[a].pitch - notes[b].pitch)
+  const strumOffsetByIdx = new Map<number, number>()
+  const strumVelByIdx = new Map<number, number>()
+  const groupDriftByIdx = new Map<number, number>()
+
+  let phraseDrift = 0
+  let ptr = 0
+  while (ptr < selectedIndices.length) {
+    const firstIdx = selectedIndices[ptr]
+    const baseStart = notes[firstIdx].start
+    const chordGroup: number[] = [firstIdx]
+    ptr++
+    while (ptr < selectedIndices.length && Math.abs(notes[selectedIndices[ptr]].start - baseStart) <= 0.025) {
+      chordGroup.push(selectedIndices[ptr])
+      ptr++
+    }
+    // Deriva temporal correlacionada AR(1) por ataque de mano/frase.
+    phraseDrift = 0.62 * phraseDrift + 0.38 * triRandom(rng)
+    for (const idx of chordGroup) groupDriftByIdx.set(idx, phraseDrift)
+
+    if (chordGroup.length >= 2 && Math.abs(strumBeats) > 1e-6) {
+      const byPitch = [...chordGroup].sort((a, b) => notes[a].pitch - notes[b].pitch)
+      const count = byPitch.length
+      const span = Math.abs(strumBeats)
+      byPitch.forEach((idx, rank) => {
+        const order = strumBeats >= 0 ? rank : count - 1 - rank
+        const frac = count > 1 ? order / (count - 1) : 0
+        strumOffsetByIdx.set(idx, frac * span)
+        // Ligero realce en la ultima cuerda atacada del rasgueo.
+        strumVelByIdx.set(idx, Math.round((frac - 0.5) * 6))
+      })
+    }
+  }
+
+  const swingStep = swingGrid === '1/8' ? 0.5 : 0.25
+
+  return normalizeTagged(
+    notes.map((n, i) => {
+      if (!set.has(i)) return { note: n, tag: false }
+
+      // 1. Swing sobre subdivisiones impares (segunda semicorchea o segunda corchea).
+      let swingDelta = 0
+      if (swing > 0) {
+        const subIdx = Math.round(n.start / swingStep)
+        const dist = Math.abs(n.start - subIdx * swingStep)
+        if (subIdx % 2 === 1 && dist <= swingStep * 0.35) {
+          swingDelta = swing * swingStep * (2 / 3)
+        }
+      }
+
+      // 2. Micro-timing: combinacion de deriva de frase + jitter individual + strum.
+      const drift = groupDriftByIdx.get(i) ?? 0
+      const jitter = timingBeats > 0 ? (0.45 * drift + 0.55 * triRandom(rng)) * timingBeats : 0
+      const strumDelta = strumOffsetByIdx.get(i) ?? 0
+      const start = Math.min(lastStart, Math.max(0, n.start + swingDelta + strumDelta + jitter))
+
+      // 3. Acento metrico + variacion organica de velocidad.
+      let accentVel = 0
+      if (accentStrength > 0) {
+        const inBar = ((n.start % bpb) + bpb) % bpb
+        const distDownbeat = Math.min(inBar, Math.abs(bpb - inBar))
+        const distHalf = bpb >= 2 ? Math.abs(inBar - bpb / 2) : 99
+        if (distDownbeat <= 0.08) accentVel = Math.round(accentStrength * 14)
+        else if (distHalf <= 0.08) accentVel = Math.round(accentStrength * 7)
+        else if (Math.abs(inBar - Math.round(inBar)) > 0.2) accentVel = -Math.round(accentStrength * 5)
+      }
+      const deltaVel = (velocityRange > 0 ? triRandom(rng) * velocityRange : 0) + accentVel + (strumVelByIdx.get(i) ?? 0)
+      const velocity = clampInt(n.velocity + deltaVel, 1, 127)
+
+      // 4. Duracion organica.
+      const length = lengthRatio > 0 ? Math.max(STUDIO_MIDI_MIN_NOTE_BEATS, n.length * (1 + triRandom(rng) * lengthRatio)) : n.length
+      return { note: { ...n, start, length, velocity }, tag: true }
+    }),
+    clipLen,
+  )
+}
+
 export function legato(notes: readonly StudioMidiNote[], selection: NoteSelection | null, clipLengthBeats: number): MidiEditResult {
   const clipLen = clipLength(clipLengthBeats)
   const set = selectedSet(notes.length, selection)
@@ -356,6 +577,7 @@ void ({
   transpose,
   setVelocity,
   quantize,
+  humanize,
   legato,
   duplicateNotes,
   splitNotesAt,

@@ -26,8 +26,15 @@ const jwt = (role: string) => `${b64url('{"alg":"none"}')}.${b64url(JSON.stringi
 const OWNER = jwt('owner');
 const DIRECTOR = jwt('director');
 const MUSICIAN = jwt('musician');
+const SUBSTITUTE = jwt('substitute');
 const STRANGER = jwt('stranger');
-const ROLES_BY_TOKEN: Record<string, string | null> = { [OWNER]: 'Owner', [DIRECTOR]: 'MusicDirector', [MUSICIAN]: 'Musician', [STRANGER]: null };
+const ROLES_BY_TOKEN: Record<string, string | null> = {
+  [OWNER]: 'Owner',
+  [DIRECTOR]: 'MusicDirector',
+  [MUSICIAN]: 'Musician',
+  [SUBSTITUTE]: 'Substitute',
+  [STRANGER]: null,
+};
 
 class FakeR2 implements R2Bucket {
   objects = new Map<string, { bytes: Uint8Array; type?: string; version: number; size?: number }>();
@@ -393,10 +400,24 @@ test('lista de sesiones por fecha descendente y borrado idempotente', async () =
 test('permisos por rol y validacion de la ruta', async () => {
   const { call, post } = setup();
   const doc = JSON.stringify(emptySession('ses_a'));
-  // Un integrante lee; no escribe, no borra y no lanza trabajos.
+  // Un Musician colabora en sesiones, audios y VCS; NO borra sesiones ni gasta creditos en jobs.
   assert.equal((await call('GET', '', { token: MUSICIAN })).status, 200);
-  assert.equal((await call('PUT', '/ses_a/session', { token: MUSICIAN, body: doc, headers: CREATE })).status, 403);
-  assert.equal((await call('PUT', '/ses_a/assets/ast_1.wav', { token: MUSICIAN, body: audio, type: 'audio/wav' })).status, 403);
+  assert.equal((await call('PUT', '/ses_a/assets/ast_1.wav', { token: MUSICIAN, body: audio, type: 'audio/wav' })).status, 200);
+  assert.equal((await call('PUT', '/ses_a/session', { token: MUSICIAN, body: doc, headers: CREATE })).status, 200);
+  const vcsPost = await call('POST', '/ses_a/vcs', {
+    token: MUSICIAN,
+    body: JSON.stringify({ branch: 'main', message: 'Maqueta inicial', author_name: 'Guitarrista', session: emptySession('ses_a') }),
+  });
+  assert.equal(vcsPost.status, 201);
+  const vcsBody = await vcsPost.json() as { commit: { id: string; branch: string }; vcs: { branches: Record<string, string> } };
+  assert.equal(vcsBody.vcs.branches.main, vcsBody.commit.id);
+  assert.equal((await call('GET', '/ses_a/vcs', { token: SUBSTITUTE })).status, 200);
+  assert.equal((await call('GET', `/ses_a/commits/${vcsBody.commit.id}`, { token: SUBSTITUTE })).status, 200);
+  // Substitute es solo lectura en el Estudio.
+  assert.equal((await call('PUT', '/ses_b/session', { token: SUBSTITUTE, body: JSON.stringify(emptySession('ses_b')), headers: CREATE })).status, 403);
+  assert.equal((await call('PUT', '/ses_a/assets/ast_2.wav', { token: SUBSTITUTE, body: audio, type: 'audio/wav' })).status, 403);
+  assert.equal((await call('POST', '/ses_a/vcs', { token: SUBSTITUTE, body: JSON.stringify({ branch: 'main', message: 'Intento', session: emptySession('ses_a') }) })).status, 403);
+  // Borrar sesion y lanzar trabajos IA siguen exclusivos de Owner y MusicDirector.
   assert.equal((await call('DELETE', '/ses_a', { token: MUSICIAN })).status, 403);
   const job = await post('/ses_a/jobs', { kind: 'assist', metrics: METRICS }, MUSICIAN);
   assert.equal(job.status, 403);
