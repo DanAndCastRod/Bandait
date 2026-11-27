@@ -17,6 +17,7 @@ import { STUDIO_INSTRUMENT_POLYPHONY, STUDIO_VOICE_STEAL_RAMP_S, type StudioInst
 import type { StudioInstrumentNode } from '../types.ts'
 import { dbToGain } from '../../stemTiming.ts'
 import { pickVoiceToSteal } from './core.ts'
+import type { VoiceMusicalPosition } from './analogDrift.ts'
 
 function disconnect(node: AudioNode): void {
   try {
@@ -33,6 +34,8 @@ export interface VoiceInit {
   owner: object | null
   /** true si viene de noteOn (sin fin conocido hasta noteOff). */
   live: boolean
+  /** Posicion musical de una nota de clip (semilla de analog_drift); ausente en vivo. */
+  musical?: VoiceMusicalPosition | null
 }
 
 /**
@@ -45,6 +48,11 @@ export class Voice {
   readonly startedAt: number
   readonly owner: object | null
   readonly live: boolean
+  /**
+   * Posicion musical (nota de un clip): semilla determinista de la deriva analogica, igual al
+   * escuchar y al exportar. null en vivo: la deriva usa la hora del contexto.
+   */
+  readonly musical: VoiceMusicalPosition | null
   /** Note-off programado; null = sigue sostenida. */
   releaseAt: number | null = null
   /** Apagado programado (inicio de la rampa); Infinity = ninguno. */
@@ -68,6 +76,7 @@ export class Voice {
     this.startedAt = init.startedAt
     this.owner = init.owner
     this.live = init.live
+    this.musical = init.musical ?? null
     this.killGain = ctx.createGain()
     this.killGain.gain.value = 1
     this.killGain.connect(destination)
@@ -269,9 +278,12 @@ export class PolyInstrument implements StudioInstrumentNode {
     this.start(pitch, velocity, startTime, endTime, null)
   }
 
-  /** playNote marcada con una tanda (`owner`), para detenerla aparte. */
-  playNoteOwned(pitch: number, velocity: number, startTime: number, endTime: number, owner: object): void {
-    this.start(pitch, velocity, startTime, endTime, owner)
+  /**
+   * playNote marcada con una tanda (`owner`), para detenerla aparte. `musical`: posicion de la nota
+   * en la sesion, para que la deriva analogica sea la misma en vivo y en el export.
+   */
+  playNoteOwned(pitch: number, velocity: number, startTime: number, endTime: number, owner: object, musical?: VoiceMusicalPosition | null): void {
+    this.start(pitch, velocity, startTime, endTime, owner, musical ?? null)
   }
 
   /** Apaga en `when` las notas de la tanda que suenan o todavia no empezaron. */
@@ -309,7 +321,7 @@ export class PolyInstrument implements StudioInstrumentNode {
     disconnect(this.output)
   }
 
-  private start(pitch: number, velocity: number, startTime: number, endTime: number | null, owner: object | null): void {
+  private start(pitch: number, velocity: number, startTime: number, endTime: number | null, owner: object | null, musical: VoiceMusicalPosition | null = null): void {
     if (this.disposed || !Number.isFinite(startTime)) return
     const p = Math.round(pitch)
     if (!(p >= 0 && p <= 127)) return
@@ -321,7 +333,7 @@ export class PolyInstrument implements StudioInstrumentNode {
       for (const v of this.pool.voices) if (v.soundingAt(start) && this.engine.chokes(p, v.pitch)) v.kill(start)
     }
     this.pool.makeRoom(start, now)
-    const voice = new Voice(this.ctx, this.output, { pitch: p, velocity: vel, startedAt: start, owner, live: endTime === null })
+    const voice = new Voice(this.ctx, this.output, { pitch: p, velocity: vel, startedAt: start, owner, live: endTime === null, musical })
     if (!this.engine.build(voice, start, endTime) || !voice.hasSources) {
       voice.dispose()
       return

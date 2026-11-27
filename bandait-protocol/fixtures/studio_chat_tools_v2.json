@@ -226,19 +226,23 @@
     {
       "name": "humanize_midi_clip",
       "command_id": "midi.humanize",
-      "description": "Humaniza las notas de un clip MIDI para darle toque orgánico/analógico: varía micro-timing (tiempo), velocidad (volumen), duración, swing, acento métrico y rasgueo de acordes (strum). preset opcional: pocket, keys, strum o analog.",
+      "description": "Humaniza las notas de un clip MIDI para darle toque orgánico/analógico: varía micro-timing (tiempo), velocidad (volumen), duración, swing, acento métrico y rasgueo de acordes (strum). preset opcional: pocket, keys, strum o analog; amount escala todo lo que viene del preset. Tiempos en ms (timing_ms, strum_ms; timing_beats y strum_beats se aceptan por compatibilidad). swing: fracción del paso que se atrasa la subdivisión impar (0.33 = tresillo 66 %, 0.5 = puntillo 75 %), en swing_grid 1/8 o 1/16. Acento y swing siguen el compás de la sesión. En una pista de batería humaniza por pieza (bombo y caja ajustados, hi-hat con más dinámica) y laid_back_ms atrasa la caja.",
       "parameters": {
         "type": "object",
         "properties": {
           "clip_id": {"type": "string", "minLength": 1, "maxLength": 80},
           "preset": {"type": "string", "enum": ["pocket", "keys", "strum", "analog"]},
           "amount": {"type": "number", "minimum": 0, "maximum": 1},
+          "timing_ms": {"type": "number", "minimum": 0, "maximum": 60},
           "timing_beats": {"type": "number", "minimum": 0, "maximum": 0.25},
           "velocity_range": {"type": "number", "minimum": 0, "maximum": 64},
           "length_ratio": {"type": "number", "minimum": 0, "maximum": 0.5},
-          "swing": {"type": "number", "minimum": 0, "maximum": 0.75},
+          "swing": {"type": "number", "minimum": 0, "maximum": 0.5},
+          "swing_grid": {"type": "string", "enum": ["1/8", "1/16"]},
+          "strum_ms": {"type": "number", "minimum": -60, "maximum": 60},
           "strum_beats": {"type": "number", "minimum": -0.12, "maximum": 0.12},
           "accent_strength": {"type": "number", "minimum": 0, "maximum": 1},
+          "laid_back_ms": {"type": "number", "minimum": 0, "maximum": 30},
           "seed": {"type": "integer"}
         },
         "required": ["clip_id"]
