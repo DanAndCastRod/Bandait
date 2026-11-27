@@ -1,6 +1,6 @@
 # Plan Maestro: Estudio DAW Profesional Colaborativo, Control de Versiones Musical, DSP Matemático, Modelos IO/ML y Ecosistema Móvil
 
-**Estado:** Implementado y verificado (Web 3.0 — Ola 3)  
+**Estado:** Hub en producción (PR #61, correcciones de la revisión en PR #63); Worker `1.5.1` desplegado el 2026-11-27 (ver sección 5)  
 **Ámbito:** `bandait-leader-web`, `bandait-stems-worker`, `bandait-protocol`, `landing/hub`  
 **Fuente de Verdad Raíz:** [`docs/PLAN_BANDAIT_3.0_MASTER.md`](PLAN_BANDAIT_3.0_MASTER.md) y [`AGENTS.md`](../AGENTS.md)
 
@@ -95,3 +95,11 @@ flowchart TB
 - **Independencia cromática y contraste WCAG:** cero literales hexadecimales en `studio.css` ni en lienzos Canvas del Estudio (`StudioAnalyzer.tsx` incluido en la auditoría automática de `verify-appearance-logic.ts`); botones con `border-radius >= 8px` y transporte circular `9999px`.
 - **Suite determinista `scripts/verify-math-vcs-io.ts`:** verifica invertibilidad FFT/IFFT (`< 1e-9`), precisión YIN (`< 0.5 cents` con señal limpia), recuperación exacta de retardo y polaridad GCC-PHAT con ruido, detección local BPM/Tonalidad/Viterbi, monotonicidad y respeto de anclas en *Simulated Annealing*, reducción estricta de colisiones Bark (estimada por el modelo, no medida sobre la mezcla), diffs VCS y fusión colaborativa 3-way.
 - **Suite `scripts/verify-studio-dsp.ts` (revisión 2026-11-27):** de-esser plano con reducción 0, saturador con nivel compensado y sin continua, `stereo_imager` transparente sobre el corte, BPM con batería real (bombo en 1 y 3) sin error de octava de 62 a 190 BPM, confianzas de BPM/tonalidad/YIN que bajan con ruido, alinear fase idempotente, Auto-Master a ±0,5 LU con pico real bajo el techo (render simulado con el núcleo real del limitador), medidor por trozos, toma en memoria (bloques perdidos, huecos, mono) y optimizador Bark sin HPF a ciegas.
+
+---
+
+## 5. Estado de despliegue
+
+- **Hub (Cloudflare Pages):** en producción desde `main` (PR #61); las correcciones de la revisión van en el PR #63.
+- **Worker `bandait-stems`:** `1.5.1` desplegado el 2026-11-27 desde local por ClipVault (versión de Cloudflare `0ae82387-9f22-4ef0-aade-f06f05762bd8`, cron `17 4 * * *`). `GET /v1/health` -> `{"ok":true,"version":"1.5.1"}`. Cierra el pendiente de desplegar `1.5.0`: se desplegó directamente `1.5.1`, que corrige los topes del índice de versiones y la protección de audios retirados.
+- Cambio respecto de `1.5.0`: `vcs_conflict` responde siempre **409** (no 412); la carrera sobre `vcs.json` se reintenta dentro del Worker.

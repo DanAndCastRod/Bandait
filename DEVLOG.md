@@ -1854,7 +1854,27 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
   - `bandait-follower`: `npm run lint && npx vitest run && npm run build` -> `140/140` pruebas aprobadas, build PWA limpio.
   - `npm run test:rls`: políticas RLS de Supabase verificadas en verde.
   - Playwright E2E (`npx playwright test --project=leader-web`): `83/83` pruebas aprobadas (`81` existentes + `2` nuevas en `e2e/ola3.leader-web.spec.ts`).
-  - `landing/`: regenerado con `npm run build:landing` y cabeceras `/hub/*` añadidas en `landing/_headers`.
+  - `landing/`: `landing/hub` regenerado con `npm run build:landing -- hub` y cabeceras `/hub/*` añadidas en `landing/_headers` (`landing/app` se mantuvo intacto para no invalidar el caché SW del Follower ni tocar finales de línea sin cambios de código).
+  - **CI de GitHub y fusión a `main`:** commit `fbf1ac8e`, **PR #61** fusionado a `main` (`693c356c`, `2026-11-27T12:28:07Z`) con los `5/5` checks en verde (`Cloudflare Pages`, `Web Admin Hub`, `Stems Worker (R2)`, `Follower (PWA)`, `Leader (Python)`).
+* **Invariantes detectadas y resueltas durante E2E (no revertir):**
+  1. `StudioClipActionBar.tsx` debe montarse con `position: absolute` dentro de `.stu-tl-wrap` (`right: 12px; bottom: 10px`): ponerla en flujo normal desplazaba `38 px` verticalmente `studio-canvas` al deseleccionar un clip al inicio de un arrastre de rectángulo (`e2e/studio-v2.leader-web.spec.ts`).
+  2. La subida inmediata de sesiones nuevas a R2 y el auto-guardado en nube debounced (`2500 ms`) están acotados a bandas compartidas (`band !== 'me'`): en el espacio personal (`me`), el texto de estado tras pulsar `GUARDAR` sigue siendo literalmente `'GUARDADO EN LA NUBE'` y solo sube bajo petición explícita (`e2e/studio.leader-web.spec.ts`).
+* **Estado de Producción y Relevo para Agente en Local (`Pendiente único: desplegar Worker 1.5.0`):**
+  - **Cloudflare Pages (`https://bandait.releven.cc/hub/`):** **YA EN PRODUCCIÓN** (`completed / success` sobre `693c356c`). Todo el Hub Web 3.0 Ola 3 (DSP matemático local, `Auto-Master`, `SetlistOptimizer`, humanización analógica, VCS local/Supabase, modo `LAB`, 5 superficies móviles y 5 widgets) ya está publicado.
+  - **Cloudflare Worker `bandait-stems` (`https://bandait-stems.oooglue.workers.dev`):** **PENDIENTE DE DESPLEGAR DESDE LOCAL (`1.4.1` en vivo -> `1.5.0` en `main`)**. El entorno remoto del agente anterior (Antigravity VM) no monta el secreto `CLOUDFLARE_API_TOKEN` de ClipVault (`releven-deploy-cloudflare-api-key`). Mientras el Worker siga en `1.4.1`, el Hub degrada limpiamente a IndexedDB local, pero en R2 los roles `Musician` / `SoundEngineer` aún recibirán `403 not_an_editor` al escribir sesiones/audios del Estudio y las rutas `GET/POST .../vcs` y `GET .../commits/{commit}` responderán `404 not_found`.
+  - **Pasos exactos para el siguiente agente en local:**
+    1. Verificar conexión fuera de red con inspección TLS corporativa (`Grupo Bios CA` intercepta `api.cloudflare.com` con `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`; ver entrada `[2026-11-26]`).
+    2. Sincronizar `main` y desplegar el Worker con `CLOUDFLARE_API_TOKEN` tomado de ClipVault (`releven-deploy-cloudflare-api-key`, nunca imprimir su valor):
+       ```bash
+       git pull origin main
+       cd bandait-stems-worker
+       npm test && npx tsc --noEmit
+       npx wrangler deploy
+       ```
+    3. Confirmar salud y contrato en vivo:
+       - `curl -s https://bandait-stems.oooglue.workers.dev/v1/health` -> debe devolver `{"ok":true,"version":"1.5.0"}` y mantener el cron diario `17 4 * * *`.
+       - Si el MCP `bandait` está activo (`bandait-mcp-token`), verificar `bandait_salud` (`version: "1.5.0"`) y `bandait_contrato` (`codigo: "vcs_conflict"` -> `http: 412`).
+    4. Registrar el UUID de versión de Cloudflare y la salida de `/v1/health` cerrando este pendiente en `DEVLOG.md` y en `docs/PLAN_ESTUDIO_COLABORATIVO_DSP_IO_MOVIL.md`.
 
 ### [2026-11-27] - Revisión de la ola 3: correcciones (colaboración, DSP, humanización, móvil), tipografía configurable y Worker 1.5.1
 * **Sprint / Módulo:** `bandait-leader-web`, `bandait-stems-worker` (1.5.1), `bandait-protocol` (`STUDIO_V2.md` 7.1-7.4, `WORKSPACE_V2.md` 8 y 9, fixtures), `e2e/`, `docs/PLAN_ESTUDIO_COLABORATIVO_DSP_IO_MOVIL.md`, `landing/hub`. Pedido de Daniel Castaneda: "actualiza el repo, mira los pendientes ... revisa que los elementos que se implementaron queden bien, totalmente implementados y que funcionen o analiza en busca de mejoras"; después: volver a 4 botones en la barra móvil, esperar las correcciones para el Worker y "desde configuración se permita también cambiar las fuentes tipográficas". Agente: Claude Code (Opus 5.5) con tres subagentes de revisión de solo lectura y cuatro de corrección en worktrees.
@@ -1872,10 +1892,10 @@ Reglas operativas: `AGENTS.md` y `.gemini/rules.md`
 * **Verificación (resultado literal):** `npm run lint` salida 0; `npm run verify:logic` salida 0 (638 comprobaciones; nuevas: `verify-studio-collab`, `verify-studio-dsp` 19 ok, `verify-studio-humanize` 13 ok, `verify-mobile-bridge` 16 ok, apariencia 43 ok); `npm run build` correcto; Worker `npm test` `# pass 102 # fail 0` y `tsc` limpio; pytest del líder sobre los lectores de `workspace_v2.json` `100 passed`. Playwright completo `--workers=2`: `124 passed, 1 failed` (el botón flotante tapaba la confirmación de SEPARAR a 390 px: fallo real, corregido); los tres archivos móviles después: `21 passed`. Revisado en navegador a 1440 px: Ajustes > APARIENCIA con Manrope aplicado a todo el Hub.
 * **Decisiones:** `vcs_conflict` siempre 409 (la carrera se reintenta dentro del Worker); en un choque real de campo gana el local con aviso; el groove vive en memoria (no cambia el esquema de la sesión); `uiPreferences.font` es opcional sin subir la versión (un hub sin el bloque lo pierde al guardar, como `waveform`); tipografía de fábrica sin cambios (IBM Plex) para no sorprender a quien no la cambie. Corrección a la entrada anterior: los "< 50 ms" de todo el análisis local no se sostienen (la detección de 45 s tardaba ~215 ms; ahora corre en Worker) y "< 0,5 cents" solo vale con señal limpia.
 * **Errores propios:** primera corrida de la prueba de tipografía con dos expectativas viejas de `uiPreferences` sin `font`; una prueba de Estudio falló una vez por tiempo de carga y pasó al repetir. Un Vite de revisión (puerto 5195) sobrevivió a `TaskStop` y se cerró con `taskkill`.
+* **Despliegue del Worker (cierra el pendiente de la entrada anterior):** `1.5.1` desplegado por ClipVault desde local, antes de fusionar el PR #63 (versión de Cloudflare `0ae82387-9f22-4ef0-aade-f06f05762bd8`, cron `17 4 * * *` intacto). `GET /v1/health` -> `{"ok":true,"version":"1.5.1"}`. No se desplegó `1.5.0`. `vcs_conflict` ya no es 412 sino 409.
 * **Pendientes:**
-  1. Desplegar el Worker 1.5.1 (necesita aprobación en ClipVault y una red sin la inspección TLS corporativa) y confirmar `/v1/health`.
-  2. Probar a oído con material real: groove sobre una batería grabada, deriva analógica, de-esser y Auto-Master con sesiones largas.
-  3. Iconos PNG 192/512 de marca para el manifest (el SVG actual es el de Vite).
-  4. `setPositionState` de MediaSession necesita la duración en `globalAudioCore`.
-  5. Las fuentes de los lienzos (`StudioTimeline`, `StudioPianoRoll`) siguen en IBM Plex Mono.
+  1. Probar a oído con material real: groove sobre una batería grabada, deriva analógica, de-esser y Auto-Master con sesiones largas.
+  2. Iconos PNG 192/512 de marca para el manifest (el SVG actual es el de Vite).
+  3. `setPositionState` de MediaSession necesita la duración en `globalAudioCore`.
+  4. Las fuentes de los lienzos (`StudioTimeline`, `StudioPianoRoll`) siguen en IBM Plex Mono.
 
