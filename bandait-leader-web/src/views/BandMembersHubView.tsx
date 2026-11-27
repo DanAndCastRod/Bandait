@@ -730,7 +730,7 @@ export const BandMembersHubView: React.FC = () => {
                     boxSizing: 'border-box',
                   }}
                 >
-                  <option value="Musician">Músico (solo lectura)</option>
+                  <option value="Musician">Músico (lectura; colabora en el Estudio)</option>
                   <option value="MusicDirector">Director Musical (edita)</option>
                   <option value="SoundEngineer">Ingeniero FOH (lectura; colabora en el Estudio)</option>
                   <option value="Substitute">Músico Suplente (solo lectura)</option>
