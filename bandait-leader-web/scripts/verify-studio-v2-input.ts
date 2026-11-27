@@ -861,7 +861,7 @@ async function main() {
 
   await check('STUDIO_ASSISTANT_TOOLS es identica a fixtures/studio_chat_tools_v2.json', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(STUDIO_ASSISTANT_TOOLS)), chatToolsFixture.tools)
-    assert.equal(STUDIO_ASSISTANT_TOOLS.length, 19)
+    assert.equal(STUDIO_ASSISTANT_TOOLS.length, 23)
   })
 
   await check('cada herramienta tiene en commands.ts un comando con assistantTool y el mismo command_id', () => {
@@ -1135,6 +1135,7 @@ async function main() {
     // Un clip larguisimo se escucha solo sus primeros 16 compases.
     const long = { ...s, tracks: s.tracks.map((t) => (t.id === 'trk_2' ? { ...t, midiClips: t.midiClips.map((c) => ({ ...c, lengthBeats: 400 })) } : t)) }
     assert.deepEqual(auditionZone({ name: 'quantize_midi_clip', args: { clip_id: 'mid_p1', grid: '1/16' } }, long, 0), { startBeat: 16, endBeat: 80 })
+    assert.deepEqual(auditionZone({ name: 'humanize_midi_clip', args: { clip_id: 'mid_p1', amount: 0.5 } }, long, 0), { startBeat: 16, endBeat: 80 })
   })
 
   await check('chips de contexto y pedidos rapidos: pista, clip, loop y vista en espanol', () => {

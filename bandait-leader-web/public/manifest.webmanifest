@@ -1,0 +1,55 @@
+{
+  "name": "Bandait — Estudio Colaborativo, Ensayo & Setlists",
+  "short_name": "Bandait Hub",
+  "description": "Plataforma web colaborativa de producción musical DAW, stems, ensayo y setlists para bandas en vivo.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111316",
+  "theme_color": "#111316",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Afinador Cromático YIN",
+      "short_name": "Afinador",
+      "description": "Abrir afinador de precisión sub-cent",
+      "url": "./?widget=tuner"
+    },
+    {
+      "name": "Grabar Idea Rápida",
+      "short_name": "Grabar Idea",
+      "description": "Capturar idea de voz o instrumento hacia el Estudio",
+      "url": "./?quick=record"
+    },
+    {
+      "name": "Estudio DAW Colaborativo",
+      "short_name": "Estudio DAW",
+      "description": "Abrir multipista colaborativo de la banda",
+      "url": "./?view=studio"
+    },
+    {
+      "name": "Ensayo y Prompter",
+      "short_name": "Ensayo",
+      "description": "Practicar stems con ChordPro sincronizado",
+      "url": "./?view=rehearsal"
+    }
+  ],
+  "share_target": {
+    "action": "./?share=audio",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

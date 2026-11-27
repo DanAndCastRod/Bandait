@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Check,
   CloudUpload,
   Command,
+  GitBranch,
+  Headphones,
   Keyboard,
   Mic,
+  Music2,
   PanelBottom,
   PanelRight,
   PanelRightClose,
@@ -16,6 +20,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  Users,
   X,
 } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
@@ -32,8 +37,10 @@ import { StudioCloudCleanup } from '../components/studio/StudioCloudCleanup'
 import { StudioInspector } from '../components/studio/StudioInspector'
 import { StudioJobsPanel } from '../components/studio/StudioJobsPanel'
 import { StudioMixer } from '../components/studio/StudioMixer'
+import { StudioMobileQuickSurface } from '../components/studio/StudioMobileQuickSurface'
 import { StudioTimeline } from '../components/studio/StudioTimeline'
 import { StudioTransport } from '../components/studio/StudioTransport'
+import { StudioVersionPanel } from '../components/studio/StudioVersionPanel'
 import {
   createSession,
   errorText,
@@ -47,6 +54,7 @@ import {
 } from '../components/studio/studioState'
 import { cloudBandKey, type CloudTarget } from '../services/stemCloud'
 import { stemCloudTarget } from '../services/stemCloudConfig'
+import { getSupabaseClient } from '../services/supabaseClient'
 import {
   ASSISTANT_LAYOUT_STORAGE_KEY,
   parseAssistantLayout,
@@ -68,6 +76,8 @@ import {
   type StudioPanelLayout,
   type StudioSideTab,
 } from '../services/studio/panelLayout'
+import { sessionToNewSong, studioToSongPatch } from '../services/studio/songStudioBridge'
+import { createStudioCollabChannel, type RealtimeClientLike } from '../services/studio/studioCollab'
 import { listStemSongs } from '../services/stemStore'
 import { sectionSpans, type SectionSpan } from '../services/stemTiming'
 import { commandShortcuts, displayShortcut, loadKeymap, matchEvent } from '../services/studio/commands'
@@ -78,26 +88,28 @@ import type { CommandContext, Keymap } from '../services/studio/types'
 import * as studioCloud from '../services/studio/studioCloud'
 import * as studioStore from '../services/studio/studioStore'
 import { readStudioPrefs, shouldStopRecordingOnLeave } from '../services/studio/studioPrefs'
-import type { Song } from '../types/hub'
+import { playlistItemFromSong } from '../services/workspaceSchema'
+import type { Playlist, Song } from '../types/hub'
 import '../styles/studio.css'
 
-/** Ancho minimo para grabar: por debajo, el Estudio queda en solo reproduccion y mezcla. */
-const WIDE_QUERY = '(min-width: 1024px)'
-const NARROW_HINT = 'La grabación necesita una ventana de al menos 1024 px de ancho.'
+/** Debajo de 768 px se activa el conmutador tactil de 5 superficies moviles. */
+const MOBILE_QUERY = '(max-width: 767px)'
 
-function subscribeWide(listener: () => void): () => void {
-  const query = window.matchMedia(WIDE_QUERY)
+function subscribeMobile(listener: () => void): () => void {
+  const query = window.matchMedia(MOBILE_QUERY)
   query.addEventListener('change', listener)
   return () => query.removeEventListener('change', listener)
 }
 
-function useWideScreen(): boolean {
+function useMobileScreen(): boolean {
   return useSyncExternalStore(
-    subscribeWide,
-    () => window.matchMedia(WIDE_QUERY).matches,
-    () => true
+    subscribeMobile,
+    () => window.matchMedia(MOBILE_QUERY).matches,
+    () => false
   )
 }
+
+export type StudioMobileSurface = 'quick' | 'arrange' | 'notes' | 'console' | 'fx'
 
 /** "Ctrl" de los atajos: Cmd en macOS (keymap.ts). */
 const PLATFORM: 'mac' | 'other' = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent) ? 'mac' : 'other'
@@ -142,27 +154,44 @@ function readPanelLayout(): StudioPanelLayout {
 interface WorkspaceProps {
   controller: StudioController
   songs: readonly Song[]
+  playlists: readonly Playlist[]
   onClose: () => void
 }
 
-const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose }) => {
+const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, playlists, onClose }) => {
+  const { sharing, saveSong, setActivePlaylist, addSongToPlaylist, setActiveSongId } = useHub()
   const snap = useStudio(controller)
   const { session, save, recording } = snap
-  const wide = useWideScreen()
+  const mobile = useMobileScreen()
+  const [mobileSurface, setMobileSurface] = useState<StudioMobileSurface>('quick')
   // Consola y panel lateral plegables a un clic (services/studio/panelLayout.ts), recordados aqui.
   const [panels, setPanels] = useState<StudioPanelLayout>(readPanelLayout)
+  const [versionsOpen, setVersionsOpen] = useState(false)
   useEffect(() => {
     studioKeymapStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, serializePanelLayout(panels))
   }, [panels])
   const [waveformOpen, setWaveformOpen] = useState(false)
   const [probeOpen, setProbeOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [songBridgeOpen, setSongBridgeOpen] = useState(false)
+  const [promoteArtist, setPromoteArtist] = useState('')
+  const [promotePlaylistId, setPromotePlaylistId] = useState('')
 
-  const showPanel = useCallback((tab: StudioSideTab) => setPanels((current) => showSideTab(current, tab)), [])
+  const showPanel = useCallback((tab: StudioSideTab) => {
+    setVersionsOpen(false)
+    setPanels((current) => showSideTab(current, tab))
+  }, [])
+  const showVersions = useCallback(() => {
+    setVersionsOpen(true)
+    setPanels((current) => (current.sideOpen ? current : { ...current, sideOpen: true }))
+  }, [])
   const toggleSide = useCallback(() => setPanels(toggleSidePanel), [])
   const toggleConsole = useCallback(() => setPanels(toggleMixer), [])
   // El mezclador elige un efecto: se muestra el inspector, que es donde se edita.
-  const showInspector = useCallback(() => showPanel('inspector'), [showPanel])
+  const showInspector = useCallback(() => {
+    showPanel('inspector')
+    if (mobile) setMobileSurface('fx')
+  }, [showPanel, mobile])
   const openWaveform = useCallback(() => {
     // El acceso rapido vive en la barra de la linea de tiempo: con el piano roll abierto se vuelve a ella.
     if (controller.snapshot().editor === 'piano_roll') controller.toggleEditor()
@@ -173,8 +202,24 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
     setExportOpen(true)
   }, [controller])
 
-  const recordAllowed = wide && snap.recordBlockReason === null
-  const recordHint = !wide ? NARROW_HINT : snap.recordBlockReason
+  const selectMobileSurface = useCallback(
+    (surface: StudioMobileSurface) => {
+      setMobileSurface(surface)
+      if (surface === 'arrange' && controller.snapshot().editor === 'piano_roll') {
+        controller.toggleEditor()
+      } else if (surface === 'notes' && controller.snapshot().editor !== 'piano_roll') {
+        controller.toggleEditor()
+      } else if (surface === 'console' && !panels.mixerOpen) {
+        setPanels((cur) => ({ ...cur, mixerOpen: true }))
+      } else if (surface === 'fx' && !panels.sideOpen) {
+        setPanels((cur) => ({ ...cur, sideOpen: true }))
+      }
+    },
+    [controller, panels.mixerOpen, panels.sideOpen],
+  )
+
+  const recordAllowed = snap.recordBlockReason === null
+  const recordHint = snap.recordBlockReason
   const song = session.songId ? songs.find((s) => s.id === session.songId) : undefined
 
   const sections = useMemo(() => sectionsFor(songs, session.songId, session.bpm, session.beatsPerBar), [songs, session.songId, session.bpm, session.beatsPerBar])
@@ -216,10 +261,10 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
       toggleAssistant,
       toggleMixer: toggleConsole,
       toggleSidePanel: toggleSide,
-      showPanel,
+      showPanel: (tab) => (tab === 'versions' ? showVersions() : showPanel(tab)),
       openWaveform,
     })
-  }, [uiBridge, recordAllowed, recordHint, openExport, toggleAssistant, toggleConsole, toggleSide, showPanel, openWaveform])
+  }, [uiBridge, recordAllowed, recordHint, openExport, toggleAssistant, toggleConsole, toggleSide, showPanel, showVersions, openWaveform])
   const registry = useMemo(() => createStudioCommandRegistry(controller, uiBridge), [controller, uiBridge])
   const [keymap, setKeymap] = useState<Keymap>(() => loadKeymap(studioKeymapStorage, registry.list()))
 
@@ -241,7 +286,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
   // Atajos de teclado (services/studio/keymap.ts). No se disparan al escribir en un campo, con un
   // dialogo abierto ni con el foco fuera del Estudio.
   useEffect(() => {
-    if (probeOpen || exportOpen || paletteOpen || shortcutsOpen) return
+    if (probeOpen || exportOpen || paletteOpen || shortcutsOpen || songBridgeOpen) return
     const onKey = (event: KeyboardEvent) => {
       // Ya lo atendio un control propio (lienzo de la linea de tiempo, teclado musical).
       if (event.defaultPrevented) return
@@ -287,7 +332,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [controller, registry, keymap, commandContext, runCommand, probeOpen, exportOpen, paletteOpen, shortcutsOpen])
+  }, [controller, registry, keymap, commandContext, runCommand, probeOpen, exportOpen, paletteOpen, shortcutsOpen, songBridgeOpen])
 
   // Cerrar la pestana con una toma en curso la dejaria sin cerrar, y con un guardado pendiente o
   // una subida a la nube en curso se perderia trabajo: el navegador pregunta antes. El estado se
@@ -319,6 +364,42 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
     void controller.closeInput().then(() => setProbeOpen(true))
   }
 
+  const songSyncPreview = useMemo(() => (song ? studioToSongPatch(song, session) : null), [song, session])
+
+  const handleApplyStudioToSong = () => {
+    if (!songSyncPreview || !sharing.activeCanEdit) return
+    saveSong(songSyncPreview.updatedSong)
+    setSongBridgeOpen(false)
+    controller.notify('info', `Ficha de «${songSyncPreview.updatedSong.title}» actualizada con el arreglo del Estudio.`)
+  }
+
+  const handleImportFromSong = () => {
+    if (!song) return
+    controller.syncStructureFromSong(song)
+    setSongBridgeOpen(false)
+  }
+
+  const handlePromoteFreeDemo = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!sharing.activeCanEdit) return
+    const created = sessionToNewSong(session, { artist: promoteArtist.trim() })
+    saveSong(created)
+    if (promotePlaylistId) {
+      const targetPl = playlists.find((p) => p.id === promotePlaylistId)
+      if (targetPl) setActivePlaylist(targetPl)
+      addSongToPlaylist(playlistItemFromSong(created))
+    }
+    controller.linkSongId(created.id)
+    setActiveSongId(created.id)
+    setSongBridgeOpen(false)
+    controller.notify('info', `Maqueta promovida a canción oficial: «${created.title}».`)
+  }
+
+  const activePeers = useMemo(
+    () => snap.collaborators.filter((peer) => !peer.sessionId || peer.sessionId === session.id),
+    [snap.collaborators, session.id],
+  )
+
   const saveText =
     save.cloud === 'saving'
       ? save.uploading && save.uploading.total > 0
@@ -332,14 +413,22 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
             ? 'GUARDADO EN ESTE EQUIPO'
             : 'GUARDADO EN LA NUBE'
   const cloudTitle = !snap.cloudAvailable
-    ? 'Entra con tu cuenta de nube para guardar el Estudio en la nube.'
+    ? 'Entra con tu cuenta de nube para sincronizar el Estudio con la banda.'
     : !snap.canEditCloud
-      ? 'Solo el Owner o el Director musical pueden guardar en la nube.'
-      : 'Sube los audios que falten y el documento de la sesión (Ctrl+S)'
+      ? 'Tu rol (Substitute) es de solo lectura en la nube del Estudio.'
+      : 'Sube los audios pendientes y sincroniza la sesión con la banda (Ctrl+S)'
   const missing = snap.engine.missingAssetIds.length
+  const effectiveMixerOpen = mobile ? mobileSurface === 'console' : panels.mixerOpen
+  const effectiveSideOpen = mobile ? mobileSurface === 'fx' : panels.sideOpen
 
   return (
-    <div ref={rootRef} className="stu" data-console={panels.mixerOpen ? 'open' : 'closed'} data-testid="studio-workspace">
+    <div
+      ref={rootRef}
+      className="stu"
+      data-console={effectiveMixerOpen ? 'open' : 'closed'}
+      data-mobile-surface={mobile ? mobileSurface : undefined}
+      data-testid="studio-workspace"
+    >
       <header className="stu-bar">
         <button type="button" className="stu-btn" data-tone="ghost" onClick={onClose} disabled={recording} aria-label="Volver a la lista de sesiones" data-testid="studio-back">
           <ArrowLeft size={14} />
@@ -366,10 +455,58 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
           aria-label="Título de la sesión"
           data-testid="studio-title"
         />
-        <span className="stu-badge" title={song ? `Canción: ${song.title}` : 'Sesión sin canción'}>
-          {song ? song.title.toUpperCase().slice(0, 28) : 'MAQUETA LIBRE'}
-        </span>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="small"
+          onClick={() => setSongBridgeOpen(true)}
+          title={song ? `Sincronizar estructura/acordes con «${song.title}»` : 'Promover maqueta libre a Canción oficial de la librería'}
+          data-testid="studio-song-bridge-open"
+        >
+          <ArrowLeftRight size={12} />
+          {song ? song.title.toUpperCase().slice(0, 22) : 'MAQUETA LIBRE'}
+        </button>
+        {activePeers.length > 0 && (
+          <span className="stu-badge" data-tone="ok" title={activePeers.map((p) => `${p.name} (${p.branch})`).join(', ')} data-testid="studio-collab-peers">
+            <Users size={11} />
+            {activePeers.length === 1 ? activePeers[0].name.slice(0, 14) : `${activePeers.length} EN LÍNEA`}
+          </span>
+        )}
         <span className="stu-bar-spacer" />
+        {(snap.abState !== null || snap.vcs.index.commits.length > 0) && (
+          <button
+            type="button"
+            className="stu-btn"
+            data-size="small"
+            data-on={snap.abState?.active === 'B'}
+            data-accent="warn"
+            onClick={() => void controller.toggleAbListening()}
+            title="Comparación auditiva instantánea A/B (0 ms) contra la última versión guardada"
+            data-testid="studio-ab-quick"
+          >
+            <Headphones size={12} />
+            {snap.abState?.active === 'B' ? 'ESCUCHANDO B' : 'A / B'}
+          </button>
+        )}
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="small"
+          data-on={versionsOpen && effectiveSideOpen}
+          onClick={() => {
+            if (mobile) {
+              setVersionsOpen(true)
+              selectMobileSurface('fx')
+            } else {
+              showVersions()
+            }
+          }}
+          title="Ramas y Control de Versiones del Estudio"
+          data-testid="studio-versions-open"
+        >
+          <GitBranch size={12} />
+          {snap.vcs.activeBranch.toUpperCase()}
+        </button>
         <span className="stu-label" aria-live="polite" data-testid="studio-save-status">
           {saveText}
         </span>
@@ -527,14 +664,58 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
 
       <StudioTransport controller={controller} recordAllowed={recordAllowed} recordHint={recordHint} />
 
-      <div className="stu-main" data-side={panels.sideOpen}>
-        <StudioTimeline controller={controller} recordAllowed={recordAllowed} waveformOpen={waveformOpen} onWaveformOpenChange={setWaveformOpen} />
+      {mobile && (
+        <nav className="stu-mobile-nav" aria-label="Superficies móviles del Estudio" data-testid="studio-mobile-nav">
+          {(
+            [
+              ['quick', 'RÁPIDO'],
+              ['arrange', 'ARREGLO'],
+              ['notes', 'NOTAS'],
+              ['console', 'CONSOLA'],
+              ['fx', 'MASTER/FX'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className="stu-btn"
+              data-on={mobileSurface === id}
+              aria-pressed={mobileSurface === id}
+              onClick={() => selectMobileSurface(id)}
+              data-testid={`studio-mobile-surface-${id}`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
 
-        <aside className="stu-side" aria-label="Panel lateral" data-open={panels.sideOpen} data-testid="studio-side">
+      {mobile && mobileSurface === 'quick' && (
+        <StudioMobileQuickSurface
+          controller={controller}
+          recordAllowed={recordAllowed}
+          onOpenExport={openExport}
+          onSyncToSong={() => setSongBridgeOpen(true)}
+        />
+      )}
+
+      <div className="stu-main" data-side={effectiveSideOpen}>
+        <div className="stu-main-editor" hidden={mobile && mobileSurface !== 'arrange' && mobileSurface !== 'notes'}>
+          <StudioTimeline controller={controller} recordAllowed={recordAllowed} waveformOpen={waveformOpen} onWaveformOpenChange={setWaveformOpen} />
+        </div>
+
+        <aside className="stu-side" aria-label="Panel lateral" data-open={effectiveSideOpen} hidden={mobile && mobileSurface !== 'fx'} data-testid="studio-side">
           {/* El panel se oculta sin desmontarse: un trabajo de IA en curso no se pierde. */}
-          <div className="stu-dock" role="tabpanel" id="studio-dock-panel" aria-labelledby={`studio-tab-${panels.sideTab}`} hidden={!panels.sideOpen} data-testid="studio-dock">
+          <div
+            className="stu-dock"
+            role="tabpanel"
+            id="studio-dock-panel"
+            aria-labelledby={versionsOpen ? 'studio-tab-versions' : `studio-tab-${panels.sideTab}`}
+            hidden={!effectiveSideOpen}
+            data-testid="studio-dock"
+          >
             <div className="stu-dock-head">
-              <span className="stu-dock-title">{STUDIO_SIDE_TAB_LABELS[panels.sideTab]}</span>
+              <span className="stu-dock-title">{versionsOpen ? 'Versiones y Ramas' : STUDIO_SIDE_TAB_LABELS[panels.sideTab]}</span>
               <button
                 type="button"
                 className="stu-btn"
@@ -549,10 +730,11 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
               </button>
             </div>
             <div className="stu-dock-body">
-              {panels.sideTab === 'device' && <StudioDevicePanel controller={controller} recordAllowed={recordAllowed} recordHint={recordHint} onOpenProbe={openProbe} />}
-              {panels.sideTab === 'inspector' && <StudioInspector controller={controller} />}
+              {versionsOpen && <StudioVersionPanel controller={controller} />}
+              {!versionsOpen && panels.sideTab === 'device' && <StudioDevicePanel controller={controller} recordAllowed={recordAllowed} recordHint={recordHint} onOpenProbe={openProbe} />}
+              {!versionsOpen && panels.sideTab === 'inspector' && <StudioInspector controller={controller} />}
               {/* El panel de IA queda montado al cambiar de pestana, por la misma razon. */}
-              <div className="stu-dock-keep" hidden={panels.sideTab !== 'jobs'}>
+              <div className="stu-dock-keep" hidden={versionsOpen || panels.sideTab !== 'jobs'}>
                 <StudioJobsPanel controller={controller} onOpenAssistant={openAssistant} assistantShortcut={shortcutLabel(registry, keymap, 'view.toggle_assistant')} />
               </div>
             </div>
@@ -564,19 +746,19 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
               className="stu-rail-btn"
               data-tone="ghost"
               onClick={toggleSide}
-              aria-expanded={panels.sideOpen}
+              aria-expanded={effectiveSideOpen}
               aria-controls="studio-dock-panel"
-              aria-label={panels.sideOpen ? 'Plegar el panel lateral' : 'Desplegar el panel lateral'}
-              title={`${panels.sideOpen ? 'Plegar' : 'Desplegar'} el panel lateral (${shortcutLabel(registry, keymap, 'view.toggle_side_panel')})`}
+              aria-label={effectiveSideOpen ? 'Plegar el panel lateral' : 'Desplegar el panel lateral'}
+              title={`${effectiveSideOpen ? 'Plegar' : 'Desplegar'} el panel lateral (${shortcutLabel(registry, keymap, 'view.toggle_side_panel')})`}
               data-testid="studio-side-toggle"
             >
-              {panels.sideOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+              {effectiveSideOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
             </button>
             <span className="stu-rail-sep" aria-hidden="true" />
             <div className="stu-rail-tabs" role="tablist" aria-orientation="vertical" aria-label="Paneles">
               {STUDIO_SIDE_TABS.map((tab) => {
                 const Icon = SIDE_TAB_ICONS[tab]
-                const selected = panels.sideTab === tab
+                const selected = !versionsOpen && panels.sideTab === tab
                 return (
                   <button
                     key={tab}
@@ -586,7 +768,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
                     aria-selected={selected}
                     aria-controls="studio-dock-panel"
                     className="stu-rail-btn"
-                    data-open={panels.sideOpen && selected}
+                    data-open={effectiveSideOpen && selected}
                     onClick={() => showPanel(tab)}
                     aria-label={STUDIO_SIDE_TAB_LABELS[tab]}
                     title={STUDIO_SIDE_TAB_LABELS[tab]}
@@ -596,6 +778,21 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
                   </button>
                 )
               })}
+              <button
+                type="button"
+                role="tab"
+                id="studio-tab-versions"
+                aria-selected={versionsOpen}
+                aria-controls="studio-dock-panel"
+                className="stu-rail-btn"
+                data-open={effectiveSideOpen && versionsOpen}
+                onClick={showVersions}
+                aria-label="Versiones y Ramas"
+                title="Versiones y Ramas (snapshots y comparación A/B)"
+                data-testid="studio-tab-versions"
+              >
+                <GitBranch size={16} />
+              </button>
             </div>
           </div>
         </aside>
@@ -611,7 +808,9 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
         />
       </div>
 
-      <StudioMixer controller={controller} onEditFx={showInspector} onExport={openExport} open={panels.mixerOpen} onToggle={toggleConsole} toggleShortcut={shortcutLabel(registry, keymap, 'view.toggle_mixer')} />
+      <div hidden={mobile && mobileSurface !== 'console'}>
+        <StudioMixer controller={controller} onEditFx={showInspector} onExport={openExport} open={effectiveMixerOpen} onToggle={toggleConsole} toggleShortcut={shortcutLabel(registry, keymap, 'view.toggle_mixer')} />
+      </div>
 
       <input
         ref={midiFileRef}
@@ -647,6 +846,101 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, onClose 
 
       {exportOpen && <StudioExportDialog controller={controller} song={song ? { id: song.id, title: song.title } : null} onClose={() => setExportOpen(false)} />}
 
+      {songBridgeOpen && (
+        <HubModal
+          title={song ? 'PUENTE ESTUDIO <-> CANCIÓN' : 'PROMOVER MAQUETA A CANCIÓN'}
+          onClose={() => setSongBridgeOpen(false)}
+          maxWidth="540px"
+          testId="studio-song-bridge-modal"
+        >
+          <div className="stu" style={{ padding: 0 }}>
+            {song && songSyncPreview ? (
+              <>
+                <div className="stu-section">
+                  <span className="stu-label">Sincronizar hacia Librería ({song.title})</span>
+                  <p className="stu-help">
+                    Envía tempo, compás, tonalidad, marcadores de sección y acordes del Estudio a la ficha oficial de la canción (preservando letras existentes).
+                  </p>
+                  <div className="stu-result">
+                    <strong>VISTA PREVIA DE CAMBIOS</strong>
+                    <p>{songSyncPreview.diff.summary}</p>
+                  </div>
+                  <div className="stu-actions" data-align="end">
+                    <button
+                      type="button"
+                      className="stu-btn"
+                      data-tone="primary"
+                      disabled={!sharing.activeCanEdit || !songSyncPreview.diff.changed}
+                      onClick={handleApplyStudioToSong}
+                      data-testid="studio-bridge-push-song"
+                    >
+                      <Check size={13} />
+                      ACTUALIZAR FICHA DE CANCIÓN
+                    </button>
+                  </div>
+                  {!sharing.activeCanEdit && (
+                    <p className="stu-help">Solo Owner o Director Musical pueden sobrescribir la ficha oficial del repertorio.</p>
+                  )}
+                </div>
+                <div className="stu-section">
+                  <span className="stu-label">Traer estructura desde Librería al Estudio</span>
+                  <p className="stu-help">
+                    Importa las {song.sections.length} secciones y acordes ChordPro actuales de «{song.title}» como marcadores y pista armónica en esta sesión (con opción de Deshacer).
+                  </p>
+                  <div className="stu-actions" data-align="end">
+                    <button type="button" className="stu-btn" onClick={handleImportFromSong} data-testid="studio-bridge-pull-song">
+                      <ArrowLeftRight size={13} />
+                      IMPORTAR DESDE CANCIÓN
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <form className="stu-section" onSubmit={handlePromoteFreeDemo}>
+                <span className="stu-label">Promover Maqueta Libre al Repertorio</span>
+                <p className="stu-help">
+                  Crea una canción oficial en la Librería heredando título ({session.title}), {session.bpm} BPM, tonalidad ({session.key || 'C'}), marcadores como secciones y acordes como ChordPro.
+                </p>
+                <label className="stu-form-row">
+                  <span className="stu-label">Artista / Autor (opcional)</span>
+                  <input
+                    className="stu-field"
+                    value={promoteArtist}
+                    onChange={(e) => setPromoteArtist(e.target.value)}
+                    placeholder="Nombre de la banda o compositor"
+                  />
+                </label>
+                {playlists.length > 0 && (
+                  <label className="stu-form-row">
+                    <span className="stu-label">Agregar también a Setlist (opcional)</span>
+                    <select className="stu-field" value={promotePlaylistId} onChange={(e) => setPromotePlaylistId(e.target.value)}>
+                      <option value="">No agregar a ningún setlist por ahora</option>
+                      {playlists.map((pl) => (
+                        <option key={pl.id} value={pl.id}>
+                          {pl.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <div className="stu-actions" data-align="end">
+                  <button type="button" className="stu-btn" data-tone="ghost" onClick={() => setSongBridgeOpen(false)}>
+                    CANCELAR
+                  </button>
+                  <button type="submit" className="stu-btn" data-tone="primary" disabled={!sharing.activeCanEdit} data-testid="studio-bridge-promote">
+                    <Music2 size={13} />
+                    CREAR CANCIÓN OFICIAL
+                  </button>
+                </div>
+                {!sharing.activeCanEdit && (
+                  <p className="stu-help">Solo Owner o Director Musical pueden crear canciones oficiales en una banda compartida.</p>
+                )}
+              </form>
+            )}
+          </div>
+        </HubModal>
+      )}
+
       {probeOpen && (
         <HubModal title="PRUEBA DE INTERFAZ" onClose={() => setProbeOpen(false)} maxWidth="920px" testId="studio-probe-modal">
           <div style={{ padding: 'clamp(12px, 3vw, 20px)', overflowY: 'auto', minHeight: 0 }}>
@@ -666,16 +960,19 @@ interface HomeProps {
   band: string
   bandName: string
   cloud: CloudTarget | null
-  canEditCloud: boolean
+  canCollaborateCloud: boolean
+  canDeleteCloud: boolean
+  actor: { userId: string; name: string; role: string }
   songs: readonly Song[]
+  playlists: readonly Playlist[]
 }
 
 /** Sesiones de una banda. Se monta con `key` = banda: al cambiar de banda arranca limpio. */
-const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, songs }) => {
+const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canCollaborateCloud, canDeleteCloud, actor, songs, playlists }) => {
   // El controlador es del audio global: salir de la pestana no cierra la sesion ni corta el audio.
   // Al volver se retoma la sesion abierta de esta banda (misma clave que el `key` de StudioHome).
   const audio = useGlobalAudioEngine()
-  const { activeBand } = useHub()
+  const { activeBand, activeSongId, setActiveSongId } = useHub()
   const audioTag = `${activeBand?.id ?? 'none'}:${band}`
   const [controller, setController] = useState<StudioController | null>(() => audio.adoptStudio(audioTag))
   const controllerRef = useRef<StudioController | null>(controller)
@@ -687,11 +984,18 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [backend, setBackend] = useState<'opfs' | 'indexeddb' | 'none' | null>(null)
   const [stemSongIds, setStemSongIds] = useState<ReadonlySet<string>>(new Set())
-  // Formulario de sesion nueva
+  // Formulario de sesion nueva (preselecciona la cancion activa del Universo Transversal si existe)
   const [title, setTitle] = useState('')
-  const [songId, setSongId] = useState('')
+  const [customSongChoice, setCustomSongChoice] = useState<string | null>(null)
   const [withStems, setWithStems] = useState(true)
   const [creating, setCreating] = useState(false)
+
+  const songId =
+    customSongChoice !== null
+      ? customSongChoice
+      : activeSongId && songs.some((s) => s.id === activeSongId)
+        ? activeSongId
+        : ''
 
   const sortedSongs = useMemo(() => [...songs].sort((a, b) => a.title.localeCompare(b.title)), [songs])
   const pickedSong = songId ? songs.find((s) => s.id === songId) : undefined
@@ -719,6 +1023,36 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
       .catch(() => undefined)
   }, [refresh])
 
+  // Canal Realtime del catalogo de sesiones: cuando otro integrante crea o guarda una sesion en la
+  // banda compartida, la lista de StudioHome se refresca sola en tiempo real.
+  const homeCollabRef = useRef<ReturnType<typeof createStudioCollabChannel> | null>(null)
+  useEffect(() => {
+    if (controller || !cloud || band === 'me') return
+    const sb = getSupabaseClient() as unknown as RealtimeClientLike | null
+    const handle = createStudioCollabChannel({
+      client: sb,
+      bandId: band,
+      initialPresence: {
+        userId: actor.userId,
+        name: actor.name,
+        role: actor.role,
+        sessionId: null,
+        branch: 'main',
+        selectedTrackId: null,
+      },
+      onEvent: (ev) => {
+        if (ev.type === 'session_catalog_changed' || ev.type === 'session_saved') {
+          void refresh()
+        }
+      },
+    })
+    homeCollabRef.current = handle
+    return () => {
+      handle.dispose()
+      homeCollabRef.current = null
+    }
+  }, [controller, cloud, band, actor.userId, actor.name, actor.role, refresh])
+
   // Salir de la pestana ya no cierra nada: motor, grabador y contexto de audio los libera el audio
   // global (context/GlobalAudioContext.tsx) al cerrar la sesion, al cambiar de banda o de usuario.
   // Una toma en curso sigue grabando salvo que AJUSTES > ESTUDIO pida detenerla al salir
@@ -732,14 +1066,20 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
   )
 
   const launch = (opened: OpenedSession, importStemsOf: string | null) => {
+    if (opened.session.songId) {
+      setActiveSongId(opened.session.songId)
+    }
+    const sb = getSupabaseClient() as unknown as RealtimeClientLike | null
     const next = new StudioController({
       session: opened.session,
       band,
       etag: opened.etag,
       dirty: opened.dirty,
       cloud,
-      canEditCloud,
+      canEditCloud: canCollaborateCloud,
       sections: sectionsFor(songs, opened.session.songId, opened.session.bpm, opened.session.beatsPerBar),
+      actor,
+      collabClient: sb,
     })
     controllerRef.current = next
     setController(next)
@@ -783,7 +1123,16 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
         title: name.slice(0, STUDIO_MAX_TITLE),
         band,
         song: pickedSong ? { id: pickedSong.id, bpm: pickedSong.bpm, beatsPerBar: pickedSong.beatsPerBar, key: pickedSong.key ?? '' } : null,
-        updatedBy: null,
+        fullSong: pickedSong ?? null,
+        updatedBy: actor.userId,
+        cloud,
+        canEditCloud: canCollaborateCloud,
+      })
+      homeCollabRef.current?.broadcast({
+        type: 'session_catalog_changed',
+        sessionId: opened.session.id,
+        senderId: actor.userId,
+        title: opened.session.title,
       })
       setTitle('')
       launch(opened, pickedSong && withStems && stemSongIds.has(pickedSong.id) ? pickedSong.id : null)
@@ -814,7 +1163,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
     setBusyId(entry.id)
     setError(null)
     try {
-      if (fromCloud && cloud && entry.cloud) await studioCloud.deleteSession(cloud, entry.id)
+      if (fromCloud && cloud && entry.cloud && canDeleteCloud) await studioCloud.deleteSession(cloud, entry.id)
       if (entry.local) await studioStore.deleteSession(entry.id)
       await refresh()
     } catch (err) {
@@ -825,7 +1174,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
     }
   }
 
-  if (controller) return <StudioWorkspace controller={controller} songs={songs} onClose={closeSession} />
+  if (controller) return <StudioWorkspace controller={controller} songs={songs} playlists={playlists} onClose={closeSession} />
 
   if (backend === 'none') {
     return (
@@ -841,7 +1190,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
     <div className="stu" data-testid="studio-home">
       <header className="stu-home-head">
         <div>
-          <span className="stu-label">Estudio · {bandName}</span>
+          <span className="stu-label">Estudio Colaborativo · {bandName}</span>
           <h2>Sesiones</h2>
         </div>
         <button
@@ -874,7 +1223,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
       )}
       {!cloud && (
         <div className="stu-notice" data-tone="info" role="status">
-          <span>Sin sesión de nube: las sesiones del Estudio quedan solo en este navegador. Entra con tu cuenta de nube para subirlas y abrirlas en otro equipo.</span>
+          <span>Sin sesión de nube: las sesiones del Estudio quedan solo en este navegador. Entra con tu cuenta de nube para compartirlas en tiempo real con la banda.</span>
         </div>
       )}
 
@@ -887,7 +1236,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
           ) : entries.length === 0 ? (
             <div className="stu-slot" data-testid="studio-list-empty">
               <strong style={{ color: 'var(--stu-text)' }}>Todavía no hay sesiones</strong>
-              <span>Crea una maqueta libre o parte de una canción de la librería: hereda su tempo, compás, tonalidad y secciones.</span>
+              <span>Crea una maqueta libre o parte de una canción de la librería: hereda su tempo, compás, tonalidad, secciones y acordes, y se comparte al instante con la banda.</span>
             </div>
           ) : (
             <ul className="stu-list" data-testid="studio-list">
@@ -907,7 +1256,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
                               DE ESTE EQUIPO
                             </button>
                           )}
-                          {entry.cloud && cloud && canEditCloud && (
+                          {entry.cloud && cloud && canDeleteCloud && (
                             <button type="button" className="stu-btn" data-tone="danger" onClick={() => void remove(entry, true)} data-testid="studio-delete-cloud">
                               {entry.local ? 'DEL EQUIPO Y LA NUBE' : 'DE LA NUBE'}
                             </button>
@@ -977,7 +1326,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
                               className="stu-btn"
                               data-size="icon"
                               data-tone="ghost"
-                              disabled={busyId !== null || (!entry.local && !(cloud && canEditCloud))}
+                              disabled={busyId !== null || (!entry.local && !(cloud && canDeleteCloud))}
                               onClick={() => setDeletingId(entry.id)}
                               aria-label={`Borrar ${entry.title}`}
                               title="Borrar"
@@ -994,14 +1343,14 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
               })}
             </ul>
           )}
-          {cloud && canEditCloud && <StudioCloudCleanup cloud={cloud} />}
+          {cloud && canDeleteCloud && <StudioCloudCleanup cloud={cloud} />}
         </section>
 
         <form className="stu-card" onSubmit={(event) => void create(event)} aria-label="Sesión nueva" data-testid="studio-new">
           <span className="stu-label">Sesión nueva</span>
           <label className="stu-form-row">
             <span className="stu-label">Punto de partida</span>
-            <select className="stu-field" value={songId} onChange={(event) => setSongId(event.target.value)} data-testid="studio-new-song">
+            <select className="stu-field" value={songId} onChange={(event) => setCustomSongChoice(event.target.value)} data-testid="studio-new-song">
               <option value="">Maqueta libre (120 BPM, 4/4)</option>
               {sortedSongs.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -1031,7 +1380,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
                 <span>Importar los stems de esta canción guardados en este equipo, uno por pista, alineados al compás 1.</span>
               </label>
             ) : (
-              <p className="stu-help">Esta canción no tiene stems en este equipo. Podrás arrastrar audio a la sesión.</p>
+              <p className="stu-help">Esta canción no tiene stems en este equipo. Podrás arrastrar audio o grabar directo en la sesión.</p>
             ))}
           <label className="stu-form-row">
             <span className="stu-label">Título</span>
@@ -1049,7 +1398,7 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
             {creating ? 'CREANDO...' : 'CREAR SESIÓN'}
           </button>
           <p className="stu-help">
-            La sesión toma la frecuencia de muestreo de este equipo. {backend === 'indexeddb' ? 'Este navegador no tiene OPFS: se puede reproducir y mezclar, no grabar.' : ''}
+            Se sube automáticamente a la nube de la banda si tienes cuenta activa. {backend === 'indexeddb' ? 'Modo móvil / memoria: soporta grabación de micrófono hasta 3 min.' : ''}
           </p>
         </form>
       </div>
@@ -1067,10 +1416,30 @@ const StudioHome: React.FC<HomeProps> = ({ band, bandName, cloud, canEditCloud, 
  * abre una en el espacio de trabajo: transporte, linea de tiempo y paneles.
  */
 export const StudioHubView: React.FC = () => {
-  const { songs, sharing, activeBand } = useHub()
+  const { songs, playlists, sharing, activeBand, activeBandRole, user } = useHub()
   const band = cloudBandKey(activeBand?.id, sharing.activeShared)
   const cloudEnabled = sharing.cloudSignedIn && !!activeBand
   const cloud = useMemo(() => (cloudEnabled ? stemCloudTarget(band) : null), [cloudEnabled, band])
+  const actor = useMemo(
+    () => ({
+      userId: user?.id ?? 'local',
+      name: user?.name ?? 'Integrante',
+      role: activeBandRole ?? 'Musician',
+    }),
+    [user?.id, user?.name, activeBandRole],
+  )
   // La clave incluye la banda del workspace: dos bandas personales comparten 'me' en la nube.
-  return <StudioHome key={`${activeBand?.id ?? 'none'}:${band}`} band={band} bandName={activeBand?.name ?? 'Sin banda'} cloud={cloud} canEditCloud={sharing.activeCanEdit} songs={songs} />
+  return (
+    <StudioHome
+      key={`${activeBand?.id ?? 'none'}:${band}`}
+      band={band}
+      bandName={activeBand?.name ?? 'Sin banda'}
+      cloud={cloud}
+      canCollaborateCloud={sharing.activeCanCollaborateStudio}
+      canDeleteCloud={sharing.activeCanEdit}
+      actor={actor}
+      songs={songs}
+      playlists={playlists}
+    />
+  )
 }

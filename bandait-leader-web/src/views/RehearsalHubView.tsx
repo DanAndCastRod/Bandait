@@ -51,13 +51,13 @@ const MANIFEST_CONCURRENCY = 4
  * React cuando cambia la seccion. Descargar es lectura: cualquier integrante puede hacerlo.
  */
 export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) => {
-  const { songs } = useHub()
+  const { songs, activeSongId, setActiveSongId } = useHub()
   const { target, bandKey } = useStemCloudTarget()
   const audio = useGlobalAudioEngine()
   const [records, setRecords] = useState<Map<string, StemSongRecord> | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  // Por defecto, la cancion que suena (o sono) en el reproductor global: volver a ENSAYO la retoma.
-  const [pickedId, setPickedId] = useState<string | null>(() => audio.currentStemSongId())
+  // Por defecto, la cancion que suena (o sono) en el reproductor global o la activa transversal.
+  const [pickedId, setPickedId] = useState<string | null>(() => audio.currentStemSongId() ?? activeSongId)
   /** Manifiestos de la nube por `${bandKey}:${songId}` (null = sin stems en la nube). */
   const [cloud, setCloud] = useState<Map<string, CloudManifest | null>>(() => new Map())
   const [cloudError, setCloudError] = useState<string | null>(null)
@@ -144,7 +144,11 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
     )
   }, [songs, records, cloudOnly])
 
-  const picked = options.find((o) => o.song.id === pickedId) ?? options[0] ?? null
+  const picked =
+    (activeSongId ? options.find((o) => o.song.id === activeSongId) : undefined) ??
+    options.find((o) => o.song.id === pickedId) ??
+    options[0] ??
+    null
   const song = picked?.song ?? null
   const record = song && records ? records.get(song.id) ?? null : null
   const manifest = song ? cloud.get(cloudKey(song.id)) ?? null : null
@@ -198,6 +202,7 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
               value={song.id}
               onChange={(e) => {
                 setPickedId(e.target.value)
+                setActiveSongId(e.target.value)
                 setDownloadError(null)
               }}
               style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '9px 10px', fontSize: '14px', fontFamily: 'inherit' }}

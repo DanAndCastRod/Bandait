@@ -57,6 +57,7 @@ import type {
   MidiClipDigest,
   MixMetrics,
   MixSuggestion,
+  PostStudioVcsOptions,
   PutSessionOptions,
   StudioAnalysis,
   StudioAnalysisChord,
@@ -67,6 +68,7 @@ import type {
   StudioCloudApi,
   StudioCloudCleanupApi,
   StudioCloudJobsV2Api,
+  StudioCloudVcsApi,
   StudioJobAsset,
   StudioJobEstimate,
   StudioJobEstimateV2,
@@ -77,6 +79,8 @@ import type {
   StudioJobState,
   StudioJobStateV2,
   StudioSessionSummary,
+  StudioVcsCommitMeta,
+  StudioVcsIndex,
   WatchJobOptions,
 } from './types.ts'
 
@@ -149,6 +153,11 @@ const MESSAGES: Record<string, string> = {
   size_mismatch: 'Un audio descargado no tiene el tamaño esperado. Reintenta.',
   aborted: 'La operación se canceló.',
   timeout: 'El trabajo tarda más de lo normal. Vuelve a consultarlo más tarde: el resultado queda guardado en la nube.',
+  no_commit: 'Ese snapshot o versión ya no existe en la nube.',
+  bad_vcs: 'Los datos de versión o rama no son válidos.',
+  vcs_corrupt: 'El índice de versiones de la nube está dañado.',
+  vcs_conflict: 'Otro integrante creó una versión al mismo tiempo. Reintenta para integrar tu snapshot.',
+  commit_conflict: 'Ya existe un snapshot con ese identificador.',
 }
 
 export function studioCloudErrorMessage(code: string, status = 0): string {
@@ -996,6 +1005,91 @@ export function watchJobV2(
 void ({ startJobV2, estimateJobV2, getJobV2, watchJobV2 } satisfies StudioCloudJobsV2Api)
 
 void ({ inspectOrphans, cleanOrphans } satisfies StudioCloudCleanupApi)
+
+// ---------------------------------------------------------------------------
+// Control de versiones del Estudio (STUDIO_V2.md 7.2)
+// ---------------------------------------------------------------------------
+
+function parseWireCommitMeta(raw: unknown): StudioVcsCommitMeta | null {
+  if (!isObject(raw) || !isStudioId(raw.id) || typeof raw.branch !== 'string') return null
+  return {
+    id: raw.id,
+    branch: raw.branch,
+    parentId: isStudioId(raw.parent_id) ? raw.parent_id : null,
+    message: typeof raw.message === 'string' ? raw.message : '',
+    authorId: typeof raw.author_id === 'string' ? raw.author_id : null,
+    authorName: typeof raw.author_name === 'string' ? raw.author_name : '',
+    createdAt: typeof raw.created_at === 'string' ? raw.created_at : '',
+    trackCount: finite(raw.track_count) ? Math.max(0, Math.floor(raw.track_count)) : 0,
+    bpm: finite(raw.bpm) ? raw.bpm : 120,
+    key: typeof raw.key === 'string' ? raw.key : null,
+    assetFiles: Array.isArray(raw.asset_files) ? raw.asset_files.filter((f): f is string => typeof f === 'string') : [],
+  }
+}
+
+export function parseVcsIndexWire(raw: unknown, etag: string | null, status = 200): StudioVcsIndex {
+  if (!isObject(raw) || raw.version !== 1 || !isObject(raw.branches) || !Array.isArray(raw.commits)) {
+    throw studioError('bad_response', status)
+  }
+  const branches: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw.branches)) {
+    if (typeof v === 'string' && isStudioId(v)) branches[k] = v
+  }
+  const commits: StudioVcsCommitMeta[] = []
+  for (const item of raw.commits) {
+    const parsed = parseWireCommitMeta(item)
+    if (parsed) commits.push(parsed)
+  }
+  const protectedAssets = Array.isArray(raw.protected_assets)
+    ? raw.protected_assets.filter((f): f is string => typeof f === 'string')
+    : []
+  return { version: 1, branches, commits, protectedAssets, etag }
+}
+
+export async function getVcs(target: CloudTarget, sessionId: string): Promise<StudioVcsIndex> {
+  const url = `${sessionUrl(target, sessionId)}/vcs`
+  const headers = await auth(target)
+  const res = await request(target, url, { method: 'GET', headers, cache: 'no-store' })
+  if (!res.ok) throw await failure(res)
+  return parseVcsIndexWire(await jsonBody(res), res.headers.get('ETag'), res.status)
+}
+
+export async function postVcs(
+  target: CloudTarget,
+  sessionId: string,
+  options: PostStudioVcsOptions,
+): Promise<{ commit: StudioVcsCommitMeta; vcs: StudioVcsIndex }> {
+  const url = `${sessionUrl(target, sessionId)}/vcs`
+  const sessionWire = JSON.parse(sessionToJson(options.session)) as unknown
+  const payload: Record<string, unknown> = {
+    branch: options.branch,
+    message: options.message,
+    author_name: options.authorName ?? '',
+    ...(options.parentId !== undefined ? { parent_id: options.parentId } : {}),
+    session: sessionWire,
+  }
+  const headers = await auth(target)
+  headers['Content-Type'] = 'application/json'
+  const res = await request(target, url, { method: 'POST', headers, body: JSON.stringify(payload) })
+  if (!res.ok) throw await failure(res)
+  const body = await jsonBody(res)
+  if (!isObject(body)) throw studioError('bad_response', res.status)
+  const commit = parseWireCommitMeta(body.commit)
+  if (!commit) throw studioError('bad_response', res.status)
+  const vcs = parseVcsIndexWire(body.vcs, res.headers.get('ETag'), res.status)
+  return { commit, vcs }
+}
+
+export async function getCommit(target: CloudTarget, sessionId: string, commitId: string): Promise<StudioSession> {
+  if (!isStudioId(commitId)) throw studioError('bad_vcs', 400)
+  const url = `${sessionUrl(target, sessionId)}/commits/${encodeURIComponent(commitId)}`
+  const headers = await auth(target)
+  const res = await request(target, url, { method: 'GET', headers })
+  if (!res.ok) throw await failure(res)
+  return parseCloudSession(await jsonBody(res), res.status)
+}
+
+void ({ getVcs, postVcs, getCommit } satisfies StudioCloudVcsApi)
 
 void ({
   studioUrl,

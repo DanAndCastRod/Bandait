@@ -11,6 +11,7 @@ import {
   Pencil,
   Redo2,
   Scissors,
+  Sliders,
   Trash2,
   Undo2,
   ZoomIn,
@@ -30,6 +31,7 @@ import {
 } from '../../services/studio/session'
 import type { MidiEditResult, QuantizeGrid } from '../../services/studio/types'
 import { inkOn, studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
+import { StudioHumanizePopover } from './StudioHumanizePopover'
 import { downloadBlob, formatBarBeat, isBlackKey, pitchName, trackColor, useStudio, type PianoTool, type StudioController } from './studioState'
 import { useStudioCanvasPalette } from './useStudioCanvasPalette'
 
@@ -420,6 +422,7 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
   const [pxPerBeat, setPxPerBeat] = useState(DEFAULT_PX_BEAT)
   const [rowH, setRowH] = useState(DEFAULT_ROW_H)
   const [velocityText, setVelocityText] = useState('')
+  const [humanizeOpen, setHumanizeOpen] = useState(false)
 
   const bodyRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -608,10 +611,12 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
     setRowH(target)
   }, [setRowH])
 
-  // Ctrl + rueda: zoom horizontal; Alt + rueda: zoom vertical. No pasivo para cancelar el de la pagina.
+  // Ctrl + rueda o pellizco tactil de 2 dedos: zoom horizontal/vertical.
   useEffect(() => {
     const body = bodyRef.current
     if (!body) return
+    let pinchStartDist = 0
+    let pinchStartPx = DEFAULT_PX_BEAT
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey && !event.altKey) return
       event.preventDefault()
@@ -619,8 +624,33 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
       if (event.altKey) zoomV(rowRef.current * Math.exp(-event.deltaY * 0.0022), event.clientY - rect.top)
       else zoomH(pxRef.current * Math.exp(-event.deltaY * 0.0022), event.clientX - rect.left)
     }
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        const dx = event.touches[0].clientX - event.touches[1].clientX
+        const dy = event.touches[0].clientY - event.touches[1].clientY
+        pinchStartDist = Math.hypot(dx, dy)
+        pinchStartPx = pxRef.current
+      }
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      if (event.touches.length === 2 && pinchStartDist > 12) {
+        event.preventDefault()
+        const dx = event.touches[0].clientX - event.touches[1].clientX
+        const dy = event.touches[0].clientY - event.touches[1].clientY
+        const dist = Math.hypot(dx, dy)
+        const rect = body.getBoundingClientRect()
+        const midX = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left
+        zoomH(pinchStartPx * (dist / pinchStartDist), midX)
+      }
+    }
     body.addEventListener('wheel', onWheel, { passive: false })
-    return () => body.removeEventListener('wheel', onWheel)
+    body.addEventListener('touchstart', onTouchStart, { passive: true })
+    body.addEventListener('touchmove', onTouchMove, { passive: false })
+    return () => {
+      body.removeEventListener('wheel', onWheel)
+      body.removeEventListener('touchstart', onTouchStart)
+      body.removeEventListener('touchmove', onTouchMove)
+    }
   }, [zoomH, zoomV])
 
   useEffect(
@@ -1063,6 +1093,50 @@ export const StudioPianoRoll: React.FC<Props> = ({ controller }) => {
           <button type="button" className="stu-btn" data-size="icon" disabled={recording || clip.notes.length < 2} onClick={() => controller.legatoNotes()} aria-label="Legato" title="Legato: cada nota llega hasta la siguiente" data-testid="studio-piano-legato">
             <AlignHorizontalJustifyStart size={14} />
           </button>
+        </div>
+
+        <div className="stu-bar-group stu-wave-anchor" role="group" aria-label="Humanizar">
+          <label className="stu-pr-strength" title="Intensidad de humanización: micro-timing (tiempo), velocidad y duración">
+            <span className="stu-label">Humano</span>
+            <input
+              type="range"
+              className="stu-range"
+              min={0}
+              max={100}
+              step={5}
+              value={Math.round(piano.humanizeAmount * 100)}
+              onChange={(event) => controller.setPiano({ humanizeAmount: Number(event.target.value) / 100 })}
+              aria-label="Intensidad de humanización"
+              aria-valuetext={`${Math.round(piano.humanizeAmount * 100)} %`}
+              data-testid="studio-piano-humanize-amount"
+            />
+            <span className="stu-pr-val">{Math.round(piano.humanizeAmount * 100)}%</span>
+          </label>
+          <button
+            type="button"
+            className="stu-btn"
+            disabled={recording || clip.notes.length === 0}
+            onClick={() => controller.humanizeNotes()}
+            title={selectionCount > 0 ? 'Humanizar tiempo y velocidad de las notas elegidas (H)' : 'Humanizar tiempo y velocidad de todas las notas (H)'}
+            data-testid="studio-piano-humanize"
+          >
+            HUMANIZAR
+          </button>
+          <button
+            type="button"
+            className="stu-btn"
+            data-size="icon"
+            data-on={humanizeOpen}
+            aria-pressed={humanizeOpen}
+            aria-expanded={humanizeOpen}
+            disabled={recording}
+            onClick={() => setHumanizeOpen((v) => !v)}
+            title="Opciones avanzadas de humanización analógica (Swing, Strum, Acentos) y generador de acordes MIDI"
+            data-testid="studio-piano-humanize-options"
+          >
+            <Sliders size={14} />
+          </button>
+          {humanizeOpen && <StudioHumanizePopover controller={controller} onClose={() => setHumanizeOpen(false)} />}
         </div>
 
         <div className="stu-bar-group" role="group" aria-label="Transponer">

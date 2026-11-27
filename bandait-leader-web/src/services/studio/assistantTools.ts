@@ -173,12 +173,12 @@ export const STUDIO_ASSISTANT_TOOLS: readonly WireAssistantTool[] = [
     name: 'set_track_fx',
     command_id: 'track.set_fx',
     description:
-      'Agrega o ajusta un efecto. track_id es el id de una pista o master. Si la pista ya tiene ese efecto se cambian solo los params que vienen y se quita el bypass; si no, se agrega con valores por defecto mas los que vienen. limiter solo en master. Parametros de eq: hpf_hz, low_db, mid_hz, mid_db, mid_q, high_db. De compressor: threshold_db, ratio, attack_ms, release_ms, knee_db, makeup_db. De limiter: ceiling_db, release_ms.',
+      'Agrega o ajusta un efecto. track_id es el id de una pista o master. Si la pista ya tiene ese efecto se cambian solo los params que vienen y se quita el bypass; si no, se agrega con valores por defecto mas los que vienen. limiter solo en master. Parametros de eq: hpf_hz, low_db, mid_hz, mid_db, mid_q, high_db. De compressor: threshold_db, ratio, attack_ms, release_ms, knee_db, makeup_db. De de_esser: freq_hz, threshold_db, reduction_db. De saturator: drive_db, tone_db, mix, output_db. De stereo_imager: width, mono_bass_hz. De limiter: ceiling_db, release_ms.',
     parameters: {
       type: 'object',
       properties: {
         track_id: ID,
-        fx_type: { type: 'string', enum: ['eq', 'compressor', 'limiter'] },
+        fx_type: { type: 'string', enum: ['eq', 'compressor', 'de_esser', 'saturator', 'stereo_imager', 'limiter'] },
         bypass: { type: 'boolean' },
         params: {
           type: 'object',
@@ -195,6 +195,14 @@ export const STUDIO_ASSISTANT_TOOLS: readonly WireAssistantTool[] = [
             release_ms: { type: 'number', minimum: 10, maximum: 1000 },
             knee_db: { type: 'number', minimum: 0, maximum: 40 },
             makeup_db: { type: 'number', minimum: 0, maximum: 24 },
+            freq_hz: { type: 'number', minimum: 2000, maximum: 10000 },
+            reduction_db: { type: 'number', minimum: 0, maximum: 18 },
+            drive_db: { type: 'number', minimum: 0, maximum: 24 },
+            tone_db: { type: 'number', minimum: -12, maximum: 12 },
+            mix: { type: 'number', minimum: 0, maximum: 1 },
+            output_db: { type: 'number', minimum: -12, maximum: 12 },
+            width: { type: 'number', minimum: 0, maximum: 2 },
+            mono_bass_hz: { type: 'number', minimum: 0, maximum: 300 },
             ceiling_db: { type: 'number', minimum: -12, maximum: 0 },
           },
         },
@@ -279,6 +287,28 @@ export const STUDIO_ASSISTANT_TOOLS: readonly WireAssistantTool[] = [
     },
   },
   {
+    name: 'humanize_midi_clip',
+    command_id: 'midi.humanize',
+    description:
+      'Humaniza las notas de un clip MIDI para darle toque orgánico/analógico: varía micro-timing (tiempo), velocidad (volumen), duración, swing, acento métrico y rasgueo de acordes (strum). preset opcional: pocket, keys, strum o analog.',
+    parameters: {
+      type: 'object',
+      properties: {
+        clip_id: ID,
+        preset: { type: 'string', enum: ['pocket', 'keys', 'strum', 'analog'] },
+        amount: { type: 'number', minimum: 0, maximum: 1 },
+        timing_beats: { type: 'number', minimum: 0, maximum: 0.25 },
+        velocity_range: { type: 'number', minimum: 0, maximum: 64 },
+        length_ratio: { type: 'number', minimum: 0, maximum: 0.5 },
+        swing: { type: 'number', minimum: 0, maximum: 0.75 },
+        strum_beats: { type: 'number', minimum: -0.12, maximum: 0.12 },
+        accent_strength: { type: 'number', minimum: 0, maximum: 1 },
+        seed: { type: 'integer' },
+      },
+      required: ['clip_id'],
+    },
+  },
+  {
     name: 'move_clip',
     command_id: 'clip.move',
     description: 'Mueve un clip (de audio o MIDI) para que empiece en start_beat. Con track_id lo pasa a otra pista del mismo tipo (audio con audio, instrumento con instrumento).',
@@ -331,6 +361,45 @@ export const STUDIO_ASSISTANT_TOOLS: readonly WireAssistantTool[] = [
     command_id: 'marker.remove',
     description: 'Quita una marca por su id.',
     parameters: { type: 'object', properties: { marker_id: ID }, required: ['marker_id'] },
+  },
+  {
+    name: 'auto_master_session',
+    command_id: 'master.auto',
+    description:
+      'Aplica masterización DSP local instantánea sobre el bus master (EQ, compresor glue, saturación analógica, imagen estéreo con graves en mono y limitador True Peak) calibrada a un objetivo de sonoridad.',
+    parameters: {
+      type: 'object',
+      properties: {
+        profile: { type: 'string', enum: ['streaming', 'club', 'live_stage', 'dynamic'] },
+        tone: { type: 'string', enum: ['warm', 'balanced', 'open'] },
+        target_lufs: { type: 'number', minimum: -24, maximum: -6 },
+      },
+      required: ['profile'],
+    },
+  },
+  {
+    name: 'unmask_mix_tracks',
+    command_id: 'mix.unmask',
+    description:
+      'Ejecuta el optimizador matemático anti-enmascaramiento espectral (bandas Bark) ajustando paneo complementario y EQ quirúrgico entre pistas en conflicto.',
+    parameters: {
+      type: 'object',
+      properties: {
+        strength: { type: 'number', minimum: 0.1, maximum: 1 },
+      },
+    },
+  },
+  {
+    name: 'generate_click_guide',
+    command_id: 'studio.click_guide',
+    description: 'Genera o actualiza una pista de metrónomo acentuado alineada al compás y a la estructura de la sesión para monitoreo o exportación.',
+    parameters: {
+      type: 'object',
+      properties: {
+        bars: { type: 'integer', minimum: 1, maximum: 512 },
+        subdivision: { type: 'string', enum: ['quarter', 'eighth'] },
+      },
+    },
   },
 ]
 
@@ -516,7 +585,14 @@ function joinParts(parts: string[]): string {
   return `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`
 }
 
-const FX_LABELS: Record<string, string> = { eq: 'el EQ', compressor: 'el compresor', limiter: 'el limitador' }
+const FX_LABELS: Record<string, string> = {
+  eq: 'el EQ',
+  compressor: 'el compresor',
+  de_esser: 'el de-esser',
+  saturator: 'el saturador analógico',
+  stereo_imager: 'la imagen estéreo',
+  limiter: 'el limitador',
+}
 
 function countText(n: number, singular: string, plural: string): string {
   return `${n} ${n === 1 ? singular : plural}`
@@ -600,6 +676,11 @@ export function describeToolCall(name: string, args: Readonly<Record<string, unk
       const strength = typeof a.strength === 'number' ? ` con fuerza ${Math.round(a.strength * 100)} %` : ''
       return `Cuantizar ${clipText(session, a.clip_id)} a ${String(a.grid)}${a.triplets === true ? ' en tresillos' : ''}${strength}`
     }
+    case 'humanize_midi_clip': {
+      const presetTxt = typeof a.preset === 'string' ? ` (preset ${a.preset})` : ''
+      const amount = typeof a.amount === 'number' ? ` al ${Math.round(a.amount * 100)} %` : ''
+      return `Humanizar tiempo y velocidad de ${clipText(session, a.clip_id)}${presetTxt}${amount}`
+    }
     case 'move_clip': {
       const to = typeof a.track_id === 'string' ? ` y pasarlo a ${trackName(session, a.track_id)}` : ''
       return `Mover ${clipText(session, a.clip_id)} al ${beatPositionText(Number(a.start_beat), bpb)}${to}`
@@ -623,6 +704,20 @@ export function describeToolCall(name: string, args: Readonly<Record<string, unk
       const marker = typeof a.marker_id === 'string' ? findMarker(session, a.marker_id) : null
       if (!marker) return `Quitar la marca ${String(a.marker_id)}`
       return `Quitar la marca "${marker.label || STUDIO_MARKER_KIND_LABELS[marker.kind]}" del ${beatPositionText(marker.beat, bpb)}`
+    }
+    case 'auto_master_session': {
+      const prof = String(a.profile ?? 'streaming')
+      const tone = typeof a.tone === 'string' ? `, carácter ${a.tone}` : ''
+      const lufs = typeof a.target_lufs === 'number' ? ` (${num(a.target_lufs, 1)} LUFS)` : ''
+      return `Aplicar Auto-Master local (${prof}${tone})${lufs}`
+    }
+    case 'unmask_mix_tracks': {
+      const pct = typeof a.strength === 'number' ? ` al ${Math.round(a.strength * 100)} %` : ''
+      return `Desenmascarar espectralmente las pistas en conflicto (bandas Bark)${pct}`
+    }
+    case 'generate_click_guide': {
+      const barsTxt = typeof a.bars === 'number' ? ` de ${a.bars} compases` : ''
+      return `Generar pista de clic y guía acentuada${barsTxt}`
     }
     default:
       return `Herramienta desconocida: ${name}`
@@ -680,7 +775,8 @@ export function toolSessionProblem(name: string, args: Readonly<Record<string, u
     }
     case 'replace_midi_notes':
     case 'transpose_midi_clip':
-    case 'quantize_midi_clip': {
+    case 'quantize_midi_clip':
+    case 'humanize_midi_clip': {
       if (typeof a.clip_id === 'string' && findMidiClip(session, a.clip_id)) return null
       if (typeof a.clip_id === 'string' && findClip(session, a.clip_id)) return `"${a.clip_id}" es un clip de audio, no MIDI.`
       return noClip(a.clip_id)

@@ -347,7 +347,7 @@ check('cache: misma combinacion, mismo objeto; otro tema u otro acento, otra pal
 })
 
 check('auditoria: los lienzos del Estudio no pintan con colores literales y repintan al cambiar el tema', () => {
-  const files = ['StudioTimeline.tsx', 'StudioPianoRoll.tsx', 'StudioMixer.tsx', 'StudioTrackHeader.tsx', 'StudioInspector.tsx', 'StudioDevicePanel.tsx']
+  const files = ['StudioTimeline.tsx', 'StudioPianoRoll.tsx', 'StudioMixer.tsx', 'StudioTrackHeader.tsx', 'StudioInspector.tsx', 'StudioDevicePanel.tsx', 'StudioAnalyzer.tsx']
   for (const file of files) {
     const src = read(`../src/components/studio/${file}`)
     const literal = src.split('\n').filter((line) => /(fillStyle|strokeStyle)\s*=/.test(line) && /#[0-9A-Fa-f]{3,8}\b|rgba?\(/.test(line))

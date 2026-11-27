@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AudioWaveform, Copy, Download, FileMusic, Layers, Music, Piano, Plus, Redo2, Scissors, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
+import { AudioWaveform, Copy, Download, FileMusic, Layers, Music, PanelLeftClose, Piano, Plus, Redo2, Scissors, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
 import { isStemAudioPath } from '../../services/stemNames'
 import { dbToGain, type SectionSpan } from '../../services/stemTiming'
 import { clipFadeFactor } from '../../services/studio/graph'
@@ -27,6 +27,7 @@ import type { AssetPeaks, LoopRegionS, PeakColumns, SnapMode } from '../../servi
 import { studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
 import type { WaveformPreferences } from '../../services/waveform'
 import { drawWaveform, resolveWaveformColors } from '../../services/waveformRender'
+import { StudioClipActionBar } from './StudioClipActionBar'
 import { StudioPianoRoll } from './StudioPianoRoll'
 import { StudioTrackHeader } from './StudioTrackHeader'
 import { StudioWaveformPopover } from './StudioWaveformPopover'
@@ -806,6 +807,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed, wav
   const { session, recording, ready } = snap
   const [zoom, setZoom] = useState(DEFAULT_ZOOM)
   const [dropping, setDropping] = useState(false)
+  const [compactHeads, setCompactHeads] = useState(false)
 
   const bodyRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -1006,18 +1008,45 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed, wav
     setZoom(target)
   }, [])
 
-  // Ctrl + rueda: zoom alrededor del puntero. No pasivo, para poder cancelar el zoom de la pagina.
+  // Ctrl + rueda o pellizco tactil de 2 dedos: zoom alrededor del punto medio.
   useEffect(() => {
     const scroller = bodyRef.current
     if (!scroller) return
+    let pinchStartDist = 0
+    let pinchStartZoom = DEFAULT_ZOOM
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return
       event.preventDefault()
       const rect = (canvasRef.current ?? scroller).getBoundingClientRect()
       changeZoom(zoomRef.current * Math.exp(-event.deltaY * 0.0022), Math.max(0, event.clientX - rect.left))
     }
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        const dx = event.touches[0].clientX - event.touches[1].clientX
+        const dy = event.touches[0].clientY - event.touches[1].clientY
+        pinchStartDist = Math.hypot(dx, dy)
+        pinchStartZoom = zoomRef.current
+      }
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      if (event.touches.length === 2 && pinchStartDist > 12) {
+        event.preventDefault()
+        const dx = event.touches[0].clientX - event.touches[1].clientX
+        const dy = event.touches[0].clientY - event.touches[1].clientY
+        const dist = Math.hypot(dx, dy)
+        const rect = (canvasRef.current ?? scroller).getBoundingClientRect()
+        const midX = Math.max(0, (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left)
+        changeZoom(pinchStartZoom * (dist / pinchStartDist), midX)
+      }
+    }
     scroller.addEventListener('wheel', onWheel, { passive: false })
-    return () => scroller.removeEventListener('wheel', onWheel)
+    scroller.addEventListener('touchstart', onTouchStart, { passive: true })
+    scroller.addEventListener('touchmove', onTouchMove, { passive: false })
+    return () => {
+      scroller.removeEventListener('wheel', onWheel)
+      scroller.removeEventListener('touchstart', onTouchStart)
+      scroller.removeEventListener('touchmove', onTouchMove)
+    }
   }, [changeZoom])
 
   const fitZoom = useCallback(() => {
@@ -1493,6 +1522,19 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed, wav
         </div>
 
         <div className="stu-bar-group" role="group" aria-label="Zoom">
+          <button
+            type="button"
+            className="stu-btn"
+            data-size="icon"
+            data-on={compactHeads}
+            aria-pressed={compactHeads}
+            onClick={() => setCompactHeads((v) => !v)}
+            aria-label="Compactar cabeceras de pista"
+            title="Compactar cabeceras de pista (84 px en móvil)"
+            data-testid="studio-compact-heads"
+          >
+            <PanelLeftClose size={14} />
+          </button>
           <button type="button" className="stu-btn" data-size="icon" disabled={zoom <= MIN_ZOOM} onClick={() => changeZoom(zoom / 1.5)} aria-label="Alejar" title="Alejar (Ctrl + rueda)">
             <ZoomOut size={14} />
           </button>
@@ -1512,7 +1554,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed, wav
       )}
 
       {/* Oculta (no desmontada) mientras el piano roll ocupa el area: conserva scroll y zoom. */}
-      <div className="stu-tl-wrap" hidden={pianoOpen}>
+      <div className="stu-tl-wrap" data-compact-heads={compactHeads ? 'true' : undefined} hidden={pianoOpen}>
       <div
         className="stu-tl-body"
         ref={bodyRef}
@@ -1655,6 +1697,7 @@ export const StudioTimeline: React.FC<Props> = ({ controller, recordAllowed, wav
             <span>Arrastra archivos de audio o MIDI aquí, agrega una pista para grabar, importa audio con el botón AUDIO o crea una pista de instrumento para tocar y dibujar notas.</span>
           </div>
         )}
+        {!pianoOpen && <StudioClipActionBar controller={controller} />}
         {dropping && <div className="stu-drop">SUELTA EL AUDIO: SOBRE UNA PISTA ENTRA AHÍ; FUERA, CREA PISTAS NUEVAS. UN .MID CREA PISTAS DE INSTRUMENTO</div>}
       </div>
     </section>

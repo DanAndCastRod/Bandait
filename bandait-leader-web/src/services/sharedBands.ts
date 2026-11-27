@@ -14,10 +14,13 @@ import type { Band, BandMember, MemberRole, Playlist, PlaylistSong, Song, Worksp
 
 /** Roles que editan canciones y setlists de una banda compartida (lo mismo que exige RLS). */
 export const EDIT_ROLES: readonly MemberRole[] = ['Owner', 'MusicDirector']
+/** Roles que colaboran creando y editando sesiones/audios/versiones en el Estudio DAW (STUDIO_V2.md 7.1). */
+export const STUDIO_COLLAB_ROLES: readonly MemberRole[] = ['Owner', 'MusicDirector', 'Musician', 'SoundEngineer']
 /** Roles que invitan integrantes (un MusicDirector no puede invitar a un Owner). */
 export const INVITE_ROLES: readonly MemberRole[] = ['Owner', 'MusicDirector']
 
 export const canEditRole = (role: MemberRole | null | undefined): boolean => !!role && EDIT_ROLES.includes(role)
+export const canCollaborateStudioRole = (role: MemberRole | null | undefined): boolean => !!role && STUDIO_COLLAB_ROLES.includes(role)
 export const canInviteRole = (role: MemberRole | null | undefined): boolean => !!role && INVITE_ROLES.includes(role)
 
 export const MEMBER_ROLES: readonly MemberRole[] = ['Owner', 'MusicDirector', 'Musician', 'Substitute', 'SoundEngineer']
@@ -118,6 +121,7 @@ export function sliceBand(ws: WorkspaceStore, bandId: string): WorkspaceStore | 
   const band = ws.bands.find((b) => b.id === bandId)
   if (!band) return null
   const voice = ws.voiceMap?.[bandId]
+  const bandVcs = ws.vcsMap?.[bandId]
   return {
     schemaVersion: ws.schemaVersion,
     activeBandId: bandId,
@@ -128,6 +132,7 @@ export function sliceBand(ws: WorkspaceStore, bandId: string): WorkspaceStore | 
     stemsMap: {},
     songsMap: { [bandId]: ws.songsMap?.[bandId] ?? [] },
     voiceMap: voice ? { [bandId]: voice } : {},
+    ...(bandVcs ? { vcsMap: { [bandId]: bandVcs } } : {}),
   }
 }
 
@@ -145,7 +150,7 @@ export function personalPart(ws: WorkspaceStore, sharedIds: ReadonlySet<string>,
   const bands = ws.bands.filter((b) => !sharedIds.has(b.id))
   const has = (id: string) => bands.some((b) => b.id === id)
   const activeBandId = has(ws.activeBandId) ? ws.activeBandId : has(fallbackActive) ? fallbackActive : bands[0]?.id ?? ''
-  return {
+  const next: WorkspaceStore = {
     ...ws,
     bands,
     activeBandId,
@@ -155,6 +160,10 @@ export function personalPart(ws: WorkspaceStore, sharedIds: ReadonlySet<string>,
     songsMap: withoutKeys(ws.songsMap, sharedIds),
     voiceMap: withoutKeys(ws.voiceMap, sharedIds),
   }
+  if (ws.vcsMap) {
+    next.vcsMap = withoutKeys(ws.vcsMap, sharedIds)
+  }
+  return next
 }
 
 /** Workspace unido: personal + compartidas. Una compartida cuyo id choque con una personal se omite. */
@@ -167,6 +176,7 @@ export function mergeWorkspace(personal: WorkspaceStore, shared: readonly Shared
     equipmentMap: { ...personal.equipmentMap },
     songsMap: { ...personal.songsMap },
     voiceMap: { ...personal.voiceMap },
+    ...(personal.vcsMap ? { vcsMap: { ...personal.vcsMap } } : {}),
   }
   for (const sb of shared) {
     const id = sb.id
@@ -180,6 +190,10 @@ export function mergeWorkspace(personal: WorkspaceStore, shared: readonly Shared
     ws.songsMap[id] = sb.data.songsMap?.[id] ?? []
     const voice = sb.data.voiceMap?.[id]
     if (voice) ws.voiceMap[id] = voice
+    const bandVcs = sb.data.vcsMap?.[id]
+    if (bandVcs) {
+      ws.vcsMap = { ...(ws.vcsMap ?? {}), [id]: bandVcs }
+    }
   }
   ws.activeBandId = ws.bands.some((b) => b.id === activeBandId)
     ? activeBandId
@@ -193,6 +207,7 @@ export function mergeWorkspace(personal: WorkspaceStore, shared: readonly Shared
 export function remapBandId(slice: WorkspaceStore, fromId: string, toId: string): WorkspaceStore {
   const band = slice.bands.find((b) => b.id === fromId)
   if (!band) return slice
+  const bandVcs = slice.vcsMap?.[fromId]
   return {
     ...slice,
     activeBandId: toId,
@@ -202,6 +217,7 @@ export function remapBandId(slice: WorkspaceStore, fromId: string, toId: string)
     equipmentMap: { [toId]: (slice.equipmentMap[fromId] ?? []).map((eq) => ({ ...eq, bandId: toId })) },
     songsMap: { [toId]: slice.songsMap?.[fromId] ?? [] },
     voiceMap: slice.voiceMap?.[fromId] ? { [toId]: slice.voiceMap[fromId] } : {},
+    ...(bandVcs ? { vcsMap: { [toId]: bandVcs } } : {}),
   }
 }
 

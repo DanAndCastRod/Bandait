@@ -18,7 +18,7 @@ import {
   type StudioCommandHandler,
   type StudioCommandId,
 } from '../../services/studio/commands'
-import { normalizeNotes, quantize, transpose } from '../../services/studio/midiOps'
+import { humanize, normalizeNotes, quantize, transpose } from '../../services/studio/midiOps'
 import {
   beatsToSeconds,
   defaultInstrument,
@@ -70,7 +70,8 @@ import {
   updateSessionMeta,
   updateTrack,
 } from '../../services/studio/sessionOps'
-import type { CommandRegistry, FxSuggestion, KeyValueStorage, QuantizeGrid, SessionMetaPatch, TrackPatch } from '../../services/studio/types'
+import { isAutoMasterProfile, isAutoMasterTone } from '../../services/studio/mastering'
+import type { CommandRegistry, FxSuggestion, HumanizePresetId, KeyValueStorage, QuantizeGrid, SessionMetaPatch, TrackPatch } from '../../services/studio/types'
 import { isStemRole, type StemRole } from '../../services/stemNames'
 import { downloadBlob, type StudioController } from './studioState'
 
@@ -94,9 +95,11 @@ export interface StudioCommandUi {
   /** Pliega o despliega el panel lateral (Alt+P). */
   toggleSidePanel: () => void
   /** Abre el panel lateral en una pestana. */
-  showPanel: (tab: 'inspector' | 'device' | 'jobs') => void
+  showPanel: (tab: 'inspector' | 'device' | 'jobs' | 'versions') => void
   /** Abre el acceso rapido a la forma de onda. */
   openWaveform: () => void
+  /** Abre o cierra la bandeja de widgets rapidos. */
+  toggleWidgets?: () => void
 }
 
 export type StudioRegistry = CommandRegistry<StudioCommandCtx>
@@ -119,6 +122,7 @@ export class StudioUiBridge implements StudioCommandUi {
     toggleSidePanel: () => {},
     showPanel: () => {},
     openWaveform: () => {},
+    toggleWidgets: () => {},
   }
 
   set(patch: Partial<StudioCommandUi>): void {
@@ -161,12 +165,16 @@ export class StudioUiBridge implements StudioCommandUi {
     this.state.toggleSidePanel()
   }
 
-  showPanel(tab: 'inspector' | 'device' | 'jobs'): void {
+  showPanel(tab: 'inspector' | 'device' | 'jobs' | 'versions'): void {
     this.state.showPanel(tab)
   }
 
   openWaveform(): void {
     this.state.openWaveform()
+  }
+
+  toggleWidgets(): void {
+    this.state.toggleWidgets?.()
   }
 }
 
@@ -191,6 +199,7 @@ export const STUDIO_ARGS_ONLY_COMMANDS: ReadonlySet<string> = new Set<StudioComm
   'midi.replace_notes',
   'midi.transpose',
   'midi.quantize',
+  'midi.humanize',
   'instrument.set',
   'track.set_mix',
   'track.set_fx',
@@ -274,8 +283,9 @@ function roleArg(args: Args): StemRole | undefined {
   return isStemRole(role) ? role : undefined
 }
 
-const FX_TYPES: readonly StudioFxType[] = ['eq', 'compressor', 'limiter']
+const FX_TYPES: readonly StudioFxType[] = ['eq', 'compressor', 'de_esser', 'saturator', 'stereo_imager', 'limiter']
 const GRIDS: readonly QuantizeGrid[] = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32']
+const HUMANIZE_PRESETS: readonly HumanizePresetId[] = ['pocket', 'keys', 'strum', 'analog']
 
 // ---------------------------------------------------------------------------
 // Registro
@@ -361,6 +371,7 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'edit.delete': { run: () => controller.deleteSelection(), ...editing },
     'edit.split': { run: () => controller.splitSelection(), ...editing },
     'edit.quantize': { run: () => controller.quantizeSelection(), ...editing },
+    'edit.humanize': { run: () => controller.humanizeSelection(), ...editing },
 
     // ---- pistas ----
     'track.toggle_mute': { run: () => controller.toggleTrackMute() },
@@ -559,6 +570,11 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'clip.trim_end': { run: () => controller.trimSelectedToPlayhead('end'), isEnabled: () => notRecording() && inTimeline() },
     'clip.fade_in': { run: () => controller.fadeSelectedToPlayhead('in'), isEnabled: () => notRecording() && inTimeline() },
     'clip.fade_out': { run: () => controller.fadeSelectedToPlayhead('out'), isEnabled: () => notRecording() && inTimeline() },
+    'clip.normalize': { run: () => controller.normalizeSelectedClips('lufs', -14), isEnabled: () => notRecording() && inTimeline() },
+    'clip.strip_silence': { run: () => controller.stripSilenceSelectedClip(), isEnabled: () => notRecording() && inTimeline() },
+    'clip.reverse': { run: () => void controller.reverseSelectedClip(), isEnabled: () => notRecording() && inTimeline() },
+    'clip.phase_invert': { run: () => controller.invertSelectedClipsPhase(), isEnabled: () => notRecording() && inTimeline() },
+    'clip.align_phase': { run: () => controller.alignSelectedClipPhase(), isEnabled: () => notRecording() && inTimeline() },
 
     // ---- piano roll ----
     'notes.transpose_up': { run: () => controller.transposeNotes(1), ...editing },
@@ -625,6 +641,35 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
         commit(ctx, 'cuantizar clip MIDI', (s) => updateMidiClip(s, { clipId, patch: { notes } }))
       },
     },
+    'midi.humanize': {
+      ...editing,
+      run: (ctx, args) => {
+        const clipId = required(str(args, 'clip_id'), 'el clip')
+        const session = snap().session
+        const loc = findMidiClip(session, clipId)
+        if (!loc) throw new Error(`No existe el clip MIDI "${clipId}".`)
+        const rawPreset = str(args, 'preset')
+        const preset = rawPreset && HUMANIZE_PRESETS.includes(rawPreset as HumanizePresetId) ? (rawPreset as HumanizePresetId) : undefined
+        const notes = humanize(
+          loc.clip.notes,
+          null,
+          {
+            preset,
+            amount: num(args, 'amount'),
+            timingBeats: num(args, 'timing_beats'),
+            velocityRange: num(args, 'velocity_range'),
+            lengthRatio: num(args, 'length_ratio'),
+            swing: num(args, 'swing'),
+            strumBeats: num(args, 'strum_beats'),
+            accentStrength: num(args, 'accent_strength'),
+            beatsPerBar: session.beatsPerBar,
+            seed: num(args, 'seed'),
+          },
+          loc.clip.lengthBeats,
+        ).notes
+        commit(ctx, 'humanizar clip MIDI', (s) => updateMidiClip(s, { clipId, patch: { notes } }))
+      },
+    },
     'midi.toggle_computer_keyboard': { run: () => controller.toggleComputerKeyboard() },
     'instrument.set': {
       ...editing,
@@ -651,7 +696,7 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
       },
     },
 
-    // ---- mezcla ----
+    // ---- mezcla, masterizacion y produccion DSP/IO ----
     'master.set': {
       ...editing,
       run: (ctx, args) => {
@@ -668,6 +713,39 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
             },
           }),
         )
+      },
+    },
+    'master.auto': {
+      ...editing,
+      run: (_ctx, args) => {
+        const rawProfile = str(args, 'profile')
+        const profile = isAutoMasterProfile(rawProfile) ? rawProfile : 'streaming'
+        const rawTone = str(args, 'tone')
+        const tone = isAutoMasterTone(rawTone) ? rawTone : 'balanced'
+        const targetLufs = num(args, 'target_lufs')
+        controller.applyAutoMaster(profile, tone, targetLufs)
+      },
+    },
+    'mix.unmask': {
+      ...editing,
+      run: (_ctx, args) => {
+        const strength = num(args, 'strength') ?? 0.75
+        controller.unmaskMixBark(strength)
+      },
+    },
+    'studio.click_guide': {
+      ...editing,
+      run: async (_ctx, args) => {
+        const bars = num(args, 'bars')
+        const subRaw = str(args, 'subdivision')
+        const subdivision = subRaw === 'eighth' ? 'eighth' : 'quarter'
+        await controller.generateClickGuideTrack(bars !== undefined ? Math.round(bars) : undefined, subdivision)
+      },
+    },
+    'studio.detect_local': {
+      ...editing,
+      run: () => {
+        controller.detectLocalMusicalAnalysis()
       },
     },
     'session.set_meta': {
@@ -728,8 +806,14 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'view.show_device': { run: () => ui.showPanel('device') },
     'view.show_jobs': { run: () => ui.showPanel('jobs') },
     'view.waveform': { run: () => ui.openWaveform() },
+    'widgets.toggle': {
+      run: () => {
+        if (ui.toggleWidgets) ui.toggleWidgets()
+        controller.toggleWidgets()
+      },
+    },
 
-    // ---- archivo ----
+    // ---- archivo y control de versiones ----
     'file.save_cloud': { run: () => void controller.saveToCloud() },
     'file.export': { run: () => ui.openExport(), isEnabled: notRecording },
     'file.import_midi': { run: () => ui.pickMidiFile(), ...editing },
@@ -743,6 +827,8 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
         downloadBlob(file.blob, file.name)
       },
     },
+    'vcs.snapshot': { run: () => void controller.commitVcsSnapshot(), ...editing },
+    'vcs.toggle_ab': { run: () => void controller.toggleAbListening(), ...editing },
   }
 
   return createStudioRegistry(handlers)

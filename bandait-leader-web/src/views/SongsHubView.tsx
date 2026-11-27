@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react'
-import { AlertTriangle, Copy, Library, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Copy, GitBranch, Library, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
 import type { Song } from '../types/hub'
 import { formatDuration, songDurationSec, totalBars } from '../services/workspaceSchema'
+import { EntityHistoryModal } from '../components/EntityHistoryModal'
 import { SongEditorModal } from '../components/SongEditorModal'
 import { HubModal } from '../components/HubModal'
 import {
@@ -30,10 +31,11 @@ interface Props {
 }
 
 export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
-  const { activeBand, songs, playlists, saveSong, duplicateSong, deleteSong } = useHub()
+  const { activeBand, songs, playlists, activeSongId, setActiveSongId, saveSong, duplicateSong, deleteSong } = useHub()
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Song | 'new' | null>(() => (openSongId ? songs.find((s) => s.id === openSongId) ?? null : null))
   const [deleting, setDeleting] = useState<Song | null>(null)
+  const [historySongId, setHistorySongId] = useState<string | null>(null)
 
   const usageBySong = useMemo(() => {
     const map = new Map<string, Usage[]>()
@@ -100,12 +102,23 @@ export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
           const usage = usageBySong.get(song.id) ?? []
           const bars = totalBars(song.sections)
           const dur = songDurationSec(song)
+          const isFocused = activeSongId === song.id
           return (
             <div
               key={song.id}
               data-testid="song-card"
               data-song-title={song.title}
-              style={{ ...cardStyle, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}
+              onClick={() => setActiveSongId(song.id)}
+              style={{
+                ...cardStyle,
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                minWidth: 0,
+                cursor: 'pointer',
+                border: isFocused ? '1px solid var(--b-accent)' : cardStyle.border,
+              }}
             >
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: '15px', color: colors.text, overflowWrap: 'anywhere' }}>{song.title}</div>
@@ -138,9 +151,25 @@ export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
               <div style={{ fontSize: '11px', color: usage.length ? colors.success : colors.disabled, fontFamily: mono }}>
                 {usage.length ? `En ${usage.length} setlist${usage.length > 1 ? 's' : ''}` : 'Sin setlists'}
               </div>
-              <div style={{ display: 'flex', gap: '6px', marginTop: 'auto', flexWrap: 'wrap' }}>
-                <button type="button" onClick={() => setEditing(song)} style={{ ...ghostButton, padding: '6px 10px', fontSize: '11px' }}>
+              <div style={{ display: 'flex', gap: '6px', marginTop: 'auto', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSongId(song.id)
+                    setEditing(song)
+                  }}
+                  style={{ ...ghostButton, padding: '6px 10px', fontSize: '11px' }}
+                >
                   <Pencil size={12} /> EDITAR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistorySongId(song.id)}
+                  aria-label={`Versiones de ${song.title}`}
+                  data-testid="song-versions-btn"
+                  style={{ ...ghostButton, padding: '6px 10px', fontSize: '11px' }}
+                >
+                  <GitBranch size={12} /> VERSIONES
                 </button>
                 <button
                   type="button"
@@ -166,8 +195,16 @@ export const SongsHubView: React.FC<Props> = ({ openSongId = null }) => {
           onCancel={() => setEditing(null)}
           onSave={(song) => {
             saveSong(song)
+            setActiveSongId(song.id)
             setEditing(null)
           }}
+        />
+      )}
+
+      {historySongId && songs.find((s) => s.id === historySongId) && (
+        <EntityHistoryModal
+          target={{ kind: 'song', entity: songs.find((s) => s.id === historySongId)! }}
+          onClose={() => setHistorySongId(null)}
         />
       )}
 

@@ -36,6 +36,7 @@ import {
   STUDIO_BEATS_PER_BAR_MIN,
   STUDIO_BPM_MAX,
   STUDIO_BPM_MIN,
+  STUDIO_CLIP_FADE_SHAPES,
   STUDIO_CLIP_GAIN_DB_MAX,
   STUDIO_CLIP_GAIN_DB_MIN,
   STUDIO_FX_PARAM_SPECS,
@@ -115,6 +116,7 @@ import type {
   SetActiveTakeArgs,
   SetClipFadesArgs,
   SetClipGainArgs,
+  SetClipPhaseInvertArgs,
   SetFrozenAssetArgs,
   SetInstrumentArgs,
   SetMarkersArgs,
@@ -316,8 +318,31 @@ export function setClipFades(session: StudioSession, args: SetClipFadesArgs): St
   } else if (args.fadeOutS !== undefined) {
     fadeOutS = clamp(args.fadeOutS, 0, Math.max(0, clip.lengthS - fadeInS), 'fade_out_s')
   }
-  if (fadeInS === clip.fadeInS && fadeOutS === clip.fadeOutS) return session
-  return replaceClip(session, loc, { ...clip, fadeInS, fadeOutS })
+  const currentShape = clip.fadeShape ?? 'linear'
+  let nextShape = currentShape
+  if (args.fadeShape !== undefined) {
+    if (!(STUDIO_CLIP_FADE_SHAPES as readonly string[]).includes(args.fadeShape)) {
+      fail('bad_value', 'fade_shape', `Forma de fade no admitida: "${String(args.fadeShape)}"`)
+    }
+    nextShape = args.fadeShape
+  }
+  if (fadeInS === clip.fadeInS && fadeOutS === clip.fadeOutS && nextShape === currentShape) return session
+  const updated: StudioClip = { ...clip, fadeInS, fadeOutS }
+  if (nextShape === 'linear') delete updated.fadeShape
+  else updated.fadeShape = nextShape
+  return replaceClip(session, loc, updated)
+}
+
+export function setClipPhaseInvert(session: StudioSession, args: SetClipPhaseInvertArgs): StudioSession {
+  const loc = locate(session, args.clipId)
+  const clip = loc.clip
+  const current = clip.phaseInvert === true
+  const next = args.phaseInvert === undefined ? !current : Boolean(args.phaseInvert)
+  if (next === current) return session
+  const updated: StudioClip = { ...clip }
+  if (next) updated.phaseInvert = true
+  else delete updated.phaseInvert
+  return replaceClip(session, loc, updated)
 }
 
 export function setClipGain(session: StudioSession, args: SetClipGainArgs): StudioSession {

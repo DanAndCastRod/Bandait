@@ -14,6 +14,12 @@ const LN_1000 = Math.log(1000)
 /** Caida de cada rafaga de las palmas antes de la siguiente. */
 const BURST_TAU_S = 0.003
 
+function hitDriftBipolar(pitch: number, startS: number, salt: number): number {
+  let h = (Math.imul(pitch | 0, 374761393) ^ Math.imul(Math.round(startS * 1000), 668265263) ^ Math.imul(salt, 2246822519)) >>> 0
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0
+  return ((h ^ (h >>> 16)) >>> 0) / 2147483648 - 1
+}
+
 export class DrumsEngine implements VoiceEngine {
   readonly type = 'drums' as const
   private readonly ctx: BaseAudioContext
@@ -46,8 +52,12 @@ export class DrumsEngine implements VoiceEngine {
     const gain = drumHitGain(p, drum, voice.velocity)
     if (!(gain > 0)) return false
     const spec = DRUM_VOICE_SPECS[drum]
-    const decay = drumDecayS(p, drum)
-    const tune = drumTuneRatio(p, drum)
+    const drift = Math.max(0, Math.min(1, p.analogDrift ?? 0))
+    const decayVar = drift > 0 ? 1 + hitDriftBipolar(voice.pitch, start, 5) * drift * 0.1 : 1
+    const tuneVar = drift > 0 ? 1 + hitDriftBipolar(voice.pitch, start, 13) * drift * 0.025 : 1
+    const filterVar = drift > 0 ? 1 + hitDriftBipolar(voice.pitch, start, 23) * drift * 0.08 : 1
+    const decay = drumDecayS(p, drum) * decayVar
+    const tune = drumTuneRatio(p, drum) * tuneVar
     const nyquist = ctx.sampleRate / 2
 
     const env = ctx.createGain()
@@ -83,7 +93,7 @@ export class DrumsEngine implements VoiceEngine {
       noise.loop = true
       const filter = ctx.createBiquadFilter()
       filter.type = spec.noise.filter
-      filter.frequency.value = Math.min(spec.noise.hz * tune, nyquist * 0.95)
+      filter.frequency.value = Math.min(spec.noise.hz * tune * filterVar, nyquist * 0.95)
       filter.Q.value = spec.noise.filter === 'bandpass' ? biquadQ('bandpass', spec.noise.q) : biquadQ('highpass', spec.noise.q)
       const level = ctx.createGain()
       level.gain.value = spec.noise.level
@@ -92,12 +102,14 @@ export class DrumsEngine implements VoiceEngine {
       level.connect(env)
       voice.addNode(filter)
       voice.addNode(level)
-      // Semilla fija por voz: el mismo golpe suena igual al escuchar y al exportar.
-      noise.start(start, noiseOffsetS(1000 + STUDIO_DRUM_VOICES.indexOf(drum)))
+      // Semilla determinista por voz (+ ligero offset de ruido cuando analogDrift > 0).
+      const baseOffset = noiseOffsetS(1000 + STUDIO_DRUM_VOICES.indexOf(drum))
+      const driftOffset = drift > 0 ? Math.abs(hitDriftBipolar(voice.pitch, start, 31)) * 0.35 : 0
+      noise.start(start, (baseOffset + driftOffset) % 2)
       voice.addSource(noise)
     }
 
-    const naturalEnd = start + drumHitSeconds(p, drum)
+    const naturalEnd = start + drumHitSeconds(p, drum) * Math.max(1, decayVar)
     // Disparo unico: el note-off no corta; el golpe se apaga al terminar su caida.
     voice.onRelease = () => naturalEnd
     voice.kill(naturalEnd)

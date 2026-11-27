@@ -36,6 +36,7 @@ import type {
   StudioAssetSource,
   StudioChord,
   StudioClip,
+  StudioClipFadeShape,
   StudioFx,
   StudioFxParamsByType,
   StudioFxType,
@@ -111,6 +112,13 @@ export interface SetClipFadesArgs {
   /** Lo que no viene no cambia. Se acotan para que fadeInS + fadeOutS <= lengthS. */
   fadeInS?: number
   fadeOutS?: number
+  fadeShape?: StudioClipFadeShape
+}
+
+export interface SetClipPhaseInvertArgs {
+  clipId: string
+  /** Si se omite, invierte el estado actual del clip. */
+  phaseInvert?: boolean
 }
 
 export interface SetClipGainArgs {
@@ -1335,6 +1343,33 @@ export interface QuantizeOptions {
   ends?: boolean
 }
 
+export type HumanizePresetId = 'pocket' | 'keys' | 'strum' | 'analog'
+
+export interface HumanizeOptions {
+  /** Preset musical opcional que fija valores base antes de aplicar overrides explicitos. */
+  preset?: HumanizePresetId
+  /** 0..1: intensidad general (escala micro-timing, velocidad y duracion). Por defecto 0.5. */
+  amount?: number
+  /** Desviacion maxima en beats del inicio de cada nota (0..0.25). Por defecto amount * 0.04. */
+  timingBeats?: number
+  /** Variacion maxima de velocidad MIDI (0..64). Por defecto round(amount * 24). */
+  velocityRange?: number
+  /** Variacion proporcional maxima de duracion (0..0.5). Por defecto amount * 0.08. */
+  lengthRatio?: number
+  /** Swing ritmico en la subdivision par (0..0.75; 0 = recto, 0.33 = tresillo). */
+  swing?: number
+  /** Subdivision de swing ('1/8' o '1/16'). Por defecto '1/16'. */
+  swingGrid?: '1/8' | '1/16'
+  /** Micro-strum direccional en acordes simultaneos (-0.12..0.12 beats; >0 grave a agudo). */
+  strumBeats?: number
+  /** Acento metrico en tiempo fuerte y medio compas (0..1). */
+  accentStrength?: number
+  /** Compas de referencia para acentos metricos (por defecto 4). */
+  beatsPerBar?: number
+  /** Semilla entera opcional para reproducibilidad determinista. */
+  seed?: number
+}
+
 export interface NoteRange {
   /** Rango en beats del clip: una nota entra si se cruza con [startBeat, endBeat). */
   startBeat: number
@@ -1364,6 +1399,8 @@ export interface MidiOpsApi {
   setVelocity(notes: readonly StudioMidiNote[], selection: NoteSelection | null, value: number, mode: VelocityMode): MidiEditResult
   /** inicio' = inicio + (rejilla_mas_cercana - inicio) * strength; el largo se conserva salvo `ends`. */
   quantize(notes: readonly StudioMidiNote[], selection: NoteSelection | null, options: QuantizeOptions, clipLengthBeats: number): MidiEditResult
+  /** Aplica variacion organica/analogica en micro-timing, velocidad y duracion. */
+  humanize(notes: readonly StudioMidiNote[], selection: NoteSelection | null, options: HumanizeOptions, clipLengthBeats: number): MidiEditResult
   /** Cada nota se alarga hasta el inicio de la siguiente nota (de cualquier pitch) de la seleccion; la ultima no cambia. */
   legato(notes: readonly StudioMidiNote[], selection: NoteSelection | null, clipLengthBeats: number): MidiEditResult
   /** Copia la seleccion corrida `offsetBeats` (lo que cae fuera del clip se descarta). */
@@ -1465,6 +1502,7 @@ export type AssistantToolName =
   | 'replace_midi_notes'
   | 'transpose_midi_clip'
   | 'quantize_midi_clip'
+  | 'humanize_midi_clip'
   | 'move_clip'
   | 'duplicate_clip'
   | 'split_clip'
@@ -1472,6 +1510,9 @@ export type AssistantToolName =
   | 'set_clip_gain'
   | 'add_marker'
   | 'remove_marker'
+  | 'auto_master_session'
+  | 'unmask_mix_tracks'
+  | 'generate_click_guide'
 
 export interface StudioCommand<Ctx> {
   /** Id estable con punto: "transport.play_pause", "midi.quantize". Es el que guarda el keymap. */
@@ -2117,3 +2158,44 @@ export interface StudioCloudJobsV2Api {
     options?: Omit<WatchJobOptions, 'onState'> & { onState?: (state: StudioJobStateV2) => void },
   ): Promise<StudioJobStateV2 | null>
 }
+
+// ===========================================================================
+// Control de versiones del Estudio (STUDIO_V2.md 7.2)
+// ===========================================================================
+
+export interface StudioVcsCommitMeta {
+  id: string
+  branch: string
+  parentId: string | null
+  message: string
+  authorId: string | null
+  authorName: string
+  createdAt: string
+  trackCount: number
+  bpm: number
+  key: string | null
+  assetFiles: string[]
+}
+
+export interface StudioVcsIndex {
+  version: 1
+  branches: Record<string, string>
+  commits: StudioVcsCommitMeta[]
+  protectedAssets: string[]
+  etag: string | null
+}
+
+export interface PostStudioVcsOptions {
+  branch: string
+  message: string
+  authorName?: string
+  parentId?: string | null
+  session: StudioSession
+}
+
+export interface StudioCloudVcsApi {
+  getVcs(target: CloudTarget, sessionId: string): Promise<StudioVcsIndex>
+  postVcs(target: CloudTarget, sessionId: string, options: PostStudioVcsOptions): Promise<{ commit: StudioVcsCommitMeta; vcs: StudioVcsIndex }>
+  getCommit(target: CloudTarget, sessionId: string, commitId: string): Promise<StudioSession>
+}
+

@@ -47,6 +47,7 @@ import {
   type SyncNotice,
 } from '../services/workspaceSync'
 import {
+  canCollaborateStudioRole,
   canEditRole,
   canInviteRole,
   copyPlaylistToBand as copyPlaylistBetweenBands,
@@ -71,6 +72,16 @@ import { downloadJson, slugify } from '../services/download'
 import { createDemoWorkspace, createPersonalWorkspace } from './seedData'
 import { carryUiPreferences, defaultUiPreferences, normalizeUiPreferences, resolveUiPreferences, withUiPreferences, type UiPreferences } from '../services/appearance'
 import { applyAppearance, readCachedPreferences } from '../services/appearanceDom'
+import {
+  branchHeadSnapshot,
+  commitEntitySnapshot,
+  createEntityBranch,
+  emptyBandVcs,
+  findEntityCommit,
+  getBandVcs,
+  withPlaylistHistory,
+  withSongHistory,
+} from '../services/versionControl'
 import { HubContext, type HubActionResult, type HubContextType, type HubSyncStatus, type SharingInfo } from './hubContextCore'
 
 const workspaceKey = (userId: string) => `bandait_workspace_${userId}`
@@ -274,6 +285,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [initialState] = useState<LoadedState>(() => loadStateFor(user))
   const [workspace, setWorkspace] = useState<WorkspaceStore>(initialState.merged)
   const [activePlaylistId, setActivePlaylistId] = useState<string>(() => firstPlaylistId(workspace))
+  const [activeSongIdState, setActiveSongIdState] = useState<string | null>(null)
   const [googleClientId, setGoogleClientIdState] = useState<string>(() => authService.getGoogleClientId())
   const [googleClientIdSource, setGoogleClientIdSource] = useState(() => authService.getGoogleClientIdSource())
   const [cloudAuthReady, setCloudAuthReady] = useState(() => !cloudConfig.isConfigured)
@@ -315,6 +327,9 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const equipment = activeBand ? workspace.equipmentMap[activeBand.id] || [] : []
   // Opcional: un documento con schemaVersion > 2 (hub mas nuevo) no se migra y podria no traerlos.
   const songs: Song[] = activeBand ? workspace.songsMap?.[activeBand.id] ?? EMPTY_SONGS : EMPTY_SONGS
+  const activeSong: Song | null = activeSongIdState ? (songs.find((s) => s.id === activeSongIdState) ?? null) : null
+  const activeSongId: string | null = activeSong ? activeSong.id : null
+  const bandVcs = useMemo(() => (activeBand ? getBandVcs(workspace, activeBand.id) : emptyBandVcs()), [activeBand, workspace])
   const voiceConfig: VoiceConfig = (activeBand ? workspace.voiceMap?.[activeBand.id] : undefined) ?? DEFAULT_VOICE
   const songStems = activePlaylist?.songs[0]
     ? workspace.stemsMap[activePlaylist.songs[0].id] || workspace.stemsMap['song_01'] || null
@@ -1157,6 +1172,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     cloudSignedIn: !!cloudUserId,
     activeShared: activeIsShared,
     activeCanEdit: !activeReadOnly,
+    activeCanCollaborateStudio: activeIsShared ? canCollaborateStudioRole(activeBandRole) : true,
     activeCanInvite: activeIsShared ? canInviteRole(activeBandRole) : true,
     activeLink: activeIsShared && activeBand ? inviteLink(getAuthRedirectUrl(), activeBand.id) : null,
     sharedBandIds: [...sharedFlags.keys()],
@@ -1213,6 +1229,13 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     })
   }
 
+  const replaceActivePlaylistSongs = (nextItems: PlaylistSong[]) => {
+    updateActivePlaylist((pl) => ({
+      ...pl,
+      songs: nextItems.map((s, idx) => ({ ...s, orderIndex: idx + 1 })),
+    }))
+  }
+
   const addSongToPlaylist = (songData: Omit<PlaylistSong, 'id' | 'orderIndex'>) => {
     updateActivePlaylist((pl) => ({
       ...pl,
@@ -1238,6 +1261,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       songsMap: { ...prev.songsMap, [bandId]: [...(prev.songsMap?.[bandId] ?? []), song] },
     }))
+    setActiveSongIdState(song.id)
     return song
   }
 
@@ -1313,6 +1337,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         playlistsMap: playlistsChanged ? { ...prev.playlistsMap, [bandId]: nextPlaylists } : prev.playlistsMap,
       }
     })
+    if (activeSongIdState === songId) setActiveSongIdState(null)
   }
 
   const updateVoiceConfig = (updates: Partial<VoiceConfig>) => {
@@ -1322,6 +1347,124 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       voiceMap: { ...prev.voiceMap, [bandId]: { ...(prev.voiceMap?.[bandId] ?? defaultVoiceConfig()), ...updates } },
     }))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Control de versiones musical en Canciones y Setlists (vcsMap)
+  // ---------------------------------------------------------------------------
+
+  const authorLabel = user?.name || 'Integrante'
+
+  const commitSongVersion = (songId: string, message: string, branch?: string) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => {
+      const song = (prev.songsMap?.[bandId] ?? []).find((s) => s.id === songId)
+      if (!song) return prev
+      const currentHistory = getBandVcs(prev, bandId).songs[songId]
+      const { history } = commitEntitySnapshot({
+        history: currentHistory,
+        snapshot: song,
+        message,
+        branch,
+        authorName: authorLabel,
+      })
+      return withSongHistory(prev, bandId, songId, history)
+    })
+  }
+
+  const switchSongBranch = (songId: string, branch: string) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => {
+      const list = prev.songsMap?.[bandId] ?? []
+      const song = list.find((s) => s.id === songId)
+      if (!song) return prev
+      const currentHistory = getBandVcs(prev, bandId).songs[songId]
+      const existingHead = branchHeadSnapshot(currentHistory, branch)
+      const nextHistory = createEntityBranch(currentHistory, branch, song, authorLabel)
+      let nextWs = withSongHistory(prev, bandId, songId, nextHistory)
+      if (existingHead) {
+        const restored: Song = { ...existingHead, id: songId, updatedAt: nowIso() }
+        nextWs = {
+          ...nextWs,
+          songsMap: { ...nextWs.songsMap, [bandId]: list.map((s) => (s.id === songId ? restored : s)) },
+        }
+      }
+      return nextWs
+    })
+  }
+
+  const restoreSongCommit = (songId: string, commitId: string) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => {
+      const list = prev.songsMap?.[bandId] ?? []
+      const currentHistory = getBandVcs(prev, bandId).songs[songId]
+      const found = findEntityCommit(currentHistory, commitId)
+      if (!found) return prev
+      const restored: Song = { ...clone(found.snapshot), id: songId, updatedAt: nowIso() }
+      return {
+        ...prev,
+        songsMap: { ...prev.songsMap, [bandId]: list.map((s) => (s.id === songId ? restored : s)) },
+      }
+    })
+  }
+
+  const commitPlaylistVersion = (playlistId: string, message: string, branch?: string) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => {
+      const pl = (prev.playlistsMap[bandId] || []).find((p) => p.id === playlistId)
+      if (!pl) return prev
+      const currentHistory = getBandVcs(prev, bandId).playlists[playlistId]
+      const { history } = commitEntitySnapshot({
+        history: currentHistory,
+        snapshot: pl,
+        message,
+        branch,
+        authorName: authorLabel,
+      })
+      return withPlaylistHistory(prev, bandId, playlistId, history)
+    })
+  }
+
+  const switchPlaylistBranch = (playlistId: string, branch: string) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => {
+      const list = prev.playlistsMap[bandId] || []
+      const pl = list.find((p) => p.id === playlistId)
+      if (!pl) return prev
+      const currentHistory = getBandVcs(prev, bandId).playlists[playlistId]
+      const existingHead = branchHeadSnapshot(currentHistory, branch)
+      const nextHistory = createEntityBranch(currentHistory, branch, pl, authorLabel)
+      let nextWs = withPlaylistHistory(prev, bandId, playlistId, nextHistory)
+      if (existingHead) {
+        const restored: Playlist = { ...existingHead, id: playlistId, bandId, updatedAt: today() }
+        nextWs = {
+          ...nextWs,
+          playlistsMap: { ...nextWs.playlistsMap, [bandId]: list.map((p) => (p.id === playlistId ? restored : p)) },
+        }
+      }
+      return nextWs
+    })
+  }
+
+  const restorePlaylistCommit = (playlistId: string, commitId: string) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => {
+      const list = prev.playlistsMap[bandId] || []
+      const currentHistory = getBandVcs(prev, bandId).playlists[playlistId]
+      const found = findEntityCommit(currentHistory, commitId)
+      if (!found) return prev
+      const restored: Playlist = { ...clone(found.snapshot), id: playlistId, bandId, updatedAt: today() }
+      return {
+        ...prev,
+        playlistsMap: { ...prev.playlistsMap, [bandId]: list.map((p) => (p.id === playlistId ? restored : p)) },
+      }
+    })
   }
 
   /** Reemplaza el workspace por un JSON importado (migrado y validado). Es una edicion del usuario. */
@@ -1334,10 +1477,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const result = parseImportedWorkspace(parsed)
     if (!result.ok) return { ok: false, message: result.error }
-    // Reemplaza solo la parte personal: las bandas compartidas viven en la nube y no se tocan
-    // (si el archivo las trae, p. ej. una exportacion de este mismo Hub, se ignoran).
     const sharedIds = new Set(sharedRef.current.keys())
-    // La apariencia es de quien importa, no del archivo.
     const imported = carryUiPreferences(personalPart(clone(result.workspace), sharedIds, result.workspace.activeBandId), workspaceRef.current)
     if (imported.bands.length === 0) {
       return { ok: false, message: 'El archivo solo trae bandas compartidas que ya tienes en la nube.' }
@@ -1362,6 +1502,35 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stemsMap: { ...prev.stemsMap, [currentSongId]: { ...existing, tracks: updatedTracks } },
       }
     })
+  }
+
+  const registerSongStemsInWorkspace = (
+    songId: string,
+    title: string,
+    bpm: number,
+    tracks: Array<{ label: string; role: string }>,
+  ) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      stemsMap: {
+        ...prev.stemsMap,
+        [songId]: {
+          songId,
+          songTitle: title,
+          bpm,
+          tracks: tracks.slice(0, 6).map((t, idx) => ({
+            channel: (idx + 1) as 1 | 2 | 3 | 4 | 5 | 6,
+            id: `${songId}_ch${idx + 1}`,
+            name: t.label,
+            code: t.role.slice(0, 3).toUpperCase(),
+            volumeDb: 0,
+            pan: 0,
+            limiterSafe: true,
+            demucsStatus: 'ready' as const,
+          })),
+        },
+      },
+    }))
   }
 
   const addEquipment = (itemData: Omit<EquipmentItem, 'id' | 'bandId'>) => {
@@ -1413,8 +1582,6 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       voz: voiceConfig,
       stems_catalogo: songStems,
       equipamiento: equipment,
-      // Documento v2 completo (todas las bandas), el mismo que descarga el lider. Se puede
-      // volver a importar desde PERFIL & SESION.
       workspace,
     })
   }
@@ -1430,7 +1597,11 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     songStems,
     equipment,
     songs,
+    activeSongId,
+    activeSong,
+    setActiveSongId: setActiveSongIdState,
     voiceConfig,
+    bandVcs,
     googleClientId,
     googleClientIdSource,
     setGoogleClientId,
@@ -1474,9 +1645,11 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActivePlaylist: (pl) => setActivePlaylistId(pl.id),
     updatePlaylistSong,
     reorderSongs,
+    replaceActivePlaylistSongs,
     addSongToPlaylist,
     removeSongFromPlaylist,
     updateStemTrackVolume,
+    registerSongStemsInWorkspace,
     addEquipment,
     updateEquipment,
     removeEquipment,
@@ -1485,6 +1658,12 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     duplicateSong,
     deleteSong,
     updateVoiceConfig,
+    commitSongVersion,
+    switchSongBranch,
+    restoreSongCommit,
+    commitPlaylistVersion,
+    switchPlaylistBranch,
+    restorePlaylistCommit,
     exportWorkspaceJson,
     importWorkspaceJson,
     uiPreferences,

@@ -57,12 +57,12 @@ function errorText(err: unknown, fallback: string): string {
  * (sigue al cambiar de vista).
  */
 export const StemsHubView: React.FC = () => {
-  const { songs, sharing, activeBand } = useHub()
+  const { songs, sharing, activeBand, activeSongId, setActiveSongId } = useHub()
   const audio = useGlobalAudioEngine()
   const [records, setRecords] = useState<Map<string, StemSongRecord> | null>(null)
   const [listError, setListError] = useState<string | null>(null)
-  // Por defecto, la cancion que suena (o sono) en el reproductor global.
-  const [pickedSongId, setPickedSongId] = useState<string | null>(() => audio.currentStemSongId())
+  // Por defecto, la cancion que suena (o sono) en el reproductor global o la activa transversal.
+  const [pickedSongId, setPickedSongId] = useState<string | null>(() => audio.currentStemSongId() ?? activeSongId)
   const [importing, setImporting] = useState(false)
   const [deleting, setDeleting] = useState<DeleteRequest | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
@@ -102,9 +102,13 @@ export const StemsHubView: React.FC = () => {
   const songIds = useMemo(() => new Set(songs.map((s) => s.id)), [songs])
   const orphans = useMemo(() => (records ? [...records.values()].filter((r) => !songIds.has(r.songId)) : []), [records, songIds])
 
-  // Cancion elegida; por defecto la primera con stems y si no hay, la primera de la libreria.
+  // Cancion elegida; prioriza la activa transversal, luego la elegida localmente o la primera con stems.
   const selectedSong =
-    sortedSongs.find((s) => s.id === pickedSongId) ?? sortedSongs.find((s) => records?.has(s.id)) ?? sortedSongs[0] ?? null
+    (activeSongId ? sortedSongs.find((s) => s.id === activeSongId) : undefined) ??
+    sortedSongs.find((s) => s.id === pickedSongId) ??
+    sortedSongs.find((s) => records?.has(s.id)) ??
+    sortedSongs[0] ??
+    null
   const record = selectedSong && records ? records.get(selectedSong.id) ?? null : null
   const showImporter = !!selectedSong && records !== null && (importing || !record)
 
@@ -303,6 +307,7 @@ export const StemsHubView: React.FC = () => {
               value={selectedSong?.id ?? ''}
               onChange={(e) => {
                 setPickedSongId(e.target.value)
+                setActiveSongId(e.target.value)
                 setImporting(false)
               }}
               style={{ ...smallInputStyle, width: '100%', marginTop: '4px', padding: '8px 12px', fontSize: '13px' }}

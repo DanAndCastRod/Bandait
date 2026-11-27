@@ -409,6 +409,11 @@ class MasterMeter {
     return this.reading
   }
 
+  readStereo(): { left: Float32Array; right: Float32Array; sampleRate: number } {
+    this.raw.read()
+    return { left: this.raw.left, right: this.raw.right, sampleRate: this.ctx.sampleRate }
+  }
+
   dispose(): void {
     this.raw.dispose()
     this.weighted.dispose()
@@ -1139,6 +1144,27 @@ export class StudioEngine implements StudioEngineApi {
 
   resetMasterLoudness(): void {
     this.masterMeter?.reset()
+  }
+
+  /** Muestras estereo recientes del bus master (sin asignacion por fotograma) para analizador FFT/STFT/Lissajous. */
+  readMasterStereo(): { left: Float32Array; right: Float32Array; sampleRate: number } | null {
+    if (!this.masterMeter || !this.ctx) return null
+    return this.masterMeter.readStereo()
+  }
+
+  /** Muestras estereo recientes de una pista individual para analisis en modo LAB. */
+  readTrackStereo(trackId: string): { left: Float32Array; right: Float32Array; sampleRate: number } | null {
+    const ctx = this.ctx
+    const output = this.graph?.trackOutputs.get(trackId)
+    if (!ctx || !output) return null
+    let meter = this.trackMeters.get(trackId)
+    if (!meter) {
+      meter = new TrackMeter(ctx)
+      output.connect(meter.tap.input)
+      this.trackMeters.set(trackId, meter)
+    }
+    meter.tap.read()
+    return { left: meter.tap.left, right: meter.tap.right, sampleRate: ctx.sampleRate }
   }
 
   // ---- cierre ----

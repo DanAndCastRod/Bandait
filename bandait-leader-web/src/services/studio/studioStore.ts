@@ -45,11 +45,12 @@ import type {
 } from './types.ts'
 
 const DB_NAME = 'bandait_studio'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const SESSIONS = 'sessions'
 const PEAKS = 'peaks'
 const FILES = 'files'
 const CHATS = 'chats'
+const VCS = 'vcs'
 
 /** Carpeta raiz del Estudio en OPFS. El escritor de tomas la recibe de recorder.ts. */
 export const STUDIO_OPFS_ROOT = 'bandait_studio'
@@ -116,8 +117,9 @@ function openDb(): Promise<IDBDatabase> {
         const files = db.createObjectStore(FILES, { keyPath: 'key' })
         files.createIndex('sessionId', 'sessionId', { unique: false })
       }
-      // v2: cada almacen se crea solo si falta, asi una base v1 sube sin perder nada.
+      // v2/v3: cada almacen se crea solo si falta, asi una base anterior sube sin perder nada.
       if (!db.objectStoreNames.contains(CHATS)) db.createObjectStore(CHATS, { keyPath: 'sessionId' })
+      if (!db.objectStoreNames.contains(VCS)) db.createObjectStore(VCS, { keyPath: 'sessionId' })
     }
     req.onsuccess = () => {
       const db = req.result
@@ -345,10 +347,11 @@ export async function deleteSession(sessionId: string): Promise<void> {
   try {
     checkSessionId(sessionId)
     const db = await openDb()
-    const tx = db.transaction([SESSIONS, PEAKS, FILES, CHATS], 'readwrite')
+    const tx = db.transaction([SESSIONS, PEAKS, FILES, CHATS, VCS], 'readwrite')
     const done = txDone(tx)
     tx.objectStore(SESSIONS).delete(sessionId)
     tx.objectStore(CHATS).delete(sessionId)
+    tx.objectStore(VCS).delete(sessionId)
     const peaks = tx.objectStore(PEAKS)
     const files = tx.objectStore(FILES)
     const peakKeys = requestValue(peaks.index('sessionId').getAllKeys(sessionId))
@@ -687,6 +690,36 @@ export async function loadChat(sessionId: string): Promise<unknown> {
     const tx = db.transaction(CHATS, 'readonly')
     const row = (await requestValue(tx.objectStore(CHATS).get(sessionId))) as { chat?: unknown } | undefined
     return row?.chat ?? null
+  } catch (err) {
+    throw friendlyError(err)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Control de versiones local (respaldo offline + cache de commits)
+// ---------------------------------------------------------------------------
+
+export async function saveVcsBundle(sessionId: string, bundle: unknown | null): Promise<void> {
+  try {
+    checkSessionId(sessionId)
+    const db = await openDb()
+    const tx = db.transaction(VCS, 'readwrite')
+    const done = txDone(tx)
+    if (bundle === null) tx.objectStore(VCS).delete(sessionId)
+    else tx.objectStore(VCS).put({ sessionId, savedAt: new Date().toISOString(), bundle })
+    await done
+  } catch (err) {
+    throw friendlyError(err)
+  }
+}
+
+export async function loadVcsBundle(sessionId: string): Promise<unknown> {
+  try {
+    checkSessionId(sessionId)
+    const db = await openDb()
+    const tx = db.transaction(VCS, 'readonly')
+    const row = (await requestValue(tx.objectStore(VCS).get(sessionId))) as { bundle?: unknown } | undefined
+    return row?.bundle ?? null
   } catch (err) {
     throw friendlyError(err)
   }

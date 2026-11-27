@@ -22,7 +22,7 @@ export interface HubViewDef {
 }
 
 const ALL_VIEWS: readonly HubViewDef[] = [
-  { id: 'studio', label: 'Estudio DAW', short: 'Estudio DAW', icon: SlidersVertical },
+  { id: 'studio', label: 'Estudio DAW', short: 'Estudio', icon: SlidersVertical },
   { id: 'rehearsal', label: 'Ensayo y Prompter', short: 'Ensayo', icon: Mic },
   { id: 'songs', label: 'Canciones y Stems', short: 'Canciones', icon: Music },
   { id: 'setlists', label: 'Setlists', short: 'Setlists', icon: ListMusic },
@@ -33,8 +33,10 @@ const ALL_VIEWS: readonly HubViewDef[] = [
 /** El Estudio esta encendido por defecto; services/studio/flag.ts permite apagarlo y entonces su vista no existe. */
 export const HUB_VIEWS: readonly HubViewDef[] = ALL_VIEWS.filter((view) => view.id !== 'studio' || studioEnabled())
 
-/** Las tres pildoras fijas de la barra movil; el resto va en la hoja "Mas". */
-export const MOBILE_BAR_VIEWS: readonly HubView[] = ['rehearsal', 'songs', 'setlists']
+/** Las cuatro pildoras fijas de la barra movil (con Estudio directo a 1 toque); el resto va en la hoja "Mas". */
+export const MOBILE_BAR_VIEWS: readonly HubView[] = studioEnabled()
+  ? ['studio', 'rehearsal', 'songs', 'setlists']
+  : ['rehearsal', 'songs', 'setlists']
 
 export function viewDef(id: HubView): HubViewDef | undefined {
   return HUB_VIEWS.find((view) => view.id === id)

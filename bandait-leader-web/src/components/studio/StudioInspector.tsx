@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react'
-import { Copy, Download, Piano, Power, RotateCcw, Scissors, Sparkles, Trash2 } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Activity, Copy, Download, Music, Piano, Power, RotateCcw, Scissors, Sliders, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import { eqBands, type EqBand } from '../../services/studio/fx'
+import { AUTO_MASTER_PROFILES, type AutoMasterProfile, type AutoMasterTone } from '../../services/studio/mastering'
 import {
   defaultFx,
   findClip,
@@ -13,12 +14,14 @@ import {
   type EqParams,
   type StudioAssetKind,
   type StudioClip,
+  type StudioClipFadeShape,
   type StudioFx,
   type StudioFxType,
   type StudioSession,
 } from '../../services/studio/session'
 import { moveClip, moveMidiClip, resizeMidiClip, setClipFades, setClipGain, updateMidiClip } from '../../services/studio/sessionOps'
 import type { StudioCanvasPalette } from '../../services/studioCanvasPalette'
+import { StudioAnalyzer } from './StudioAnalyzer'
 import { StudioInstrumentPanel } from './StudioInstrumentPanel'
 import { StudioMidiDevicePanel } from './StudioMidiDevicePanel'
 import { useStudioCanvasPalette } from './useStudioCanvasPalette'
@@ -318,15 +321,52 @@ const PARAM_UI: Readonly<Record<StudioFxType, Readonly<Record<string, ParamUi>>>
     kneeDb: { label: 'Rodilla', step: 1, format: (v) => `${v.toFixed(0)} dB` },
     makeupDb: { label: 'Ganancia de salida', step: 0.5, format: signedDb },
   },
+  de_esser: {
+    freqHz: { label: 'Frecuencia sibilante', step: 50, log: true, format: hertz },
+    thresholdDb: { label: 'Umbral', step: 0.5, format: signedDb },
+    reductionDb: { label: 'Reducción máxima', step: 0.5, format: (v) => `-${Math.abs(v).toFixed(1)} dB` },
+  },
+  saturator: {
+    driveDb: { label: 'Empuje analógico (Drive)', step: 0.5, format: signedDb },
+    toneDb: { label: 'Inclinación tonal (Tilt)', step: 0.5, format: signedDb },
+    mix: { label: 'Mezcla paralela', step: 0.01, format: (v) => `${Math.round(v * 100)}%` },
+    outputDb: { label: 'Nivel de salida', step: 0.5, format: signedDb },
+  },
+  stereo_imager: {
+    width: { label: 'Apertura estéreo (M/S)', step: 0.02, format: (v) => `${Math.round(v * 100)}%` },
+    monoBassHz: { label: 'Graves en mono bajo', step: 5, format: (v) => (v <= 0 ? 'apagado' : hertz(v)) },
+  },
   limiter: {
     ceilingDb: { label: 'Techo', step: 0.1, format: signedDb },
     releaseMs: { label: 'Relajación', step: 5, format: millis },
   },
 }
 
-const FX_LABELS: Readonly<Record<StudioFxType, string>> = { eq: 'EQ', compressor: 'COMPRESOR', limiter: 'LIMITADOR' }
-const FX_NAMES: Readonly<Record<StudioFxType, string>> = { eq: 'EQ', compressor: 'compresor', limiter: 'limitador' }
-const FX_TYPES_UI: readonly StudioFxType[] = ['eq', 'compressor', 'limiter']
+const FX_LABELS: Readonly<Record<StudioFxType, string>> = {
+  eq: 'EQ',
+  compressor: 'COMPRESOR',
+  de_esser: 'DE-ESSER',
+  saturator: 'SATURADOR',
+  stereo_imager: 'IMAGEN ESTÉREO',
+  limiter: 'LIMITADOR',
+}
+const FX_NAMES: Readonly<Record<StudioFxType, string>> = {
+  eq: 'EQ',
+  compressor: 'compresor',
+  de_esser: 'de-esser',
+  saturator: 'saturador analógico',
+  stereo_imager: 'imagen estéreo',
+  limiter: 'limitador',
+}
+const FX_SHORT_UI: Readonly<Record<StudioFxType, string>> = {
+  eq: 'EQ',
+  compressor: 'COMP',
+  de_esser: 'DS',
+  saturator: 'SAT',
+  stereo_imager: 'IMG',
+  limiter: 'LIM',
+}
+const FX_TYPES_UI: readonly StudioFxType[] = ['eq', 'compressor', 'de_esser', 'saturator', 'stereo_imager', 'limiter']
 
 const KIND_LABELS: Readonly<Record<StudioAssetKind, string>> = {
   recording: 'GRABACIÓN',
@@ -356,7 +396,7 @@ const ClipSection: React.FC<{ controller: StudioController; session: StudioSessi
     return (
       <section className="stu-section" aria-label="Clip elegido" data-testid="studio-inspector-clip">
         <span className="stu-label">Clip</span>
-        <p className="stu-help">Elige un clip en la línea de tiempo para ajustar su ganancia, sus fades, su posición y su toma; o un clip MIDI para su largo, su repetición y el piano roll.</p>
+        <p className="stu-help">Elige un clip en la línea de tiempo para ajustar su ganancia, sus fades, su polaridad y sus transformaciones de onda; o un clip MIDI para su largo, su repetición y el piano roll.</p>
       </section>
     )
   }
@@ -466,6 +506,47 @@ const ClipSection: React.FC<{ controller: StudioController; session: StudioSessi
         onCommit={() => controller.commitLive('Fade de salida')}
         testId="studio-clip-fade-out"
       />
+      <div className="stu-inst-pick">
+        <label className="stu-param">
+          <span className="stu-label">Curva de fundido</span>
+          <select
+            className="stu-field"
+            value={clip.fadeShape ?? 'linear'}
+            disabled={recording}
+            onChange={(event) => controller.setSelectedClipsFadeShape(event.target.value as StudioClipFadeShape)}
+            data-testid="studio-clip-fade-shape"
+          >
+            <option value="linear">Lineal</option>
+            <option value="exp">Exponencial</option>
+            <option value="scurve">Curva S (coseno)</option>
+          </select>
+        </label>
+        <label className="stu-check">
+          <input
+            type="checkbox"
+            checked={clip.phaseInvert === true}
+            disabled={recording}
+            onChange={() => controller.invertSelectedClipsPhase()}
+            data-testid="studio-clip-phase-invert"
+          />
+          <span>Invertir fase 180°</span>
+        </label>
+      </div>
+
+      <div className="stu-actions">
+        <button type="button" className="stu-btn" data-size="small" disabled={recording} onClick={() => controller.normalizeSelectedClips('lufs', -14)} title="Normalizar sonoridad a -14 LUFS respetando techo -1 dBTP">
+          NORM -14 LUFS
+        </button>
+        <button type="button" className="stu-btn" data-size="small" disabled={recording} onClick={() => controller.alignSelectedClipPhase()} title="Alinear fase y retardo inter-pista mediante correlación cruzada GCC-PHAT">
+          ALINEAR FASE
+        </button>
+        <button type="button" className="stu-btn" data-size="small" disabled={recording} onClick={() => controller.stripSilenceSelectedClip()} title="Recortar silencios con histéresis de Schmitt y micro-fades">
+          STRIP SILENCE
+        </button>
+        <button type="button" className="stu-btn" data-size="small" disabled={recording} onClick={() => void controller.reverseSelectedClip()} title="Invertir audio en reversa (crea asset de 24 bits)">
+          REVERSA
+        </button>
+      </div>
 
       <div className="stu-param">
         <span className="stu-label">Toma</span>
@@ -718,11 +799,11 @@ const FxSection: React.FC<{ controller: StudioController; session: StudioSession
                 data-on={item === type}
                 aria-pressed={item === type}
                 disabled={blocked}
-                title={blocked ? 'El limitador solo va en el master' : undefined}
+                title={blocked ? 'El limitador solo va en el master' : FX_LABELS[item]}
                 onClick={() => controller.selectFx({ targetId, type: item })}
                 data-testid={`studio-fx-type-${item}`}
               >
-                {item === 'eq' ? 'EQ' : item === 'compressor' ? 'COMP' : 'LIM'}
+                {FX_SHORT_UI[item]}
               </button>
             )
           })}
@@ -796,13 +877,117 @@ const FxSection: React.FC<{ controller: StudioController; session: StudioSession
   )
 }
 
-/**
- * Inspector del Estudio: el clip elegido (audio: ganancia, fades, posicion, toma; MIDI: posicion,
- * largo, repeticion y piano roll), el instrumento de la pista de instrumento elegida, la entrada
- * MIDI (si la sesion tiene pistas de instrumento) y el efecto elegido de una pista o del master
- * (parametros y bypass). Los arrastres cambian el motor en caliente y dejan un solo paso de
- * deshacer al soltar.
- */
+// ---------------------------------------------------------------------------
+// Produccion, Masterizacion Local y Analizador Cientifico (0 cuota IA)
+// ---------------------------------------------------------------------------
+
+const ProductionMasterSection: React.FC<{ controller: StudioController; recording: boolean; labMode: boolean }> = ({
+  controller,
+  recording,
+  labMode,
+}) => {
+  const [profile, setProfile] = useState<AutoMasterProfile>('streaming')
+  const [tone, setTone] = useState<AutoMasterTone>('balanced')
+
+  return (
+    <section className="stu-section" aria-label="Producción y Masterización DSP" data-testid="studio-inspector-mastering">
+      <div className="stu-param-head">
+        <span className="stu-label">Producción y Master (0 IA)</span>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="mini"
+          data-on={labMode}
+          aria-pressed={labMode}
+          onClick={() => controller.toggleLabMode()}
+          title="Activar telemetría científica (FFT, STFT, Lissajous, matriz Bark)"
+        >
+          <Activity size={11} />
+          LAB
+        </button>
+      </div>
+
+      <div className="stu-inst-pick">
+        <label className="stu-param">
+          <span className="stu-label">Perfil Auto-Master</span>
+          <select
+            className="stu-field"
+            value={profile}
+            disabled={recording}
+            onChange={(e) => setProfile(e.target.value as AutoMasterProfile)}
+            data-testid="studio-automaster-profile"
+          >
+            {Object.values(AUTO_MASTER_PROFILES).map((spec) => (
+              <option key={spec.id} value={spec.id}>
+                {spec.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="stu-param">
+          <span className="stu-label">Carácter tonal</span>
+          <select
+            className="stu-field"
+            value={tone}
+            disabled={recording}
+            onChange={(e) => setTone(e.target.value as AutoMasterTone)}
+            data-testid="studio-automaster-tone"
+          >
+            <option value="warm">Cálido analógico</option>
+            <option value="balanced">Balanceado</option>
+            <option value="open">Abierto / Aire</option>
+          </select>
+        </label>
+      </div>
+
+      <p className="stu-help">{AUTO_MASTER_PROFILES[profile].description}</p>
+
+      <div className="stu-actions">
+        <button
+          type="button"
+          className="stu-btn"
+          data-tone="primary"
+          disabled={recording}
+          onClick={() => controller.applyAutoMaster(profile, tone)}
+          data-testid="studio-inspector-apply-master"
+        >
+          <Wand2 size={13} />
+          AUTO-MASTER
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          disabled={recording}
+          onClick={() => controller.unmaskMixBark(0.75)}
+          title="Optimizar paneo, pasa-altos y EQ quirúrgico en 24 bandas Bark"
+        >
+          <Sliders size={13} />
+          DESENMASCARAR BARK
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          disabled={recording}
+          onClick={() => void controller.generateClickGuideTrack()}
+          title="Sintetizar pista WAV de 24 bits con metrónomo acentuado y avisos previos de sección"
+        >
+          <Music size={13} />
+          CLIC Y GUÍA
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          disabled={recording}
+          onClick={() => controller.detectLocalMusicalAnalysis()}
+          title="Detectar BPM, tonalidad y acordes en este dispositivo sin usar cuota IA"
+        >
+          DETECTAR BPM / TONO
+        </button>
+      </div>
+    </section>
+  )
+}
+
 export const StudioInspector: React.FC<StudioPanelProps> = ({ controller }) => {
   const snap = useStudio(controller)
   const { session } = snap
@@ -827,6 +1012,8 @@ export const StudioInspector: React.FC<StudioPanelProps> = ({ controller }) => {
       {instrumentTrackId && <StudioInstrumentPanel controller={controller} trackId={instrumentTrackId} />}
       {hasInstrumentTracks && <StudioMidiDevicePanel controller={controller} />}
       <FxSection controller={controller} session={session} selection={selection} />
+      <ProductionMasterSection controller={controller} recording={snap.recording} labMode={snap.labMode} />
+      <StudioAnalyzer controller={controller} />
     </>
   )
 }

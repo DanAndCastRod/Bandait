@@ -3,6 +3,7 @@
  * Multi-band, Google Auth, Setlists, Stems & Technical Equipment
  */
 import type { UiPreferences } from '../services/appearance.ts'
+import type { EcosystemBandVcs } from '../services/versionControl.ts'
 
 export type MemberRole = 'Owner' | 'MusicDirector' | 'Musician' | 'Substitute' | 'SoundEngineer'
 
@@ -202,6 +203,8 @@ export interface WorkspaceStore {
    * (services/appearance.ts), que tolera valores danados. WORKSPACE_V2.md seccion 8.
    */
   uiPreferences?: UiPreferences
+  /** Historial opcional de ramas y snapshots musicales para Canciones y Setlists por banda. */
+  vcsMap?: Record<string, EcosystemBandVcs>
 }
 
 /** Forma minima aceptada al cargar (v1 o v2, antes de migrar). */

@@ -32,13 +32,14 @@ import { sweepOrphans } from './studioCleanup.ts';
 import { handleMcp } from './mcp.ts';
 import type { Env, ExecutionContextLike, FetchLike, R2Bucket, ScheduledControllerLike, StudioDeps } from './types.ts';
 
-export const VERSION = '1.4.1';
+export const VERSION = '1.5.0';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SONG = /^[A-Za-z0-9_-]{1,80}$/;
 const FILE = /^[A-Za-z0-9 ._()-]{1,120}$/;
 const AUDIO_EXT = /\.(mp3|m4a|wav|flac|ogg|aac)$/i;
 const ROLE = /^[a-z_]{1,32}$/;
 const EDITORS = new Set(['Owner', 'MusicDirector']);
+export const STUDIO_COLLABORATORS = new Set(['Owner', 'MusicDirector', 'Musician', 'SoundEngineer']);
 const MANIFEST_LIMIT = 64 * 1024;
 const MAX_STEMS = 16;
 const DEFAULT_MAX_FILE_MB = 200;
@@ -97,9 +98,11 @@ function bearer(req: Request): string {
   return m[1];
 }
 
+export type AccessLevel = boolean | 'collab';
+
 /** Prefix the caller may use, after checking the session (and the role for writes). */
 export async function authorize(
-  req: Request, env: Env, band: string, write: boolean, fetchFn: FetchLike,
+  req: Request, env: Env, band: string, write: AccessLevel, fetchFn: FetchLike,
 ): Promise<string> {
   const token = bearer(req);
   const base = env.SUPABASE_URL.replace(/\/+$/, '');
@@ -125,7 +128,8 @@ export async function authorize(
     return `users/${id}/`;
   }
   if (typeof body !== 'string') throw new ApiError(403, 'not_a_member');
-  if (write && !EDITORS.has(body)) throw new ApiError(403, 'not_an_editor');
+  if (write === 'collab' && !STUDIO_COLLABORATORS.has(body)) throw new ApiError(403, 'not_an_editor');
+  if (write === true && !EDITORS.has(body)) throw new ApiError(403, 'not_an_editor');
   return `bands/${band}/`;
 }
 

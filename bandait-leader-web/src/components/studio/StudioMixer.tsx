@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
-import { ChevronDown, ChevronUp, Download, Power, RotateCcw, Sparkles } from 'lucide-react'
+import { Activity, ChevronDown, ChevronUp, Download, Power, RotateCcw, Sliders, Sparkles, Wand2 } from 'lucide-react'
 import { STEM_ROLE_CODES, stemRoleLabel } from '../../services/stemNames'
 import {
   defaultFx,
@@ -70,8 +70,22 @@ function live(controller: StudioController, operation: (session: StudioSession) 
   }
 }
 
-const FX_SHORT: Readonly<Record<StudioFxType, string>> = { eq: 'EQ', compressor: 'COMP', limiter: 'LIM' }
-const FX_NAMES: Readonly<Record<StudioFxType, string>> = { eq: 'EQ', compressor: 'compresor', limiter: 'limitador' }
+const FX_SHORT: Readonly<Record<StudioFxType, string>> = {
+  eq: 'EQ',
+  compressor: 'COMP',
+  de_esser: 'DS',
+  saturator: 'SAT',
+  stereo_imager: 'IMG',
+  limiter: 'LIM',
+}
+const FX_NAMES: Readonly<Record<StudioFxType, string>> = {
+  eq: 'EQ',
+  compressor: 'compresor',
+  de_esser: 'de-esser',
+  saturator: 'saturador',
+  stereo_imager: 'imagen estéreo',
+  limiter: 'limitador',
+}
 
 interface InsertProps {
   controller: StudioController
@@ -248,6 +262,8 @@ const TrackStrip: React.FC<StripProps> = React.memo(({ controller, track, index,
         <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="eq" chain={track.fx} selected={picked === 'eq'} onEditFx={onEditFx} />
         {eq && eq.type === 'eq' ? <StudioEqCurve params={eq.params} sampleRate={sampleRate} bypass={eq.bypass} className="stu-eq-mini" /> : <span className="stu-eq-mini" data-empty="true" aria-hidden="true" />}
         <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="compressor" chain={track.fx} selected={picked === 'compressor'} onEditFx={onEditFx} />
+        <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="de_esser" chain={track.fx} selected={picked === 'de_esser'} onEditFx={onEditFx} />
+        <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="saturator" chain={track.fx} selected={picked === 'saturator'} onEditFx={onEditFx} />
       </div>
 
       <MiniSlider
@@ -358,6 +374,8 @@ const MasterStrip: React.FC<MasterProps> = ({ controller, session, selectedFx, r
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="eq" chain={master.fx} selected={picked === 'eq'} onEditFx={onEditFx} />
             {eq && eq.type === 'eq' ? <StudioEqCurve params={eq.params} sampleRate={session.sampleRate} bypass={eq.bypass} className="stu-eq-mini" /> : <span className="stu-eq-mini" data-empty="true" aria-hidden="true" />}
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="compressor" chain={master.fx} selected={picked === 'compressor'} onEditFx={onEditFx} />
+            <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="saturator" chain={master.fx} selected={picked === 'saturator'} onEditFx={onEditFx} />
+            <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="stereo_imager" chain={master.fx} selected={picked === 'stereo_imager'} onEditFx={onEditFx} />
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="limiter" chain={master.fx} selected={picked === 'limiter'} onEditFx={onEditFx} />
           </div>
           <MiniSlider
@@ -423,13 +441,6 @@ const MasterStrip: React.FC<MasterProps> = ({ controller, session, selectedFx, r
 // Mezclador
 // ---------------------------------------------------------------------------
 
-/**
- * Consola de mezcla del Estudio: un canal por pista (inserts, envio a reverb, paneo, fader con
- * escala en dB, medidor LED, mute y solo) y el master (EQ, compresor, limitador, reverb
- * compartida, LUFS integrado y pico real). Medidores y lecturas de sonoridad se pintan desde un
- * solo requestAnimationFrame, sin estado de React. Plegarla (boton o Alt+M) deja su barra con
- * EXPORTAR; el estado lo guarda la vista (services/studio/panelLayout.ts).
- */
 export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport, open, onToggle, toggleShortcut }) => {
   const snap = useStudio(controller)
   const { session } = snap
@@ -511,6 +522,46 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport, o
           {session.tracks.length} {session.tracks.length === 1 ? 'pista' : 'pistas'}
         </span>
         <span className="stu-bar-spacer" />
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="small"
+          disabled={snap.recording || !snap.ready || session.tracks.length < 2}
+          onClick={() => controller.unmaskMixBark(0.75)}
+          title="Desenmascarar colisiones espectrales entre pistas (24 bandas Bark, 0 cuota IA)"
+          data-testid="studio-unmask-btn"
+        >
+          <Sliders size={12} />
+          DESENMASCARAR
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="small"
+          disabled={snap.recording || !snap.ready}
+          onClick={() => controller.applyAutoMaster('streaming', 'balanced')}
+          title="Auto-Master DSP local instantáneo (-14 LUFS Streaming, 0 cuota IA)"
+          data-testid="studio-automaster-btn"
+        >
+          <Wand2 size={12} />
+          AUTO-MASTER
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          data-size="small"
+          data-on={snap.labMode}
+          aria-pressed={snap.labMode}
+          onClick={() => {
+            controller.toggleLabMode()
+            if (!snap.labMode) onEditFx()
+          }}
+          title="Mostrar u ocultar analizador científico LAB (FFT, STFT, Lissajous M/S, matriz Bark)"
+          data-testid="studio-lab-toggle"
+        >
+          <Activity size={12} />
+          LAB
+        </button>
         <button type="button" className="stu-btn" onClick={onExport} disabled={snap.recording || !snap.ready} title="Exportar la mezcla o las pistas a WAV" data-testid="studio-export-open">
           <Download size={13} />
           EXPORTAR
