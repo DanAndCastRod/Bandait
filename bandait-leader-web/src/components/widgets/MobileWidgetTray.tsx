@@ -20,7 +20,8 @@ import { useHub } from '../../context/hubContextCore'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { cloudBandKey } from '../../services/stemCloud'
 import { stemCloudTarget } from '../../services/stemCloudConfig'
-import { detectBpmLocal, detectKeyLocal, detectPitchYin, type PitchDetectionResult } from '../../services/studio/dspMath'
+import { YIN_MIN_HZ, YIN_RELIABLE_CONFIDENCE, detectPitchYin, type PitchDetectionResult } from '../../services/studio/dspMath'
+import { analyzeMusicalAsync } from '../../services/studio/dspAnalysisClient'
 import { defaultTrack, newStudioId, type StudioSession } from '../../services/studio/session'
 import { addAsset, addClip, addTrack } from '../../services/studio/sessionOps'
 import * as studioStore from '../../services/studio/studioStore'
@@ -157,7 +158,8 @@ const TunerWidget: React.FC<{ studioRecording: boolean }> = ({ studioRecording }
     }
     const src = ctx.createMediaStreamSource(stream)
     const analyser = ctx.createAnalyser()
-    analyser.fftSize = 4096
+    // 8192 muestras: dos periodos completos del Si grave de un bajo de 5 cuerdas (30,9 Hz).
+    analyser.fftSize = 8192
     src.connect(analyser)
     const buf = new Float32Array(analyser.fftSize)
     streamRef.current = stream
@@ -170,8 +172,8 @@ const TunerWidget: React.FC<{ studioRecording: boolean }> = ({ studioRecording }
       if (now - lastTick >= 65) {
         lastTick = now
         analyser.getFloatTimeDomainData(buf)
-        const res = detectPitchYin(buf, ctx.sampleRate, { referenceA4Hz: a4Ref.current, threshold: 0.14 })
-        if (res && res.confidence >= 0.7) setPitch(res)
+        const res = detectPitchYin(buf, ctx.sampleRate, { referenceA4Hz: a4Ref.current, threshold: 0.14, minHz: YIN_MIN_HZ })
+        if (res && res.confidence >= YIN_RELIABLE_CONFIDENCE) setPitch(res)
       }
       rafRef.current = requestAnimationFrame(loop)
     }
@@ -776,18 +778,32 @@ const QuickIdeaRecorderWidget: React.FC<{
       offset += c.length
     }
     const sr = srRef.current
-    const bpmEst = detectBpmLocal(monoSamples, sr)
-    const keyEst = detectKeyLocal(monoSamples, sr)
-    const safeBpm = bpmEst?.bpm ?? 120
-    const safeKey = keyEst?.key ?? 'C'
+    // Fuera del hilo principal (Worker). Solo se usan el BPM y el tono fiables: una idea tarareada
+    // o con ruido no debe imponer un tempo o una tonalidad inventados.
+    const fallbackBpm = activeSong?.bpm ?? 120
+    let reliableBpm: number | null = null
+    let reliableKey: string | null = null
+    try {
+      const analysis = await analyzeMusicalAsync(monoSamples, sr, { sessionBpm: fallbackBpm, startS: 0 })
+      if (analysis.bpmReliable && analysis.bpm) reliableBpm = analysis.bpm.bpm
+      if (analysis.keyReliable && analysis.key) reliableKey = analysis.key.key
+    } catch {
+      // Sin analisis se guarda igual, con el tempo de la cancion o 120.
+    }
+    const safeBpm = reliableBpm ?? fallbackBpm
+    const safeKey = reliableKey ?? activeSong?.key ?? 'C'
     const wavBuf = encodeWav24([monoSamples], sr)
     const blob = new Blob([wavBuf], { type: 'audio/wav' })
     const label = `Idea ${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`
 
     try {
       if (controller) {
-        await controller.addQuickIdeaBlob(blob, label, { bpm: safeBpm, key: safeKey })
-        setStatus(`Guardada en la sesión abierta (${safeBpm} BPM · ${safeKey}).`)
+        await controller.addQuickIdeaBlob(blob, label, { bpm: reliableBpm ?? undefined, key: reliableKey })
+        setStatus(
+          reliableBpm || reliableKey
+            ? `Guardada en la sesión abierta (${[reliableBpm ? `${reliableBpm} BPM` : null, reliableKey].filter(Boolean).join(' · ')}).`
+            : 'Guardada en la sesión abierta (tempo y tono sin detectar con seguridad).',
+        )
         return
       }
 
