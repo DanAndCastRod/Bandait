@@ -821,7 +821,7 @@ input, select, textarea {
   background: var(--b-card);
 }
 
-/* Movil: barra inferior de pildoras fijas + Mas. Arriba en 56 px desde el borde (lo que reserva studio.css). */
+/* Movil: barra inferior de 4 pildoras (Ensayo, Canciones, Setlists, Mas). Arriba en 56 px desde el borde (lo que reserva studio.css). */
 .hub-mobile-nav {
   position: fixed;
   left: 8px;
@@ -850,7 +850,7 @@ input, select, textarea {
   border: 0;
   background: transparent;
   color: var(--b-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
 }
 .hub-pill-tab > span {

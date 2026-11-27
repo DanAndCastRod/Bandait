@@ -3010,7 +3010,7 @@
   background: var(--stu-panel);
 }
 .stu-mobile-nav .stu-btn {
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 4px;
   font-size: 10px;
   letter-spacing: 0.3px;
@@ -3100,8 +3100,8 @@
   font-size: 13px;
 }
 .stu-mq-ms {
-  min-height: 36px;
-  width: 38px;
+  min-height: 44px;
+  width: 44px;
   padding: 0;
 }
 .stu-mq-slider {

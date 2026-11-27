@@ -82,6 +82,7 @@ export const SetlistOptimizerModal: React.FC<Props> = ({ playlist, onClose }) =>
             style={{
               ...ghostButton,
               padding: '4px 10px',
+              minHeight: '44px',
               fontSize: '11px',
               borderRadius: radius.control,
               border: labOpen ? '1px solid var(--b-accent)' : '1px solid var(--b-border)',
@@ -108,6 +109,7 @@ export const SetlistOptimizerModal: React.FC<Props> = ({ playlist, onClose }) =>
                   justifyContent: 'flex-start',
                   textAlign: 'left',
                   padding: '8px 10px',
+                  minHeight: '44px',
                   fontSize: '11px',
                   borderRadius: radius.control,
                   background: active ? 'var(--b-accent)' : 'var(--b-elevated)',
@@ -226,9 +228,13 @@ export const SetlistOptimizerModal: React.FC<Props> = ({ playlist, onClose }) =>
                   type="button"
                   onClick={() => togglePin(origIdx)}
                   title={isPinned ? 'Liberar posición' : `Fijar en su posición original (#${origIdx + 1})`}
+                  aria-pressed={isPinned}
                   style={{
                     ...ghostButton,
-                    padding: '4px 8px',
+                    padding: '4px 10px',
+                    minHeight: '44px',
+                    minWidth: '44px',
+                    flexShrink: 0,
                     fontSize: '11px',
                     borderRadius: radius.control,
                     color: isPinned ? colors.warning : colors.muted,

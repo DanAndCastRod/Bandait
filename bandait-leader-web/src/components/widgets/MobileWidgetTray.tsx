@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Activity,
   Check,
@@ -17,12 +17,23 @@ import {
 } from 'lucide-react'
 import { useGlobalAudioEngine } from '../../context/globalAudioContextCore'
 import { useHub } from '../../context/hubContextCore'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { cloudBandKey } from '../../services/stemCloud'
 import { stemCloudTarget } from '../../services/stemCloudConfig'
 import { detectBpmLocal, detectKeyLocal, detectPitchYin, type PitchDetectionResult } from '../../services/studio/dspMath'
-import { defaultFx, defaultTrack, newStudioId, STUDIO_MASTER_ID } from '../../services/studio/session'
-import { addAsset, addClip, addTrack, updateMaster } from '../../services/studio/sessionOps'
+import { defaultTrack, newStudioId, type StudioSession } from '../../services/studio/session'
+import { addAsset, addClip, addTrack } from '../../services/studio/sessionOps'
 import * as studioStore from '../../services/studio/studioStore'
+import { applyXyMacro, type XYMode } from '../../services/studio/xyMacro'
+import {
+  POCKET_SCHEDULER_MS,
+  clampPocketBpm,
+  linearRegressionTapBpm,
+  schedulePocketWindow,
+  startPocketCursor,
+  type PocketClick,
+  type PocketCursor,
+} from '../../services/pocketMetronome'
 import { encodeWav24 } from '../../services/wav'
 import { createSession, withFx, type StudioController } from '../studio/studioState'
 import { cardStyle, colors, ghostButton, labelStyle, mono, primaryButton, radius } from '../hubStyles'
@@ -35,104 +46,154 @@ interface Props {
   onOpenStudio: () => void
 }
 
-/** Regresion lineal por minimos cuadrados t_k = a + b*k para estimar BPM estable con hasta 8 taps. */
-function linearRegressionTapBpm(tapsMs: readonly number[]): number | null {
-  if (tapsMs.length < 2) return null
-  const n = tapsMs.length
-  let sumX = 0
-  let sumY = 0
-  let sumXY = 0
-  let sumXX = 0
-  for (let i = 0; i < n; i++) {
-    sumX += i
-    sumY += tapsMs[i]
-    sumXY += i * tapsMs[i]
-    sumXX += i * i
-  }
-  const denom = n * sumXX - sumX * sumX
-  if (denom <= 0) return null
-  const slopeMs = (n * sumXY - sumX * sumY) / denom
-  if (!(slopeMs > 180 && slopeMs < 2000)) return null
-  return Math.max(40, Math.min(260, Math.round((60000 / slopeMs) * 10) / 10))
+/** Lo mismo que el conmutador movil del Estudio: el boton flotante solo existe en pantallas chicas. */
+const MOBILE_QUERY = '(max-width: 767px)'
+/** Objetivo tactil minimo (WCAG 2.5.5 / guias de iOS y Android). */
+const TOUCH = '44px'
+
+type AudioContextCtor = typeof AudioContext
+
+function audioContextCtor(): AudioContextCtor | null {
+  if (typeof window === 'undefined') return null
+  return window.AudioContext || (window as unknown as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext || null
 }
 
+/** Crea el AudioContext y lo reanuda DENTRO del gesto (iOS solo lo deja sonar o escuchar asi). */
+function contextInGesture(): AudioContext | null {
+  const Ctor = audioContextCtor()
+  if (!Ctor) return null
+  try {
+    const ctx = new Ctor()
+    if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined)
+    return ctx
+  } catch {
+    return null
+  }
+}
+
+function closeContext(ctx: AudioContext | null): void {
+  if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => undefined)
+}
+
+/** true mientras la sesion del Estudio graba (re-render solo cuando cambia). */
+function useStudioRecording(controller: StudioController | null): boolean {
+  const subscribe = useCallback((cb: () => void) => (controller ? controller.subscribe(cb) : () => undefined), [controller])
+  const get = useCallback(() => (controller ? controller.snapshot().recording : false), [controller])
+  return useSyncExternalStore(subscribe, get, () => false)
+}
+
+const MIC_BUSY_TEXT = 'El Estudio está grabando: el micrófono está ocupado hasta que termine la toma.'
+
 // ---------------------------------------------------------------------------
-// 1. Afinador Cromatico Matematico (YIN < 0,5 cents)
+// 1. Afinador cromatico (YIN)
 // ---------------------------------------------------------------------------
 
-const TunerWidget: React.FC = () => {
+const TunerWidget: React.FC<{ studioRecording: boolean }> = ({ studioRecording }) => {
   const [listening, setListening] = useState(false)
-  const [a4Hz, setA4Hz] = useState(440)
+  const [starting, setStarting] = useState(false)
+  const [a4Hz, setA4HzState] = useState(440)
   const [pitch, setPitch] = useState<PitchDetectionResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const ctxRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const rafRef = useRef<number>(0)
+  // La referencia la lee el bucle de rAF: por ref, no por el cierre del render en que arranco.
+  const a4Ref = useRef(440)
+  // Cada arranque lleva un numero; detener o desmontar lo invalida (un getUserMedia pendiente se descarta).
+  const genRef = useRef(0)
+
+  const setA4Hz = (next: number) => {
+    a4Ref.current = next
+    setA4HzState(next)
+  }
 
   const stop = useCallback(() => {
+    genRef.current++
     cancelAnimationFrame(rafRef.current)
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
-    if (ctxRef.current) {
-      void ctxRef.current.close().catch(() => undefined)
-      ctxRef.current = null
-    }
+    closeContext(ctxRef.current)
+    ctxRef.current = null
     setListening(false)
+    setStarting(false)
   }, [])
 
   useEffect(() => () => stop(), [stop])
 
   const start = async () => {
+    if (listening || starting || studioRecording) return
     setError(null)
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Este navegador no da acceso al micrófono.')
+      return
+    }
+    const ctx = contextInGesture()
+    if (!ctx) {
+      setError('Este navegador no tiene Web Audio.')
+      return
+    }
+    const gen = ++genRef.current
+    ctxRef.current = ctx
+    setStarting(true)
+    let stream: MediaStream
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       })
-      const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      const ctx = new Ctor()
-      const src = ctx.createMediaStreamSource(stream)
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 4096
-      src.connect(analyser)
-      const buf = new Float32Array(analyser.fftSize)
-      streamRef.current = stream
-      ctxRef.current = ctx
-      setListening(true)
+    } catch {
+      if (gen === genRef.current) {
+        stop()
+        setError('Permite el acceso al micrófono para usar el afinador cromático.')
+      } else {
+        closeContext(ctx)
+      }
+      return
+    }
+    if (gen !== genRef.current) {
+      // Se detuvo o se desmonto mientras el navegador pedia permiso.
+      stream.getTracks().forEach((t) => t.stop())
+      closeContext(ctx)
+      return
+    }
+    const src = ctx.createMediaStreamSource(stream)
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 4096
+    src.connect(analyser)
+    const buf = new Float32Array(analyser.fftSize)
+    streamRef.current = stream
+    setStarting(false)
+    setListening(true)
 
-      let lastTick = 0
-      const loop = (now: number) => {
-        if (now - lastTick >= 65) {
-          lastTick = now
-          analyser.getFloatTimeDomainData(buf)
-          const res = detectPitchYin(buf, ctx.sampleRate, { referenceA4Hz: a4Hz, threshold: 0.14 })
-          if (res && res.confidence >= 0.7) {
-            setPitch(res)
-          }
-        }
-        rafRef.current = requestAnimationFrame(loop)
+    let lastTick = 0
+    const loop = (now: number) => {
+      if (gen !== genRef.current) return
+      if (now - lastTick >= 65) {
+        lastTick = now
+        analyser.getFloatTimeDomainData(buf)
+        const res = detectPitchYin(buf, ctx.sampleRate, { referenceA4Hz: a4Ref.current, threshold: 0.14 })
+        if (res && res.confidence >= 0.7) setPitch(res)
       }
       rafRef.current = requestAnimationFrame(loop)
-    } catch {
-      setError('Permite el acceso al micrófono para usar el afinador cromático.')
-      stop()
     }
+    rafRef.current = requestAnimationFrame(loop)
   }
 
   const inTune = pitch ? Math.abs(pitch.cents) <= 4 : false
   const needlePct = pitch ? Math.max(0, Math.min(100, 50 + pitch.cents)) : 50
+  const smallBtn: React.CSSProperties = { ...ghostButton, padding: '4px 10px', minHeight: TOUCH, minWidth: TOUCH, justifyContent: 'center' }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} data-testid="widget-tuner">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <span style={labelStyle}>REFERENCIA LA4: {a4Hz} HZ</span>
         <div style={{ display: 'flex', gap: '4px' }}>
-          <button type="button" onClick={() => setA4Hz((v) => Math.max(432, v - 1))} style={{ ...ghostButton, padding: '4px 8px', minHeight: '32px' }}>
+          <button type="button" onClick={() => setA4Hz(Math.max(432, a4Hz - 1))} style={smallBtn} aria-label="Bajar la referencia 1 Hz">
             -1 Hz
           </button>
-          <button type="button" onClick={() => setA4Hz(440)} style={{ ...ghostButton, padding: '4px 8px', minHeight: '32px' }}>
+          <button type="button" onClick={() => setA4Hz(440)} style={smallBtn} aria-label="Referencia 440 Hz">
             440
           </button>
-          <button type="button" onClick={() => setA4Hz((v) => Math.min(446, v + 1))} style={{ ...ghostButton, padding: '4px 8px', minHeight: '32px' }}>
+          <button type="button" onClick={() => setA4Hz(Math.min(446, a4Hz + 1))} style={smallBtn} aria-label="Subir la referencia 1 Hz">
             +1 Hz
           </button>
         </div>
@@ -195,83 +256,144 @@ const TunerWidget: React.FC = () => {
       </div>
 
       {error && <div style={{ fontSize: '12px', color: colors.danger }}>{error}</div>}
+      {studioRecording && !listening && <div style={{ fontSize: '12px', color: colors.muted }}>{MIC_BUSY_TEXT}</div>}
 
       <button
         type="button"
         onClick={() => (listening ? stop() : void start())}
-        style={{ ...primaryButton(listening ? colors.danger : undefined), minHeight: '44px', justifyContent: 'center' }}
+        disabled={starting || (!listening && studioRecording)}
+        style={{ ...primaryButton(listening ? colors.danger : undefined), minHeight: TOUCH, justifyContent: 'center' }}
         data-testid="widget-tuner-toggle"
       >
         <Mic size={15} />
-        {listening ? 'DETENER MICRÓFONO' : 'ENCENDER AFINADOR YIN'}
+        {listening ? 'DETENER MICRÓFONO' : starting ? 'ABRIENDO MICRÓFONO...' : 'ENCENDER AFINADOR'}
       </button>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// 2. Tap Tempo + Metronomo Sintetizado de Bolsillo
+// 2. Tap tempo + metronomo de bolsillo (programado en el reloj del AudioContext)
 // ---------------------------------------------------------------------------
+
+/** Un golpe de clic en `click.time` del reloj del AudioContext (nunca en "ahora"). */
+function scheduleClickSound(ctx: AudioContext, click: PocketClick): void {
+  const t = click.time
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(click.accent ? 1120 : 780, t)
+  gain.gain.setValueAtTime(0.0001, t)
+  gain.gain.linearRampToValueAtTime(click.accent ? 0.35 : 0.2, t + 0.002)
+  gain.gain.exponentialRampToValueAtTime(0.0008, t + 0.045)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.onended = () => {
+    osc.disconnect()
+    gain.disconnect()
+  }
+  osc.start(t)
+  osc.stop(t + 0.05)
+}
 
 const PocketMetronomeWidget: React.FC<{ controller: StudioController | null }> = ({ controller }) => {
   const { activeSong, sharing, saveSong } = useHub()
   const [bpm, setBpm] = useState<number>(() => controller?.snapshot().session.bpm ?? activeSong?.bpm ?? 120)
   const [beatsPerBar, setBeatsPerBar] = useState<number>(() => controller?.snapshot().session.beatsPerBar ?? activeSong?.beatsPerBar ?? 4)
   const [playing, setPlaying] = useState(false)
-  const [beatIdx, setBeatIdx] = useState(0)
   const tapsRef = useRef<number[]>([])
+  // El programador lee tempo y compas por ref: cambiarlos con el clic sonando no lo reinicia.
+  const bpmRef = useRef(bpm)
+  const bpbRef = useRef(beatsPerBar)
+  const ctxRef = useRef<AudioContext | null>(null)
   const timerRef = useRef<number>(0)
-  const audioCtxRef = useRef<AudioContext | null>(null)
+  const rafRef = useRef<number>(0)
+  const cursorRef = useRef<PocketCursor | null>(null)
+  /** Golpes ya programados que el pulso visual todavia no mostro. */
+  const pendingRef = useRef<PocketClick[]>([])
+  const dotsRef = useRef<Array<HTMLSpanElement | null>>([])
+  const litRef = useRef(-1)
+
+  useEffect(() => {
+    bpmRef.current = bpm
+  }, [bpm])
+  useEffect(() => {
+    bpbRef.current = beatsPerBar
+  }, [beatsPerBar])
+
+  /** Pinta el pulso por DOM (sin estado React por golpe). */
+  const paintBeat = useCallback((beat: number) => {
+    if (litRef.current === beat) return
+    litRef.current = beat
+    dotsRef.current.forEach((dot, idx) => {
+      if (!dot) return
+      dot.style.background = idx === beat ? (idx === 0 ? 'var(--b-accent)' : 'var(--b-cobalt)') : 'var(--b-border-strong)'
+      dot.style.transform = idx === beat ? 'scale(1.25)' : 'scale(1)'
+    })
+  }, [])
 
   const stopClick = useCallback(() => {
     window.clearInterval(timerRef.current)
+    cancelAnimationFrame(rafRef.current)
+    cursorRef.current = null
+    pendingRef.current = []
+    paintBeat(-1)
     setPlaying(false)
-    setBeatIdx(0)
-  }, [])
+  }, [paintBeat])
 
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       window.clearInterval(timerRef.current)
-      if (audioCtxRef.current) {
-        void audioCtxRef.current.close().catch(() => undefined)
+      cancelAnimationFrame(rafRef.current)
+      closeContext(ctxRef.current)
+      ctxRef.current = null
+    },
+    []
+  )
+
+  const startClick = () => {
+    // El AudioContext se crea o reanuda aqui, dentro del toque (iOS).
+    let ctx = ctxRef.current
+    if (!ctx || ctx.state === 'closed') {
+      ctx = contextInGesture()
+      ctxRef.current = ctx
+    } else if (ctx.state === 'suspended') {
+      void ctx.resume().catch(() => undefined)
+    }
+    if (!ctx) return
+    const audioCtx = ctx
+    cursorRef.current = startPocketCursor(audioCtx.currentTime)
+    pendingRef.current = []
+
+    const tick = () => {
+      const cursor = cursorRef.current
+      if (!cursor || audioCtx.state === 'closed') return
+      const { clicks, cursor: next } = schedulePocketWindow(cursor, audioCtx.currentTime, bpmRef.current, bpbRef.current)
+      cursorRef.current = next
+      for (const click of clicks) {
+        try {
+          scheduleClickSound(audioCtx, click)
+        } catch {
+          // Sin salida de audio: el pulso visual sigue.
+        }
+        pendingRef.current.push(click)
       }
     }
-  }, [])
-
-  const triggerClick = useCallback((accent: boolean) => {
-    try {
-      const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      if (!audioCtxRef.current) audioCtxRef.current = new Ctor()
-      const ctx = audioCtxRef.current
-      if (ctx.state === 'suspended') void ctx.resume()
-      const now = ctx.currentTime
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'triangle'
-      osc.frequency.setValueAtTime(accent ? 1120 : 780, now)
-      gain.gain.setValueAtTime(accent ? 0.35 : 0.2, now)
-      gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.045)
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(now)
-      osc.stop(now + 0.05)
-    } catch {
-      // Sin salida de audio disponible.
+    const draw = () => {
+      const now = audioCtx.currentTime
+      const queue = pendingRef.current
+      let shown = -1
+      while (queue.length > 0 && queue[0].time <= now) shown = queue.shift()!.beat
+      if (shown >= 0) paintBeat(shown)
+      rafRef.current = requestAnimationFrame(draw)
     }
-  }, [])
-
-  useEffect(() => {
-    if (!playing) return
-    let step = 0
-    triggerClick(true)
-    const intervalMs = (60 / bpm) * 1000
-    timerRef.current = window.setInterval(() => {
-      step = (step + 1) % beatsPerBar
-      setBeatIdx(step)
-      triggerClick(step === 0)
-    }, intervalMs)
-    return () => window.clearInterval(timerRef.current)
-  }, [playing, bpm, beatsPerBar, triggerClick])
+    tick()
+    window.clearInterval(timerRef.current)
+    timerRef.current = window.setInterval(tick, POCKET_SCHEDULER_MS)
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(draw)
+    setPlaying(true)
+  }
 
   const handleTap = () => {
     const now = performance.now()
@@ -298,15 +420,19 @@ const PocketMetronomeWidget: React.FC<{ controller: StudioController | null }> =
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} data-testid="widget-metronome">
       <div style={{ ...cardStyle, padding: '14px', background: 'var(--b-well)', textAlign: 'center' }}>
         <div style={{ fontFamily: mono, fontSize: '36px', fontWeight: 800, color: colors.text }}>{bpm} BPM</div>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '8px' }} aria-hidden>
           {Array.from({ length: beatsPerBar }, (_, idx) => (
             <span
               key={idx}
+              ref={(el) => {
+                dotsRef.current[idx] = el
+              }}
               style={{
                 width: '12px',
                 height: '12px',
                 borderRadius: '9999px',
-                background: playing && beatIdx === idx ? (idx === 0 ? 'var(--b-accent)' : 'var(--b-cobalt)') : 'var(--b-border-strong)',
+                background: 'var(--b-border-strong)',
+                transition: 'transform 60ms ease-out',
               }}
             />
           ))}
@@ -318,11 +444,15 @@ const PocketMetronomeWidget: React.FC<{ controller: StudioController | null }> =
           <button
             key={b}
             type="button"
-            onClick={() => setBeatsPerBar(b)}
+            onClick={() => {
+              setBeatsPerBar(b)
+              litRef.current = -1
+            }}
+            aria-pressed={beatsPerBar === b}
             style={{
               ...ghostButton,
               flex: 1,
-              minHeight: '38px',
+              minHeight: TOUCH,
               justifyContent: 'center',
               background: beatsPerBar === b ? 'var(--b-accent)' : 'var(--b-elevated)',
               color: beatsPerBar === b ? 'var(--b-on-accent)' : colors.text,
@@ -339,8 +469,9 @@ const PocketMetronomeWidget: React.FC<{ controller: StudioController | null }> =
         max={240}
         step={1}
         value={Math.round(bpm)}
-        onChange={(e) => setBpm(Number(e.target.value))}
+        onChange={(e) => setBpm(clampPocketBpm(Number(e.target.value)))}
         aria-label="Tempo BPM"
+        style={{ minHeight: TOUCH }}
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -350,18 +481,11 @@ const PocketMetronomeWidget: React.FC<{ controller: StudioController | null }> =
           style={{ ...ghostButton, minHeight: '48px', justifyContent: 'center', fontWeight: 700 }}
           data-testid="widget-metronome-tap"
         >
-          TAP TEMPO
+          MARCAR TEMPO
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (playing) {
-              stopClick()
-            } else {
-              setBeatIdx(0)
-              setPlaying(true)
-            }
-          }}
+          onClick={() => (playing ? stopClick() : startClick())}
           style={{ ...primaryButton(), minHeight: '48px', justifyContent: 'center' }}
           data-testid="widget-metronome-play"
         >
@@ -371,7 +495,7 @@ const PocketMetronomeWidget: React.FC<{ controller: StudioController | null }> =
       </div>
 
       {(controller || (activeSong && sharing.activeCanEdit)) && (
-        <button type="button" onClick={applyBpm} style={{ ...ghostButton, minHeight: '40px', justifyContent: 'center' }}>
+        <button type="button" onClick={applyBpm} style={{ ...ghostButton, minHeight: TOUCH, justifyContent: 'center' }}>
           <Check size={14} />
           APLICAR A {controller ? 'SESIÓN ESTUDIO' : `«${activeSong?.title.slice(0, 18)}»`}
         </button>
@@ -381,70 +505,55 @@ const PocketMetronomeWidget: React.FC<{ controller: StudioController | null }> =
 }
 
 // ---------------------------------------------------------------------------
-// 3. Pad X/Y Macro de Mezcla y Expresion en Vivo
+// 3. Pad X/Y de macros de mezcla
 // ---------------------------------------------------------------------------
 
-type XYMode = 'warmth_air' | 'dry_space' | 'vox_band'
+const XY_MODES: ReadonlyArray<{ id: XYMode; label: string; hint: string; undo: string }> = [
+  { id: 'warmth_air', label: 'CALIDEZ / AIRE', hint: 'X: saturación del master · Y: agudos del master', undo: 'Macro X/Y Calidez y Aire' },
+  { id: 'dry_space', label: 'COLA / REVERB', hint: 'X: cola de la reverb · Y: retorno de la reverb', undo: 'Macro X/Y Reverb' },
+  { id: 'vox_band', label: 'BANDA / VOZ', hint: 'X: volumen de la banda · Y: volumen de las voces', undo: 'Macro X/Y Voz vs Banda' },
+]
+
+interface XyGesture {
+  pointerId: number
+  base: StudioSession
+  x0: number
+  y0: number
+}
 
 const MacroXYPadWidget: React.FC<{ controller: StudioController | null; onOpenStudio: () => void }> = ({ controller, onOpenStudio }) => {
   const [mode, setMode] = useState<XYMode>('warmth_air')
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0.5, y: 0.5 })
   const padRef = useRef<HTMLDivElement>(null)
+  // Sesion al poner el dedo: cada movimiento se aplica en relativo a ella, no a la ya movida.
+  const gestureRef = useRef<XyGesture | null>(null)
+  const modeDef = XY_MODES.find((m) => m.id === mode) ?? XY_MODES[0]
 
-  const applyMacro = (nx: number, ny: number, commit: boolean) => {
-    setPos({ x: nx, y: ny })
-    if (!controller) return
-    const snap = controller.snapshot()
-    if (snap.recording) return
-
-    if (mode === 'dry_space') {
-      const returnDb = Math.round((-36 + ny * 32) * 10) / 10
-      const decayS = Math.round((0.6 + nx * 3.4) * 100) / 100
-      controller.applyLive(updateMaster(snap.session, { patch: { reverb: { returnDb, decayS } } }))
-      if (commit) controller.commitLive('Macro X/Y Reverb')
-    } else if (mode === 'warmth_air') {
-      const baseSat = defaultFx('saturator')
-      const baseEq = defaultFx('eq')
-      let next = withFx(snap.session, STUDIO_MASTER_ID, {
-        ...baseSat,
-        params: { ...baseSat.params, driveDb: Math.round(nx * 14 * 10) / 10, mix: 0.65 },
-      })
-      next = withFx(next, STUDIO_MASTER_ID, {
-        ...baseEq,
-        params: { ...baseEq.params, highDb: Math.round((ny - 0.3) * 9 * 10) / 10 },
-      })
-      controller.applyLive(next)
-      if (commit) controller.commitLive('Macro X/Y Calidez y Aire')
-    } else if (mode === 'vox_band') {
-      const voxBoost = (ny - 0.5) * 8
-      const bandTrim = (nx - 0.5) * 8
-      for (const t of snap.session.tracks) {
-        if (t.role === 'vocals') {
-          controller.updateTrackLive(t.id, { volumeDb: Math.max(-24, Math.min(6, Math.round(voxBoost * 10) / 10)) })
-        } else if (t.role !== 'click' && t.role !== 'guide') {
-          controller.updateTrackLive(t.id, { volumeDb: Math.max(-24, Math.min(6, Math.round(bandTrim * 10) / 10)) })
-        }
-      }
-      if (commit) controller.commitLive('Macro X/Y Voz vs Banda')
+  const pointToPad = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const el = padRef.current
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    return {
+      x: Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width))),
+      y: Math.max(0, Math.min(1, 1 - (clientY - rect.top) / Math.max(1, rect.height))),
     }
   }
 
-  const updateFromPointer = (clientX: number, clientY: number, commit: boolean) => {
-    const el = padRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const nx = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)))
-    const ny = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / Math.max(1, rect.height)))
-    applyMacro(nx, ny, commit)
+  const endGesture = (pointerId: number) => {
+    const g = gestureRef.current
+    if (!g || g.pointerId !== pointerId) return
+    gestureRef.current = null
+    // Un solo paso de deshacer por gesto (commitLive no apila nada si no hubo cambio).
+    controller?.commitLive(modeDef.undo)
   }
 
   if (!controller) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }} data-testid="widget-xypad">
         <p style={{ margin: 0, fontSize: '12px', color: colors.muted }}>
-          Abre una sesión en el Estudio DAW para controlar calidez analógica, espacio estéreo o balance vocal en tiempo real con el dedo.
+          Abre una sesión en el Estudio DAW para controlar calidez, espacio o balance vocal en tiempo real con el dedo.
         </p>
-        <button type="button" onClick={onOpenStudio} style={{ ...primaryButton(), minHeight: '44px', justifyContent: 'center' }}>
+        <button type="button" onClick={onOpenStudio} style={{ ...primaryButton(), minHeight: TOUCH, justifyContent: 'center' }}>
           <Sliders size={14} /> ABRIR ESTUDIO DAW
         </button>
       </div>
@@ -454,21 +563,16 @@ const MacroXYPadWidget: React.FC<{ controller: StudioController | null; onOpenSt
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }} data-testid="widget-xypad">
       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-        {(
-          [
-            ['warmth_air', 'TAPE / AIR'],
-            ['dry_space', 'DECAY / REV'],
-            ['vox_band', 'BANDA / VOZ'],
-          ] as const
-        ).map(([id, label]) => (
+        {XY_MODES.map(({ id, label }) => (
           <button
             key={id}
             type="button"
             onClick={() => setMode(id)}
+            aria-pressed={mode === id}
             style={{
               ...ghostButton,
               flex: 1,
-              minHeight: '36px',
+              minHeight: TOUCH,
               justifyContent: 'center',
               fontSize: '10px',
               background: mode === id ? 'var(--b-accent)' : 'var(--b-elevated)',
@@ -479,18 +583,30 @@ const MacroXYPadWidget: React.FC<{ controller: StudioController | null; onOpenSt
           </button>
         ))}
       </div>
+      <p style={{ margin: 0, fontFamily: mono, fontSize: '10px', color: colors.muted }}>{modeDef.hint}. Mueve desde donde están hoy.</p>
 
       <div
         ref={padRef}
         onPointerDown={(e) => {
+          if (controller.snapshot().recording) return
+          const p = pointToPad(e.clientX, e.clientY)
+          if (!p) return
           e.currentTarget.setPointerCapture(e.pointerId)
-          updateFromPointer(e.clientX, e.clientY, false)
+          gestureRef.current = { pointerId: e.pointerId, base: controller.snapshot().session, x0: p.x, y0: p.y }
+          setPos(p)
         }}
         onPointerMove={(e) => {
-          if (e.buttons === 0) return
-          updateFromPointer(e.clientX, e.clientY, false)
+          const g = gestureRef.current
+          if (!g || g.pointerId !== e.pointerId) return
+          const p = pointToPad(e.clientX, e.clientY)
+          if (!p) return
+          setPos(p)
+          if (controller.snapshot().recording) return
+          controller.applyLive(applyXyMacro(g.base, mode, p.x - g.x0, p.y - g.y0, withFx))
         }}
-        onPointerUp={(e) => updateFromPointer(e.clientX, e.clientY, true)}
+        onPointerUp={(e) => endGesture(e.pointerId)}
+        onPointerCancel={(e) => endGesture(e.pointerId)}
+        onLostPointerCapture={(e) => endGesture(e.pointerId)}
         style={{
           position: 'relative',
           height: '180px',
@@ -503,20 +619,30 @@ const MacroXYPadWidget: React.FC<{ controller: StudioController | null; onOpenSt
         }}
         data-testid="widget-xypad-surface"
       >
+        {/* Capa del tamano del pad movida con transform (el % de translate es el de la propia capa). */}
         <div
+          aria-hidden
           style={{
             position: 'absolute',
-            left: `${pos.x * 100}%`,
-            top: `${(1 - pos.y) * 100}%`,
-            width: '26px',
-            height: '26px',
-            borderRadius: '9999px',
-            background: 'var(--b-accent)',
-            boxShadow: '0 0 0 4px color-mix(in srgb, var(--b-accent) 28%, transparent)',
-            transform: 'translate(-50%, -50%)',
+            inset: 0,
+            transform: `translate(${pos.x * 100}%, ${(1 - pos.y) * 100}%)`,
             pointerEvents: 'none',
           }}
-        />
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '26px',
+              height: '26px',
+              borderRadius: '9999px',
+              background: 'var(--b-accent)',
+              boxShadow: '0 0 0 4px color-mix(in srgb, var(--b-accent) 28%, transparent)',
+              transform: 'translate(-50%, -50%)',
+            }}
+          />
+        </div>
         <span style={{ position: 'absolute', left: '8px', bottom: '6px', fontFamily: mono, fontSize: '10px', color: colors.muted }}>
           X: {Math.round(pos.x * 100)}% · Y: {Math.round(pos.y * 100)}%
         </span>
@@ -526,15 +652,18 @@ const MacroXYPadWidget: React.FC<{ controller: StudioController | null; onOpenSt
 }
 
 // ---------------------------------------------------------------------------
-// 4. Grabadora Rapida de Ideas (1 toque + BPM/Tono local -> Sesion Estudio)
+// 4. Grabadora rapida de ideas (BPM y tono locales -> sesion del Estudio)
 // ---------------------------------------------------------------------------
 
-const QuickIdeaRecorderWidget: React.FC<{ controller: StudioController | null; onOpenStudio: () => void }> = ({
-  controller,
-  onOpenStudio,
-}) => {
+const QuickIdeaRecorderWidget: React.FC<{
+  controller: StudioController | null
+  studioRecording: boolean
+  onOpenStudio: () => void
+  onBusyChange: (busy: boolean) => void
+}> = ({ controller, studioRecording, onOpenStudio, onBusyChange }) => {
   const { activeBand, activeSong, sharing, user } = useHub()
   const [recording, setRecording] = useState(false)
+  const [starting, setStarting] = useState(false)
   const [seconds, setSeconds] = useState(0)
   const [status, setStatus] = useState<string | null>(null)
   const chunksRef = useRef<Float32Array[]>([])
@@ -542,62 +671,104 @@ const QuickIdeaRecorderWidget: React.FC<{ controller: StudioController | null; o
   const ctxRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<number>(0)
+  const genRef = useRef(0)
+  const stopAndSaveRef = useRef<() => Promise<void>>(async () => undefined)
+
+  useEffect(() => {
+    onBusyChange(recording || starting)
+  }, [recording, starting, onBusyChange])
 
   const cleanup = useCallback(() => {
+    genRef.current++
     window.clearInterval(timerRef.current)
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
-    if (ctxRef.current) {
-      void ctxRef.current.close().catch(() => undefined)
-      ctxRef.current = null
-    }
+    closeContext(ctxRef.current)
+    ctxRef.current = null
     setRecording(false)
+    setStarting(false)
   }, [])
 
-  useEffect(() => () => cleanup(), [cleanup])
+  useEffect(
+    () => () => {
+      cleanup()
+      onBusyChange(false)
+    },
+    [cleanup, onBusyChange]
+  )
 
   const startRec = async () => {
+    if (recording || starting) return
+    if (studioRecording) {
+      setStatus(MIC_BUSY_TEXT)
+      return
+    }
     setStatus(null)
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus('Este navegador no da acceso al micrófono.')
+      return
+    }
+    const ctx = contextInGesture()
+    if (!ctx) {
+      setStatus('Este navegador no tiene Web Audio.')
+      return
+    }
+    const gen = ++genRef.current
+    ctxRef.current = ctx
     chunksRef.current = []
     setSeconds(0)
+    setStarting(true)
+    let stream: MediaStream
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      const ctx = new Ctor()
-      srRef.current = ctx.sampleRate
-      const src = ctx.createMediaStreamSource(stream)
-      const proc = ctx.createScriptProcessor(4096, 1, 1)
-      proc.onaudioprocess = (ev) => {
-        const input = ev.inputBuffer.getChannelData(0)
-        chunksRef.current.push(new Float32Array(input))
-      }
-      src.connect(proc)
-      proc.connect(ctx.destination)
-      streamRef.current = stream
-      ctxRef.current = ctx
-      setRecording(true)
-      let ticks = 0
-      timerRef.current = window.setInterval(() => {
-        ticks += 1
-        const elapsed = Math.floor(ticks / 4)
-        setSeconds(elapsed)
-        if (elapsed >= 180) void stopAndSave()
-      }, 250)
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch {
-      setStatus('No se pudo abrir el micrófono.')
-      cleanup()
+      if (gen === genRef.current) {
+        cleanup()
+        setStatus('No se pudo abrir el micrófono.')
+      } else {
+        closeContext(ctx)
+      }
+      return
     }
+    if (gen !== genRef.current || (controller && controller.snapshot().recording)) {
+      stream.getTracks().forEach((t) => t.stop())
+      if (gen === genRef.current) {
+        cleanup()
+        setStatus(MIC_BUSY_TEXT)
+      } else {
+        closeContext(ctx)
+      }
+      return
+    }
+    srRef.current = ctx.sampleRate
+    const src = ctx.createMediaStreamSource(stream)
+    const proc = ctx.createScriptProcessor(4096, 1, 1)
+    proc.onaudioprocess = (ev) => {
+      chunksRef.current.push(new Float32Array(ev.inputBuffer.getChannelData(0)))
+    }
+    src.connect(proc)
+    proc.connect(ctx.destination)
+    streamRef.current = stream
+    setStarting(false)
+    setRecording(true)
+    const startedAt = performance.now()
+    timerRef.current = window.setInterval(() => {
+      const elapsed = Math.floor((performance.now() - startedAt) / 1000)
+      setSeconds(elapsed)
+      if (elapsed >= 180) void stopAndSaveRef.current()
+    }, 250)
   }
 
   const stopAndSave = async () => {
     cleanup()
     const chunks = chunksRef.current
+    chunksRef.current = []
     const total = chunks.reduce((acc, c) => acc + c.length, 0)
     if (total < srRef.current * 0.3) {
       setStatus('Grabación demasiado corta.')
       return
     }
-    setStatus('Analizando BPM/Tono y guardando WAV 24-bit...')
+    setStatus('Analizando BPM y tono y guardando WAV de 24 bits...')
     const monoSamples = new Float32Array(total)
     let offset = 0
     for (const c of chunks) {
@@ -616,7 +787,7 @@ const QuickIdeaRecorderWidget: React.FC<{ controller: StudioController | null; o
     try {
       if (controller) {
         await controller.addQuickIdeaBlob(blob, label, { bpm: safeBpm, key: safeKey })
-        setStatus(`Guardada en sesión abierta (${safeBpm} BPM · ${safeKey}).`)
+        setStatus(`Guardada en la sesión abierta (${safeBpm} BPM · ${safeKey}).`)
         return
       }
 
@@ -679,6 +850,12 @@ const QuickIdeaRecorderWidget: React.FC<{ controller: StudioController | null; o
     }
   }
 
+  useEffect(() => {
+    stopAndSaveRef.current = stopAndSave
+  })
+
+  const blocked = !recording && studioRecording
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} data-testid="widget-recorder">
       <div style={{ ...cardStyle, padding: '16px', background: 'var(--b-well)', textAlign: 'center' }}>
@@ -687,8 +864,10 @@ const QuickIdeaRecorderWidget: React.FC<{ controller: StudioController | null; o
         </div>
         <div style={{ fontSize: '12px', color: colors.muted, marginTop: '4px' }}>
           {recording
-            ? 'Grabando idea (máx. 3:00)... Al detener detecta BPM y Tono sin gastar IA.'
-            : 'Captura un riff, melodía o nota de voz directo hacia el Estudio DAW.'}
+            ? 'Grabando idea (máx. 3:00)... Al detener detecta BPM y tono sin gastar IA.'
+            : blocked
+              ? MIC_BUSY_TEXT
+              : 'Captura un riff, melodía o nota de voz directo hacia el Estudio DAW.'}
         </div>
       </div>
 
@@ -697,6 +876,7 @@ const QuickIdeaRecorderWidget: React.FC<{ controller: StudioController | null; o
       <button
         type="button"
         onClick={() => (recording ? void stopAndSave() : void startRec())}
+        disabled={starting || blocked}
         style={{
           ...primaryButton(recording ? colors.danger : undefined),
           minHeight: '48px',
@@ -705,14 +885,14 @@ const QuickIdeaRecorderWidget: React.FC<{ controller: StudioController | null; o
         data-testid="widget-recorder-toggle"
       >
         {recording ? <Square size={16} /> : <Circle size={16} />}
-        {recording ? 'DETENER Y ENVIAR A ESTUDIO' : 'GRABAR IDEA RÁPIDA'}
+        {recording ? 'DETENER Y ENVIAR A ESTUDIO' : starting ? 'ABRIENDO MICRÓFONO...' : 'GRABAR IDEA RÁPIDA'}
       </button>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// 5. Conmutador A/B de Versiones (0 ms)
+// 5. Conmutador A/B de versiones (0 ms)
 // ---------------------------------------------------------------------------
 
 const VersionABWidget: React.FC<{ controller: StudioController | null; onOpenStudio: () => void }> = ({ controller, onOpenStudio }) => {
@@ -728,7 +908,7 @@ const VersionABWidget: React.FC<{ controller: StudioController | null; onOpenStu
         <p style={{ margin: 0, fontSize: '12px', color: colors.muted }}>
           Abre una sesión en el Estudio DAW para alternar en 0 ms entre tu mezcla actual (A) y cualquier snapshot o rama guardada (B).
         </p>
-        <button type="button" onClick={onOpenStudio} style={{ ...primaryButton(), minHeight: '44px', justifyContent: 'center' }}>
+        <button type="button" onClick={onOpenStudio} style={{ ...primaryButton(), minHeight: TOUCH, justifyContent: 'center' }}>
           <GitBranch size={14} /> ABRIR ESTUDIO DAW
         </button>
       </div>
@@ -765,7 +945,7 @@ const VersionABWidget: React.FC<{ controller: StudioController | null; onOpenStu
         type="button"
         disabled={snap.recording || snap.vcs.saving}
         onClick={() => void controller.commitVcsSnapshot(`Snapshot rápido (${snap.vcs.activeBranch})`)}
-        style={{ ...ghostButton, minHeight: '40px', justifyContent: 'center' }}
+        style={{ ...ghostButton, minHeight: TOUCH, justifyContent: 'center' }}
       >
         GUARDAR SNAPSHOT AHORA
       </button>
@@ -774,7 +954,7 @@ const VersionABWidget: React.FC<{ controller: StudioController | null; onOpenStu
 }
 
 // ---------------------------------------------------------------------------
-// Bandeja Flotante Principal (MobileWidgetTray)
+// Bandeja flotante (MobileWidgetTray)
 // ---------------------------------------------------------------------------
 
 const WIDGET_TABS: ReadonlyArray<{ id: MobileWidgetId; label: string; icon: React.ComponentType<{ size?: number }> }> = [
@@ -785,31 +965,85 @@ const WIDGET_TABS: ReadonlyArray<{ id: MobileWidgetId; label: string; icon: Reac
   { id: 'ab', label: 'A / B', icon: Activity },
 ]
 
+const DISCARD_TAKE_TEXT = 'Hay una idea grabándose. Si sales ahora se descarta. ¿Descartarla?'
+
+/** Mientras la bandeja esta abierta, vuelve a mirar cada segundo (abrir o cerrar el Estudio no siempre cambia lo que suena). */
+const STUDIO_RECHECK_MS = 1000
+
 export const MobileWidgetTray: React.FC<Props> = ({ initialWidget = null, offsetBottomPx = 68, onOpenStudio }) => {
   const { activeBand, sharing } = useHub()
   const audio = useGlobalAudioEngine()
-  const [open, setOpen] = useState< boolean >(() => initialWidget !== null)
+  const mobile = useMediaQuery(MOBILE_QUERY, false)
+  const [open, setOpen] = useState<boolean>(() => initialWidget !== null)
   const [activeTab, setActiveTab] = useState<MobileWidgetId>(() => initialWidget ?? 'tuner')
+  const recorderBusyRef = useRef(false)
+  const onRecorderBusy = useCallback((busy: boolean) => {
+    recorderBusyRef.current = busy
+  }, [])
 
   const bandKey = cloudBandKey(activeBand?.id, sharing.activeShared)
   const audioTag = `${activeBand?.id ?? 'none'}:${bandKey}`
-  const studioController = useMemo(() => (open ? audio.adoptStudio(audioTag) : null), [audio, audioTag, open])
+  // Sesion del Estudio abierta para esta banda: sigue al audio global (abrir o cerrar la sesion
+  // con la bandeja abierta la actualiza), no la foto del momento en que se abrio la bandeja.
+  const subscribeStudio = useCallback(
+    (cb: () => void) => {
+      const off = audio.subscribeNowPlaying(cb)
+      const timer = open ? window.setInterval(cb, STUDIO_RECHECK_MS) : 0
+      return () => {
+        off()
+        if (timer) window.clearInterval(timer)
+      }
+    },
+    [audio, open]
+  )
+  const getStudio = useCallback(() => (open ? audio.adoptStudio(audioTag) : null), [audio, audioTag, open])
+  const studioController = useSyncExternalStore(subscribeStudio, getStudio, () => null)
+  const studioRecording = useStudioRecording(studioController)
 
+  /** Cerrar o cambiar de widget desmonta la grabadora: con una toma en curso se pregunta antes. */
+  const confirmLeaveRecorder = useCallback((): boolean => {
+    if (!recorderBusyRef.current) return true
+    return window.confirm(DISCARD_TAKE_TEXT)
+  }, [])
+
+  const closeTray = useCallback(() => {
+    if (confirmLeaveRecorder()) setOpen(false)
+  }, [confirmLeaveRecorder])
+
+  const selectTab = (id: MobileWidgetId) => {
+    if (id === activeTab) return
+    if (activeTab === 'recorder' && !confirmLeaveRecorder()) return
+    setActiveTab(id)
+  }
+
+  const openStudioFromWidget = () => {
+    if (!confirmLeaveRecorder()) return
+    setOpen(false)
+    onOpenStudio()
+  }
+
+  const openRef = useRef(open)
   useEffect(() => {
-    const onToggle = () => setOpen((v) => !v)
+    openRef.current = open
+  }, [open])
+  useEffect(() => {
+    const onToggle = () => {
+      if (!openRef.current) setOpen(true)
+      else if (confirmLeaveRecorder()) setOpen(false)
+    }
     window.addEventListener('bandait:toggle-widgets', onToggle)
     return () => window.removeEventListener('bandait:toggle-widgets', onToggle)
-  }, [])
+  }, [confirmLeaveRecorder])
 
   return (
     <>
-      {/* Disparador compacto flotante de bolsillo */}
-      {!open && (
+      {/* Disparador flotante: solo en movil (en escritorio la bandeja se abre con ?widget=). */}
+      {!open && mobile && (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label="Herramientas y widgets de bolsillo"
-          title="Abrir herramientas rápidas: Afinador YIN, Metrónomo, Pad XY, Grabadora de Ideas y A/B"
+          aria-label="Herramientas de bolsillo"
+          title="Abrir herramientas rápidas: afinador, metrónomo, pad X/Y, grabadora de ideas y A/B"
           data-testid="mobile-widget-fab"
           style={{
             position: 'fixed',
@@ -819,7 +1053,8 @@ export const MobileWidgetTray: React.FC<Props> = ({ initialWidget = null, offset
             display: 'inline-flex',
             alignItems: 'center',
             gap: '6px',
-            minHeight: '38px',
+            minHeight: TOUCH,
+            minWidth: TOUCH,
             padding: '0 12px',
             borderRadius: radius.transport,
             border: '1px solid var(--b-border-strong)',
@@ -832,15 +1067,15 @@ export const MobileWidgetTray: React.FC<Props> = ({ initialWidget = null, offset
             cursor: 'pointer',
           }}
         >
-          <Wrench size={13} style={{ color: 'var(--b-accent)' }} />
-          <span>TOOLS</span>
+          <Wrench size={14} style={{ color: 'var(--b-accent)' }} />
+          <span>HERRAMIENTAS</span>
         </button>
       )}
 
       {open && (
         <div
           role="dialog"
-          aria-label="Widgets musicales de bolsillo"
+          aria-label="Herramientas de bolsillo"
           data-testid="mobile-widget-tray"
           style={{
             position: 'fixed',
@@ -864,12 +1099,12 @@ export const MobileWidgetTray: React.FC<Props> = ({ initialWidget = null, offset
             <span style={labelStyle}>KIT RÁPIDO DE ESCENARIO Y BOLSILLO</span>
             <button
               type="button"
-              onClick={() => setOpen(false)}
-              aria-label="Cerrar widgets"
-              style={{ ...ghostButton, padding: '4px 6px', minHeight: '28px' }}
+              onClick={closeTray}
+              aria-label="Cerrar herramientas"
+              style={{ ...ghostButton, padding: 0, minHeight: TOUCH, minWidth: TOUCH, justifyContent: 'center' }}
               data-testid="mobile-widget-close"
             >
-              <X size={14} />
+              <X size={16} />
             </button>
           </div>
 
@@ -881,14 +1116,15 @@ export const MobileWidgetTray: React.FC<Props> = ({ initialWidget = null, offset
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => selectTab(item.id)}
+                  aria-pressed={selected}
                   data-testid={`mobile-widget-tab-${item.id}`}
                   style={{
                     ...ghostButton,
                     flexDirection: 'column',
                     gap: '2px',
                     padding: '6px 2px',
-                    minHeight: '44px',
+                    minHeight: TOUCH,
                     fontSize: '9px',
                     justifyContent: 'center',
                     borderRadius: radius.control,
@@ -903,11 +1139,21 @@ export const MobileWidgetTray: React.FC<Props> = ({ initialWidget = null, offset
             })}
           </div>
 
-          {activeTab === 'tuner' && <TunerWidget />}
+          {activeTab === 'tuner' && <TunerWidget studioRecording={studioRecording} />}
           {activeTab === 'metronome' && <PocketMetronomeWidget controller={studioController} />}
-          {activeTab === 'xypad' && <MacroXYPadWidget controller={studioController} onOpenStudio={() => { setOpen(false); onOpenStudio() }} />}
-          {activeTab === 'recorder' && <QuickIdeaRecorderWidget controller={studioController} onOpenStudio={() => { setOpen(false); onOpenStudio() }} />}
-          {activeTab === 'ab' && <VersionABWidget controller={studioController} onOpenStudio={() => { setOpen(false); onOpenStudio() }} />}
+          {activeTab === 'xypad' && <MacroXYPadWidget controller={studioController} onOpenStudio={openStudioFromWidget} />}
+          {activeTab === 'recorder' && (
+            <QuickIdeaRecorderWidget
+              controller={studioController}
+              studioRecording={studioRecording}
+              onOpenStudio={() => {
+                setOpen(false)
+                onOpenStudio()
+              }}
+              onBusyChange={onRecorderBusy}
+            />
+          )}
+          {activeTab === 'ab' && <VersionABWidget controller={studioController} onOpenStudio={openStudioFromWidget} />}
         </div>
       )}
     </>

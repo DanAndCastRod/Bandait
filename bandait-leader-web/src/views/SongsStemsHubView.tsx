@@ -2,13 +2,15 @@ import React from 'react'
 import { SongsHubView } from './SongsHubView'
 import { StemsHubView } from './StemsHubView'
 import { SegmentedControl } from '../components/SegmentedControl'
-import type { SongsSegment } from '../components/shell/hubViews'
+import type { SongFocusRequest, SongsSegment } from '../components/shell/hubViews'
 
 interface Props {
   segment: SongsSegment
   onSegmentChange: (segment: SongsSegment) => void
   /** Cancion a abrir en el editor de la LIBRERIA (pedido desde Ensayo). */
   openSongId?: string | null
+  /** Salto explicito a STEMS desde la barra del Universo de la Cancion. */
+  focusRequest?: SongFocusRequest | null
 }
 
 const SEGMENTS: ReadonlyArray<{ id: SongsSegment; label: string }> = [
@@ -21,7 +23,7 @@ const SEGMENTS: ReadonlyArray<{ id: SongsSegment; label: string }> = [
  * techo, con un selector segmentado LIBRERIA | STEMS Y PISTAS. Cada segmento conserva su vista
  * tal cual (SongsHubView y StemsHubView).
  */
-export const SongsStemsHubView: React.FC<Props> = ({ segment, onSegmentChange, openSongId = null }) => (
+export const SongsStemsHubView: React.FC<Props> = ({ segment, onSegmentChange, openSongId = null, focusRequest = null }) => (
   <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
     <div className="hub-view-head">
       <h1 className="hub-view-title">Canciones y Stems</h1>
@@ -35,7 +37,7 @@ export const SongsStemsHubView: React.FC<Props> = ({ segment, onSegmentChange, o
       />
     </div>
     <div id="songs-stems-panel" role="tabpanel" aria-label={segment === 'library' ? 'Librería' : 'Stems y pistas'} style={{ minWidth: 0 }}>
-      {segment === 'library' ? <SongsHubView openSongId={openSongId} /> : <StemsHubView />}
+      {segment === 'library' ? <SongsHubView openSongId={openSongId} /> : <StemsHubView focusRequest={focusRequest} />}
     </div>
   </div>
 )

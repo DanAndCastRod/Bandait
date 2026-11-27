@@ -1243,6 +1243,30 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }))
   }
 
+  /**
+   * Agrega un item al setlist `playlistId` de la banda activa SIN cambiar el setlist activo
+   * (addSongToPlaylist usa el activo del render, que no sirve justo despues de cambiarlo).
+   */
+  const addSongToPlaylistById = (playlistId: string, songData: Omit<PlaylistSong, 'id' | 'orderIndex'>) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => ({
+      ...prev,
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [bandId]: (prev.playlistsMap[bandId] || []).map((pl) =>
+          pl.id === playlistId
+            ? {
+                ...pl,
+                songs: [...pl.songs, { ...songData, id: `song_${Date.now()}`, orderIndex: pl.songs.length + 1 }],
+                updatedAt: new Date().toISOString().slice(0, 10),
+              }
+            : pl
+        ),
+      },
+    }))
+  }
+
   const removeSongFromPlaylist = (songId: string) => {
     updateActivePlaylist((pl) => ({
       ...pl,
@@ -1647,6 +1671,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reorderSongs,
     replaceActivePlaylistSongs,
     addSongToPlaylist,
+    addSongToPlaylistById,
     removeSongFromPlaylist,
     updateStemTrackVolume,
     registerSongStemsInWorkspace,

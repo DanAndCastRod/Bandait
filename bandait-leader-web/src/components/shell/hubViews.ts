@@ -12,6 +12,16 @@ export type HubView = 'studio' | 'rehearsal' | 'songs' | 'setlists' | 'band' | '
 /** Segmento de Canciones y Stems: LIBRERIA (SongsHubView) o STEMS Y PISTAS (StemsHubView). */
 export type SongsSegment = 'library' | 'stems'
 
+/**
+ * Pedido explicito de abrir una cancion en ENSAYO o en STEMS (el salto de la barra del Universo
+ * de la Cancion). Sin el, esas vistas retoman lo que suena en el reproductor global. `nonce`
+ * distingue dos pedidos de la misma cancion.
+ */
+export interface SongFocusRequest {
+  songId: string
+  nonce: number
+}
+
 export interface HubViewDef {
   id: HubView
   /** Nombre en el rail de escritorio. */
@@ -22,7 +32,7 @@ export interface HubViewDef {
 }
 
 const ALL_VIEWS: readonly HubViewDef[] = [
-  { id: 'studio', label: 'Estudio DAW', short: 'Estudio', icon: SlidersVertical },
+  { id: 'studio', label: 'Estudio DAW', short: 'Estudio DAW', icon: SlidersVertical },
   { id: 'rehearsal', label: 'Ensayo y Prompter', short: 'Ensayo', icon: Mic },
   { id: 'songs', label: 'Canciones y Stems', short: 'Canciones', icon: Music },
   { id: 'setlists', label: 'Setlists', short: 'Setlists', icon: ListMusic },
@@ -33,10 +43,11 @@ const ALL_VIEWS: readonly HubViewDef[] = [
 /** El Estudio esta encendido por defecto; services/studio/flag.ts permite apagarlo y entonces su vista no existe. */
 export const HUB_VIEWS: readonly HubViewDef[] = ALL_VIEWS.filter((view) => view.id !== 'studio' || studioEnabled())
 
-/** Las cuatro pildoras fijas de la barra movil (con Estudio directo a 1 toque); el resto va en la hoja "Mas". */
-export const MOBILE_BAR_VIEWS: readonly HubView[] = studioEnabled()
-  ? ['studio', 'rehearsal', 'songs', 'setlists']
-  : ['rehearsal', 'songs', 'setlists']
+/**
+ * Las tres pildoras fijas de la barra movil; con "Mas" son 4 (docs/REQUERIMIENTOS_WEB_3.0.md). El
+ * Estudio DAW va en la hoja "Mas", primero de la lista (decision de Daniel Castaneda, 2026-11-27).
+ */
+export const MOBILE_BAR_VIEWS: readonly HubView[] = ['rehearsal', 'songs', 'setlists']
 
 export function viewDef(id: HubView): HubViewDef | undefined {
   return HUB_VIEWS.find((view) => view.id === id)

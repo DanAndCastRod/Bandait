@@ -3,10 +3,13 @@
  * Estudio DAW (`StudioSession`):
  *   - `songToStudioSeed(song)`: traduce secciones por compases a `StudioMarker[]` y acordes en
  *     linea `[Am]` de cada seccion `chordpro` a `StudioChord[]` exactos en beats.
- *   - `studioToSongPatch(song, session)`: traduce de vuelta `bpm`, `beatsPerBar`, `key`,
- *     `StudioMarker[]` -> `SongSection[]` (conservando letras y avisos hablados existentes cuando
- *     coinciden) y `StudioChord[]` -> acordes ChordPro, devolviendo una vista previa Diff antes de
- *     sobrescribir la ficha oficial de la cancion.
+ *   - `studioToSongPatch(song, session)`: traduce de vuelta `bpm`, `beatsPerBar`, `key`, duracion,
+ *     `StudioMarker[]` -> `SongSection[]` y `StudioChord[]` -> acordes ChordPro, devolviendo una
+ *     vista previa antes de sobrescribir la ficha oficial. Las secciones emparejadas con un
+ *     marcador conservan su letra y su aviso hablado (si tienen letra con acordes en linea y los
+ *     del Estudio difieren, los acordes NO se aplican y la vista previa lo dice); las secciones
+ *     sin marcador se eliminan, y la vista previa lista las que se van con letra (`lyricsRemoved`)
+ *     para que la interfaz pida confirmacion.
  *   - `sessionToNewSong(session, idFactory)`: promueve una maqueta libre creada en el Estudio DAW
  *     (`songId === null`) a una `Song` oficial lista para agregar a un Setlist.
  *
@@ -192,55 +195,117 @@ function formatChordsAsChordPro(chords: readonly StudioChord[], startBeat: numbe
   return lines.join('\n')
 }
 
+/** Nombres de acorde `[X]` de un bloque ChordPro, en orden (sin `[%]` ni directivas). */
+export function chordNamesOf(chordpro: string): string[] {
+  const out: string[] = []
+  for (const line of chordpro.split(/\r?\n/)) {
+    if (line.trim().startsWith('{')) continue
+    for (const m of line.matchAll(CHORD_TOKEN_RE)) {
+      const name = sanitizeChordName(m[1])
+      if (name) out.push(name)
+    }
+  }
+  return out
+}
+
+/** Texto cantado de un bloque ChordPro: lo que queda al quitar acordes, `[%]`, barras y directivas. */
+export function lyricTextOf(chordpro: string): string {
+  return chordpro
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().startsWith('{'))
+    .map((line) => line.replace(/\[[^\]]*\]/g, ' ').replace(/[|%]/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .join('\n')
+}
+
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, i) => name === b[i])
+}
+
+interface BuiltSections {
+  sections: SongSection[]
+  /** Secciones cuyos acordes se reescriben con los del Estudio. */
+  chordsUpdated: string[]
+  /** Secciones con letra y acordes en linea cuyos acordes difieren de los del Estudio: se conserva la letra. */
+  chordsKept: string[]
+}
+
 function buildSectionsFromSession(
   session: StudioSession,
   existingSections: readonly SongSection[],
   idGen: (prefix: 'mk' | 'sec' | 'song') => string,
-): SongSection[] {
+): BuiltSections {
   const bpb = Math.max(1, session.beatsPerBar)
   const sorted = [...session.markers].sort(compareMarkers)
-  const sessionChords = session.chords ?? []
+  const sessionChords = [...(session.chords ?? [])].sort(compareChords)
   const endS = sessionEndSeconds(session)
   const sessionEndBeat = Math.max(
     sorted.length > 0 ? sorted[sorted.length - 1].beat + bpb * 4 : bpb * 8,
     endS > 0 ? Math.ceil(secondsToBeats(endS, session.bpm) / bpb) * bpb : bpb * 8,
   )
+  const chordsUpdated: string[] = []
+  const chordsKept: string[] = []
 
   if (sorted.length === 0) {
-    if (existingSections.length > 0) return existingSections.map((s) => ({ ...s }))
+    if (existingSections.length > 0) return { sections: existingSections.map((s) => ({ ...s })), chordsUpdated, chordsKept }
     const bars = Math.max(4, Math.round(sessionEndBeat / bpb))
-    return [
-      {
-        id: idGen('sec'),
-        kind: 'verse',
-        label: ' Arreglo Principal'.trim(),
-        bars,
-        chordpro: formatChordsAsChordPro(sessionChords, 0, bars * bpb, bpb),
-      },
-    ]
+    return {
+      sections: [
+        {
+          id: idGen('sec'),
+          kind: 'verse',
+          label: 'Arreglo Principal',
+          bars,
+          chordpro: formatChordsAsChordPro(sessionChords, 0, bars * bpb, bpb),
+        },
+      ],
+      chordsUpdated,
+      chordsKept,
+    }
   }
 
-  return sorted.map((m, i) => {
+  // Cada seccion existente se empareja a lo sumo con un marcador: dos marcadores "Coro" no
+  // comparten id (el lider usa el id de la seccion como clave).
+  const used = new Set<string>()
+  const sections = sorted.map((m, i) => {
     const nextBeat = i + 1 < sorted.length ? sorted[i + 1].beat : Math.max(m.beat + bpb * 4, sessionEndBeat)
     const bars = Math.max(1, Math.round((nextBeat - m.beat) / bpb))
     const kind = MARKER_TO_SECTION_KIND[m.kind] ?? 'custom'
     const label = m.label.trim() || kind.toUpperCase()
+    const byIndex = existingSections[i]
     const match =
-      existingSections[i] && existingSections[i].kind === kind
-        ? existingSections[i]
-        : existingSections.find((s) => s.label.trim().toLowerCase() === label.toLowerCase() && s.kind === kind)
+      byIndex && byIndex.kind === kind && !used.has(byIndex.id)
+        ? byIndex
+        : existingSections.find((s) => !used.has(s.id) && s.kind === kind && s.label.trim().toLowerCase() === label.toLowerCase())
+    if (match) used.add(match.id)
 
-    const studioChordsText = formatChordsAsChordPro(sessionChords, m.beat, m.beat + bars * bpb, bpb)
-    // Si la seccion existente tenia letra sin corchetes o estaba vacia, inyectamos los acordes del Estudio;
-    // si ya tenia letra con acordes, conservamos la letra intacta para nunca destruir letras vocales.
-    let chordpro = match?.chordpro ?? ''
-    if (!chordpro.trim() && studioChordsText) {
-      chordpro = studioChordsText
-    } else if (chordpro.trim() && !CHORD_TOKEN_RE.test(chordpro) && studioChordsText) {
-      CHORD_TOKEN_RE.lastIndex = 0
-      chordpro = `${studioChordsText}\n${chordpro}`
+    const endBeat = m.beat + bars * bpb
+    const studioNames = sessionChords.filter((c) => c.beat >= m.beat - 0.01 && c.beat < endBeat - 0.01).map((c) => c.name)
+    const studioChordsText = formatChordsAsChordPro(sessionChords, m.beat, endBeat, bpb)
+    const existing = match?.chordpro ?? ''
+    let chordpro = existing
+    if (!existing.trim()) {
+      // Nada que perder: los acordes del Estudio, si hay.
+      if (studioChordsText) {
+        chordpro = studioChordsText
+        chordsUpdated.push(label)
+      }
+    } else if (!sameNames(chordNamesOf(existing), studioNames)) {
+      const hasLyrics = lyricTextOf(existing).length > 0
+      const existingNames = chordNamesOf(existing)
+      if (!hasLyrics) {
+        // Solo acordes: se reescriben con los del Estudio.
+        chordpro = studioChordsText
+        chordsUpdated.push(label)
+      } else if (existingNames.length === 0) {
+        // Letra sin acordes: los acordes del Estudio van encima y la letra queda intacta.
+        chordpro = `${studioChordsText}\n${existing}`
+        chordsUpdated.push(label)
+      } else {
+        // Letra con acordes en linea: reubicarlos sobre las silabas no es seguro; se conserva tal cual.
+        chordsKept.push(label)
+      }
     }
-    CHORD_TOKEN_RE.lastIndex = 0
 
     return {
       id: match?.id ?? idGen('sec'),
@@ -251,11 +316,29 @@ function buildSectionsFromSession(
       ...(match?.cueText !== undefined ? { cueText: match.cueText } : {}),
     }
   })
+  return { sections, chordsUpdated, chordsKept }
 }
 
 export interface SongSyncPreview {
   updatedSong: Song
   diff: SongDiff
+  /** Lineas de la vista previa: las del diff de la ficha mas duracion, acordes y letras en riesgo. */
+  summary: string[]
+  /** true si aplicar cambia algo de la ficha (incluida la duracion). */
+  changed: boolean
+  /** [antes, despues] en segundos, o null si no cambia. */
+  durationChanged: [number | null, number] | null
+  chordsUpdated: string[]
+  chordsKept: string[]
+  /** Secciones de la ficha sin marcador en el Estudio que llevan letra o aviso hablado: se eliminarian. */
+  lyricsRemoved: Array<{ id: string; label: string }>
+}
+
+/** m:ss de una duracion en segundos ("—" si no hay). */
+export function formatDurationSec(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined || !Number.isFinite(sec)) return '—'
+  const s = Math.max(0, Math.round(sec))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
 /** Calcula la actualizacion propuesta de `Song` desde una `StudioSession` + su Diff de confirmacion. */
@@ -265,7 +348,8 @@ export function studioToSongPatch(
   idGen: (prefix: 'mk' | 'sec' | 'song') => string = newStudioId,
   nowIso = new Date().toISOString(),
 ): SongSyncPreview {
-  const sections = buildSectionsFromSession(session, song.sections, idGen)
+  const built = buildSectionsFromSession(session, song.sections, idGen)
+  const sections = built.sections
   const bars = totalBars(sections)
   const beatsPerBar = Math.max(1, Math.min(12, session.beatsPerBar))
   const bpm = clampBpm(session.bpm)
@@ -284,9 +368,33 @@ export function studioToSongPatch(
     updatedAt: nowIso,
   }
 
+  const diff = diffSongs(song, updatedSong)
+  const keptIds = new Set(sections.map((s) => s.id))
+  const lyricsRemoved = song.sections
+    .filter((s) => !keptIds.has(s.id) && (lyricTextOf(s.chordpro).length > 0 || (typeof s.cueText === 'string' && s.cueText.trim().length > 0)))
+    .map((s) => ({ id: s.id, label: s.label || s.kind }))
+  const before = song.durationSec ?? null
+  const durationChanged: [number | null, number] | null = before === durationSec ? null : [before, durationSec]
+
+  const summary = [...diff.summary]
+  if (durationChanged) summary.push(`Duración: ${formatDurationSec(durationChanged[0])} -> ${formatDurationSec(durationChanged[1])}`)
+  if (built.chordsUpdated.length > 0) summary.push(`Acordes del Estudio aplicados en: ${built.chordsUpdated.join(', ')}`)
+  if (built.chordsKept.length > 0) {
+    summary.push(`Acordes NO aplicados (la sección tiene letra con acordes en línea; se conserva): ${built.chordsKept.join(', ')}`)
+  }
+  if (lyricsRemoved.length > 0) {
+    summary.push(`Se eliminarían CON SU LETRA (sin marcador en el Estudio): ${lyricsRemoved.map((s) => s.label).join(', ')}`)
+  }
+
   return {
     updatedSong,
-    diff: diffSongs(song, updatedSong),
+    diff,
+    summary,
+    changed: diff.changed || durationChanged !== null,
+    durationChanged,
+    chordsUpdated: built.chordsUpdated,
+    chordsKept: built.chordsKept,
+    lyricsRemoved,
   }
 }
 
@@ -297,7 +405,7 @@ export function sessionToNewSong(
   idGen: (prefix: 'mk' | 'sec' | 'song') => string = newStudioId,
 ): Song {
   const nowIso = options.nowIso ?? new Date().toISOString()
-  const sections = buildSectionsFromSession(session, [], idGen)
+  const { sections } = buildSectionsFromSession(session, [], idGen)
   const beatsPerBar = Math.max(1, Math.min(12, session.beatsPerBar))
   const bpm = clampBpm(session.bpm)
   const bars = totalBars(sections)
