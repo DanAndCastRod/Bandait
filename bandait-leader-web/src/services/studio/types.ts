@@ -2197,5 +2197,6 @@ export interface StudioCloudVcsApi {
   getVcs(target: CloudTarget, sessionId: string): Promise<StudioVcsIndex>
   postVcs(target: CloudTarget, sessionId: string, options: PostStudioVcsOptions): Promise<{ commit: StudioVcsCommitMeta; vcs: StudioVcsIndex }>
   getCommit(target: CloudTarget, sessionId: string, commitId: string): Promise<StudioSession>
+  deleteVcsBranch(target: CloudTarget, sessionId: string, branch: string): Promise<StudioVcsIndex>
 }
 

@@ -32,7 +32,7 @@ import { sweepOrphans } from './studioCleanup.ts';
 import { handleMcp } from './mcp.ts';
 import type { Env, ExecutionContextLike, FetchLike, R2Bucket, ScheduledControllerLike, StudioDeps } from './types.ts';
 
-export const VERSION = '1.5.0';
+export const VERSION = '1.5.1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SONG = /^[A-Za-z0-9_-]{1,80}$/;
 const FILE = /^[A-Za-z0-9 ._()-]{1,120}$/;
@@ -100,10 +100,25 @@ function bearer(req: Request): string {
 
 export type AccessLevel = boolean | 'collab';
 
+/** Owner o MusicDirector: administran la banda (borrar sesiones o ramas, gastar IA, limpiar). */
+export function isEditorRole(role: string | null): boolean {
+  return role !== null && EDITORS.has(role);
+}
+
 /** Prefix the caller may use, after checking the session (and the role for writes). */
 export async function authorize(
   req: Request, env: Env, band: string, write: AccessLevel, fetchFn: FetchLike,
 ): Promise<string> {
+  return (await authorizeWithRole(req, env, band, write, fetchFn)).prefix;
+}
+
+/**
+ * Como authorize, y ademas devuelve el rol verificado por Supabase (`Owner` en el workspace
+ * personal `me`, donde la cuenta es la duena de todo).
+ */
+export async function authorizeWithRole(
+  req: Request, env: Env, band: string, write: AccessLevel, fetchFn: FetchLike,
+): Promise<{ prefix: string; role: string }> {
   const token = bearer(req);
   const base = env.SUPABASE_URL.replace(/\/+$/, '');
   const headers = { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
@@ -125,12 +140,12 @@ export async function authorize(
   if (band === 'me') {
     const id = body && typeof body === 'object' ? (body as { id?: unknown }).id : null;
     if (typeof id !== 'string' || !UUID.test(id)) throw new ApiError(401, 'invalid_token');
-    return `users/${id}/`;
+    return { prefix: `users/${id}/`, role: 'Owner' };
   }
   if (typeof body !== 'string') throw new ApiError(403, 'not_a_member');
   if (write === 'collab' && !STUDIO_COLLABORATORS.has(body)) throw new ApiError(403, 'not_an_editor');
   if (write === true && !EDITORS.has(body)) throw new ApiError(403, 'not_an_editor');
-  return `bands/${band}/`;
+  return { prefix: `bands/${band}/`, role: body };
 }
 
 function parseManifest(raw: unknown, song: string): Manifest {

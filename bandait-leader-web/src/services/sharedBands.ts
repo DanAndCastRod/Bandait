@@ -11,6 +11,7 @@
  */
 
 import type { Band, BandMember, MemberRole, Playlist, PlaylistSong, Song, WorkspaceStore } from '../types/hub.ts'
+import { getBandVcs, pruneBandVcs } from './versionControl.ts'
 
 /** Roles que editan canciones y setlists de una banda compartida (lo mismo que exige RLS). */
 export const EDIT_ROLES: readonly MemberRole[] = ['Owner', 'MusicDirector']
@@ -121,7 +122,13 @@ export function sliceBand(ws: WorkspaceStore, bandId: string): WorkspaceStore | 
   const band = ws.bands.find((b) => b.id === bandId)
   if (!band) return null
   const voice = ws.voiceMap?.[bandId]
+  // Historial de versiones con los topes de WORKSPACE_V2.md 9 y sin entidades borradas.
   const bandVcs = ws.vcsMap?.[bandId]
+    ? pruneBandVcs(getBandVcs(ws, bandId), {
+        songIds: new Set((ws.songsMap?.[bandId] ?? []).map((s) => s.id)),
+        playlistIds: new Set((ws.playlistsMap[bandId] ?? []).map((p) => p.id)),
+      })
+    : undefined
   return {
     schemaVersion: ws.schemaVersion,
     activeBandId: bandId,

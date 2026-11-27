@@ -13,7 +13,16 @@ import type { Playlist, Song, WorkspaceStore } from '../types/hub.ts'
 import { totalBars } from './workspaceSchema.ts'
 
 export const DEFAULT_ECOSYSTEM_BRANCHES = ['main', 'vivo', 'acustico'] as const
-export const MAX_ENTITY_COMMITS = 48
+/**
+ * Topes de `vcsMap` (WORKSPACE_V2.md 9). Cada commit es una copia completa de la cancion o del
+ * setlist y viaja dentro de `bandait_bands.content` (banda compartida) o de
+ * `bandait_workspaces.workspace` (personal), asi que el historial tiene que ser corto.
+ */
+export const MAX_ENTITY_COMMITS = 12
+/** Bytes (UTF-8) del historial de UNA banda. */
+export const MAX_BAND_VCS_BYTES = 256 * 1024
+/** Bytes del historial de todas las bandas de un workspace personal juntas. */
+export const MAX_WORKSPACE_VCS_BYTES = 1024 * 1024
 const BRANCH_RE = /^[A-Za-z0-9_-]{1,40}$/
 
 export type VersionedEntityKind = 'song' | 'playlist'
@@ -93,9 +102,21 @@ export function emptyBandVcs(): EcosystemBandVcs {
   return { songs: {}, playlists: {} }
 }
 
-function makeCommitId(prefix: string, nowIso: string, count: number): string {
+function randomSuffix(): string {
+  const bytes = new Uint8Array(4)
+  const cryptoApi = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto
+  if (cryptoApi?.getRandomValues) cryptoApi.getRandomValues(bytes)
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Id unico de verdad: fecha + sufijo aleatorio, distinto de todos los del historial. */
+function makeCommitId(prefix: string, nowIso: string, existing: readonly { id: string }[]): string {
   const compact = nowIso.replace(/[^0-9]/g, '').slice(0, 14)
-  return `${prefix}_${compact}_${count + 1}`
+  const taken = new Set(existing.map((c) => c.id))
+  let id = `${prefix}_${compact}_${randomSuffix()}`
+  while (taken.has(id)) id = `${prefix}_${compact}_${randomSuffix()}`
+  return id
 }
 
 export interface CommitEntityArgs<T> {
@@ -117,7 +138,7 @@ export function commitEntitySnapshot<T>(args: CommitEntityArgs<T>): {
   const nowIso = args.nowIso ?? new Date().toISOString()
   const message = args.message.trim().slice(0, 160) || `Snapshot (${branch})`
   const authorName = (args.authorName ?? 'Integrante').trim().slice(0, 80) || 'Integrante'
-  const id = args.commitId ?? makeCommitId('v', nowIso, prev.commits.length)
+  const id = args.commitId ?? makeCommitId('v', nowIso, prev.commits)
   const parentId = prev.branches[branch] ?? prev.commits[0]?.id ?? null
 
   const commit: EntityCommit<T> = {
@@ -316,20 +337,170 @@ export function diffPlaylists(base: Playlist, target: Playlist): PlaylistDiff {
   }
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * Lector tolerante de un historial (WORKSPACE_V2.md 9): descarta commits sin la forma minima,
+ * ramas que apuntan a commits que no estan y conserva los campos desconocidos de cada commit.
+ * Devuelve null si no queda nada utilizable.
+ */
+function readHistory<T>(raw: unknown): EntityVcsHistory<T> | null {
+  if (!isRecord(raw) || !Array.isArray(raw.commits)) return null
+  const commits: EntityCommit<T>[] = []
+  const seen = new Set<string>()
+  for (const c of raw.commits) {
+    if (!isRecord(c) || typeof c.id !== 'string' || !c.id || seen.has(c.id) || typeof c.branch !== 'string' || !isRecord(c.snapshot)) continue
+    seen.add(c.id)
+    commits.push({
+      ...(c as unknown as EntityCommit<T>),
+      parentId: typeof c.parentId === 'string' ? c.parentId : null,
+      message: typeof c.message === 'string' ? c.message : '',
+      authorName: typeof c.authorName === 'string' ? c.authorName : 'Integrante',
+      createdAt: typeof c.createdAt === 'string' ? c.createdAt : '',
+    })
+  }
+  const branches: Record<string, string> = {}
+  if (isRecord(raw.branches)) {
+    for (const [k, v] of Object.entries(raw.branches)) if (BRANCH_RE.test(k) && typeof v === 'string' && seen.has(v)) branches[k] = v
+  }
+  if (commits.length === 0) return null
+  const activeBranch = typeof raw.activeBranch === 'string' && BRANCH_RE.test(raw.activeBranch) ? raw.activeBranch : 'main'
+  return { activeBranch, branches, commits }
+}
+
+function readHistories<T>(raw: unknown): Record<string, EntityVcsHistory<T>> {
+  const out: Record<string, EntityVcsHistory<T>> = {}
+  if (!isRecord(raw)) return out
+  for (const [id, h] of Object.entries(raw)) {
+    const history = readHistory<T>(h)
+    if (history) out[id] = history
+  }
+  return out
+}
+
 /** Obtiene el almacen VCS de una banda dentro de `WorkspaceStore` (vacio si aun no existe). */
 export function getBandVcs(ws: WorkspaceStore, bandId: string): EcosystemBandVcs {
-  const raw = ws.vcsMap?.[bandId]
-  if (!raw || typeof raw !== 'object') return emptyBandVcs()
+  const raw = ws.vcsMap?.[bandId] as unknown
+  if (!isRecord(raw)) return emptyBandVcs()
   return {
-    songs: raw.songs && typeof raw.songs === 'object' ? raw.songs : {},
-    playlists: raw.playlists && typeof raw.playlists === 'object' ? raw.playlists : {},
+    ...(raw as unknown as EcosystemBandVcs),
+    songs: readHistories<Song>(raw.songs),
+    playlists: readHistories<Playlist>(raw.playlists),
   }
 }
 
-/** Escribe el historial VCS de una cancion en `WorkspaceStore`. */
+function utf8Bytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength
+}
+
+/** Recorta un historial a MAX_ENTITY_COMMITS (las cabezas de rama se quedan). */
+function capHistory<T>(history: EntityVcsHistory<T>): EntityVcsHistory<T> {
+  if (history.commits.length <= MAX_ENTITY_COMMITS) return history
+  const heads = new Set(Object.values(history.branches))
+  const commits: EntityCommit<T>[] = []
+  for (const c of history.commits) if (commits.length < MAX_ENTITY_COMMITS || heads.has(c.id)) commits.push(c)
+  return { ...history, commits }
+}
+
+export interface PruneBandVcsOptions {
+  /** Canciones que existen: los historiales de las demas se borran. Sin el campo, no se filtra. */
+  songIds?: ReadonlySet<string>
+  playlistIds?: ReadonlySet<string>
+  maxBytes?: number
+}
+
+/**
+ * Poda el historial de una banda: quita el de entidades borradas, deja MAX_ENTITY_COMMITS por
+ * entidad y, si la banda pasa de `maxBytes`, expulsa primero los commits mas viejos que no son
+ * cabeza, luego las ramas mas viejas que no son la activa y por ultimo los historiales enteros
+ * mas viejos. Pura y determinista.
+ */
+export function pruneBandVcs(bandVcs: EcosystemBandVcs, options: PruneBandVcsOptions = {}): EcosystemBandVcs {
+  const maxBytes = options.maxBytes ?? MAX_BAND_VCS_BYTES
+  type Kind = 'songs' | 'playlists'
+  const tables: Record<Kind, Record<string, EntityVcsHistory<unknown>>> = { songs: {}, playlists: {} }
+  for (const kind of ['songs', 'playlists'] as const) {
+    const live = kind === 'songs' ? options.songIds : options.playlistIds
+    for (const [id, h] of Object.entries(bandVcs[kind] as Record<string, EntityVcsHistory<unknown>>)) {
+      if (live && !live.has(id)) continue
+      const history = readHistory<unknown>(h)
+      if (history) tables[kind][id] = capHistory(history)
+    }
+  }
+  const rebuild = (): EcosystemBandVcs => ({
+    ...bandVcs,
+    songs: tables.songs as Record<string, EntityVcsHistory<Song>>,
+    playlists: tables.playlists as Record<string, EntityVcsHistory<Playlist>>,
+  })
+  // Tamano por commit, calculado una vez; el total se descuenta al expulsar.
+  const sizes = new Map<EntityCommit<unknown>, number>()
+  let total = utf8Bytes({ songs: {}, playlists: {} })
+  for (const kind of ['songs', 'playlists'] as const) {
+    for (const [id, h] of Object.entries(tables[kind])) {
+      total += utf8Bytes(id) + utf8Bytes({ activeBranch: h.activeBranch, branches: h.branches, commits: [] })
+      for (const c of h.commits) {
+        const size = utf8Bytes(c) + 1
+        sizes.set(c, size)
+        total += size
+      }
+    }
+  }
+  const removeCommit = (kind: Kind, id: string, commit: EntityCommit<unknown>) => {
+    const h = tables[kind][id]
+    const commits = h.commits.filter((c) => c !== commit)
+    const branches = Object.fromEntries(Object.entries(h.branches).filter(([, head]) => head !== commit.id))
+    total -= sizes.get(commit) ?? 0
+    if (commits.length === 0) delete tables[kind][id]
+    else tables[kind][id] = { ...h, commits, branches }
+  }
+  while (total > maxBytes) {
+    // 1) El commit mas viejo que no es cabeza. 2) La cabeza mas vieja que no es la rama activa.
+    // 3) La cabeza mas vieja de todas (se pierde ese historial entero si era el ultimo commit).
+    let victim: { kind: Kind; id: string; commit: EntityCommit<unknown>; rank: number } | null = null
+    for (const kind of ['songs', 'playlists'] as const) {
+      for (const [id, h] of Object.entries(tables[kind])) {
+        const heads = new Set(Object.values(h.branches))
+        const activeHead = h.branches[h.activeBranch]
+        for (const commit of h.commits) {
+          const rank = !heads.has(commit.id) ? 0 : commit.id !== activeHead ? 1 : 2
+          if (!victim || rank < victim.rank || (rank === victim.rank && commit.createdAt < victim.commit.createdAt)) {
+            victim = { kind, id, commit, rank }
+          }
+        }
+      }
+    }
+    if (!victim) break
+    removeCommit(victim.kind, victim.id, victim.commit)
+  }
+  return rebuild()
+}
+
+/**
+ * Poda `vcsMap` de un workspace: quita las bandas que ya no estan, los historiales de canciones y
+ * setlists borrados, y aplica los topes por banda y del workspace entero (WORKSPACE_V2.md 9).
+ */
+export function pruneWorkspaceVcs(ws: WorkspaceStore): WorkspaceStore {
+  if (!ws.vcsMap) return ws
+  const bandIds = ws.bands.map((b) => b.id).filter((id) => ws.vcsMap?.[id])
+  const perBand = Math.min(MAX_BAND_VCS_BYTES, Math.floor(MAX_WORKSPACE_VCS_BYTES / Math.max(1, bandIds.length)))
+  const vcsMap: Record<string, EcosystemBandVcs> = {}
+  for (const bandId of bandIds) {
+    const pruned = pruneBandVcs(getBandVcs(ws, bandId), {
+      songIds: new Set((ws.songsMap?.[bandId] ?? []).map((s) => s.id)),
+      playlistIds: new Set((ws.playlistsMap[bandId] ?? []).map((p) => p.id)),
+      maxBytes: perBand,
+    })
+    if (Object.keys(pruned.songs).length > 0 || Object.keys(pruned.playlists).length > 0) vcsMap[bandId] = pruned
+  }
+  return { ...ws, vcsMap }
+}
+
+/** Escribe el historial VCS de una cancion en `WorkspaceStore` (y aplica los topes). */
 export function withSongHistory(ws: WorkspaceStore, bandId: string, songId: string, history: EntityVcsHistory<Song>): WorkspaceStore {
   const bandVcs = getBandVcs(ws, bandId)
-  return {
+  return pruneWorkspaceVcs({
     ...ws,
     vcsMap: {
       ...(ws.vcsMap ?? {}),
@@ -338,13 +509,13 @@ export function withSongHistory(ws: WorkspaceStore, bandId: string, songId: stri
         songs: { ...bandVcs.songs, [songId]: history },
       },
     },
-  }
+  })
 }
 
-/** Escribe el historial VCS de un setlist en `WorkspaceStore`. */
+/** Escribe el historial VCS de un setlist en `WorkspaceStore` (y aplica los topes). */
 export function withPlaylistHistory(ws: WorkspaceStore, bandId: string, playlistId: string, history: EntityVcsHistory<Playlist>): WorkspaceStore {
   const bandVcs = getBandVcs(ws, bandId)
-  return {
+  return pruneWorkspaceVcs({
     ...ws,
     vcsMap: {
       ...(ws.vcsMap ?? {}),
@@ -353,5 +524,5 @@ export function withPlaylistHistory(ws: WorkspaceStore, bandId: string, playlist
         playlists: { ...bandVcs.playlists, [playlistId]: history },
       },
     },
-  }
+  })
 }

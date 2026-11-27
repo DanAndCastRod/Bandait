@@ -1054,13 +1054,53 @@ para generar. El cuerpo de `POST .../jobs` no cambia.
 ### 7.1 Permisos colaborativos en `/v1/bands/{band}/studio`
 - **Lectura** (`GET .../studio`, `GET .../session`, `GET .../assets/{asset}`, `GET .../jobs/{job}`, `GET .../vcs`, `GET .../commits/{commit}`, `GET .../_cleanup`): cualquier integrante de la banda.
 - **Edición colaborativa de estudio** (`PUT .../session`, `PUT .../assets/{asset}`, `POST .../vcs`): roles `Owner`, `MusicDirector`, `Musician` y `SoundEngineer` (`STUDIO_COLLABORATORS`). El rol `Substitute` permanece en solo lectura.
-- **Administración y gasto de IA** (`DELETE .../studio/{session}`, `POST .../_cleanup`, `POST .../jobs`): exclusivo de `Owner` y `MusicDirector` (`EDITORS`).
+- **Administración y gasto de IA** (`DELETE .../studio/{session}`, `DELETE .../vcs/branches/{branch}`, `POST .../_cleanup`, `POST .../jobs`): exclusivo de `Owner` y `MusicDirector` (`EDITORS`).
 
 ### 7.2 Control de versiones en R2 (`vcs.json` y `commits/`)
-- `GET /v1/bands/{band}/studio/{session}/vcs`: devuelve `{ branches: Record<string, string>, commits: VcsCommitMeta[], protected_assets: string[] }` (o un grafo vacío si aún no hay commits), con cabecera `ETag`.
-- `POST /v1/bands/{band}/studio/{session}/vcs`: cuerpo `{ branch: string, message: string, author_name?: string, session: SessionDocument }`. Valida `session`, verifica que sus `assets` existan en R2, escribe el snapshot inmutable en `studio/<session>/commits/<commit_id>.json` y actualiza `studio/<session>/vcs.json` acumulando en `protected_assets` los nombres de archivo e ids de `assets` referenciados por todos los commits retenidos (máximo 128 commits por sesión).
-- `GET /v1/bands/{band}/studio/{session}/commits/{commit}`: devuelve el `SessionDocument` guardado en ese commit.
-- `studioCleanup.ts` lee `studio/<session>/vcs.json` (1 operación R2 adicional por sesión) y protege todos los `protected_assets` contra el barrido de huérfanos.
+
+Cambios del Worker 1.5.1 (2026-11-27): `parent_id` normativo, tope de ramas, borrado de rama,
+`retired_assets`, autor verificado y `vcs_conflict` pasa de 412 a 409.
+
+```
+VcsIndex {
+  version           1
+  branches          { [rama]: commit_id }      rama ^[A-Za-z0-9_-]{1,40}$, hasta 16
+  commits           VcsCommitMeta[]            del más nuevo al más viejo
+  protected_assets  string[]                   NOMBRES de archivo de assets/ (no ids)
+  retired_assets    { file, until }[]          1.5.1; ausente en índices anteriores = []
+}
+
+VcsCommitMeta {
+  id, branch, parent_id (string | null), message, author_id (sub del token | null),
+  author_name, created_at, track_count, bpm, key (string | null), asset_files string[]
+}
+```
+
+- `GET /v1/bands/{band}/studio/{session}/vcs`: devuelve el `VcsIndex` (vacío si aún no hay commits), con cabecera `ETag` cuando existe. Un lector viejo ignora `retired_assets`.
+- `POST /v1/bands/{band}/studio/{session}/vcs`: cuerpo `{ branch: string, message: string, parent_id?: string | null, author_name?: string, session: SessionDocument }` (hasta 1 MiB + 64 KiB; más es 413 `session_too_large`). Valida `session` (400 `bad_session`), verifica que sus `assets` existan en R2 con su tamaño (409 `missing_asset`), escribe el snapshot inmutable en `studio/<session>/commits/<commit_id>.json` (409 `commit_conflict` si el id ya existe) y actualiza `vcs.json` con escritura condicional (`etagMatches`). Responde 201 `{ commit, vcs }`.
+  - **`parent_id`**: ausente, el commit se encadena a la cabeza actual de la rama. Presente, debe ser la cabeza actual (`null` = la rama todavía no existe); si no, 409 `vcs_conflict` y no se escribe nada. El Hub, ante 409 `vcs_conflict`, vuelve a leer el índice y reintenta una vez con la cabeza nueva.
+  - **Carreras**: si `vcs.json` cambió entre la lectura y la escritura, el Worker relee y reintenta hasta 3 veces; si sigue perdiendo, 409 `vcs_conflict` y borra el snapshot que había escrito.
+  - **`author_name`**: sale de la identidad verificada (token de Supabase: `user_metadata.full_name`, `user_metadata.name` o la parte local del correo; `Integrante` si no hay nada). El campo del cuerpo se acepta y se ignora.
+  - **Topes**: se retienen 128 commits; las cabezas de rama nunca se expulsan (como mucho 128 + 16 entradas). Hasta 16 ramas: un commit que crearía la 17.ª es 409 `too_many_branches`. Si el índice pasa de 1 MiB se expulsan commits viejos que no son cabeza hasta que quepa. Los documentos de los commits expulsados se borran.
+- `DELETE /v1/bands/{band}/studio/{session}/vcs/branches/{branch}` (Owner / MusicDirector): quita la rama y los commits de esa rama que ninguna otra cabeza alcanza por `parent_id`; borra sus documentos. Responde 200 `{ deleted_commits, vcs }`. `main` no se borra (409 `branch_protected`); rama inexistente 404 `no_branch`; nombre inválido 400 `bad_vcs`; carrera perdida 3 veces 409 `vcs_conflict`.
+- `GET /v1/bands/{band}/studio/{session}/commits/{commit}`: devuelve el `SessionDocument` guardado en ese commit. `{commit}` sin el patrón de id es 400 `bad_commit`; inexistente 404 `no_commit`.
+- **Protección de audios**: `protected_assets` = archivos de todos los commits retenidos ∪ `retired_assets` vigentes. Un audio que deja de estar en algún commit retenido (commit expulsado o rama borrada) entra en `retired_assets` con `until` = ahora + 30 días (hasta 4096 entradas; si sobran, salen primero las que vencen antes) y se suelta en la primera escritura del índice después de vencer.
+- `studioCleanup.ts` lee `vcs.json` solo en sesiones con candidatos (1 operación R2) y no borra ningún archivo de `protected_assets` (por nombre, y por id = nombre sin extensión). Antes de borrar vuelve a pedir el etag de `session.json` **y** de `vcs.json`; si cualquiera cambió, salta esa sesión. La limpieza oportunista disparada por el guardado de un `Musician` o `SoundEngineer` es conservadora: protege además todo `retired_assets`, aunque haya vencido.
+- Un `vcs.json` ilegible es 500 `vcs_corrupt` en `GET`/`POST`/`DELETE` y deja la sesión sin limpiar (`session_unreadable`).
+
+Códigos (se suman a la tabla de errores de v1 7):
+
+| HTTP | `error` | Ruta | Cuándo |
+|---|---|---|---|
+| 400 | `bad_vcs` | `POST .../vcs`, `DELETE .../vcs/branches/{branch}` | cuerpo no es objeto, rama o mensaje inválidos, `parent_id` mal formado, nombre de rama inválido |
+| 400 | `bad_commit` | `GET .../commits/{commit}` | `{commit}` no cumple el patrón de id |
+| 404 | `no_commit` | `GET .../commits/{commit}` | el snapshot no existe |
+| 404 | `no_branch` | `DELETE .../vcs/branches/{branch}` | la rama no existe |
+| 409 | `vcs_conflict` | `POST .../vcs`, `DELETE .../vcs/branches/{branch}` | `parent_id` no es la cabeza actual, o `vcs.json` siguió cambiando tras 3 intentos |
+| 409 | `commit_conflict` | `POST .../vcs` | colisión de id al escribir el snapshot |
+| 409 | `too_many_branches` | `POST .../vcs` | la sesión ya tiene 16 ramas |
+| 409 | `branch_protected` | `DELETE .../vcs/branches/{branch}` | `main` no se borra |
+| 500 | `vcs_corrupt` | `GET`/`POST .../vcs`, `DELETE .../vcs/branches/{branch}` | `vcs.json` ilegible o fuera del esquema v1 |
 
 ### 7.3 Efectos DSP adicionales, polaridad/curvas de clip y `analog_drift` (solo `version: 2`)
 - Nuevos tipos de `fx` admitidos en `version: 2` (hasta 5 efectos en pista, hasta 6 en master con `limiter` de último):

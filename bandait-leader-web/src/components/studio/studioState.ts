@@ -34,7 +34,7 @@ import type { SectionSpan } from '../../services/stemTiming'
 import { encodeWav24, parseWavHeader } from '../../services/wav'
 import { bounce, bounceRange, soloTrackSession } from '../../services/studio/bounce'
 import { COMPUTER_KEYBOARD_DEFAULT_OCTAVE } from '../../services/studio/computerKeyboard'
-import { StudioEngine, playbackStopS } from '../../services/studio/engine'
+import { StudioEngine, assetsInUse, playbackStopS } from '../../services/studio/engine'
 import { instrumentTailSeconds } from '../../services/studio/instruments/core'
 import { createHistory, STUDIO_HISTORY_LIMIT } from '../../services/studio/history'
 import { instrumentAvailability } from '../../services/studio/instruments/index'
@@ -203,8 +203,10 @@ import {
 } from '../../services/studio/productionTools'
 import { applySongStructureToSession, songToStudioSeed } from '../../services/studio/songStudioBridge'
 import {
+  StudioMergeConflictError,
   createStudioCollabChannel,
   mergeCollaborativeSession,
+  mergeCollaborativeSessionDetailed,
   type RealtimeClientLike,
   type StudioCollabEvent,
   type StudioCollabHandle,
@@ -849,6 +851,13 @@ export class StudioController {
   private lastCloudBase: StudioSession
   private vcsBundle: StudioVcsBundle = emptyStudioVcsBundle()
   private abWorkingBackup: StudioSession | null = null
+  /**
+   * Audios ya decodificados de la referencia B del A/B: el cambio a B no espera a leer ni a
+   * decodificar (resolveAudio los devuelve sin consumirlos). Se vacia al quitar la referencia.
+   */
+  private abPreloaded = new Map<string, AudioBuffer>()
+  /** Cambios de compañeros en serie: dos guardados seguidos no se fusionan a la vez. */
+  private collabQueue: Promise<void> = Promise.resolve()
   private widgetsToggleHandler: (() => void) | null = null
 
   constructor(options: StudioControllerOptions) {
@@ -964,10 +973,11 @@ export class StudioController {
         selectedTrackId: this.snap.selectedTrackId,
       },
       onPeersChange: (peers) => {
-        this.emit({ collaborators: peers.filter((p) => p.sessionId === this.sessionId || p.sessionId === null) })
+        // Colabora en esta sesion quien la tiene abierta; quien mira la lista (sessionId null) no.
+        this.emit({ collaborators: peers.filter((p) => p.sessionId === this.sessionId) })
       },
       onEvent: (event) => {
-        void this.handleCollabEvent(event)
+        this.collabQueue = this.collabQueue.then(() => this.handleCollabEvent(event)).catch(() => undefined)
       },
     })
     void this.initVcs()
@@ -984,9 +994,16 @@ export class StudioController {
 
   async dispose(): Promise<void> {
     if (this.disposed) return
+    // Un autoguardado a la nube que estaba esperando se hace ahora, no se pierde: sube en segundo
+    // plano (no usa el motor) y el canal de colaboracion se cierra cuando termina, para que los
+    // companeros reciban el aviso de session_saved.
+    let cloudFlush: Promise<void> | null = null
     if (this.cloudAutoSaveTimer) {
       clearTimeout(this.cloudAutoSaveTimer)
       this.cloudAutoSaveTimer = null
+      if (this.cloud && this.snap.canEditCloud && this.snap.save.dirty && !this.snap.recording && this.snap.save.cloud !== 'saving') {
+        cloudFlush = this.saveToCloud(false)
+      }
     }
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -997,8 +1014,17 @@ export class StudioController {
       clearTimeout(this.tapTimer)
       this.tapTimer = null
     }
-    this.collabHandle?.dispose()
-    this.collabHandle = null
+    const handle = this.collabHandle
+    if (cloudFlush) {
+      void cloudFlush.finally(() => {
+        handle?.dispose()
+        if (this.collabHandle === handle) this.collabHandle = null
+      })
+    } else {
+      handle?.dispose()
+      this.collabHandle = null
+    }
+    this.abPreloaded.clear()
     this.disposed = true
     this.listeners.clear()
     this.frameCallbacks.clear()
@@ -1061,6 +1087,8 @@ export class StudioController {
       this.decoded.delete(asset.id)
       return ready
     }
+    const preloaded = this.abPreloaded.get(asset.id)
+    if (preloaded) return preloaded
     let file: Blob | null = await studioStore.getAsset(this.sessionId, asset.file).catch(() => null)
     if (!file && this.cloud) {
       try {
@@ -3266,6 +3294,17 @@ export class StudioController {
   }
 
   /**
+   * Los audios que nombra un documento leido de la nube ya estan en la nube: no hay que subirlos
+   * (y quiza todavia no esten en este equipo, si los grabo otro integrante).
+   */
+  private markInCloud(session: StudioSession): void {
+    const files = this.uploadedFiles()
+    const before = files.size
+    for (const asset of session.assets) files.add(asset.file)
+    if (files.size !== before) this.storeUploaded(files)
+  }
+
+  /**
    * GUARDAR: sube los audios que falten y el documento. `overwrite` pisa la version de la nube
    * (tras un conflicto). En caso de colision 412 intenta primero una fusion colaborativa de 3 vias
    * (`mergeCollaborativeSession`) para que dos musicos editando distintas pistas nunca se pisen.
@@ -3286,7 +3325,7 @@ export class StudioController {
       this.saveTimer = null
     }
     await this.queueLocalSave()
-    const version = this.editCount
+    let version = this.editCount
     const workingSession = this.abWorkingBackup ?? this.snap.session
     const document = removeUnusedAssets(workingSession)
     this.emit({ save: { ...this.snap.save, cloud: 'saving', cloudDetail: null, uploading: { done: 0, total: document.assets.length } } })
@@ -3305,20 +3344,42 @@ export class StudioController {
           // Resolucion automatica de 3 vias por entidad antes de molestar al musico con un conflicto.
           const remote = await studioCloud.getSession(cloud, this.sessionId)
           if (!remote) throw err
-          const merged = mergeCollaborativeSession(this.lastCloudBase, workingSession, remote.session)
-          const mergedDoc = removeUnusedAssets(merged)
+          // Si no combina (StudioMergeConflictError) se muestra el conflicto y NO se sube nada.
+          const result = mergeCollaborativeSessionDetailed(this.lastCloudBase, workingSession, remote.session)
+          const mergedDoc = removeUnusedAssets(result.session)
+          // Los audios que agrego el otro ya estan en la nube: solo se suben los de este equipo.
+          this.markInCloud(remote.session)
           await this.uploadAssets(cloud, mergedDoc, false)
           saved = await studioCloud.putSession(cloud, mergedDoc, { ifMatch: remote.etag })
           this.lastCloudBase = saved.session
-          if (!this.abWorkingBackup) {
-            this.history.push(merged, 'Fusión colaborativa')
-            this.setSession(merged, false)
-          } else {
-            this.abWorkingBackup = merged
+          // Lo que el musico edito mientras se subia no se pierde: se vuelve a fusionar contra el
+          // estado vigente (base = lo que se fusiono, local = lo de ahora, remoto = lo subido).
+          const current = this.abWorkingBackup ?? this.snap.session
+          const editedMeanwhile = current !== workingSession
+          let next = result.session
+          if (editedMeanwhile) {
+            try {
+              next = mergeCollaborativeSession(workingSession, current, result.session)
+            } catch {
+              next = current
+            }
           }
-          await this.engine.load(this.snap.session, this.resolveAudio).catch(() => undefined)
-          void this.ensurePeaks()
-          this.notify('info', 'Cambios combinados en tiempo real con la banda.')
+          if (!this.abWorkingBackup) {
+            this.history.push(next, 'Fusión colaborativa')
+            // setSession sincroniza el motor en caliente (syncEngine): sin halt, sin cortar a quien escucha.
+            this.setSession(next, false)
+          } else {
+            this.abWorkingBackup = next
+          }
+          // Sin ediciones durante la subida, lo que queda en pantalla es lo que se guardo.
+          if (!editedMeanwhile) version = this.editCount
+          else if (!this.disposed) this.scheduleSave()
+          this.notify(
+            result.conflicts.length > 0 ? 'warn' : 'info',
+            result.conflicts.length > 0
+              ? `Cambios combinados con la banda. ${result.conflicts.length} ${result.conflicts.length === 1 ? 'ajuste chocó' : 'ajustes chocaron'} con los de otro integrante: se mantuvo tu versión.`
+              : 'Cambios combinados en tiempo real con la banda.',
+          )
         } else {
           throw err
         }
@@ -3340,12 +3401,17 @@ export class StudioController {
         updatedAt: saved.session.updatedAt,
       })
     } catch (err) {
-      const conflict = err instanceof StemCloudError && (err.code === 'session_conflict' || err.status === 412)
+      const mergeConflict = err instanceof StudioMergeConflictError
+      const conflict = mergeConflict || (err instanceof StemCloudError && (err.code === 'session_conflict' || err.status === 412))
       this.emit({
         save: {
           ...this.snap.save,
           cloud: conflict ? 'conflict' : 'error',
-          cloudDetail: conflict ? 'Alguien guardó esta sesión en la nube después de que la abriste.' : errorText(err, 'No se pudo guardar en la nube.'),
+          cloudDetail: mergeConflict
+            ? `${err.message} No se subió nada: recarga la versión de la nube o sobrescríbela.`
+            : conflict
+              ? 'Alguien guardó esta sesión en la nube después de que la abriste.'
+              : errorText(err, 'No se pudo guardar en la nube.'),
           uploading: null,
         },
       })
@@ -3386,6 +3452,7 @@ export class StudioController {
       }
       await this.saving.catch(() => undefined)
       await studioStore.saveSession(remote.session, { band: this.band, etag: remote.etag, dirty: false })
+      this.markInCloud(remote.session)
       if (remote.session.sampleRate !== this.snap.session.sampleRate) await this.closeInput()
       this.lastCloudBase = remote.session
       this.abWorkingBackup = null
@@ -3470,36 +3537,59 @@ export class StudioController {
       await this.refreshVcsFromCloud()
       return
     }
+    // Grabando o subiendo no se toca nada: el proximo guardado choca (412) y fusiona solo.
     if (event.type === 'session_saved' && this.cloud && !this.snap.recording && this.snap.save.cloud !== 'saving') {
       if (event.etag === this.snap.save.etag) return
-      if (this.snap.abState?.active === 'B') return
       try {
         const remote = await studioCloud.getSession(this.cloud, this.sessionId)
-        if (!remote) return
+        if (!remote || this.disposed || remote.etag === this.snap.save.etag) return
+        // Durante la descarga pudo empezar una toma o un guardado (la foto cambia tras el await).
+        const now = this.snapshot()
+        if (now.recording || now.save.cloud === 'saving') return
+        this.markInCloud(remote.session)
+        const peer = this.snap.collaborators.find((p) => p.userId === event.senderId)?.name ?? 'otro integrante'
+        // Con la referencia B sonando, lo de la banda va a la mezcla A (la que vuelve al soltar B).
+        const working = this.abWorkingBackup ?? this.snap.session
+        let next: StudioSession
+        let conflicts = 0
         if (!this.snap.save.dirty) {
-          this.lastCloudBase = remote.session
+          next = remote.session
           await studioStore.saveSession(remote.session, {
             band: this.band,
             etag: remote.etag,
             dirty: false,
             cloudUpdatedAt: remote.session.updatedAt,
           }).catch(() => undefined)
-          this.history.push(remote.session, 'Actualización en vivo')
-          this.setSession(remote.session, false, {
-            save: { ...this.snap.save, local: 'saved', dirty: false, etag: remote.etag, cloud: 'idle', cloudDetail: null },
-          })
-          await this.engine.load(remote.session, this.resolveAudio).catch(() => undefined)
-          void this.ensurePeaks()
         } else {
-          const merged = mergeCollaborativeSession(this.lastCloudBase, this.snap.session, remote.session)
-          this.lastCloudBase = remote.session
-          this.history.push(merged, 'Fusión en vivo')
-          this.setSession(merged, false, {
-            save: { ...this.snap.save, etag: remote.etag },
-          })
-          await this.engine.load(merged, this.resolveAudio).catch(() => undefined)
-          void this.ensurePeaks()
-          this.scheduleSave()
+          let result: ReturnType<typeof mergeCollaborativeSessionDetailed>
+          try {
+            result = mergeCollaborativeSessionDetailed(this.lastCloudBase, working, remote.session)
+          } catch (err) {
+            if (!(err instanceof StudioMergeConflictError)) throw err
+            this.emit({ save: { ...this.snap.save, cloud: 'conflict', cloudDetail: `${err.message} Cambios de ${peer} sin combinar: recarga la versión de la nube o sobrescríbela.` } })
+            return
+          }
+          next = result.session
+          conflicts = result.conflicts.length
+        }
+        if ((this.abWorkingBackup ?? this.snap.session) !== working) return // edito mientras tanto: lo resuelve el proximo guardado
+        this.lastCloudBase = remote.session
+        const dirty = this.snap.save.dirty
+        const save: StudioSnapshot['save'] = dirty
+          ? { ...this.snap.save, etag: remote.etag }
+          : { ...this.snap.save, local: 'saved', dirty: false, etag: remote.etag, cloud: 'idle', cloudDetail: null }
+        if (this.abWorkingBackup) {
+          this.abWorkingBackup = next
+          this.emit({ save })
+        } else {
+          this.history.push(next, dirty ? 'Fusión en vivo' : 'Actualización en vivo')
+          // setSession -> syncEngine: el motor aplica el cambio en caliente (los audios nuevos se
+          // resuelven en segundo plano) y la reproduccion sigue, sin el halt de engine.load().
+          this.setSession(next, false, { save })
+        }
+        if (dirty) this.scheduleSave()
+        if (conflicts > 0) {
+          this.notify('warn', `Cambios de ${peer} combinados. ${conflicts} ${conflicts === 1 ? 'ajuste chocó' : 'ajustes chocaron'} con los tuyos: se mantuvo tu versión.`)
         }
       } catch {
         // La sesion seguira sincronizandose en el proximo guardado.
@@ -3540,14 +3630,27 @@ export class StudioController {
     }
 
     try {
-      await this.uploadAssets(this.cloud, cleanDoc, false)
-      const { commit: remoteCommit, vcs: remoteVcs } = await studioCloud.postVcs(this.cloud, this.sessionId, {
-        branch: localCommit.branch,
-        message: localCommit.message,
-        authorName: this.actor.name,
-        parentId: localCommit.parentId,
-        session: cleanDoc,
-      })
+      const cloud = this.cloud
+      await this.uploadAssets(cloud, cleanDoc, false)
+      const post = (parentId: string | null) =>
+        studioCloud.postVcs(cloud, this.sessionId, {
+          branch: localCommit.branch,
+          message: localCommit.message,
+          authorName: this.actor.name,
+          parentId,
+          session: cleanDoc,
+        })
+      let posted: Awaited<ReturnType<typeof studioCloud.postVcs>>
+      try {
+        posted = await post(localCommit.parentId)
+      } catch (err) {
+        // Otro integrante movio la rama (o la cabeza local nunca llego a la nube): el snapshot es
+        // un documento completo, asi que basta con reintentar una vez sobre la cabeza vigente.
+        if (!(err instanceof StemCloudError && err.code === 'vcs_conflict')) throw err
+        const fresh = await studioCloud.getVcs(cloud, this.sessionId)
+        posted = await post(fresh.branches[localCommit.branch] ?? null)
+      }
+      const { commit: remoteCommit, vcs: remoteVcs } = posted
       const nextLocalCommits = { ...this.vcsBundle.localCommits }
       if (remoteCommit.id !== localCommit.id) {
         delete nextLocalCommits[localCommit.id]
@@ -3632,11 +3735,64 @@ export class StudioController {
     this.vcsBundle = { ...this.vcsBundle, activeBranch: branch }
     await studioStore.saveVcsBundle(this.sessionId, serializeVcsBundle(this.vcsBundle)).catch(() => undefined)
     this.collabHandle?.updatePresence({ branch })
+    // apply -> setSession -> syncEngine: el motor cambia en caliente, sin detener el transporte.
     this.apply(targetSession, `Cambiar a rama ${branch}`, {
       vcs: { activeBranch: branch, index: this.vcsBundle.index, saving: false },
     })
-    await this.engine.load(targetSession, this.resolveAudio).catch(() => undefined)
-    void this.ensurePeaks()
+  }
+
+  /** Owner y MusicDirector administran las ramas (borrar); el resto solo las usa. */
+  canManageVcsBranches(): boolean {
+    return this.actor.role === 'Owner' || this.actor.role === 'MusicDirector'
+  }
+
+  /**
+   * Borra una rama en la nube (solo Owner y MusicDirector; `main` no se borra) y la quita del
+   * indice local. Si era la activa, se vuelve a `main`.
+   */
+  async deleteVcsBranch(rawBranch: string): Promise<boolean> {
+    const branch = normalizeBranchName(rawBranch)
+    if (branch === 'main') {
+      this.notify('warn', 'La rama main no se puede borrar.')
+      return false
+    }
+    if (this.actor.role !== 'Owner' && this.actor.role !== 'MusicDirector') {
+      this.notify('warn', 'Solo el Owner de la banda o el director musical pueden borrar ramas.')
+      return false
+    }
+    if (this.snap.recording) return false
+    try {
+      let remoteIndex: StudioVcsIndex | null = null
+      if (this.cloud && this.vcsBundle.index.branches[branch]) {
+        try {
+          remoteIndex = await studioCloud.deleteVcsBranch(this.cloud, this.sessionId, branch)
+        } catch (err) {
+          // Una rama que solo existia en este equipo no esta en la nube: se borra igual aqui.
+          if (!(err instanceof StemCloudError && err.code === 'no_branch')) throw err
+        }
+      }
+      if (this.vcsBundle.activeBranch === branch) await this.switchVcsBranch('main')
+      const branches = { ...this.vcsBundle.index.branches }
+      delete branches[branch]
+      const keptIds = new Set(Object.values(branches))
+      const commits = this.vcsBundle.index.commits.filter((c) => c.branch !== branch || keptIds.has(c.id))
+      const localIndex: StudioVcsIndex = { ...this.vcsBundle.index, branches, commits }
+      const index = remoteIndex ? { ...mergeStudioVcsIndices(localIndex, remoteIndex), branches: { ...remoteIndex.branches } } : localIndex
+      const keep = new Set(index.commits.map((c) => c.id))
+      const localCommits = Object.fromEntries(Object.entries(this.vcsBundle.localCommits).filter(([id]) => keep.has(id)))
+      this.vcsBundle = { ...this.vcsBundle, index, localCommits }
+      await studioStore.saveVcsBundle(this.sessionId, serializeVcsBundle(this.vcsBundle)).catch(() => undefined)
+      const abGone = this.snap.abState && !keep.has(this.snap.abState.commitId)
+      this.emit({ vcs: { activeBranch: this.vcsBundle.activeBranch, index, saving: false }, ...(abGone ? { abState: null } : {}) })
+      if (this.cloud) {
+        this.collabHandle?.broadcast({ type: 'vcs_updated', sessionId: this.sessionId, branch, commitId: '', senderId: this.actor.userId })
+      }
+      this.notify('info', `Rama ${branch} borrada.`)
+      return true
+    } catch (err) {
+      this.fail(err, 'No se pudo borrar la rama.')
+      return false
+    }
   }
 
   /** Restaura cualquier commit previo en la rama actual como un paso de deshacer. */
@@ -3646,9 +3802,8 @@ export class StudioController {
     const targetSession = await this.loadVcsCommitSession(commitId)
     if (!targetSession) return
     const meta = this.vcsBundle.index.commits.find((c) => c.id === commitId)
+    // apply -> setSession -> syncEngine: sin halt; los audios que falten se resuelven en caliente.
     this.apply(targetSession, `Restaurar: ${meta?.message ?? commitId}`)
-    await this.engine.load(targetSession, this.resolveAudio).catch(() => undefined)
-    void this.ensurePeaks()
     this.notify('info', `Restaurada la versión "${meta?.message ?? commitId}".`)
   }
 
@@ -3656,19 +3811,43 @@ export class StudioController {
   async setAbReferenceCommit(commitId: string | null): Promise<void> {
     if (this.snap.abState?.active === 'B') await this.toggleAbListening()
     if (!commitId) {
+      this.abPreloaded.clear()
       this.emit({ abState: null })
       return
     }
     const meta = this.vcsBundle.index.commits.find((c) => c.id === commitId)
     if (!meta) return
-    // Pre-cargar el commit en cache local para que el boton A/B conmute en 0 ms reales.
+    // Pre-cargar el documento y los AUDIOS de B (no los de A, que ya suenan) sin tocar el
+    // transporte: al pulsar A/B el motor encuentra todo decodificado y conmuta sin corte.
     const refSession = await this.loadVcsCommitSession(commitId)
-    if (refSession) {
-      await this.engine.load(this.snap.session, this.resolveAudio).catch(() => undefined)
-    }
+    if (refSession) await this.preloadAbAudio(refSession)
     this.emit({
       abState: { active: 'A', commitId, label: meta.message || meta.branch },
     })
+  }
+
+  /** Decodifica los audios de `session` que el motor no tiene, sin aplicarla ni detener nada. */
+  private async preloadAbAudio(session: StudioSession): Promise<void> {
+    const wanted = assetsInUse(session)
+    const wantedIds = new Set(wanted.map((a) => a.id))
+    for (const id of [...this.abPreloaded.keys()]) if (!wantedIds.has(id)) this.abPreloaded.delete(id)
+    for (const asset of wanted) {
+      if (this.disposed) return
+      if (this.engine.getBuffer(asset.id) || this.abPreloaded.has(asset.id)) continue
+      try {
+        let file: Blob | null = await studioStore.getAsset(this.sessionId, asset.file).catch(() => null)
+        if (!file && this.cloud) {
+          file = await studioCloud.getAsset(this.cloud, this.sessionId, asset.file)
+          await studioStore.putAsset(this.sessionId, asset.file, file).catch(() => undefined)
+          this.markUploaded(asset.file)
+        }
+        if (!file) continue
+        const buffer = await this.engine.getContext().decodeAudioData(await file.arrayBuffer())
+        this.abPreloaded.set(asset.id, buffer)
+      } catch {
+        // Sin ese audio, B sonara sin el (igual que una sesion con un audio faltante).
+      }
+    }
   }
 
   /** Alterna en vivo (sin detener el cabezal ni ensuciar el historial) entre A (actual) y B (snapshot). */

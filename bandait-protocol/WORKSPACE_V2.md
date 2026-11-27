@@ -25,6 +25,7 @@ stemsMap        { [songId]: SongStems }       (sin cambios)
 songsMap        { [bandId]: Song[] }          NUEVO: librería de canciones por banda
 voiceMap        { [bandId]: VoiceConfig }     NUEVO: conteos y avisos de voz
 uiPreferences   UiPreferences                 OPCIONAL (2026-11-25): apariencia del músico, ver 8
+vcsMap          { [bandId]: BandVcs }         OPCIONAL (2026-11-27): versiones de canciones y setlists, ver 9
 _sync           objeto interno del motor de sincronización del hub (no lo usa el líder)
 ```
 
@@ -238,3 +239,54 @@ Waveform {
 - `accent` guarda el color elegido. La tinta de contraste y, si hace falta, el acento ajustado
   (ninguna tinta llega a 4,5:1) se calculan al aplicarlo (`services/appearance.ts`).
 - Importar un JSON conserva la apariencia de quien importa.
+
+## 9. vcsMap (versiones de canciones y setlists; opcional)
+
+Fecha: 2026-11-27 (Web 3.0, ola 3). Campo de la raíz, solo del hub; el líder lo conserva como
+campo desconocido y no lo usa. Implementación: `bandait-leader-web/src/services/versionControl.ts`.
+
+```
+vcsMap { [bandId]: BandVcs }
+
+BandVcs {
+  songs      { [songId]: EntityHistory<Song> }
+  playlists  { [playlistId]: EntityHistory<Playlist> }
+}
+
+EntityHistory<T> {
+  activeBranch  string                  rama ^[A-Za-z0-9_-]{1,40}$; por defecto "main"
+  branches      { [rama]: commitId }     cabeza de cada rama
+  commits       EntityCommit<T>[]       del más nuevo al más viejo
+}
+
+EntityCommit<T> {
+  id          string                    "v_<AAAAMMDDhhmmss>_<8 hex aleatorios>", único en su historial
+  branch      string
+  parentId    string | null
+  message     string                    hasta 160 caracteres
+  authorName  string                    hasta 80 caracteres
+  createdAt   string                    ISO 8601
+  snapshot    T                         copia COMPLETA de la canción o del setlist
+}
+```
+
+- Vive en el mismo documento que la banda: en `bandait_workspaces.workspace` para las bandas
+  personales y en `bandait_bands.content` (sección 7, solo la clave de esa banda) para las
+  compartidas. Como cada commit es una copia completa, el historial tiene topes:
+  - **12 commits por entidad** (las cabezas de rama se conservan aunque queden fuera);
+  - **256 KiB por banda** (UTF-8 de `BandVcs`);
+  - **1 MiB por workspace personal**: el tope por banda baja a `1 MiB / bandas con historial`
+    cuando hay más de 4.
+  Al pasarse se expulsan, en este orden, los commits más viejos que no son cabeza, las cabezas
+  más viejas que no son la rama activa y, por último, las cabezas activas más viejas (si era el
+  último commit de una entidad, su historial desaparece).
+- Borrar una canción o un setlist borra su historial. Los historiales de entidades que ya no
+  existen se descartan también al escribir (`pruneWorkspaceVcs`) y al armar el documento de una
+  banda compartida (`sliceBand`).
+- Ausente = sin historial. Un documento sin el campo no lo agrega hasta el primer commit.
+- Lectura tolerante: un commit sin `id`, `branch` o `snapshot` objeto se descarta; una rama que
+  apunta a un commit inexistente se descarta; un historial sin commits válidos se descarta. Los
+  campos desconocidos de cada commit se conservan. Nunca es un error de `validateWorkspace`.
+- Un hub anterior a esta sección escribía hasta 48 commits por entidad sin tope en bytes; el
+  primero que escribe con esta versión lo recorta. No hay migración aparte.
+- Es solo del hub: no viaja al líder ni a los followers.
