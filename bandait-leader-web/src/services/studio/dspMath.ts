@@ -4,17 +4,21 @@
  * Incluye:
  *   - Transformada Rapida de Fourier Cooley-Tukey radix-2 en sitio (FFT / IFFT) + STFT
  *   - 24 bandas criticas psicoacusticas de Zwicker (escala Bark)
- *   - Deteccion de frecuencia fundamental f0 por algoritmo YIN con interpolacion parabolica (< 0,5 cents)
+ *   - Deteccion de frecuencia fundamental f0 por algoritmo YIN (funcion de diferencia por FFT e
+ *     interpolacion parabolica). Error < 0,5 cents SOLO con senal limpia y armonica; con ruido el
+ *     error crece (SNR 10 dB: decenas de cents en graves) y la confianza baja en proporcion.
  *   - Alineacion automatica de fase y retardo inter-pista por Correlacion Cruzada Generalizada (GCC-PHAT)
- *   - Deteccion musical local: BPM por autocorrelacion de envolvente de onsets, Tonalidad/Camelot por
- *     perfiles de Krumhansl-Schmuckler y secuencia de Acordes por decodificacion Viterbi sobre HMM
+ *   - Deteccion musical local: BPM por autocorrelacion de una envolvente de inicios en dos bandas con
+ *     correccion de octava (T, 2T, T/2), Tonalidad/Camelot por perfiles de Krumhansl-Schmuckler y
+ *     secuencia de Acordes por decodificacion Viterbi sobre HMM. Cada resultado trae una confianza
+ *     real (0 con ruido o silencio): quien escribe en la sesion debe respetar los umbrales exportados.
  *   - Deteccion de transientes por Flujo Espectral con umbral adaptativo de mediana movil
  *   - Telemetria estereo y dinamica: correlacion de fase de Pearson, goniometro Lissajous Mid/Side,
  *     rango de sonoridad EBU R128 (LRA) y factor de cresta (PLR).
  *
  * Modulo puro: sin DOM, sin Web Audio y sin import.meta.env. Se prueba directamente en Node.
  */
-import { integratedLufs, kWeightingCoefficients, truePeakDb } from './loudness.ts'
+import { createLoudnessMeter, integratedLufs, kWeightingCoefficients, truePeakDb } from './loudness.ts'
 import { STUDIO_MAX_BEAT, compareChords, roundBeat, type StudioChord } from './session.ts'
 
 const TWO_PI = 2 * Math.PI
@@ -244,10 +248,32 @@ export function barkBandEnergiesDb(samples: Float32Array, sampleRate: number, ff
   return out
 }
 
+/**
+ * Devuelve `samples` tal cual si todas sus muestras son finitas; si alguna es NaN o infinita,
+ * una copia con esas muestras en 0. Un solo NaN contamina una FFT entera (y con ella la
+ * tonalidad o el Viterbi), asi que los detectores sanean su entrada con esto.
+ */
+export function sanitizeSamples(samples: Float32Array): Float32Array {
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i]
+    if (v - v !== 0) {
+      const copy = new Float32Array(samples)
+      for (let j = i; j < copy.length; j++) {
+        const w = copy[j]
+        if (w - w !== 0) copy[j] = 0
+      }
+      return copy
+    }
+  }
+  return samples
+}
+
+/** Promedio de los canales, con el largo del canal mas corto (sea cual sea el numero de canales). */
 export function downmixMono(channels: readonly Float32Array[]): Float32Array {
   if (channels.length === 0) return new Float32Array(0)
   if (channels.length === 1) return channels[0]
-  const len = Math.min(channels[0].length, channels[1].length)
+  let len = channels[0].length
+  for (let c = 1; c < channels.length; c++) len = Math.min(len, channels[c].length)
   const mono = new Float32Array(len)
   const inv = 1 / channels.length
   for (let c = 0; c < channels.length; c++) {
@@ -278,7 +304,7 @@ export function spectralCentroidHz(samples: Float32Array, sampleRate: number, ff
 }
 
 // ---------------------------------------------------------------------------
-// 2. Algoritmo YIN para deteccion fundamental f0 (< 0,5 cents)
+// 2. Algoritmo YIN para deteccion fundamental f0 (< 0,5 cents solo con senal limpia)
 // ---------------------------------------------------------------------------
 
 export interface PitchDetectionResult {
@@ -302,28 +328,90 @@ export function frequencyToNoteInfo(hz: number, referenceA4Hz = 440): Omit<Pitch
   return { midi, noteName, octave, cents, targetHz }
 }
 
+/** Frecuencia minima que admite YIN: La0 (27,5 Hz), la cuerda mas grave del piano y del bajo de 5. */
+export const YIN_MIN_HZ = 27.5
+
+/**
+ * Confianza minima para tratar una lectura de YIN como afinacion fiable. Con senal limpia la
+ * confianza ronda 0,98; con SNR 20 dB baja a ~0,85 y con SNR 10 dB a ~0,5 (donde el error en
+ * graves ya llega a decenas de cents). Un afinador deberia ocultar la aguja por debajo de esto.
+ */
+export const YIN_RELIABLE_CONFIDENCE = 0.7
+
+interface YinScratch {
+  n: number
+  aRe: Float64Array
+  aIm: Float64Array
+  bRe: Float64Array
+  bIm: Float64Array
+}
+let yinScratch: YinScratch | null = null
+
+function yinBuffers(n: number): YinScratch {
+  if (!yinScratch || yinScratch.n !== n) {
+    yinScratch = { n, aRe: new Float64Array(n), aIm: new Float64Array(n), bRe: new Float64Array(n), bIm: new Float64Array(n) }
+  }
+  return yinScratch
+}
+
 /**
  * Detector monofonico YIN (De Cheveigne & Kawahara, 2002) con funcion de diferencia media
  * acumulada normalizada d'(tau) e interpolacion parabolica sub-muestra.
+ *
+ * - La funcion de diferencia se calcula por FFT con la ventana mas larga que cabe
+ *   (`muestras - tauMax`): menos varianza con ruido y costo O(N log N) (unos 3 FFT de 4096).
+ * - Un minimo pegado a `tauMax` no se acepta (no se sabe si es un minimo o si la funcion sigue
+ *   bajando fuera del rango): devuelve null en vez de inventar una nota.
+ * - `confidence` sale de la aperiodicidad d'(T) (~ fraccion de potencia de ruido): baja con el
+ *   ruido aunque la nota siga saliendo bien.
+ * - `minHz` admite hasta YIN_MIN_HZ (27,5 Hz); necesita `muestras >= 2 * sampleRate / minHz`.
  */
 export function detectPitchYin(
-  samples: Float32Array,
+  input: Float32Array,
   sampleRate: number,
   options: { minHz?: number; maxHz?: number; threshold?: number; referenceA4Hz?: number } = {},
 ): PitchDetectionResult | null {
-  if (!(sampleRate > 0) || samples.length < 128) return null
-  const minHz = options.minHz ?? 45
-  const maxHz = options.maxHz ?? 1600
+  if (!(sampleRate > 0) || input.length < 128) return null
+  const samples = sanitizeSamples(input)
+  const minHz = Math.max(YIN_MIN_HZ, options.minHz ?? 45)
+  const maxHz = Math.min(sampleRate / 4, options.maxHz ?? 1600)
   const threshold = options.threshold ?? 0.12
   const tauMin = Math.max(2, Math.floor(sampleRate / maxHz))
-  const tauMax = Math.min(Math.floor(samples.length / 2), Math.ceil(sampleRate / minHz))
+  // Tres muestras de margen: una nota justo en minHz no queda con su minimo pegado al borde.
+  const tauMax = Math.min(Math.floor(samples.length / 2), Math.ceil(sampleRate / minHz) + 3)
   if (tauMax <= tauMin + 2) return null
 
-  const windowLen = tauMax
+  const windowLen = samples.length - tauMax
+  const total = windowLen + tauMax
   // Comprobar nivel minimo para ignorar silencio.
   let energy = 0
-  for (let i = 0; i < windowLen * 2 && i < samples.length; i++) energy += samples[i] * samples[i]
-  if (energy / Math.min(samples.length, windowLen * 2) < 1e-7) return null
+  for (let i = 0; i < total; i++) energy += samples[i] * samples[i]
+  if (energy / total < 1e-7) return null
+
+  // d(tau) = sum x[i]^2 + sum x[i+tau]^2 - 2 r(tau), con r(tau) por correlacion circular sin
+  // solapamiento (la ventana `a` es cero desde windowLen, asi que n + tau < total <= n).
+  const n = nextPow2(total)
+  const { aRe, aIm, bRe, bIm } = yinBuffers(n)
+  aRe.fill(0)
+  aIm.fill(0)
+  bRe.fill(0)
+  bIm.fill(0)
+  for (let i = 0; i < windowLen; i++) aRe[i] = samples[i]
+  for (let i = 0; i < total; i++) bRe[i] = samples[i]
+  fftRadix2(aRe, aIm, false)
+  fftRadix2(bRe, bIm, false)
+  for (let k = 0; k < n; k++) {
+    // conj(A) * B
+    const re = aRe[k] * bRe[k] + aIm[k] * bIm[k]
+    const im = aRe[k] * bIm[k] - aIm[k] * bRe[k]
+    bRe[k] = re
+    bIm[k] = im
+  }
+  fftRadix2(bRe, bIm, true)
+
+  const cum = new Float64Array(total + 1)
+  for (let i = 0; i < total; i++) cum[i + 1] = cum[i] + samples[i] * samples[i]
+  const e0 = cum[windowLen]
 
   const diff = new Float64Array(tauMax + 1)
   const cmnd = new Float64Array(tauMax + 1)
@@ -331,11 +419,7 @@ export function detectPitchYin(
   let runningSum = 0
 
   for (let tau = 1; tau <= tauMax; tau++) {
-    let d = 0
-    for (let i = 0; i < windowLen; i++) {
-      const delta = samples[i] - samples[i + tau]
-      d += delta * delta
-    }
+    const d = Math.max(0, e0 + (cum[tau + windowLen] - cum[tau]) - 2 * bRe[tau])
     diff[tau] = d
     runningSum += d
     cmnd[tau] = runningSum > EPS ? (d * tau) / runningSum : 1
@@ -359,6 +443,8 @@ export function detectPitchYin(
     }
     if (bestTau < 0 || minVal > 0.38) return null
   }
+  // Minimo en el borde del rango: la frecuencia real puede estar por debajo de minHz.
+  if (bestTau >= tauMax - 1) return null
 
   // Interpolacion parabolica sobre diff (mas fiel en el minimo verdadero que sobre cmnd).
   let refinedTau = bestTau
@@ -375,7 +461,8 @@ export function detectPitchYin(
 
   const hz = sampleRate / refinedTau
   if (!(hz >= minHz * 0.9 && hz <= maxHz * 1.1)) return null
-  const confidence = Math.max(0, Math.min(1, 1 - cmnd[bestTau]))
+  // d'(T) ~ potencia aperiodica / potencia total: 0 con senal limpia, ~0,1 con SNR 10 dB.
+  const confidence = Math.max(0, Math.min(1, 1 - 1.6 * Math.sqrt(Math.max(0, cmnd[bestTau]))))
   const info = frequencyToNoteInfo(hz, options.referenceA4Hz ?? 440)
   return { hz, ...info, confidence }
 }
@@ -524,6 +611,28 @@ export function alignPhaseCrossCorrelation(
   }
 }
 
+export interface PhaseAlignmentPlanInput {
+  targetStartS: number
+  targetLengthS: number
+  /** phaseInvert del clip de referencia: la polaridad buscada es la de como SUENA la referencia. */
+  referencePhaseInvert: boolean
+  /** Resultado de alignPhaseCrossCorrelation sobre el audio crudo (sin phaseInvert aplicado). */
+  lagSeconds: number
+  polarity: 1 | -1
+  maxSessionS: number
+}
+
+/**
+ * Inicio y polaridad finales del clip a alinear. El analisis compara audio crudo, asi que el clip
+ * queda invertido si y solo si (polaridad cruda -1) XOR (referencia invertida). Es un valor
+ * absoluto, no un "invertir lo que haya": repetir la accion sobre el resultado no cambia nada.
+ */
+export function planPhaseAlignment(input: PhaseAlignmentPlanInput): { startS: number; phaseInvert: boolean } {
+  const lag = Number.isFinite(input.lagSeconds) ? input.lagSeconds : 0
+  const startS = Math.max(0, Math.min(input.maxSessionS - input.targetLengthS, input.targetStartS - lag))
+  return { startS, phaseInvert: (input.polarity === -1) !== input.referencePhaseInvert }
+}
+
 // ---------------------------------------------------------------------------
 // 4. Deteccion Musical Local: Transientes, BPM, Tonalidad/Camelot y Acordes Viterbi
 // ---------------------------------------------------------------------------
@@ -595,99 +704,319 @@ export function detectTransients(
   return onsets
 }
 
-/** Estima el BPM local [60..200] por autocorrelacion ponderada de la envolvente de inicios. */
-export function detectBpmLocal(samples: Float32Array, sampleRate: number): { bpm: number; confidence: number } | null {
-  if (!(sampleRate > 0) || samples.length < sampleRate * 1.5) return null
-  const hop = Math.max(64, Math.round(sampleRate / 200)) // ~200 Hz de tasa de envolvente
-  const envRate = sampleRate / hop
-  const frames = Math.floor(samples.length / hop)
-  if (frames < 64) return null
+/** BPM que detecta detectBpmLocal: el rango del contrato de la sesion para un pulso de negra. */
+export const BPM_DETECT_MIN = 60
+export const BPM_DETECT_MAX = 200
+/** Rango preferido al resolver la octava (T, 2T, T/2): fuera de aqui solo se queda con evidencia clara. */
+export const BPM_PREFERRED_MIN = 70
+export const BPM_PREFERRED_MAX = 180
+/** Confianza minima para escribir el BPM detectado en la sesion; por debajo solo se propone. */
+export const BPM_APPLY_MIN_CONFIDENCE = 0.5
+/** Confianza minima para escribir la tonalidad detectada en la sesion; por debajo solo se propone. */
+export const KEY_APPLY_MIN_CONFIDENCE = 0.5
+/** Segundos que analiza detectBpmLocal como maximo (el pulso no cambia: el resto es costo). */
+const BPM_MAX_ANALYSIS_S = 60
 
-  const env = new Float64Array(frames)
-  let prevE = 0
-  for (let f = 0; f < frames; f++) {
-    let e = 0
-    const base = f * hop
-    for (let i = 0; i < hop; i++) {
-      const s = samples[base + i]
-      e += s * s
-    }
-    const rms = Math.sqrt(e / hop)
-    const diff = rms - prevE
-    env[f] = diff > 0 ? diff : 0
-    prevE = rms
+export interface BpmDetectionResult {
+  bpm: number
+  /** 0..1: autocorrelacion normalizada de la envolvente en el periodo elegido (0 con ruido). */
+  confidence: number
+}
+
+/** Tasa de la envolvente de inicios (cuadros por segundo). */
+const ONSET_ENV_RATE = 100
+
+/**
+ * Envolvente de inicios a 100 cuadros/s: flujo espectral positivo (FFT de ~43 ms sobre la senal
+ * diezmada a ~12 kHz) en dos bandas, graves bajo ~150 Hz y el resto, cada una normalizada por su
+ * propia dispersion. Asi el bombo no tapa a la caja (con bombo en 1 y 3 y caja en 2 y 4 los
+ * cuatro tiempos pesan parecido), y una nota o un acorde sostenido no fabrica inicios: su
+ * magnitud por bin no cambia, mientras que su energia total si ondula por los batidos entre
+ * notas (con un flujo de energia, acordes sostenidos solos daban 113 BPM con confianza 1).
+ */
+function onsetEnvelope(samples: Float32Array, sampleRate: number): { env: Float64Array; rate: number } {
+  const decim = Math.max(1, Math.round(sampleRate / 12000))
+  const rate = sampleRate / decim
+  // Diezmado con dos pasa bajos de un polo (~0,4 de la nueva Nyquist): lo que se cuele de agudos
+  // solo suma flujo en la banda alta, que es donde ya estaba.
+  const coef = 1 - Math.exp((-TWO_PI * Math.min(rate * 0.4, 5000)) / sampleRate)
+  const len = Math.floor(samples.length / decim)
+  const x = new Float32Array(len)
+  let a = 0
+  let b = 0
+  for (let i = 0, j = 0; j < len; i++) {
+    a += coef * (samples[i] - a)
+    b += coef * (a - b)
+    if (i % decim === decim - 1) x[j++] = b
   }
+  const n = 512
+  const hop = Math.max(1, Math.round(rate / ONSET_ENV_RATE))
+  const frames = Math.max(0, Math.floor((len - n) / hop) + 1)
+  const low = new Float64Array(frames)
+  const high = new Float64Array(frames)
+  if (frames < 2) return { env: new Float64Array(frames), rate: rate / hop }
+  const bins = n >> 1
+  const lowBins = Math.max(1, Math.round((150 * n) / rate))
+  const win = hannWindow(n)
+  const re = new Float64Array(n)
+  const im = new Float64Array(n)
+  let prev = new Float64Array(bins + 1)
+  let cur = new Float64Array(bins + 1)
+  for (let f = 0; f < frames; f++) {
+    const base = f * hop
+    for (let i = 0; i < n; i++) {
+      re[i] = x[base + i] * win[i]
+      im[i] = 0
+    }
+    fftRadix2(re, im, false)
+    let fl = 0
+    let fh = 0
+    for (let k = 1; k <= bins; k++) {
+      const mag = Math.sqrt(re[k] * re[k] + im[k] * im[k])
+      cur[k] = mag
+      const d = mag - prev[k]
+      if (d > 0) {
+        if (k <= lowBins) fl += d
+        else fh += d
+      }
+    }
+    low[f] = f === 0 ? 0 : fl
+    high[f] = f === 0 ? 0 : fh
+    const swap = prev
+    prev = cur
+    cur = swap
+  }
+  const std = (x: Float64Array) => {
+    let m = 0
+    for (let i = 0; i < x.length; i++) m += x[i]
+    m /= x.length
+    let v = 0
+    for (let i = 0; i < x.length; i++) v += (x[i] - m) * (x[i] - m)
+    return Math.sqrt(v / x.length)
+  }
+  const sL = std(low)
+  const sH = std(high)
+  const floor = Math.max(sL, sH) * 0.05
+  const env = new Float64Array(frames)
+  if (!(floor > EPS)) return { env, rate: rate / hop }
+  const wL = 1 / Math.max(sL, floor)
+  const wH = 1 / Math.max(sH, floor)
+  for (let f = 0; f < frames; f++) env[f] = low[f] * wL + high[f] * wH
+  return { env, rate: rate / hop }
+}
+
+/** Autocorrelacion normalizada e insesgada (r(0) = 1) de `x` ya centrada, por FFT, lags 0..maxLag. */
+function normalizedAutocorrelation(x: Float64Array, maxLag: number): Float64Array {
+  const n = x.length
+  const size = nextPow2(2 * n)
+  const re = new Float64Array(size)
+  const im = new Float64Array(size)
+  re.set(x)
+  fftRadix2(re, im, false)
+  for (let k = 0; k < size; k++) {
+    re[k] = re[k] * re[k] + im[k] * im[k]
+    im[k] = 0
+  }
+  fftRadix2(re, im, true)
+  const out = new Float64Array(maxLag + 1)
+  const r0 = re[0] / n
+  if (!(r0 > EPS)) return out
+  for (let lag = 0; lag <= maxLag && lag < n; lag++) out[lag] = re[lag] / (n - lag) / r0
+  return out
+}
+
+/** Valor de `r` en un lag fraccionario (interpolacion lineal). */
+function sampleAt(r: Float64Array, lag: number): number {
+  const i = Math.floor(lag)
+  if (i < 0 || i + 1 >= r.length) return 0
+  const fr = lag - i
+  return r[i] * (1 - fr) + r[i + 1] * fr
+}
+
+/**
+ * Relacion entre la energia de inicios a mitad de periodo y la del pulso, con la fase del pulso
+ * que mas energia junta. Cerca de 1: la mitad del periodo tambien es un tiempo fuerte (el periodo
+ * es el doble del pulso real). Cerca de 0: la mitad esta vacia o solo tiene adornos (corcheas).
+ */
+function halfPeriodSalience(env: Float64Array, period: number): number {
+  const frames = env.length
+  const steps = Math.max(1, Math.round(period))
+  const beats = Math.floor((frames - 2) / period)
+  if (beats < 3) return 0
+  const pick = (pos: number) => {
+    const i = Math.round(pos)
+    if (i < 1 || i >= frames - 1) return 0
+    return Math.max(env[i - 1], env[i], env[i + 1])
+  }
+  let bestOn = -1
+  let bestPhase = 0
+  for (let phase = 0; phase < steps; phase++) {
+    let on = 0
+    for (let k = 0; k < beats; k++) on += pick(phase + k * period)
+    if (on > bestOn) {
+      bestOn = on
+      bestPhase = phase
+    }
+  }
+  if (!(bestOn > EPS)) return 0
+  let mid = 0
+  for (let k = 0; k < beats; k++) mid += pick(bestPhase + k * period + period / 2)
+  return mid / bestOn
+}
+
+/**
+ * Estima el BPM del pulso de negra [60..200] por autocorrelacion de una envolvente de inicios en
+ * dos bandas, con correccion de octava:
+ *   1. Periodo candidato P = maximo de la autocorrelacion con un prior suave centrado en 120.
+ *   2. Si la mitad de P concentra casi tanta energia de inicios como P (caja en 2 y 4 cuando P
+ *      dura dos tiempos), el pulso real es P/2. Fuera del rango preferido (70..180) basta menos
+ *      evidencia para volver a el.
+ *   3. Si el BPM queda por encima del rango preferido y la mitad del periodo esta vacia, se toma 2P.
+ * `confidence` es la autocorrelacion normalizada en el pulso (o en su doble, si es mayor): ~0
+ * con ruido blanco o silencio, ~1 con un clic. Devuelve null sin pulso medible.
+ */
+export function detectBpmLocal(input: Float32Array, sampleRate: number): BpmDetectionResult | null {
+  if (!(sampleRate > 0) || input.length < sampleRate * 1.5) return null
+  const clean = sanitizeSamples(input)
+  const samples = clean.length > sampleRate * BPM_MAX_ANALYSIS_S ? clean.subarray(0, Math.round(sampleRate * BPM_MAX_ANALYSIS_S)) : clean
+  const { env, rate: envRate } = onsetEnvelope(samples, sampleRate)
+  const frames = env.length
+  if (frames < 64) return null
 
   let mean = 0
   for (let f = 0; f < frames; f++) mean += env[f]
   mean /= frames
+  const centered = new Float64Array(frames)
   let energy = 0
   for (let f = 0; f < frames; f++) {
-    env[f] = Math.max(0, env[f] - mean * 0.5)
-    energy += env[f] * env[f]
+    centered[f] = env[f] - mean
+    energy += centered[f] * centered[f]
   }
   if (!(energy > EPS)) return null
 
-  const minBpm = 60
-  const maxBpm = 200
-  const minLag = Math.max(2, Math.floor((60 * envRate) / maxBpm))
-  const maxLag = Math.min(frames - 2, Math.ceil((60 * envRate) / minBpm))
-  if (maxLag <= minLag) return null
+  const lagOf = (bpm: number) => (60 * envRate) / bpm
+  const minLag = Math.max(2, Math.floor(lagOf(BPM_DETECT_MAX)))
+  const maxLag = Math.min(frames - 2, Math.ceil(lagOf(BPM_DETECT_MIN)))
+  if (maxLag <= minLag + 2) return null
+  // Hasta 4 periodos del pulso mas lento: sirve para afinar el periodo y para la confianza.
+  const acfMax = Math.min(frames - 2, Math.ceil(maxLag * 4) + 2)
+  const r = normalizedAutocorrelation(centered, acfMax)
 
-  const acf = new Float64Array(maxLag + 2)
-  for (let lag = minLag - 1; lag <= maxLag + 1; lag++) {
-    if (lag < 1 || lag >= frames) continue
-    let sum = 0
-    for (let i = 0; i + lag < frames; i++) sum += env[i] * env[i + lag]
-    const bpm = (60 * envRate) / lag
-    // Prior perceptual suave centrado en 120 BPM para evitar octavas dobles/mitad espurias.
-    const logPrior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 120) / 0.65, 2))
-    acf[lag] = (sum / energy) * (0.75 + 0.25 * logPrior)
-  }
-
+  // 1. Candidato inicial con prior suave (no decide la octava: eso lo hacen los pasos 2 y 3).
   let bestLag = minLag
-  let bestVal = -1
+  let bestScore = -Infinity
   for (let lag = minLag; lag <= maxLag; lag++) {
-    // Sumar armonico a 2x lag si cabe (refuerza el pulso de negra).
-    const harmonic = lag * 2 <= maxLag ? 0.25 * acf[lag * 2] : 0
-    const score = acf[lag] + harmonic
-    if (score > bestVal) {
-      bestVal = score
+    if (!(r[lag] >= r[lag - 1] && r[lag] >= r[lag + 1])) continue
+    const bpm = (60 * envRate) / lag
+    const prior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 120) / 1.0, 2))
+    const score = r[lag] * (0.6 + 0.4 * prior)
+    if (score > bestScore) {
+      bestScore = score
       bestLag = lag
     }
   }
+  if (!Number.isFinite(bestScore)) return null
 
-  let refinedLag = bestLag
-  if (bestLag > minLag && bestLag < maxLag) {
-    const y0 = acf[bestLag - 1]
-    const y1 = acf[bestLag]
-    const y2 = acf[bestLag + 1]
+  // Afinado parabolico del periodo.
+  const refine = (lag: number): number => {
+    const i = Math.round(lag)
+    if (i <= 1 || i + 1 >= r.length) return lag
+    // Buscar el maximo local mas cercano (+-2) antes de interpolar.
+    let peak = i
+    for (let d = -2; d <= 2; d++) {
+      const j = i + d
+      if (j > 0 && j + 1 < r.length && r[j] > r[peak]) peak = j
+    }
+    const y0 = r[peak - 1]
+    const y1 = r[peak]
+    const y2 = r[peak + 1]
     const denom = 2 * (2 * y1 - y2 - y0)
     if (Math.abs(denom) > EPS) {
       const delta = (y2 - y0) / denom
-      if (Math.abs(delta) < 1) refinedLag = bestLag + delta
+      if (Math.abs(delta) < 1) return peak + delta
+    }
+    return peak
+  }
+  let period = refine(bestLag)
+
+  // 2 y 3. Correccion de octava con la energia de inicios a mitad de periodo.
+  for (let pass = 0; pass < 3; pass++) {
+    const bpm = (60 * envRate) / period
+    const faster = bpm * 2
+    if (faster <= BPM_DETECT_MAX) {
+      const ratio = halfPeriodSalience(env, period)
+      const need = bpm < BPM_PREFERRED_MIN ? 0.35 : faster <= BPM_PREFERRED_MAX ? 0.55 : 0.6
+      if (ratio >= need) {
+        period = refine(period / 2)
+        continue
+      }
+    }
+    const slower = bpm / 2
+    if (bpm > BPM_PREFERRED_MAX && slower >= BPM_DETECT_MIN) {
+      const ratio = halfPeriodSalience(env, period * 2)
+      if (ratio < 0.35) {
+        period = refine(period * 2)
+        continue
+      }
+    }
+    break
+  }
+
+  // Periodo mas preciso con el multiplo mas largo que cabe (el error de un cuadro se reparte).
+  for (const k of [4, 3, 2]) {
+    if (period * k + 2 < r.length) {
+      const longLag = refine(period * k)
+      if (Math.abs(longLag / k - period) < 0.5) period = longLag / k
+      break
     }
   }
 
-  const rawBpm = (60 * envRate) / refinedLag
-  // Si cae muy cerca de un entero (ej. 119.8..120.2), preferir redondeo a 0.5 o entero.
+  const confidenceRaw = Math.max(sampleAt(r, period), period * 2 + 1 < r.length ? sampleAt(r, period * 2) : 0)
+  const rawBpm = (60 * envRate) / period
+  // Si cae muy cerca de un entero (ej. 119.8..120.2), preferir el entero.
   const rounded = Math.abs(rawBpm - Math.round(rawBpm)) < 0.35 ? Math.round(rawBpm) : Math.round(rawBpm * 10) / 10
   return {
-    bpm: Math.max(minBpm, Math.min(maxBpm, rounded)),
-    confidence: Math.max(0, Math.min(1, bestVal)),
+    bpm: Math.max(BPM_DETECT_MIN, Math.min(BPM_DETECT_MAX, rounded)),
+    confidence: Math.max(0, Math.min(1, (confidenceRaw - 0.08) / 0.32)),
   }
 }
 
-/** Calcula un cromagrama de 12 clases de altura sobre un segmento de audio. */
-export function computeChromaVector(samples: Float32Array, sampleRate: number, fftSize = 4096): Float64Array {
+const chromaMaps = new Map<string, Int8Array>()
+
+/** Clase de altura de cada bin (o -1 fuera de 55..4200 Hz), calculada una vez por tamano y frecuencia. */
+function chromaBinMap(n: number, sampleRate: number): Int8Array {
+  const key = `${n}:${sampleRate}`
+  let map = chromaMaps.get(key)
+  if (!map) {
+    const bins = (n >> 1) + 1
+    map = new Int8Array(bins).fill(-1)
+    for (let k = 1; k < bins; k++) {
+      const hz = (k * sampleRate) / n
+      if (hz < 55 || hz > 4200) continue
+      const midi = 69 + 12 * Math.log2(hz / 440)
+      map[k] = ((Math.round(midi) % 12) + 12) % 12
+    }
+    if (chromaMaps.size > 16) chromaMaps.clear()
+    chromaMaps.set(key, map)
+  }
+  return map
+}
+
+/**
+ * Calcula un cromagrama de 12 clases de altura sobre un segmento de audio. `overlap` false usa
+ * ventanas contiguas (la mitad de FFT): lo usa el Viterbi, que ya promedia por segmento.
+ */
+export function computeChromaVector(input: Float32Array, sampleRate: number, fftSize = 4096, overlap = true): Float64Array {
   const chroma = new Float64Array(12)
-  if (samples.length === 0 || !(sampleRate > 0)) return chroma
+  if (input.length === 0 || !(sampleRate > 0)) return chroma
+  const samples = sanitizeSamples(input)
   const n = nextPow2(Math.min(fftSize, Math.max(512, samples.length)))
   const bins = (n >> 1) + 1
+  const pcOf = chromaBinMap(n, sampleRate)
   const win = hannWindow(n)
   const re = new Float64Array(n)
   const im = new Float64Array(n)
-  const hop = Math.max(256, n >> 1)
+  const hop = overlap ? Math.max(256, n >> 1) : n
   const maxFrames = 48
   const possible = samples.length >= n ? Math.floor((samples.length - n) / hop) + 1 : 1
   const stride = possible > maxFrames ? Math.ceil(possible / maxFrames) * hop : hop
@@ -699,12 +1028,9 @@ export function computeChromaVector(samples: Float32Array, sampleRate: number, f
     for (let i = 0; i < copy; i++) re[i] = samples[pos + i] * win[i]
     fftRadix2(re, im, false)
     for (let k = 1; k < bins; k++) {
-      const hz = (k * sampleRate) / n
-      if (hz < 55 || hz > 4200) continue
-      const mag = Math.hypot(re[k], im[k])
-      const midi = 69 + 12 * Math.log2(hz / 440)
-      const pc = ((Math.round(midi) % 12) + 12) % 12
-      chroma[pc] += mag * mag
+      const pc = pcOf[k]
+      if (pc < 0) continue
+      chroma[pc] += re[k] * re[k] + im[k] * im[k]
     }
     if (samples.length < n) break
   }
@@ -749,12 +1075,21 @@ export interface KeyDetectionResult {
   confidence: number
 }
 
-/** Detecta tonalidad y codigo Camelot usando los perfiles de Krumhansl-Schmuckler. */
+/**
+ * Detecta tonalidad y codigo Camelot usando los perfiles de Krumhansl-Schmuckler.
+ *
+ * `confidence` (0..1) combina dos medidas: la correlacion con el mejor perfil (0,2 o menos no
+ * dice nada: es lo que da el ruido) y lo "tonal" del cromagrama (1 - planitud espectral de las 12
+ * clases: el ruido reparte la energia por igual). Ruido blanco: ~0; una progresion clara: > 0,7.
+ */
 export function detectKeyLocal(samples: Float32Array, sampleRate: number): KeyDetectionResult | null {
   const chroma = computeChromaVector(samples, sampleRate)
   let sum = 0
   for (let i = 0; i < 12; i++) sum += chroma[i]
   if (!(sum > EPS)) return null
+  let logSum = 0
+  for (let i = 0; i < 12; i++) logSum += Math.log(Math.max(chroma[i], 1e-9))
+  const flatness = Math.exp(logSum / 12) / (sum / 12)
 
   let bestCorr = -Infinity
   let bestRoot = 0
@@ -785,8 +1120,56 @@ export function detectKeyLocal(samples: Float32Array, sampleRate: number): KeyDe
     root: rootName,
     mode: bestMode,
     camelot,
-    confidence: Math.max(0, Math.min(1, (bestCorr + 1) / 2)),
+    confidence: keyConfidence(bestCorr, flatness),
   }
+}
+
+/** Confianza de la tonalidad a partir de la correlacion K-S y la planitud del cromagrama. */
+export function keyConfidence(bestCorr: number, chromaFlatness: number): number {
+  if (!Number.isFinite(bestCorr) || !Number.isFinite(chromaFlatness)) return 0
+  const corrTerm = Math.max(0, Math.min(1, (bestCorr - 0.2) / 0.5))
+  // Ruido blanco o rosa: planitud ~0,97-0,99. Una progresion diatonica (7 de 12 notas): ~0,86.
+  const tonalTerm = Math.max(0, Math.min(1, (0.97 - chromaFlatness) / 0.1))
+  return Math.round(corrTerm * tonalTerm * 1000) / 1000
+}
+
+export interface MusicalAnalysisOptions {
+  /** BPM de la sesion: rejilla de los acordes cuando el BPM detectado no es fiable. */
+  sessionBpm: number
+  /** Segundo de la sesion donde empieza `samples` (el inicio del clip analizado). */
+  startS: number
+  /** Beats por paso del Viterbi (por defecto 2). */
+  stepBeats?: number
+}
+
+export interface MusicalAnalysis {
+  bpm: BpmDetectionResult | null
+  key: KeyDetectionResult | null
+  /** true si el BPM supera BPM_APPLY_MIN_CONFIDENCE (se puede escribir en la sesion). */
+  bpmReliable: boolean
+  /** true si la tonalidad supera KEY_APPLY_MIN_CONFIDENCE. */
+  keyReliable: boolean
+  /** BPM con que se armo la rejilla de acordes: el detectado si es fiable, si no el de la sesion. */
+  gridBpm: number
+  chords: StudioChord[]
+}
+
+/**
+ * Deteccion musical completa (BPM, tonalidad y acordes) con politica de confianza. Los acordes se
+ * ubican en beats de la rejilla que quedara en la sesion (`gridBpm`), y el desfase del clip se
+ * convierte con ese mismo BPM: si el BPM detectado no se aplica, los acordes caen en la rejilla
+ * vigente. Puro: lo usa el Web Worker de analisis y, sin Worker, el hilo principal.
+ */
+export function analyzeMusical(samples: Float32Array, sampleRate: number, options: MusicalAnalysisOptions): MusicalAnalysis {
+  const clean = sanitizeSamples(samples)
+  const bpm = detectBpmLocal(clean, sampleRate)
+  const key = detectKeyLocal(clean, sampleRate)
+  const bpmReliable = bpm !== null && bpm.confidence >= BPM_APPLY_MIN_CONFIDENCE
+  const keyReliable = key !== null && key.confidence >= KEY_APPLY_MIN_CONFIDENCE
+  const gridBpm = bpmReliable && bpm ? bpm.bpm : options.sessionBpm
+  const startBeatOffset = roundBeat(Math.max(0, options.startS) * (gridBpm / 60))
+  const chords = gridBpm > 0 ? detectChordsViterbi(clean, sampleRate, gridBpm, { stepBeats: options.stepBeats ?? 2, startBeatOffset }) : []
+  return { bpm, key, bpmReliable, keyReliable, gridBpm, chords }
 }
 
 /**
@@ -842,7 +1225,7 @@ export function detectChordsViterbi(
 
   for (let f = 0; f < numFrames; f++) {
     const seg = samples.subarray(f * frameSamples, Math.min(samples.length, (f + 1) * frameSamples))
-    const chroma = computeChromaVector(seg, sampleRate, 4096)
+    const chroma = computeChromaVector(seg, sampleRate, 4096, false)
     for (let s = 0; s < 24; s++) {
       let sim = 0
       const tpl = templates[s]
@@ -982,6 +1365,12 @@ export function loudnessRangeLu(channels: Float32Array[], sampleRate: number): n
     }
   }
 
+  return lraFromSubBlocks(subEnergies, totalSteps)
+}
+
+/** LRA a partir de la potencia ponderada K (suma de canales) de cada tramo de 100 ms. */
+function lraFromSubBlocks(subEnergies: Float64Array, totalSteps: number): number {
+  if (totalSteps < 10) return 0
   // Ventana short-term de 3 s (30 sub-bloques; si el audio es mas corto pero >= 1 s, ventana adaptada).
   const winSize = Math.min(30, Math.max(4, Math.floor(totalSteps / 2)))
   const stLufs: number[] = []
@@ -1013,7 +1402,8 @@ export interface AudioMathTelemetry {
 }
 
 /** Calcula toda la telemetria matematica de un conjunto de canales de audio. */
-export function measureAudioTelemetry(channels: Float32Array[], sampleRate: number): AudioMathTelemetry {
+export function measureAudioTelemetry(input: Float32Array[], sampleRate: number): AudioMathTelemetry {
+  const channels = input.map(sanitizeSamples)
   const lufs = integratedLufs(channels, sampleRate)
   const tp = truePeakDb(channels, sampleRate)
   const plrDb = Number.isFinite(lufs) && Number.isFinite(tp) ? Math.round((tp - lufs) * 10) / 10 : 0
@@ -1024,4 +1414,118 @@ export function measureAudioTelemetry(channels: Float32Array[], sampleRate: numb
   const centroidHz = Math.round(spectralCentroidHz(mono, sampleRate))
   const barkDb = barkBandEnergiesDb(mono, sampleRate)
   return { lufs, truePeakDb: tp, plrDb, lraLu, phaseCorrelation, centroidHz, barkDb }
+}
+
+export interface LoudnessSummary {
+  /** LUFS integrado BS.1770 (-Infinity en silencio). */
+  lufs: number
+  /** Pico real (sobremuestreo x4 de loudness.ts), dBTP. */
+  truePeakDb: number
+  /** Rango de sonoridad EBU R128 (LU). */
+  lraLu: number
+  /** Pico real menos LUFS integrado (dB); 0 si alguno no es finito. */
+  plrDb: number
+}
+
+/** Medicion de sonoridad del master: lo que necesitan Auto-Master y el panel del master. */
+export function measureLoudnessSummary(input: Float32Array[], sampleRate: number): LoudnessSummary {
+  const channels = input.slice(0, 2).map(sanitizeSamples)
+  const lufs = integratedLufs(channels, sampleRate)
+  const tp = truePeakDb(channels, sampleRate)
+  const plrDb = Number.isFinite(lufs) && Number.isFinite(tp) ? Math.round((tp - lufs) * 10) / 10 : 0
+  return { lufs, truePeakDb: tp, lraLu: loudnessRangeLu(channels, sampleRate), plrDb }
+}
+
+/** Medidor incremental de LoudnessSummary: recibe el audio por trozos (sin copiarlo entero). */
+export interface LoudnessSummaryMeter {
+  push(channels: readonly Float32Array[]): void
+  summary(): LoudnessSummary
+}
+
+/**
+ * Version por trozos de measureLoudnessSummary: LUFS integrado con el medidor de loudness.ts,
+ * LRA con los mismos tramos de 100 ms que loudnessRangeLu y pico real con truePeakDb sobre cada
+ * trozo mas las ultimas muestras del anterior (el interpolador ve a los dos lados del corte).
+ */
+export function createLoudnessSummaryMeter(sampleRate: number, channelCount: number): LoudnessSummaryMeter {
+  const count = Math.max(1, Math.min(2, Math.floor(channelCount)))
+  const lufsMeter = createLoudnessMeter(sampleRate, count)
+  const { shelf, highpass } = kWeightingCoefficients(sampleRate)
+  const step = Math.max(1, Math.round(sampleRate * 0.1))
+  const filterState = new Float64Array(count * 4)
+  let subs = new Float64Array(1024)
+  let subCount = 0
+  let acc = 0
+  let accSamples = 0
+  const overlap = 16
+  const tails: Float32Array[] = Array.from({ length: count }, () => new Float32Array(0))
+  let peakDb = Number.NEGATIVE_INFINITY
+
+  return {
+    push(input: readonly Float32Array[]): void {
+      if (!(sampleRate > 0) || input.length < count) return
+      const used = input.slice(0, count).map(sanitizeSamples)
+      let total = Infinity
+      for (const ch of used) total = Math.min(total, ch.length)
+      if (!(total > 0) || !Number.isFinite(total)) return
+      lufsMeter.push(used, total)
+
+      let done = 0
+      while (done < total) {
+        const take = Math.min(step - accSamples, total - done)
+        for (let c = 0; c < count; c++) {
+          const data = used[c]
+          const o = c * 4
+          let s1 = filterState[o]
+          let s2 = filterState[o + 1]
+          let t1 = filterState[o + 2]
+          let t2 = filterState[o + 3]
+          let sum = 0
+          for (let i = done; i < done + take; i++) {
+            const x = data[i]
+            const y = shelf.b0 * x + s1
+            s1 = shelf.b1 * x - shelf.a1 * y + s2
+            s2 = shelf.b2 * x - shelf.a2 * y
+            const z = highpass.b0 * y + t1
+            t1 = highpass.b1 * y - highpass.a1 * z + t2
+            t2 = highpass.b2 * y - highpass.a2 * z
+            sum += z * z
+          }
+          filterState[o] = s1
+          filterState[o + 1] = s2
+          filterState[o + 2] = t1
+          filterState[o + 3] = t2
+          acc += sum / step
+        }
+        accSamples += take
+        done += take
+        if (accSamples === step) {
+          if (subCount === subs.length) {
+            const grown = new Float64Array(subs.length * 2)
+            grown.set(subs)
+            subs = grown
+          }
+          subs[subCount++] = acc
+          acc = 0
+          accSamples = 0
+        }
+      }
+
+      for (let c = 0; c < count; c++) {
+        const tail = tails[c]
+        const data = used[c].subarray(0, total)
+        const joined = new Float32Array(tail.length + data.length)
+        joined.set(tail)
+        joined.set(data, tail.length)
+        const tp = truePeakDb([joined], sampleRate)
+        if (tp > peakDb) peakDb = tp
+        tails[c] = joined.slice(Math.max(0, joined.length - overlap))
+      }
+    },
+    summary(): LoudnessSummary {
+      const lufs = lufsMeter.integratedLufs()
+      const plrDb = Number.isFinite(lufs) && Number.isFinite(peakDb) ? Math.round((peakDb - lufs) * 10) / 10 : 0
+      return { lufs, truePeakDb: peakDb, lraLu: lraFromSubBlocks(subs, subCount), plrDb }
+    },
+  }
 }

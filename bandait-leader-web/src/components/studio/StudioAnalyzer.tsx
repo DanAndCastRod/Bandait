@@ -307,7 +307,8 @@ function drawBarkView(
 /**
  * Laboratorio Cientifico de Audio (`LAB`):
  *   - Espectro FFT Radix-2 con retencion de picos
- *   - Espectrograma Waterfall STFT tiempo-frecuencia
+ *   - Cascada espectral (una FFT por cuadro de pantalla apilada en el tiempo; el salto depende de
+ *     la tasa de cuadros, por eso no se anuncia como STFT)
  *   - Goniometro Lissajous Mid/Side + Correlador de Fase de Pearson r in [-1, +1]
  *   - Matriz psicoacustica de colision en 24 bandas Bark
  *
@@ -400,9 +401,16 @@ export const StudioAnalyzer: React.FC<StudioPanelProps> = ({ controller }) => {
             <Activity size={12} />
             FFT
           </button>
-          <button type="button" className="stu-btn" data-size="small" data-on={mode === 'waterfall'} onClick={() => setMode('waterfall')} title="Espectrograma STFT Waterfall">
+          <button
+            type="button"
+            className="stu-btn"
+            data-size="small"
+            data-on={mode === 'waterfall'}
+            onClick={() => setMode('waterfall')}
+            title="Cascada espectral: una FFT por cuadro de pantalla, apiladas en el tiempo (no es un STFT con salto fijo)"
+          >
             <Waves size={12} />
-            STFT
+            CASCADA
           </button>
           <button type="button" className="stu-btn" data-size="small" data-on={mode === 'lissajous'} onClick={() => setMode('lissajous')} title="Goniómetro Mid/Side Lissajous">
             <Radio size={12} />
@@ -430,7 +438,7 @@ export const StudioAnalyzer: React.FC<StudioPanelProps> = ({ controller }) => {
       {mode === 'bark' && snap.lastUnmaskResult && snap.lastUnmaskResult.topPairs.length > 0 && (
         <div className="stu-lab-pairs">
           <span className="stu-label">
-            Reducción de solapamiento: -{snap.lastUnmaskResult.reductionPct}%
+            Reducción de solapamiento estimada por el modelo: -{snap.lastUnmaskResult.reductionPct}%
           </span>
           {snap.lastUnmaskResult.topPairs.slice(0, 3).map((pair) => (
             <div key={`${pair.trackAId}-${pair.trackBId}`} className="stu-help">

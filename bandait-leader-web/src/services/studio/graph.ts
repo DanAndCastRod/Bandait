@@ -26,7 +26,7 @@
  * node (graph.ts importa instruments/factory.ts, que tampoco toca Web Audio al cargarse).
  */
 import { dbToGain } from '../stemTiming.ts'
-import { createFxUnit, createReverbUnit, fxLatencySeconds, setParam, type FxUnit, type ReverbUnit } from './fx.ts'
+import { createFxUnit, createReverbUnit, fxLatencySeconds, measureWaveShaperLatency, setParam, type FxUnit, type ReverbUnit } from './fx.ts'
 import { instrumentKey } from './instruments/core.ts'
 import { EMPTY_PREPARATION, createInstrument } from './instruments/factory.ts'
 import { STUDIO_REVERB_RETURN_DB_MIN, STUDIO_REVERB_SEND_DB_MIN, type StudioClip, type StudioFx, type StudioSession, type StudioTrack } from './session.ts'
@@ -307,7 +307,8 @@ async function loadLimiterWorklet(ctx: BaseAudioContext): Promise<GraphCapabilit
 export function prepareGraphContext(ctx: BaseAudioContext): Promise<GraphCapabilities> {
   let pending = preparing.get(ctx)
   if (!pending) {
-    pending = loadLimiterWorklet(ctx).then((capabilities) => {
+    // El retardo del saturador se mide antes de construir el grafo: entra en la compensacion entre pistas.
+    pending = Promise.all([loadLimiterWorklet(ctx), measureWaveShaperLatency(ctx.sampleRate)]).then(([capabilities]) => {
       prepared.set(ctx, capabilities)
       return capabilities
     })

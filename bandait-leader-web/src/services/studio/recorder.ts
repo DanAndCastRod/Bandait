@@ -27,7 +27,7 @@ import {
   saveCalibration,
   takeStartSeconds,
 } from './latency.ts'
-import { encodeWav24 } from '../wav.ts'
+import { MemoryTakeAccumulator } from './memoryTake.ts'
 import { STUDIO_MAX_ASSET_BYTES, assetFileName, newStudioId, type StudioAsset } from './session.ts'
 import { STUDIO_OPFS_ROOT, deleteAsset, putAsset, storageBackend } from './studioStore.ts'
 import type { WriterCommand, WriterEvent, WriterFileSpec } from './opfsWriter.worker.ts'
@@ -239,11 +239,10 @@ export const MAX_MOBILE_TAKE_SECONDS = 180
 
 interface MemoryTakeSink {
   port: MessagePort
-  ch0Chunks: Float32Array[]
-  ch1Chunks: Float32Array[]
-  frames: number
-  maxFrames: number
-  truncated: boolean
+  /** PCM de 24 bits ya intercalado, solo con los canales de la pista armada. */
+  acc: MemoryTakeAccumulator
+  /** Se cumple cuando llega `end` del worklet: despues de eso no quedan bloques en camino. */
+  ended: Promise<void>
 }
 
 interface ActiveTake {
@@ -660,33 +659,31 @@ export class StudioRecorder implements StudioRecorderApi {
   private async beginMemoryTake(takeId: string): Promise<{ firstBlockCtxTime: number; sink: MemoryTakeSink }> {
     const channel = new MessageChannel()
     const maxFrames = Math.ceil(MAX_MOBILE_TAKE_SECONDS * this.ctx.sampleRate)
-    const sink: MemoryTakeSink = {
-      port: channel.port1,
-      ch0Chunks: [],
-      ch1Chunks: [],
-      frames: 0,
-      maxFrames,
-      truncated: false,
-    }
+    // En memoria se graba una sola pista: sus canales deciden si el PCM es mono o estereo.
+    const arm = this.arms[0]
+    const picks: Array<0 | 1> = !arm || arm.channel === 'stereo' ? [0, 1] : [arm.channel === 1 ? 1 : 0]
+    const acc = new MemoryTakeAccumulator(picks, this.ctx.sampleRate, maxFrames)
+    let markEnded: () => void = () => undefined
+    const ended = new Promise<void>((resolve) => {
+      markEnded = resolve
+    })
+    const sink: MemoryTakeSink = { port: channel.port1, acc, ended }
     channel.port1.onmessage = (event: MessageEvent) => {
       const message = event.data as CaptureSinkMessage
-      if (!message || message.type !== 'block') return
-      const remaining = sink.maxFrames - sink.frames
-      if (remaining > 0) {
-        const take = Math.min(message.frames, remaining)
-        const c0 = new Float32Array(take)
-        c0.set(new Float32Array(message.ch0, 0, take))
-        const c1 = new Float32Array(take)
-        c1.set(new Float32Array(message.ch1, 0, take))
-        sink.ch0Chunks.push(c0)
-        sink.ch1Chunks.push(c1)
-        sink.frames += take
-        if (take < message.frames) sink.truncated = true
-      } else {
-        sink.truncated = true
+      if (!message) return
+      if (message.type === 'end') {
+        acc.end(message.blocks)
+        markEnded()
+        return
       }
+      if (message.type !== 'block') return
+      acc.push(message)
       const recycle: CaptureRecycleMessage = { type: 'recycle', buffers: [message.ch0, message.ch1] }
-      channel.port1.postMessage(recycle, [message.ch0, message.ch1])
+      try {
+        channel.port1.postMessage(recycle, [message.ch0, message.ch1])
+      } catch {
+        // El worklet ya no esta: los bufers se sueltan.
+      }
     }
 
     const started = waitEvent(
@@ -719,33 +716,28 @@ export class StudioRecorder implements StudioRecorderApi {
     ).catch(() => null)
     this.postCapture({ type: 'stop', takeId })
     const stopped = await stoppedWait
+    // El worklet manda el ultimo bloque y luego `end` por el sumidero: cerrar el puerto antes de
+    // `end` podia perder ese bloque. Si el worklet no responde, se cierra con lo que haya.
+    let endTimer: ReturnType<typeof setTimeout> | null = null
+    await Promise.race([sink.ended, new Promise<void>((resolve) => (endTimer = setTimeout(resolve, STOP_TIMEOUT_MS)))])
+    if (endTimer !== null) clearTimeout(endTimer)
+    sink.port.onmessage = null
     sink.port.close()
 
-    const mergeChunks = (chunks: Float32Array[], total: number): Float32Array => {
-      const out = new Float32Array(total)
-      let offset = 0
-      for (const ch of chunks) {
-        out.set(ch, offset)
-        offset += ch.length
-      }
-      return out
-    }
-
+    const take = sink.acc.finish()
     const writtenFiles: ClosedEvent['files'] = []
-    if (sink.frames > 0 && files.length > 0) {
-      const ch0 = mergeChunks(sink.ch0Chunks, sink.frames)
-      const ch1 = mergeChunks(sink.ch1Chunks, sink.frames)
+    let error: string | null = null
+    if (take.frames > 0 && files.length > 0) {
+      // En memoria hay una sola pista armada: su archivo lleva los canales que se acumularon.
+      const blob = new Blob(take.parts as BlobPart[], { type: 'audio/wav' })
+      take.parts.length = 0
       for (const f of files) {
-        const channels = f.arm.channel === 'stereo' ? [ch0, ch1] : [f.arm.channel === 1 ? ch1 : ch0]
-        const wavBytes = encodeWav24(channels, this.ctx.sampleRate)
-        const blob = new Blob([wavBytes], { type: 'audio/wav' })
-        await putAsset(this.sessionId, f.file, blob)
-        writtenFiles.push({
-          file: f.file,
-          frames: sink.frames,
-          bytes: blob.size,
-          channels: channels.length === 2 ? 2 : 1,
-        })
+        try {
+          await putAsset(this.sessionId, f.file, blob)
+          writtenFiles.push({ file: f.file, frames: take.frames, bytes: blob.size, channels: take.channels })
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err)
+        }
       }
     }
 
@@ -755,12 +747,12 @@ export class StudioRecorder implements StudioRecorderApi {
         type: 'closed',
         takeId,
         files: writtenFiles,
-        blocks: sink.ch0Chunks.length,
-        missingBlocks: 0,
-        gapFrames: 0,
+        blocks: take.blocks,
+        missingBlocks: take.missingBlocks,
+        gapFrames: take.gapFrames,
         failedBlocks: 0,
-        truncated: sink.truncated,
-        error: null,
+        truncated: take.truncated,
+        error,
       },
     }
   }

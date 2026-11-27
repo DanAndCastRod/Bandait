@@ -5,17 +5,30 @@
  * por descenso coordenado acotado (Bounded Coordinate Descent) los ajustes optimos de:
  *   1. Paneo estereo complementario (separando guitarras/teclas/coros sin descentrar voz principal,
  *      bombo ni bajo).
- *   2. Pasa-altos (`hpfHz`) automatico en pistas no graves para limpiar lodo sub-grave (< 110 Hz).
+ *   2. Pasa-altos (`hpfHz`) en pistas no graves, SOLO si su espectro medido tiene energia
+ *      apreciable bajo el corte (sin muestras medidas no se pone a ciegas).
  *   3. Recortes quirurgicos de `EQ` parametrico (`midHz`, `midDb`, `midQ`) sobre la banda Bark de
  *      mayor solapamiento, respetando jerarquia de roles (`vocals` > `bass`/`drums` > acompanamiento).
+ *
+ * La "reduccion" que informa es una ESTIMACION del propio modelo de colision (espectro Bark de
+ * cada pista x respuesta exacta de su EQ x solapamiento de paneo), no una medicion de la mezcla
+ * resultante: la interfaz la presenta como estimada. Nunca agrega un EQ a una cadena llena (el
+ * maximo de efectos por pista del contrato), asi la sesion sigue siendo valida al guardar.
  *
  * Modulo puro: sin DOM, sin React y sin import.meta.env.
  */
 import { dbToGain } from '../stemTiming.ts'
 import type { StemRole } from '../stemNames.ts'
 import { BARK_BAND_EDGES_HZ, barkBandPowers } from './dspMath.ts'
+import { eqPowerGainAt } from './fx.ts'
 import { trackAudible } from './graph.ts'
 import { defaultFx, type EqParams, type StudioFx, type StudioSession, type StudioTrack } from './session.ts'
+
+/** Efectos que admite una pista en `version: 2` (STUDIO_V2.md 7.3; el Hub siempre escribe v2). */
+export const TRACK_MAX_FX = 5
+
+/** Fraccion minima de energia bajo el corte para que valga la pena un pasa altos. */
+const HPF_MIN_LOW_ENERGY = 0.02
 
 export interface TrackSpectralInput {
   trackId: string
@@ -125,23 +138,9 @@ function barkCenterHz(band: number): number {
   return Math.round(Math.sqrt(lo * hi))
 }
 
-/** Ganancia aproximada de potencia de una cadena EQ en la frecuencia `hz`. */
-function approxEqPowerGain(eq: EqParams, hz: number): number {
-  let db = 0
-  if (eq.hpfHz > 0 && hz < eq.hpfHz * 1.4) {
-    const ratio = Math.max(0.1, hz / eq.hpfHz)
-    db -= 12 * Math.max(0, Math.log2(1 / ratio))
-  }
-  if (hz <= 200) db += eq.lowDb * Math.max(0, 1 - hz / 240)
-  if (hz >= 5000) db += eq.highDb * Math.min(1, (hz - 4500) / 4000)
-  if (Math.abs(eq.midDb) > 0.05 && eq.midHz > 0) {
-    const octDist = Math.abs(Math.log2(Math.max(20, hz) / eq.midHz))
-    const bwOct = 1 / Math.max(0.2, eq.midQ)
-    const bell = Math.exp(-Math.pow(octDist / (bwOct * 0.6), 2))
-    db += eq.midDb * bell
-  }
-  const lin = dbToGain(db)
-  return lin * lin
+/** Ganancia de potencia del EQ en `hz`: la respuesta exacta de los mismos biquads que suenan. */
+function eqPowerGain(eq: EqParams, hz: number, sampleRate: number): number {
+  return eqPowerGainAt(eq, hz, sampleRate)
 }
 
 /** Solapamiento espacial estereo entre dos posiciones de paneo [-1..1]: 1 en mismo punto, ~0.15 opuestos. */
@@ -176,6 +175,7 @@ function computeCollisionPairScore(
   eqB: EqParams,
   volDbB: number,
   panB: number,
+  sampleRate: number,
 ): { total: number; dominantBand: number } {
   const spatial = stereoOverlapFactor(panA, panB)
   const gA = Math.pow(dbToGain(volDbA), 2)
@@ -186,8 +186,8 @@ function computeCollisionPairScore(
 
   for (let b = 0; b < 24; b++) {
     const hz = barkCenterHz(b)
-    const eA = barkA[b] * gA * approxEqPowerGain(eqA, hz)
-    const eB = barkB[b] * gB * approxEqPowerGain(eqB, hz)
+    const eA = barkA[b] * gA * eqPowerGain(eqA, hz, sampleRate)
+    const eB = barkB[b] * gB * eqPowerGain(eqB, hz, sampleRate)
     // Peso perceptual mayor en zona vocal/presencia (300..4000 Hz, Bark 3..17) y subgrave (Bark 0..2).
     const perceptualWeight = b <= 2 ? 1.25 : b >= 3 && b <= 17 ? 1.35 : 0.75
     const overlap = Math.sqrt(Math.max(0, eA * eB)) * spatial * perceptualWeight
@@ -226,6 +226,9 @@ export function optimizeBarkMixUnmasking(
   }
 
   const inputById = new Map(inputs.map((inp) => [inp.trackId, inp]))
+  const sampleRate = session.sampleRate > 0 ? session.sampleRate : 48000
+  // true si el perfil de la pista salio de sus muestras (no del perfil de respaldo por rol).
+  const measured: boolean[] = []
   const baseBark = activeTracks.map((t) => {
     const inp = inputById.get(t.id)
     if (inp?.samples && inp.samples.length > 0 && (inp.sampleRate ?? 0) > 0) {
@@ -235,11 +238,15 @@ export function optimizeBarkMixUnmasking(
       if (sum > 1e-12) {
         const norm = new Float64Array(24)
         for (let b = 0; b < 24; b++) norm[b] = raw[b] / sum
+        measured.push(true)
         return norm
       }
     }
+    measured.push(false)
     return fallbackBarkProfileForRole(t.role)
   })
+  // Una pista sin EQ y con la cadena llena no puede recibir uno: solo se le cambia el paneo.
+  const canEq = activeTracks.map((t) => t.fx.some((fx) => fx.type === 'eq') || t.fx.length < TRACK_MAX_FX)
 
   const pans = activeTracks.map((t) => t.pan)
   const vols = activeTracks.map((t) => t.volumeDb)
@@ -260,6 +267,7 @@ export function optimizeBarkMixUnmasking(
           eqs[j],
           vols[j],
           pans[j],
+          sampleRate,
         )
         mat[i][j] = Math.round(total * 1000) / 1000
         mat[j][i] = mat[i][j]
@@ -274,13 +282,15 @@ export function optimizeBarkMixUnmasking(
   const initial = evalMatrix()
   const actions: MixUnmaskAction[] = []
 
-  // Paso 1: Limpieza de subgraves (HPF) en pistas que no son bombo/bajo.
+  // Paso 1: Limpieza de subgraves (HPF) en pistas que no son bombo/bajo, solo si su espectro
+  // MEDIDO tiene energia bajo el corte (sin muestras no hay evidencia: no se pone a ciegas).
   for (let i = 0; i < n; i++) {
     const t = activeTracks[i]
-    if (!isLowEndRole(t.role, t.name) && eqs[i].hpfHz < 75) {
-      const targetHpf = t.role === 'vocals' || t.role === 'backing_vocals' ? Math.round(80 + 20 * strength) : Math.round(90 + 30 * strength)
-      eqs[i].hpfHz = targetHpf
-    }
+    if (!canEq[i] || !measured[i] || isLowEndRole(t.role, t.name) || eqs[i].hpfHz >= 75) continue
+    const targetHpf = t.role === 'vocals' || t.role === 'backing_vocals' ? Math.round(80 + 20 * strength) : Math.round(90 + 30 * strength)
+    let lowShare = 0
+    for (let b = 0; b < 24; b++) if (barkCenterHz(b) < targetHpf) lowShare += baseBark[i][b]
+    if (lowShare >= HPF_MIN_LOW_ENERGY) eqs[i].hpfHz = targetHpf
   }
 
   // Paso 2: Separacion estereo complementaria en pistas no ancladas al centro que chocan entre si.
@@ -316,7 +326,7 @@ export function optimizeBarkMixUnmasking(
     // La pista de menor prioridad cede espacio mediante un recorte EQ quirurgico (Q medio-alto).
     const yieldIdx = prioI >= prioJ ? pair.j : pair.i
     const domIdx = yieldIdx === pair.i ? pair.j : pair.i
-    if (carvedTracks.has(yieldIdx)) continue
+    if (carvedTracks.has(yieldIdx) || !canEq[yieldIdx]) continue
 
     let targetHz = Math.max(200, Math.min(8000, barkCenterHz(pair.band)))
     // Caso clasico Kick vs Bass: tallar al bajo en ~90..220 Hz y dar aire de definicion.
@@ -325,7 +335,7 @@ export function optimizeBarkMixUnmasking(
       (activeTracks[pair.j].role === 'drums' && activeTracks[pair.i].role === 'bass')
     ) {
       const bassIdx = activeTracks[pair.i].role === 'bass' ? pair.i : pair.j
-      if (!carvedTracks.has(bassIdx)) {
+      if (!carvedTracks.has(bassIdx) && canEq[bassIdx]) {
         eqs[bassIdx].midHz = 210
         eqs[bassIdx].midDb = Math.round(-3.2 * strength * 10) / 10
         eqs[bassIdx].midQ = 2.4

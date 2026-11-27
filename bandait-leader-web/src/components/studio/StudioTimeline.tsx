@@ -22,6 +22,7 @@ import {
   type StudioTrack,
 } from '../../services/studio/session'
 import { expandMidiClipNotes, moveClip, moveClipsBy, moveMidiClip, resizeMidiClip, setClipFades, snapTime, trimClip } from '../../services/studio/sessionOps'
+import { evaluateFadeCurve } from '../../services/studio/waveOps'
 import { clipsInMarquee, dragLoopRegion, edgeScrollSpeed, marqueeFromPoints, marqueeSelection, type LoopDragPart, type MarqueeClipBox, type MarqueeRect } from '../../services/studio/timelineMath'
 import type { AssetPeaks, LoopRegionS, PeakColumns, SnapMode } from '../../services/studio/types'
 import { studioTrackColor, type StudioCanvasPalette } from '../../services/studioCanvasPalette'
@@ -273,36 +274,47 @@ function paintClip(ctx: CanvasRenderingContext2D, scene: Scene, clip: StudioClip
     }
   }
 
-  // Fades: lo que queda fuera de la curva se oscurece y la curva se traza encima.
+  // Fades: lo que queda fuera de la curva se oscurece y la curva se traza encima, con la misma
+  // forma (lineal, x^2,2 o coseno elevado) que programa el motor (graph.clipFadeFactor).
   if (clip.active) {
     const fadeIn = clip.fadeInS * view.zoom
     const fadeOut = clip.fadeOutS * view.zoom
+    const shape = clip.fadeShape ?? 'linear'
     ctx.fillStyle = pal.fadeShade
     ctx.strokeStyle = withAlpha(color, 0.9)
     ctx.lineWidth = 1
+    // Puntos de la curva: 1 tramo si es lineal; si no, uno cada ~3 px (entre 4 y 24).
+    const segmentsFor = (px: number) => (shape === 'linear' ? 1 : Math.max(4, Math.min(24, Math.round(px / 3))))
+    const traceCurve = (fromX: number, widthPx: number, rising: boolean) => {
+      const steps = segmentsFor(widthPx)
+      for (let k = 0; k <= steps; k++) {
+        const u = k / steps
+        const gain = evaluateFadeCurve(rising ? u : 1 - u, shape)
+        const px = fromX + u * widthPx
+        const py = box.y + box.h - gain * box.h
+        if (k === 0) ctx.moveTo(px, py)
+        else ctx.lineTo(px, py)
+      }
+    }
     if (fadeIn >= 1) {
       ctx.beginPath()
-      ctx.moveTo(box.x, box.y)
-      ctx.lineTo(box.x + fadeIn, box.y)
-      ctx.lineTo(box.x, box.y + box.h)
+      traceCurve(box.x, fadeIn, true)
+      ctx.lineTo(box.x, box.y)
       ctx.closePath()
       ctx.fill()
       ctx.beginPath()
-      ctx.moveTo(box.x, box.y + box.h)
-      ctx.lineTo(box.x + fadeIn, box.y)
+      traceCurve(box.x, fadeIn, true)
       ctx.stroke()
     }
     if (fadeOut >= 1) {
       const end = box.x + box.w
       ctx.beginPath()
-      ctx.moveTo(end, box.y)
-      ctx.lineTo(end - fadeOut, box.y)
-      ctx.lineTo(end, box.y + box.h)
+      traceCurve(end - fadeOut, fadeOut, false)
+      ctx.lineTo(end, box.y)
       ctx.closePath()
       ctx.fill()
       ctx.beginPath()
-      ctx.moveTo(end, box.y + box.h)
-      ctx.lineTo(end - fadeOut, box.y)
+      traceCurve(end - fadeOut, fadeOut, false)
       ctx.stroke()
     }
   }
