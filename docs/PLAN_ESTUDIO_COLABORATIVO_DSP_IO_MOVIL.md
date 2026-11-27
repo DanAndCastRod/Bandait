@@ -1,6 +1,6 @@
 # Plan Maestro: Estudio DAW Profesional Colaborativo, Control de Versiones Musical, DSP Matemático, Modelos IO/ML y Ecosistema Móvil
 
-**Estado:** Implementado y verificado (Web 3.0 — Ola 3)  
+**Estado:** Hub en producción en Cloudflare Pages (`PR #61` / `693c356c`); pendiente desplegar Worker `1.5.0` desde local (ver sección 5)  
 **Ámbito:** `bandait-leader-web`, `bandait-stems-worker`, `bandait-protocol`, `landing/hub`  
 **Fuente de Verdad Raíz:** [`docs/PLAN_BANDAIT_3.0_MASTER.md`](PLAN_BANDAIT_3.0_MASTER.md) y [`AGENTS.md`](../AGENTS.md)
 
@@ -92,3 +92,18 @@ flowchart TB
 - **Cero iconos emoji** en código, UI, hojas de estilo y documentación (`AGENTS.md`).
 - **Independencia cromática y contraste WCAG:** cero literales hexadecimales en `studio.css` ni en lienzos Canvas del Estudio (`StudioAnalyzer.tsx` incluido en la auditoría automática de `verify-appearance-logic.ts`); botones con `border-radius >= 8px` y transporte circular `9999px`.
 - **Suite determinista `scripts/verify-math-vcs-io.ts`:** verifica invertibilidad FFT/IFFT (`< 1e-9`), precisión YIN (`< 0.5 cents`), recuperación exacta de retardo y polaridad GCC-PHAT con ruido, detección local BPM/Tonalidad/Viterbi, monotonicidad y respeto de anclas en *Simulated Annealing*, reducción estricta de colisiones Bark, diffs VCS y fusión colaborativa 3-way.
+
+---
+
+## 5. Estado de Despliegue y Relevo para Agente en Local
+
+- **Repositorio (`main`):** implementado, verificado (`93/93` Worker, `14/14` suites lógicas Hub, `140/140` Follower, `35/35` RLS, `83/83` Playwright `leader-web`) y fusionado en **PR #61** (`693c356c`, `5/5` checks de GitHub Actions en verde).
+- **Cloudflare Pages (`https://bandait.releven.cc/hub/`):** **desplegado en producción** automáticamente desde `main` (`completed / success`).
+- **Pendiente operativo único para el agente en local — Desplegar Cloudflare Worker `bandait-stems` (`1.5.0`):**
+  - El código del Worker `1.5.0` (`STUDIO_COLLABORATORS`, `/vcs`, `/commits/{commit}`, `protected_assets` en `studioCleanup.ts` y códigos VCS en `mcp.ts`) ya está en `main`, pero la VM remota donde se implementó no tenía montado `CLOUDFLARE_API_TOKEN` (almacenado en ClipVault bajo `releven-deploy-cloudflare-api-key`).
+  - **Checklist de ejecución en local** (fuera de red con inspección TLS `Grupo Bios CA`):
+    1. `git pull origin main && cd bandait-stems-worker`
+    2. Cargar `CLOUDFLARE_API_TOKEN` desde ClipVault (`releven-deploy-cloudflare-api-key`) sin exponerlo en consola ni logs.
+    3. Ejecutar `npm test && npx tsc --noEmit && npx wrangler deploy`.
+    4. Verificar `curl -s https://bandait-stems.oooglue.workers.dev/v1/health` -> `{"ok":true,"version":"1.5.0"}` (y cron `17 4 * * *` activo).
+    5. Actualizar esta sección y `DEVLOG.md` con el UUID de despliegue de Cloudflare.
