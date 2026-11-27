@@ -84,11 +84,11 @@ test.describe('Web Admin Hub 2.3 - navegacion', () => {
     await expect(page.getByRole('heading', { name: 'Rider Técnico & Ruteo de Equipos' })).toBeVisible();
   });
 
-  test('movil 390 px: barra de pildoras con Estudio directo y hoja "Más" con el resto, sin scroll horizontal', async ({ page }) => {
+  test('movil 390 px: barra de 4 pildoras y hoja "Más" con el resto, sin scroll horizontal', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await enterDemo(page);
     const bottom = page.getByRole('navigation', { name: 'Vistas del hub' });
-    await expect(bottom.getByRole('button')).toHaveText(['Estudio', 'Ensayo', 'Canciones', 'Setlists', 'Más']);
+    await expect(bottom.getByRole('button')).toHaveText(['Ensayo', 'Canciones', 'Setlists', 'Más']);
     for (const id of ['rehearsal', 'songs', 'setlists']) {
       await page.getByTestId(`tab-${id}`).click();
       await expect(page.getByTestId(`tab-${id}`)).toHaveAttribute('aria-current', 'page');
@@ -97,7 +97,7 @@ test.describe('Web Admin Hub 2.3 - navegacion', () => {
 
     await page.getByTestId('tab-more').click();
     const sheet = page.getByTestId('more-sheet');
-    await expect(sheet.getByTestId(/^tab-/)).toHaveText(['Banda', 'Ajustes']);
+    await expect(sheet.getByTestId(/^tab-/)).toHaveText(['Estudio DAW', 'Banda', 'Ajustes']);
     await expect(sheet.getByTestId('upload-audio-cta')).toBeVisible();
     await expect(sheet.getByTestId('open-manual')).toBeVisible();
     await expect(sheet.getByTestId('export-json')).toBeVisible();

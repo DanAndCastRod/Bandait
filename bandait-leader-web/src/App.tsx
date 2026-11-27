@@ -4,7 +4,7 @@ import { GlobalAudioProvider } from './context/GlobalAudioContext'
 import { useHub } from './context/hubContextCore'
 import { AuthScreen } from './components/AuthScreen'
 import { HubShell } from './components/shell/HubShell'
-import type { HubView, SongsSegment } from './components/shell/hubViews'
+import type { HubView, SongFocusRequest, SongsSegment } from './components/shell/hubViews'
 import { MiniPlayer } from './components/MiniPlayer'
 import { SongUniverseBar } from './components/SongUniverseBar'
 import { MobileWidgetTray, type MobileWidgetId } from './components/widgets/MobileWidgetTray'
@@ -85,28 +85,64 @@ function viewOfSource(view: HubView, segment: SongsSegment): AudioView | null {
   return null
 }
 
+/**
+ * Quita `view`, `widget` y `quick` de la URL una vez leidos: si se quedaran, recargar la pagina
+ * volveria a abrir la vista o el widget del acceso directo aunque el usuario ya se hubiera ido.
+ */
+function clearLaunchParams(): void {
+  try {
+    const url = new URL(window.location.href)
+    let changed = false
+    for (const key of ['view', 'widget', 'quick']) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key)
+        changed = true
+      }
+    }
+    if (changed) window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+  } catch {
+    // Sin History API: no pasa nada grave, solo se reabre al recargar.
+  }
+}
+
 const HubMainContent: React.FC = () => {
-  const { user, cloud, initialSyncBlocking, syncStatus, retrySync, continueOffline, logout } = useHub()
+  const { user, cloud, initialSyncBlocking, syncStatus, retrySync, continueOffline, logout, activeSongId } = useHub()
   /** Motor de audio global: lo que suena sigue sonando al cambiar de vista (mini reproductor). */
   const globalAudio = useGlobalAudio()
   const [initialLaunch] = useState(readInitialUrlLaunch)
+  useEffect(() => {
+    clearLaunchParams()
+  }, [])
   const [view, setView] = useState<HubView>(initialLaunch.view)
   /** Segmento de Canciones y Stems; se recuerda mientras dure la sesion. */
   const [songsSegment, setSongsSegment] = useState<SongsSegment>('library')
   /** Cancion a abrir en el editor de la LIBRERIA (pedido desde ENSAYO); se olvida al cambiar de vista. */
   const [editSongRequest, setEditSongRequest] = useState<string | null>(null)
+  /**
+   * Salto explicito de la barra del Universo a ENSAYO o STEMS con la cancion activa. Navegar de
+   * otra forma lo olvida: esas vistas retoman entonces lo que suena en el reproductor global.
+   */
+  const [songFocus, setSongFocus] = useState<SongFocusRequest | null>(null)
   const selectView = (next: HubView) => {
     setEditSongRequest(null)
+    setSongFocus(null)
     setView(next)
   }
   const navigateUniverse = (nextView: HubView, nextSeg?: SongsSegment) => {
     setEditSongRequest(null)
+    const wantsSong = nextView === 'rehearsal' || (nextView === 'songs' && nextSeg === 'stems')
+    setSongFocus(wantsSong && activeSongId ? { songId: activeSongId, nonce: Date.now() } : null)
     if (nextSeg) setSongsSegment(nextSeg)
     setView(nextView)
+  }
+  const changeSongsSegment = (next: SongsSegment) => {
+    setSongFocus(null)
+    setSongsSegment(next)
   }
   /** "Abrir pistas" de Ensayo y la CTA "+ Subir o separar audio": Canciones y Stems > STEMS Y PISTAS. */
   const openStems = () => {
     setEditSongRequest(null)
+    setSongFocus(null)
     setSongsSegment('stems')
     setView('songs')
   }
@@ -219,12 +255,16 @@ const HubMainContent: React.FC = () => {
         contenido mixto). El control de transporte del director vive en la PWA servida desde la LAN.
       */}
       {view === 'setlists' && <PlaylistsHubView />}
-      {view === 'songs' && <SongsStemsHubView segment={songsSegment} onSegmentChange={setSongsSegment} openSongId={editSongRequest} />}
+      {view === 'songs' && (
+        <SongsStemsHubView segment={songsSegment} onSegmentChange={changeSongsSegment} openSongId={editSongRequest} focusRequest={songFocus} />
+      )}
       {view === 'rehearsal' && (
         <RehearsalHubView
           onOpenTracks={openStems}
+          focusRequest={songFocus}
           onEditSong={(songId) => {
             setEditSongRequest(songId)
+            setSongFocus(null)
             setSongsSegment('library')
             setView('songs')
           }}

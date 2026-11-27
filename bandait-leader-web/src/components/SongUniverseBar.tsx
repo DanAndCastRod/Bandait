@@ -1,6 +1,7 @@
 import React from 'react'
 import { Disc3, Library, ListMusic, Mic, SlidersVertical, X } from 'lucide-react'
 import { useHub } from '../context/hubContextCore'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 import type { HubView, SongsSegment } from './shell/hubViews'
 import { colors, ghostButton, mono, radius } from './hubStyles'
 
@@ -18,13 +19,16 @@ interface Props {
  */
 export const SongUniverseBar: React.FC<Props> = ({ currentView, currentSegment, studioEnabled, onNavigate }) => {
   const { activeSong, setActiveSongId } = useHub()
+  // Con dedo (movil o pantalla tactil) cada pildora llega a 44 px; con raton queda compacta.
+  const touch = useMediaQuery('(max-width: 767px), (pointer: coarse)', false)
   if (!activeSong) return null
+  const target = touch ? '44px' : '28px'
 
   const pill = (active: boolean): React.CSSProperties => ({
     ...ghostButton,
     padding: '4px 9px',
     fontSize: '11px',
-    minHeight: '28px',
+    minHeight: target,
     borderRadius: radius.control,
     background: active ? 'var(--b-accent)' : 'var(--b-elevated)',
     color: active ? 'var(--b-on-accent)' : colors.text,
@@ -118,7 +122,9 @@ export const SongUniverseBar: React.FC<Props> = ({ currentView, currentSegment, 
           style={{
             ...ghostButton,
             padding: '4px 6px',
-            minHeight: '28px',
+            minHeight: target,
+            minWidth: target,
+            justifyContent: 'center',
             borderRadius: radius.control,
             background: 'transparent',
             color: colors.muted,

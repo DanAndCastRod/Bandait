@@ -14,14 +14,14 @@
       "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
   "shortcuts": [
     {
-      "name": "Afinador Cromático YIN",
+      "name": "Afinador cromático",
       "short_name": "Afinador",
-      "description": "Abrir afinador de precisión sub-cent",
+      "description": "Abrir el afinador cromático",
       "url": "./?widget=tuner"
     },
     {
@@ -42,14 +42,5 @@
       "description": "Practicar stems con ChordPro sincronizado",
       "url": "./?view=rehearsal"
     }
-  ],
-  "share_target": {
-    "action": "./?share=audio",
-    "method": "GET",
-    "params": {
-      "title": "title",
-      "text": "text",
-      "url": "url"
-    }
-  }
+  ]
 }

@@ -88,7 +88,7 @@ export const StudioMobileQuickSurface: React.FC<Props> = ({ controller, recordAl
         <div className="stu-mq-transport">
           <button
             type="button"
-            className="stu-btn stu-mq-bigbtn"
+            className="stu-btn stu-mq-bigbtn b-transport"
             data-tone="primary"
             onClick={() => controller.togglePlay()}
             data-testid="studio-mq-play"
@@ -98,7 +98,7 @@ export const StudioMobileQuickSurface: React.FC<Props> = ({ controller, recordAl
           </button>
           <button
             type="button"
-            className="stu-btn stu-mq-bigbtn"
+            className="stu-btn stu-mq-bigbtn b-transport"
             onClick={() => controller.stop()}
           >
             <Square size={18} />
@@ -106,7 +106,7 @@ export const StudioMobileQuickSurface: React.FC<Props> = ({ controller, recordAl
           </button>
           <button
             type="button"
-            className="stu-btn stu-mq-bigbtn"
+            className="stu-btn stu-mq-bigbtn b-transport"
             data-tone={recording ? 'danger' : undefined}
             data-on={recording}
             onClick={() => void quickRecordIdea()}

@@ -30,6 +30,7 @@ import { barAtTime, sectionIndexAtBar, sectionSpans, type SectionSpan } from '..
 import { useStemCloudTarget } from '../hooks/useStemCloudTarget'
 import { onCloudStemsChanged } from '../services/stemCloudEvents'
 import type { Song } from '../types/hub'
+import type { SongFocusRequest } from '../components/shell/hubViews'
 import { cardStyle, colors, labelStyle, mono, primaryButton, smallInputStyle, viewStyle } from '../components/hubStyles'
 import '../styles/audio.css'
 
@@ -39,6 +40,8 @@ interface Props {
   onOpenTracks: () => void
   /** Abre la cancion en el editor de CANCIONES (para agregarle secciones). */
   onEditSong: (songId: string) => void
+  /** Salto explicito desde la barra del Universo de la Cancion: abre esa cancion. */
+  focusRequest?: SongFocusRequest | null
 }
 
 /** Consultas de manifiesto en paralelo al abrir ENSAYO (una por cancion sin stems locales). */
@@ -50,14 +53,21 @@ const MANIFEST_CONCURRENCY = 4
  * reproductor que PISTAS (StemStudio); el prompter lee la posicion con rAF y solo vuelve a pintar
  * React cuando cambia la seccion. Descargar es lectura: cualquier integrante puede hacerlo.
  */
-export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) => {
+export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong, focusRequest = null }) => {
   const { songs, activeSongId, setActiveSongId } = useHub()
   const { target, bandKey } = useStemCloudTarget()
   const audio = useGlobalAudioEngine()
   const [records, setRecords] = useState<Map<string, StemSongRecord> | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  // Por defecto, la cancion que suena (o sono) en el reproductor global o la activa transversal.
-  const [pickedId, setPickedId] = useState<string | null>(() => audio.currentStemSongId() ?? activeSongId)
+  // Un salto explicito manda; si no, la cancion que suena (o sono) en el reproductor global (volver
+  // a ENSAYO la retoma con su posicion, tempo y tono) y solo sin nada cargado, la activa.
+  const [pickedId, setPickedId] = useState<string | null>(() => focusRequest?.songId ?? audio.currentStemSongId() ?? activeSongId)
+  // Otro salto con la vista ya montada (patron "ajustar estado al cambiar una prop", sin efecto).
+  const [seenFocus, setSeenFocus] = useState(focusRequest)
+  if (focusRequest !== seenFocus) {
+    setSeenFocus(focusRequest)
+    if (focusRequest) setPickedId(focusRequest.songId)
+  }
   /** Manifiestos de la nube por `${bandKey}:${songId}` (null = sin stems en la nube). */
   const [cloud, setCloud] = useState<Map<string, CloudManifest | null>>(() => new Map())
   const [cloudError, setCloudError] = useState<string | null>(null)
@@ -144,11 +154,12 @@ export const RehearsalHubView: React.FC<Props> = ({ onOpenTracks, onEditSong }) 
     )
   }, [songs, records, cloudOnly])
 
+  // Lo que suena en el reproductor global manda (pickedId nace de el): la cancion activa de la
+  // Libreria o de Setlists no lo libera. Solo un gesto explicito cambia de cancion.
+  // Si la pedida no tiene stems, se queda en la que suena antes de caer en la primera.
+  const playingId = audio.currentStemSongId()
   const picked =
-    (activeSongId ? options.find((o) => o.song.id === activeSongId) : undefined) ??
-    options.find((o) => o.song.id === pickedId) ??
-    options[0] ??
-    null
+    options.find((o) => o.song.id === pickedId) ?? (playingId ? options.find((o) => o.song.id === playingId) : undefined) ?? options[0] ?? null
   const song = picked?.song ?? null
   const record = song && records ? records.get(song.id) ?? null : null
   const manifest = song ? cloud.get(cloudKey(song.id)) ?? null : null

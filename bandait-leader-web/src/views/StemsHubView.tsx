@@ -24,6 +24,7 @@ import {
   type CloudManifest,
 } from '../services/stemCloud'
 import { stemCloudTarget } from '../services/stemCloudConfig'
+import type { SongFocusRequest } from '../components/shell/hubViews'
 import { colors, headerBarStyle, labelStyle, mono, smallInputStyle, viewStyle } from '../components/hubStyles'
 import '../styles/audio.css'
 
@@ -56,14 +57,24 @@ function errorText(err: unknown, fallback: string): string {
  * por defecto la cancion que esta cargada. SUBIR Y SEPARAR encola el trabajo en la cola global
  * (sigue al cambiar de vista).
  */
-export const StemsHubView: React.FC = () => {
+export const StemsHubView: React.FC<{ focusRequest?: SongFocusRequest | null }> = ({ focusRequest = null }) => {
   const { songs, sharing, activeBand, activeSongId, setActiveSongId } = useHub()
   const audio = useGlobalAudioEngine()
   const [records, setRecords] = useState<Map<string, StemSongRecord> | null>(null)
   const [listError, setListError] = useState<string | null>(null)
-  // Por defecto, la cancion que suena (o sono) en el reproductor global o la activa transversal.
-  const [pickedSongId, setPickedSongId] = useState<string | null>(() => audio.currentStemSongId() ?? activeSongId)
+  // Un salto explicito manda; si no, la cancion que suena (o sono) en el reproductor global y solo
+  // sin nada cargado, la activa transversal.
+  const [pickedSongId, setPickedSongId] = useState<string | null>(() => focusRequest?.songId ?? audio.currentStemSongId() ?? activeSongId)
   const [importing, setImporting] = useState(false)
+  // Otro salto con la vista ya montada (patron "ajustar estado al cambiar una prop", sin efecto).
+  const [seenFocus, setSeenFocus] = useState(focusRequest)
+  if (focusRequest !== seenFocus) {
+    setSeenFocus(focusRequest)
+    if (focusRequest) {
+      setPickedSongId(focusRequest.songId)
+      setImporting(false)
+    }
+  }
   const [deleting, setDeleting] = useState<DeleteRequest | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [cloudStates, setCloudStates] = useState<Record<string, CloudSongState>>({})
@@ -102,9 +113,9 @@ export const StemsHubView: React.FC = () => {
   const songIds = useMemo(() => new Set(songs.map((s) => s.id)), [songs])
   const orphans = useMemo(() => (records ? [...records.values()].filter((r) => !songIds.has(r.songId)) : []), [records, songIds])
 
-  // Cancion elegida; prioriza la activa transversal, luego la elegida localmente o la primera con stems.
+  // Cancion elegida: la de pickedSongId (salto explicito, reproductor global o activa, en ese
+  // orden al montar), luego la primera con stems. La activa de otra vista no libera lo que suena.
   const selectedSong =
-    (activeSongId ? sortedSongs.find((s) => s.id === activeSongId) : undefined) ??
     sortedSongs.find((s) => s.id === pickedSongId) ??
     sortedSongs.find((s) => records?.has(s.id)) ??
     sortedSongs[0] ??
