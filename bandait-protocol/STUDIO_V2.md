@@ -1069,7 +1069,25 @@ para generar. El cuerpo de `POST .../jobs` no cambia.
   - `stereo_imager`: `width` (`0..2`, def `1`), `mono_bass_hz` (`0..300`, def `120`).
 - Campos opcionales en clips de audio (`version: 2`, omitidos en el cable cuando valen el valor por defecto):
   - `phase_invert`: `true` (ausente cuando es `false`).
-  - `fade_shape`: `'exp' | 'scurve'` (ausente cuando es `'linear'`).
+  - `fade_shape`: `'exp' | 'scurve'` (ausente cuando es `'linear'`). Curva de ganancia del fundido
+    para `u` en `[0, 1]` (`u = 0` silencio, `u = 1` ganancia del clip; en el fundido de entrada
+    `u = t / fade_in_s`, en el de salida `u = (length_s - t) / fade_out_s`):
+    - `'linear'`: `g(u) = u`.
+    - `'exp'`: `g(u) = u^2.2`.
+    - `'scurve'` (coseno elevado): `g(u) = 0.5 - 0.5 * cos(pi * u)`.
+    Si los dos fundidos se solapan manda el menor. El motor, el export y el dibujo del clip usan la
+    misma curva.
+- Procesado de los efectos (no viaja: fija como deben sonar igual en vivo y en el export):
+  - `de_esser`: bandas complementarias en `freq_hz` (grave = pasa bajos Butterworth de 2o orden;
+    aguda = entrada menos grave) y compresor solo en la aguda, con su ganancia automatica restada.
+    Con `reduction_db` 0 la respuesta es plana.
+  - `saturator`: curva con pendiente 1 en el origen y nivel compensado (con `drive_db` 0 una senal
+    chica pasa a 0 dB), `mix` mezclado dentro de la curva (seco y humedo con el mismo retardo),
+    pasa altos de 10 Hz contra la continua y el retardo del sobremuestreo declarado en la
+    compensacion entre pistas.
+  - `stereo_imager`: graves en mono por cruce Linkwitz-Riley de 4o orden en `mono_bass_hz` (lado por
+    pasa altos LR4, medio por el pasa todo equivalente); con `width` 1 la imagen no cambia sobre el
+    corte y con `mono_bass_hz` 0 es la identidad.
 - Parámetro opcional en instrumentos `synth` y `drums` (`version: 2`):
   - `analog_drift`: `0..1` (def `0`; se omite en el cable cuando vale `0` para identidad exacta con documentos previos).
 

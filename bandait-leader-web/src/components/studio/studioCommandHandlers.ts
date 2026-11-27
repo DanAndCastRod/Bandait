@@ -717,13 +717,13 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     },
     'master.auto': {
       ...editing,
-      run: (_ctx, args) => {
+      run: async (_ctx, args) => {
         const rawProfile = str(args, 'profile')
         const profile = isAutoMasterProfile(rawProfile) ? rawProfile : 'streaming'
         const rawTone = str(args, 'tone')
         const tone = isAutoMasterTone(rawTone) ? rawTone : 'balanced'
         const targetLufs = num(args, 'target_lufs')
-        controller.applyAutoMaster(profile, tone, targetLufs)
+        await controller.applyAutoMaster(profile, tone, targetLufs)
       },
     },
     'mix.unmask': {
@@ -744,8 +744,8 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     },
     'studio.detect_local': {
       ...editing,
-      run: () => {
-        controller.detectLocalMusicalAnalysis()
+      run: async () => {
+        await controller.detectLocalMusicalAnalysis()
       },
     },
     'session.set_meta': {

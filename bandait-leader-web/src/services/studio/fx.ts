@@ -49,29 +49,283 @@ export function limiterLatencySeconds(sampleRate: number): number {
   return limiterLookaheadFrames(sampleRate, STUDIO_LIMITER_LOOKAHEAD_MS) / sampleRate
 }
 
-/** Retardo de una unidad de efecto. El EQ, el saturador y el stereo_imager no retrasan; de_esser usa compresor de banda. */
+/**
+ * Retardo del sobremuestreo x4 del WaveShaperNode (saturador), en muestras, por frecuencia de
+ * muestreo. Cada navegador usa su propio filtro de remuestreo, asi que no se supone: lo mide
+ * measureWaveShaperLatency con un impulso en un OfflineAudioContext. 0 mientras no se mida.
+ */
+const shaperLatencyFrames = new Map<number, number>()
+const shaperLatencyPending = new Map<number, Promise<number>>()
+
+/** Retardo medido del saturador (muestras) a `sampleRate`, o 0 si aun no se midio. */
+export function waveShaperLatencyFrames(sampleRate: number): number {
+  return shaperLatencyFrames.get(Math.round(sampleRate)) ?? 0
+}
+
+/** Fija el retardo del saturador a mano (pruebas en node, donde no hay OfflineAudioContext). */
+export function setWaveShaperLatencyFrames(sampleRate: number, frames: number): void {
+  shaperLatencyFrames.set(Math.round(sampleRate), Math.max(0, Math.round(frames)))
+}
+
+/** Retardo de una unidad de efecto. El EQ y el stereo_imager no retrasan; de_esser usa compresor de banda; el saturador, su sobremuestreo. */
 export function fxLatencySeconds(type: StudioFxType, sampleRate: number, limiterWorklet: boolean): number {
   if (type === 'compressor' || type === 'de_esser') return compressorLatencySeconds(sampleRate)
   if (type === 'limiter') return limiterWorklet ? limiterLatencySeconds(sampleRate) : compressorLatencySeconds(sampleRate)
+  if (type === 'saturator') return waveShaperLatencyFrames(sampleRate) / sampleRate
   return 0
 }
 
+/** Amplitud de pico del seno de referencia con que el saturador iguala sonoridad (unos -10 dBFS). */
+export const SATURATOR_REFERENCE_PEAK = 0.3
+/** Asimetria de la curva (segundo armonico): genera continua, que filtra el pasa altos de 10 Hz. */
+const SATURATOR_ASYMMETRY = 0.08
+/** Corte del pasa altos que quita la continua que deja la asimetria. */
+export const SATURATOR_DC_BLOCK_HZ = 10
+
+function saturatorRaw(x: number, drive: number): number {
+  // Pendiente 1 en el origen y salida 0 con entrada 0: sin continua en silencio.
+  return Math.tanh(drive * (x + SATURATOR_ASYMMETRY * x * x)) / drive
+}
+
+/** RMS (sin continua) de la curva cruda sobre un seno de amplitud SATURATOR_REFERENCE_PEAK. */
+function saturatorReferenceRms(drive: number): number {
+  const n = 512
+  let sum = 0
+  let sumSq = 0
+  for (let i = 0; i < n; i++) {
+    const y = saturatorRaw(SATURATOR_REFERENCE_PEAK * Math.sin((2 * Math.PI * i) / n), drive)
+    sum += y
+    sumSq += y * y
+  }
+  const mean = sum / n
+  return Math.sqrt(Math.max(0, sumSq / n - mean * mean))
+}
+
 /**
- * Curva sigmoide tipo cinta analogica (con ligera asimetria de segundo armonico par + tanh de tercer
- * armonico impar) para `WaveShaperNode` con `oversample = '4x'`.
+ * Compensacion de nivel del saturador (lineal): iguala el RMS de un seno de referencia (~-10 dBFS
+ * de pico) entre `driveDb` y drive 0. Con drive 0 vale exactamente 1.
  */
-export function buildTapeSaturatorCurve(driveDb: number, points = 2049): Float32Array<ArrayBuffer> {
+export function saturatorMakeupGain(driveDb: number): number {
+  const drive = dbToGain(Math.max(0, Math.min(24, driveDb)))
+  return saturatorReferenceRms(1) / saturatorReferenceRms(drive)
+}
+
+/**
+ * Curva tipo cinta para `WaveShaperNode` (`oversample = '4x'`): tanh con algo de asimetria
+ * (armonicos pares), pendiente 1 en el origen (con drive 0 una senal chica pasa a 0 dB) y
+ * compensacion automatica de nivel (saturatorMakeupGain): subir el drive cambia el color, no el
+ * volumen, a nivel de referencia. La mezcla seca va DENTRO de la curva
+ * (`mix * saturado + (1 - mix) * x`): seco y humedo comparten el retardo del sobremuestreo y no hay
+ * filtro peine con `mix < 1`.
+ */
+export function buildTapeSaturatorCurve(driveDb: number, mix = 1, points = 2049): Float32Array<ArrayBuffer> {
   const curve = new Float32Array(points)
   const drive = dbToGain(Math.max(0, Math.min(24, driveDb)))
-  const norm = Math.tanh(drive) || 1
+  const makeup = saturatorMakeupGain(driveDb)
+  const wet = Math.max(0, Math.min(1, Number.isFinite(mix) ? mix : 1))
   for (let i = 0; i < points; i++) {
     const x = (i / (points - 1)) * 2 - 1
-    // Ligera polarizacion asimetrica para generar calidez par sin desplazamiento DC notable.
-    const asym = x + 0.06 * x * x - 0.03
-    const shaped = (Math.tanh(asym * drive) - Math.tanh(-0.03 * drive)) / norm
+    const shaped = wet * makeup * saturatorRaw(x, drive) + (1 - wet) * x
     curve[i] = Math.max(-1, Math.min(1, shaped))
   }
+  // El centro exacto (entrada 0) da 0: un numero impar de puntos lo deja en la mitad.
+  if (points % 2 === 1) curve[(points - 1) / 2] = 0
   return curve
+}
+
+// ---------------------------------------------------------------------------
+// Respuesta de biquads (formulas del Audio EQ Cookbook tal como las usa Web Audio)
+// ---------------------------------------------------------------------------
+
+export type BiquadKind = 'lowpass' | 'highpass' | 'lowshelf' | 'peaking' | 'highshelf' | 'allpass'
+
+/** Q de un pasa bajos o pasa altos de Butterworth (0,7071 lineal) en la unidad de Web Audio: dB. */
+export const BUTTERWORTH_Q_DB = 20 * Math.log10(Math.SQRT1_2)
+
+/**
+ * Coeficientes normalizados (a0 = 1) de un BiquadFilterNode. `q` va como lo recibe el nodo: en
+ * lowpass/highpass es dB (resonancia); en peaking es adimensional; en los shelves no se usa
+ * (Web Audio fija S = 1).
+ */
+export function biquadCoefficients(kind: BiquadKind, frequency: number, q: number, gainDb: number, sampleRate: number): { b0: number; b1: number; b2: number; a1: number; a2: number } {
+  const f = Math.max(0, Math.min(frequency, sampleRate / 2))
+  const w0 = (2 * Math.PI * f) / sampleRate
+  const cw = Math.cos(w0)
+  const sw = Math.sin(w0)
+  const A = Math.pow(10, gainDb / 40)
+  let b0: number, b1: number, b2: number, a0: number, a1: number, a2: number
+  if (kind === 'lowpass' || kind === 'highpass') {
+    const alpha = sw / (2 * Math.pow(10, q / 20))
+    if (kind === 'lowpass') {
+      b0 = (1 - cw) / 2
+      b1 = 1 - cw
+      b2 = (1 - cw) / 2
+    } else {
+      b0 = (1 + cw) / 2
+      b1 = -(1 + cw)
+      b2 = (1 + cw) / 2
+    }
+    a0 = 1 + alpha
+    a1 = -2 * cw
+    a2 = 1 - alpha
+  } else if (kind === 'allpass') {
+    const alpha = sw / (2 * Math.max(1e-4, q))
+    b0 = 1 - alpha
+    b1 = -2 * cw
+    b2 = 1 + alpha
+    a0 = 1 + alpha
+    a1 = -2 * cw
+    a2 = 1 - alpha
+  } else if (kind === 'peaking') {
+    const alpha = sw / (2 * Math.max(1e-4, q))
+    b0 = 1 + alpha * A
+    b1 = -2 * cw
+    b2 = 1 - alpha * A
+    a0 = 1 + alpha / A
+    a1 = -2 * cw
+    a2 = 1 - alpha / A
+  } else {
+    // S = 1 en ambos estantes.
+    const alpha = (sw / 2) * Math.SQRT2
+    const k = 2 * Math.sqrt(A) * alpha
+    if (kind === 'lowshelf') {
+      b0 = A * (A + 1 - (A - 1) * cw + k)
+      b1 = 2 * A * (A - 1 - (A + 1) * cw)
+      b2 = A * (A + 1 - (A - 1) * cw - k)
+      a0 = A + 1 + (A - 1) * cw + k
+      a1 = -2 * (A - 1 + (A + 1) * cw)
+      a2 = A + 1 + (A - 1) * cw - k
+    } else {
+      b0 = A * (A + 1 + (A - 1) * cw + k)
+      b1 = -2 * A * (A - 1 + (A + 1) * cw)
+      b2 = A * (A + 1 + (A - 1) * cw - k)
+      a0 = A + 1 - (A - 1) * cw + k
+      a1 = 2 * (A - 1 - (A + 1) * cw)
+      a2 = A + 1 - (A - 1) * cw - k
+    }
+  }
+  return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+}
+
+/** Respuesta compleja [re, im] de un biquad en `hz`. */
+export function biquadResponse(kind: BiquadKind, frequency: number, q: number, gainDb: number, sampleRate: number, hz: number): [number, number] {
+  const { b0, b1, b2, a1, a2 } = biquadCoefficients(kind, frequency, q, gainDb, sampleRate)
+  const w = (2 * Math.PI * hz) / sampleRate
+  const c1 = Math.cos(w)
+  const s1 = -Math.sin(w)
+  const c2 = Math.cos(2 * w)
+  const s2 = -Math.sin(2 * w)
+  const nr = b0 + b1 * c1 + b2 * c2
+  const ni = b1 * s1 + b2 * s2
+  const dr = 1 + a1 * c1 + a2 * c2
+  const di = a1 * s1 + a2 * s2
+  const den = dr * dr + di * di
+  return [(nr * dr + ni * di) / den, (ni * dr - nr * di) / den]
+}
+
+/** Ganancia de potencia (|H|^2) del EQ de cuatro bandas en `hz`, con los mismos filtros que suena. */
+export function eqPowerGainAt(params: EqParams, hz: number, sampleRate: number): number {
+  let power = 1
+  for (const band of eqBands(params, sampleRate)) {
+    if (band.type === 'highpass' && band.frequency <= 0) continue
+    if (band.type !== 'highpass' && band.gainDb === 0) continue
+    const [re, im] = biquadResponse(band.type, band.frequency, band.q, band.gainDb, sampleRate, hz)
+    power *= re * re + im * im
+  }
+  return power
+}
+
+// ---------------------------------------------------------------------------
+// Ganancia automatica del DynamicsCompressorNode
+// ---------------------------------------------------------------------------
+
+/**
+ * Ganancia automatica de compensacion (makeup) que el DynamicsCompressorNode aplica SIEMPRE a su
+ * salida, en dB. Es la curva estatica normativa de la especificacion de Web Audio (la misma de
+ * Chromium, Firefox y WebKit, que vienen del mismo codigo): curva lineal hasta el umbral, rodilla
+ * exponencial de ancho `kneeDb` y relacion constante despues; makeup = (1 / curva(1))^0,6.
+ * Con relacion 1 vale ~0 dB. Sirve para restarla donde no se quiere (el de-esser).
+ */
+export function dynamicsCompressorMakeupDb(thresholdDb: number, kneeDb: number, ratio: number): number {
+  const thr = Math.max(-100, Math.min(0, thresholdDb))
+  const knee = Math.max(0, Math.min(40, kneeDb))
+  const r = Math.max(1, Math.min(20, ratio))
+  const linearThreshold = Math.pow(10, thr / 20)
+  const toDb = (x: number) => (x > 0 ? 20 * Math.log10(x) : -1000)
+  const kneeCurve = (x: number, k: number) => (x < linearThreshold ? x : linearThreshold + (1 - Math.exp(-k * (x - linearThreshold))) / k)
+  const slopeAt = (x: number, k: number) => {
+    if (x < linearThreshold) return 1
+    const x2 = x * 1.001
+    return (toDb(kneeCurve(x2, k)) - toDb(kneeCurve(x, k))) / (toDb(x2) - toDb(x))
+  }
+  // k tal que la pendiente al final de la rodilla sea 1 / ratio (busqueda geometrica, 15 pasos).
+  const kneeEndLinear = Math.pow(10, (thr + knee) / 20)
+  let minK = 0.1
+  let maxK = 10000
+  let k = 5
+  for (let i = 0; i < 15; i++) {
+    if (slopeAt(kneeEndLinear, k) < 1 / r) maxK = k
+    else minK = k
+    k = Math.sqrt(minK * maxK)
+  }
+  const kneeThresholdDb = thr + knee
+  const yKneeDb = toDb(kneeCurve(kneeEndLinear, k))
+  const saturate = (x: number) => (x < kneeEndLinear ? kneeCurve(x, k) : Math.pow(10, (yKneeDb + (toDb(x) - kneeThresholdDb) / r) / 20))
+  const fullRangeGain = saturate(1)
+  if (!(fullRangeGain > 0)) return 0
+  return 0.6 * -toDb(fullRangeGain)
+}
+
+/** Q (en dB, unidad de Web Audio) del pasa bajos que separa las bandas del de-esser: Butterworth. */
+export const DE_ESSER_CROSSOVER_Q_DB = BUTTERWORTH_Q_DB
+
+/** Relacion de compresion del de-esser para `reductionDb` 0..18: de 1 (apagado) a 16:1. */
+export function deEsserRatio(reductionDb: number): number {
+  return 1 + (Math.max(0, Math.min(18, Number.isFinite(reductionDb) ? reductionDb : 0)) / 18) * 15
+}
+
+/** Rodilla del compresor de la banda sibilante del de-esser (dB). */
+export const DE_ESSER_KNEE_DB = 6
+
+/**
+ * Respuesta en `hz` de la suma de bandas del de-esser con la banda aguda sin reducir:
+ * grave = LP(x), agudo = x - LP(x) (complementaria). Con reduccion 0 la suma es x exacto: plana.
+ * `legacy` devuelve la topologia anterior (LP + HP de 2o orden en la misma frecuencia), que deja
+ * un hueco de -180 dB en el corte; se conserva solo para documentar la regresion en las pruebas.
+ */
+export function deEsserSumResponse(hz: number, crossoverHz: number, sampleRate: number, legacy = false): [number, number] {
+  if (legacy) {
+    const lp = biquadResponse('lowpass', crossoverHz, 0.707, 0, sampleRate, hz)
+    const hp = biquadResponse('highpass', crossoverHz, 0.707, 0, sampleRate, hz)
+    return [lp[0] + hp[0], lp[1] + hp[1]]
+  }
+  const lp = biquadResponse('lowpass', crossoverHz, DE_ESSER_CROSSOVER_Q_DB, 0, sampleRate, hz)
+  const high: [number, number] = [1 - lp[0], -lp[1]]
+  return [lp[0] + high[0], lp[1] + high[1]]
+}
+
+/** Q lineal del pasa todo del medio en el stereo_imager (el de la suma Linkwitz-Riley de 4o orden). */
+export const IMAGER_ALLPASS_Q = Math.SQRT1_2
+
+function complexMul(a: [number, number], b: [number, number]): [number, number] {
+  return [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]
+}
+
+/**
+ * Respuesta del stereo_imager en `hz` para el medio y el lado. Graves en mono por cruce
+ * Linkwitz-Riley de 4o orden en `monoBassHz`: el lado pasa por un pasa altos LR4 (dos Butterworth
+ * en cascada) y el medio por el pasa todo de 2o orden que iguala su fase (LP_LR4 + HP_LR4 = AP2).
+ * Por encima del corte medio y lado quedan con la misma fase: con width 1 la imagen no se mueve y
+ * la magnitud es plana; solo se quita el lado bajo el corte. Con `monoBassHz` 0 es la identidad.
+ */
+export function stereoImagerResponse(hz: number, width: number, monoBassHz: number, sampleRate: number): { mid: [number, number]; side: [number, number] } {
+  const w = Math.max(0, Math.min(2, width))
+  if (!(monoBassHz > 0)) return { mid: [1, 0], side: [w, 0] }
+  const fc = Math.min(monoBassHz, sampleRate / 2 - 10)
+  const ap = biquadResponse('allpass', fc, IMAGER_ALLPASS_Q, 0, sampleRate, hz)
+  const hp = biquadResponse('highpass', fc, BUTTERWORTH_Q_DB, 0, sampleRate, hz)
+  const hp4 = complexMul(hp, hp)
+  return { mid: ap, side: [hp4[0] * w, hp4[1] * w] }
 }
 
 export interface EqBand {
@@ -371,24 +625,28 @@ function createFallbackLimiterUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit 
 }
 
 function createDeEsserUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
-  // Topologia split-band coherente en fase:
-  //   - Banda grave/media: lowpass en freqHz + retardo igual a la anticipacion del compresor
-  //   - Banda sibilante: highpass en freqHz -> DynamicsCompressorNode rapido
+  // Bandas complementarias (suma exacta con la banda aguda sin reducir):
+  //   - grave/media: LP(x) en freqHz + retardo igual a la anticipacion del compresor
+  //   - sibilante:  x - LP(x) -> DynamicsCompressorNode rapido -> trim que resta su makeup automatico
+  // Con reduccion 0 (relacion 1) la salida es x retrasada: respuesta plana. El trim evita que el
+  // makeup automatico del compresor (hasta +12 dB con los valores por defecto) realce la sibilancia
+  // que queda bajo el umbral.
   const splitIn = ctx.createGain()
   const sumOut = ctx.createGain()
   const lowFilter = ctx.createBiquadFilter()
   lowFilter.type = 'lowpass'
-  lowFilter.Q.value = 0.707
-  const highFilter = ctx.createBiquadFilter()
-  highFilter.type = 'highpass'
-  highFilter.Q.value = 0.707
+  lowFilter.Q.value = DE_ESSER_CROSSOVER_Q_DB
+  const lowInvert = ctx.createGain()
+  lowInvert.gain.value = -1
+  const highSum = ctx.createGain()
   const sibilantComp = ctx.createDynamicsCompressor()
   sibilantComp.attack.value = 0.001
   sibilantComp.release.value = 0.045
-  sibilantComp.knee.value = 6
+  sibilantComp.knee.value = DE_ESSER_KNEE_DB
+  const makeupTrim = ctx.createGain()
 
   const latencyS = compressorLatencySeconds(ctx.sampleRate)
-  const nodes: AudioNode[] = [splitIn, sumOut, lowFilter, highFilter, sibilantComp]
+  const nodes: AudioNode[] = [splitIn, sumOut, lowFilter, lowInvert, highSum, sibilantComp, makeupTrim]
   splitIn.connect(lowFilter)
   if (latencyS > 0) {
     const lowDelay = ctx.createDelay(Math.max(0.05, latencyS * 2))
@@ -399,9 +657,12 @@ function createDeEsserUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
   } else {
     lowFilter.connect(sumOut)
   }
-  splitIn.connect(highFilter)
-  highFilter.connect(sibilantComp)
-  sibilantComp.connect(sumOut)
+  splitIn.connect(highSum)
+  lowFilter.connect(lowInvert)
+  lowInvert.connect(highSum)
+  highSum.connect(sibilantComp)
+  sibilantComp.connect(makeupTrim)
+  makeupTrim.connect(sumOut)
 
   const path = wetDry(ctx, splitIn, sumOut, latencyS)
   const nyquist = ctx.sampleRate / 2 - 10
@@ -409,12 +670,11 @@ function createDeEsserUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
     if (next.type !== 'de_esser') return
     const p = next.params as DeEsserParams
     const freq = Math.max(2000, Math.min(nyquist, p.freqHz))
+    const ratio = deEsserRatio(p.reductionDb)
     setParam(ctx, lowFilter.frequency, freq, immediate)
-    setParam(ctx, highFilter.frequency, freq, immediate)
     setParam(ctx, sibilantComp.threshold, p.thresholdDb, immediate)
-    // reductionDb 0..18 dB mapea la relacion de compresion de 1 (apagado) hasta 16:1.
-    const ratio = 1 + (Math.max(0, Math.min(18, p.reductionDb)) / 18) * 15
     setParam(ctx, sibilantComp.ratio, ratio, immediate)
+    setParam(ctx, makeupTrim.gain, dbToGain(-dynamicsCompressorMakeupDb(p.thresholdDb, DE_ESSER_KNEE_DB, ratio)), immediate)
     setBypass(ctx, path, next.bypass, immediate)
   }
   update(fx, true)
@@ -422,42 +682,39 @@ function createDeEsserUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
 }
 
 function createSaturatorUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
-  const splitIn = ctx.createGain()
-  const sumMix = ctx.createGain()
-  const wetGain = ctx.createGain()
-  const dryMixGain = ctx.createGain()
+  // shaper (curva con la mezcla seca dentro, x4) -> pasa altos de continua -> tono -> salida.
+  // La rama seca del bypass lleva el retardo medido del sobremuestreo.
   const shaper = ctx.createWaveShaper()
   shaper.oversample = '4x'
+  const dcBlock = ctx.createBiquadFilter()
+  dcBlock.type = 'highpass'
+  dcBlock.frequency.value = SATURATOR_DC_BLOCK_HZ
+  dcBlock.Q.value = BUTTERWORTH_Q_DB
   const toneFilter = ctx.createBiquadFilter()
   toneFilter.type = 'highshelf'
   toneFilter.frequency.value = Math.min(4500, ctx.sampleRate / 2 - 10)
   const postGain = ctx.createGain()
 
-  splitIn.connect(shaper)
-  shaper.connect(toneFilter)
+  shaper.connect(dcBlock)
+  dcBlock.connect(toneFilter)
   toneFilter.connect(postGain)
-  postGain.connect(wetGain)
-  wetGain.connect(sumMix)
 
-  splitIn.connect(dryMixGain)
-  dryMixGain.connect(sumMix)
-
-  const path = wetDry(ctx, splitIn, sumMix, 0)
-  let currentDriveKey = Number.NaN
+  const latencyS = waveShaperLatencyFrames(ctx.sampleRate) / ctx.sampleRate
+  const path = wetDry(ctx, shaper, postGain, latencyS)
+  let currentCurveKey = ''
 
   const update = (next: StudioFx, immediate: boolean) => {
     if (next.type !== 'saturator') return
     const p = next.params as SaturatorParams
     const driveKey = Math.round(p.driveDb * 10) / 10
-    if (driveKey !== currentDriveKey) {
-      shaper.curve = buildTapeSaturatorCurve(driveKey)
-      currentDriveKey = driveKey
+    const mixKey = Math.round(Math.max(0, Math.min(1, p.mix)) * 100) / 100
+    const curveKey = `${driveKey}:${mixKey}`
+    if (curveKey !== currentCurveKey) {
+      shaper.curve = buildTapeSaturatorCurve(driveKey, mixKey)
+      currentCurveKey = curveKey
     }
-    const mix = Math.max(0, Math.min(1, p.mix))
     setParam(ctx, toneFilter.gain, p.toneDb, immediate)
     setParam(ctx, postGain.gain, dbToGain(p.outputDb), immediate)
-    setParam(ctx, wetGain.gain, mix, immediate)
-    setParam(ctx, dryMixGain.gain, 1 - mix, immediate)
     setBypass(ctx, path, next.bypass, immediate)
   }
   update(fx, true)
@@ -465,17 +722,18 @@ function createSaturatorUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
     type: 'saturator',
     input: path.input,
     output: path.output,
-    latencyS: 0,
+    latencyS,
     update,
-    dispose: () => disconnectAll([splitIn, sumMix, wetGain, dryMixGain, shaper, toneFilter, postGain, ...path.nodes]),
+    dispose: () => disconnectAll([shaper, dcBlock, toneFilter, postGain, ...path.nodes]),
   }
 }
 
 function createStereoImagerUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
-  // Matriz Mid/Side exacta:
-  //   M = 0.5 * (L + R)
-  //   S = 0.5 * (L - R) -> Pasa-altos (monoBassHz) -> ganancia width
+  // Matriz Mid/Side con graves en mono por cruce Linkwitz-Riley de 4o orden (stereoImagerResponse):
+  //   M = 0.5 * (L + R) -> pasa todo de 2o orden en monoBassHz (misma fase que el lado)
+  //   S = 0.5 * (L - R) -> dos pasa altos Butterworth (LR4) -> ganancia width
   //   L' = M + S', R' = M - S'
+  // Con monoBassHz 0 los filtros quedan en identidad (BiquadFilterNode a 0 Hz).
   const stereoIn = ctx.createGain()
   stereoIn.channelCount = 2
   stereoIn.channelCountMode = 'explicit'
@@ -487,15 +745,21 @@ function createStereoImagerUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
   const midR = ctx.createGain()
   midR.gain.value = 0.5
   const midSum = ctx.createGain()
+  const midAllpass = ctx.createBiquadFilter()
+  midAllpass.type = 'allpass'
+  midAllpass.Q.value = IMAGER_ALLPASS_Q
 
   const sideL = ctx.createGain()
   sideL.gain.value = 0.5
   const sideR = ctx.createGain()
   sideR.gain.value = -0.5
   const sideSum = ctx.createGain()
-  const sideHpf = ctx.createBiquadFilter()
-  sideHpf.type = 'highpass'
-  sideHpf.Q.value = 20 * Math.log10(STUDIO_EQ_HPF_Q)
+  const sideHp1 = ctx.createBiquadFilter()
+  sideHp1.type = 'highpass'
+  sideHp1.Q.value = BUTTERWORTH_Q_DB
+  const sideHp2 = ctx.createBiquadFilter()
+  sideHp2.type = 'highpass'
+  sideHp2.Q.value = BUTTERWORTH_Q_DB
   const sideWidth = ctx.createGain()
   const sideInv = ctx.createGain()
   sideInv.gain.value = -1
@@ -505,19 +769,21 @@ function createStereoImagerUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
   splitter.connect(midR, 1)
   midL.connect(midSum)
   midR.connect(midSum)
+  midSum.connect(midAllpass)
 
   splitter.connect(sideL, 0)
   splitter.connect(sideR, 1)
   sideL.connect(sideSum)
   sideR.connect(sideSum)
-  sideSum.connect(sideHpf)
-  sideHpf.connect(sideWidth)
+  sideSum.connect(sideHp1)
+  sideHp1.connect(sideHp2)
+  sideHp2.connect(sideWidth)
   sideWidth.connect(sideInv)
 
   // L' = M + S', R' = M - S'
-  midSum.connect(merger, 0, 0)
+  midAllpass.connect(merger, 0, 0)
   sideWidth.connect(merger, 0, 0)
-  midSum.connect(merger, 0, 1)
+  midAllpass.connect(merger, 0, 1)
   sideInv.connect(merger, 0, 1)
 
   const path = wetDry(ctx, stereoIn, merger, 0)
@@ -525,8 +791,11 @@ function createStereoImagerUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
   const update = (next: StudioFx, immediate: boolean) => {
     if (next.type !== 'stereo_imager') return
     const p = next.params as StereoImagerParams
+    const cut = Math.max(0, Math.min(nyquist, p.monoBassHz))
     setParam(ctx, sideWidth.gain, Math.max(0, Math.min(2, p.width)), immediate)
-    setParam(ctx, sideHpf.frequency, Math.max(0, Math.min(nyquist, p.monoBassHz)), immediate)
+    setParam(ctx, midAllpass.frequency, cut, immediate)
+    setParam(ctx, sideHp1.frequency, cut, immediate)
+    setParam(ctx, sideHp2.frequency, cut, immediate)
     setBypass(ctx, path, next.bypass, immediate)
   }
   update(fx, true)
@@ -537,8 +806,62 @@ function createStereoImagerUnit(ctx: BaseAudioContext, fx: StudioFx): FxUnit {
     latencyS: 0,
     update,
     dispose: () =>
-      disconnectAll([stereoIn, splitter, merger, midL, midR, midSum, sideL, sideR, sideSum, sideHpf, sideWidth, sideInv, ...path.nodes]),
+      disconnectAll([stereoIn, splitter, merger, midL, midR, midSum, midAllpass, sideL, sideR, sideSum, sideHp1, sideHp2, sideWidth, sideInv, ...path.nodes]),
   }
+}
+
+/**
+ * Mide el retardo del sobremuestreo x4 del WaveShaperNode con un impulso en un
+ * OfflineAudioContext (una vez por frecuencia de muestreo) y lo deja en waveShaperLatencyFrames.
+ * prepareGraphContext y bounce lo esperan antes de construir el grafo. Sin OfflineAudioContext
+ * (node) queda en 0.
+ */
+export function measureWaveShaperLatency(sampleRate: number): Promise<number> {
+  const rate = Math.round(sampleRate)
+  const known = shaperLatencyFrames.get(rate)
+  if (known !== undefined) return Promise.resolve(known)
+  const pending = shaperLatencyPending.get(rate)
+  if (pending) return pending
+  const run = (async () => {
+    let frames = 0
+    try {
+      if (typeof OfflineAudioContext !== 'undefined' && rate > 0) {
+        const length = 2048
+        const at = 256
+        const offline = new OfflineAudioContext({ numberOfChannels: 1, length, sampleRate: rate })
+        const impulse = offline.createBuffer(1, length, rate)
+        impulse.getChannelData(0)[at] = 0.5
+        const source = offline.createBufferSource()
+        source.buffer = impulse
+        const shaper = offline.createWaveShaper()
+        // Dos puntos: identidad en [-1, 1].
+        shaper.curve = new Float32Array([-1, 1])
+        shaper.oversample = '4x'
+        source.connect(shaper)
+        shaper.connect(offline.destination)
+        source.start(0)
+        const rendered = await offline.startRendering()
+        const data = rendered.getChannelData(0)
+        let peak = 0
+        let peakAt = at
+        for (let i = 0; i < data.length; i++) {
+          const v = Math.abs(data[i])
+          if (v > peak) {
+            peak = v
+            peakAt = i
+          }
+        }
+        if (peak > 0.1 && peakAt >= at && peakAt - at < 512) frames = peakAt - at
+      }
+    } catch {
+      frames = 0
+    }
+    shaperLatencyFrames.set(rate, frames)
+    shaperLatencyPending.delete(rate)
+    return frames
+  })()
+  shaperLatencyPending.set(rate, run)
+  return run
 }
 
 export interface CreatedFxUnit {

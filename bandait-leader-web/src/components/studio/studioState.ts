@@ -32,7 +32,7 @@ import { stemBaseName, stemExtension, type StemRole } from '../../services/stemN
 import { loadStemSong } from '../../services/stemStore'
 import type { SectionSpan } from '../../services/stemTiming'
 import { encodeWav24, parseWavHeader } from '../../services/wav'
-import { bounce, bounceRange, soloTrackSession } from '../../services/studio/bounce'
+import { bounce, bounceRange, renderMix, soloTrackSession } from '../../services/studio/bounce'
 import { COMPUTER_KEYBOARD_DEFAULT_OCTAVE } from '../../services/studio/computerKeyboard'
 import { StudioEngine, playbackStopS } from '../../services/studio/engine'
 import { instrumentTailSeconds } from '../../services/studio/instruments/core'
@@ -187,13 +187,12 @@ import { measureMix, renderListenExcerpt, type MeasureMixOptions } from '../../s
 import {
   alignPhaseCrossCorrelation,
   barkBandEnergiesDb,
-  detectBpmLocal,
-  detectChordsViterbi,
-  detectKeyLocal,
   downmixMono,
+  planPhaseAlignment,
+  type LoudnessSummary,
 } from '../../services/studio/dspMath'
-import { integratedLufs } from '../../services/studio/loudness'
-import { applyAutoMasterToSession, type AutoMasterProfile, type AutoMasterTone } from '../../services/studio/mastering'
+import { analyzeMusicalAsync, measureLoudnessInChunks } from '../../services/studio/dspAnalysisClient'
+import { calibrateAutoMaster, type AutoMasterMeasurement, type AutoMasterProfile, type AutoMasterTone } from '../../services/studio/mastering'
 import { optimizeBarkMixUnmasking, type MixUnmaskResult, type TrackSpectralInput } from '../../services/studio/mixOptimizer'
 import {
   computeDefaultClickBars,
@@ -382,6 +381,10 @@ export interface StudioSnapshot {
   labMode: boolean
   /** Ultimo resultado del optimizador anti-enmascaramiento Bark (para matriz termica LAB). */
   lastUnmaskResult: MixUnmaskResult | null
+  /** Trabajo DSP local en curso (Auto-Master mide varios renders; el analisis corre en un Worker). */
+  dspBusy: 'master' | 'analysis' | null
+  /** Ultima medicion del master sobre el render (LUFS, pico real, LRA, PLR) y la version medida. */
+  masterLoudness: (LoudnessSummary & { version: number }) | null
 }
 
 /** Lo que recibe cada panel del Estudio (los de la parte 2 incluidos). */
@@ -903,6 +906,8 @@ export class StudioController {
       collaborators: [],
       labMode: false,
       lastUnmaskResult: null,
+      dspBusy: null,
+      masterLoudness: null,
     }
   }
 
@@ -3941,9 +3946,19 @@ export class StudioController {
     const refMono = downmixMono(refSeg.channels.map((ch) => ch.subarray(rFrom, rFrom + count)))
     const res = alignPhaseCrossCorrelation(refMono, targetMono, sr, 40)
 
-    const newStartS = Math.max(0, Math.min(STUDIO_MAX_SESSION_SECONDS - targetLoc.clip.lengthS, targetLoc.clip.startS - res.lagSeconds))
+    // La polaridad se fija en absoluto respecto de como SUENA la referencia (su phaseInvert
+    // incluido): repetir la accion deja todo igual en vez de deshacer la correccion.
+    const plan = planPhaseAlignment({
+      targetStartS: targetLoc.clip.startS,
+      targetLengthS: targetLoc.clip.lengthS,
+      referencePhaseInvert: refClip.phaseInvert === true,
+      lagSeconds: res.lagSeconds,
+      polarity: res.polarity,
+      maxSessionS: STUDIO_MAX_SESSION_SECONDS,
+    })
+    const newStartS = plan.startS
     const currentInverted = targetLoc.clip.phaseInvert === true
-    const nextInverted = res.polarity === -1 ? !currentInverted : currentInverted
+    const nextInverted = plan.phaseInvert
 
     this.run('Alinear fase GCC-PHAT', (cur) => {
       let next: StudioSession = {
@@ -3959,17 +3974,26 @@ export class StudioController {
       }
       return next
     })
-    const polTxt = res.polarity === -1 ? ' + polaridad invertida 180°' : ''
+    const polTxt = nextInverted !== currentInverted ? (nextInverted ? ' + polaridad invertida 180°' : ' + polaridad restituida') : ''
     this.notify('info', `Fase alineada con "${refTrack.name}": ${res.lagMs >= 0 ? '-' : '+'}${Math.abs(res.lagMs).toFixed(2)} ms (${res.lagSamples} muestras)${polTxt}.`)
   }
 
-  /** Detecta localmente BPM, Tonalidad (Krumhansl-Schmuckler) y Acordes (HMM Viterbi) sin usar cuota IA. */
-  detectLocalMusicalAnalysis(clipId?: string): { bpm: number | null; key: string | null; chordsCount: number } | null {
+  /**
+   * Detecta localmente BPM, Tonalidad (Krumhansl-Schmuckler) y Acordes (HMM Viterbi) sin usar
+   * cuota IA. El calculo corre en un Web Worker (no bloquea la interfaz). Solo se ESCRIBE en la
+   * sesion lo que supera su umbral de confianza (BPM_APPLY_MIN_CONFIDENCE, KEY_APPLY_MIN_CONFIDENCE);
+   * lo demas se propone en el aviso para que la persona lo fije a mano.
+   */
+  async detectLocalMusicalAnalysis(clipId?: string): Promise<{ bpm: number | null; key: string | null; chordsCount: number; applied: { bpm: boolean; key: boolean } } | null> {
+    if (this.snap.dspBusy) {
+      this.notify('info', 'Espera a que termine el análisis DSP en curso.')
+      return null
+    }
     const session = this.snap.session
     const targetId = clipId ?? this.snap.selectedClipId
     let mono: Float32Array | null = null
     let sr = session.sampleRate
-    let startBeatOffset = 0
+    let startS = 0
 
     if (targetId) {
       const loc = findClip(session, targetId)
@@ -3979,7 +4003,7 @@ export class StudioController {
           const limit = Math.min(seg.channels[0].length, Math.round(seg.sampleRate * 45))
           mono = downmixMono(seg.channels.map((ch) => ch.subarray(0, limit)))
           sr = seg.sampleRate
-          startBeatOffset = secondsToBeats(loc.clip.startS, session.bpm)
+          startS = loc.clip.startS
         }
       }
     }
@@ -3997,7 +4021,7 @@ export class StudioController {
           const clipMono = downmixMono(seg.channels.map((ch) => ch.subarray(0, limit)))
           if (!mono) {
             mono = new Float32Array(clipMono)
-            startBeatOffset = secondsToBeats(clip.startS, session.bpm)
+            startS = clip.startS
           } else {
             const n = Math.min(mono.length, clipMono.length)
             for (let i = 0; i < n; i++) mono[i] += clipMono[i]
@@ -4012,87 +4036,123 @@ export class StudioController {
       return null
     }
 
-    const bpmRes = detectBpmLocal(mono, sr)
-    const keyRes = detectKeyLocal(mono, sr)
-    const effectiveBpm = bpmRes?.bpm ?? session.bpm
-    const chords = detectChordsViterbi(mono, sr, effectiveBpm, { stepBeats: 2, startBeatOffset: roundBeat(startBeatOffset) })
+    this.emit({ dspBusy: 'analysis' })
+    this.notify('info', 'Analizando BPM, tonalidad y acordes en este equipo...')
+    let analysis: Awaited<ReturnType<typeof analyzeMusicalAsync>>
+    try {
+      analysis = await analyzeMusicalAsync(mono, sr, { sessionBpm: session.bpm, startS })
+    } catch (err) {
+      this.fail(err, 'No se pudo analizar el audio.')
+      return null
+    } finally {
+      this.emit({ dspBusy: null })
+    }
 
+    const { bpm: bpmRes, key: keyRes, bpmReliable, keyReliable } = analysis
+    // Los acordes van en beats de la rejilla con que se calcularon: si el BPM detectado no se
+    // aplica y la persona cambio el BPM mientras tanto, caerian corridos; tambien se descartan
+    // sin contenido tonal fiable (con ruido el Viterbi igual devuelve algo).
+    let chordsApplied = 0
     this.run('Detección musical local', (cur) => {
       let next = updateSessionMeta(cur, {
         patch: {
-          ...(bpmRes ? { bpm: bpmRes.bpm } : {}),
-          ...(keyRes ? { key: keyRes.key } : {}),
+          ...(bpmReliable && bpmRes ? { bpm: bpmRes.bpm } : {}),
+          ...(keyReliable && keyRes ? { key: keyRes.key } : {}),
         },
       })
-      if (chords.length > 0) {
-        next = setChords(next, { chords })
+      const gridOk = bpmReliable || cur.bpm === analysis.gridBpm
+      if (keyReliable && gridOk && analysis.chords.length > 0) {
+        next = setChords(next, { chords: analysis.chords })
+        chordsApplied = analysis.chords.length
       }
       return next
     })
 
+    const pct = (c: number) => `${Math.round(c * 100)} %`
+    const applied: string[] = []
+    const proposed: string[] = []
+    if (bpmRes) (bpmReliable ? applied : proposed).push(`${bpmRes.bpm} BPM (confianza ${pct(bpmRes.confidence)})`)
+    if (keyRes) (keyReliable ? applied : proposed).push(`tono ${keyRes.key} / ${keyRes.camelot} (confianza ${pct(keyRes.confidence)})`)
+    if (chordsApplied > 0) applied.push(`${chordsApplied} acordes`)
     const parts: string[] = []
-    if (bpmRes) parts.push(`${bpmRes.bpm} BPM`)
-    if (keyRes) parts.push(`Tono ${keyRes.key} (${keyRes.camelot})`)
-    if (chords.length > 0) parts.push(`${chords.length} acordes detectados`)
-    this.notify('info', `Análisis DSP local (0 cuota IA): ${parts.join(' · ')}.`)
+    if (applied.length > 0) parts.push(`aplicado: ${applied.join(' · ')}`)
+    if (proposed.length > 0) parts.push(`propuesto sin aplicar (confianza baja, revísalo y fíjalo a mano): ${proposed.join(' · ')}`)
+    if (parts.length === 0) parts.push('no se encontró un pulso ni un centro tonal medibles')
+    this.notify(applied.length > 0 ? 'info' : 'warn', `Análisis DSP local (0 cuota IA): ${parts.join('. ')}.`)
     return {
       bpm: bpmRes?.bpm ?? null,
       key: keyRes?.key ?? null,
-      chordsCount: chords.length,
+      chordsCount: chordsApplied,
+      applied: { bpm: bpmReliable, key: keyReliable },
     }
   }
 
-  /** Calibra al instante la cadena completa del Bus Master hacia un objetivo LUFS / True Peak local. */
-  applyAutoMaster(profile: AutoMasterProfile = 'streaming', tone: AutoMasterTone = 'balanced', targetLufsOverride?: number): void {
+  /**
+   * Renderiza `session` igual que el export (mismo grafo, sin tiempo real) y la mide en trozos
+   * sin bloquear la interfaz: LUFS integrado, pico real x4, LRA y PLR (y el balance Bark de los
+   * primeros 12 s si `withBark`).
+   */
+  private async measureRender(session: StudioSession, withBark: boolean): Promise<AutoMasterMeasurement> {
+    const rendered = await renderMix(session, this.engine.getBuffers(), { sampleRate: session.sampleRate })
+    const loudness = await measureLoudnessInChunks(rendered)
+    let barkDb: Float32Array | null = null
+    if (withBark) {
+      const n = Math.min(rendered.length, Math.round(rendered.sampleRate * 12))
+      const channels = [rendered.getChannelData(0).subarray(0, n)]
+      if (rendered.numberOfChannels > 1) channels.push(rendered.getChannelData(1).subarray(0, n))
+      barkDb = barkBandEnergiesDb(downmixMono(channels), rendered.sampleRate)
+    }
+    return { ...loudness, barkDb }
+  }
+
+  /**
+   * Auto-Master calibrado midiendo: render sin la cadena del master, cadena inicial y hasta 3
+   * renders con la cadena corrigiendo volumen y techo hasta +-0,5 LU del objetivo y el pico real
+   * bajo el techo (mastering.calibrateAutoMaster). Idempotente. Los renders son offline y la
+   * medicion va por trozos: la interfaz no se congela.
+   */
+  async applyAutoMaster(profile: AutoMasterProfile = 'streaming', tone: AutoMasterTone = 'balanced', targetLufsOverride?: number): Promise<void> {
+    if (this.snap.recording) return
+    if (this.snap.dspBusy) {
+      this.notify('info', 'Espera a que termine el trabajo DSP en curso.')
+      return
+    }
     const session = this.snap.session
-    let measuredLufs: number | null = this.mixMeasurement?.metrics.master.lufs ?? null
-    let measuredBarkDb: Float32Array | null = null
-
-    // Si hay buffers de audio cargados, tomar una ventana representativa rapida para medir balance espectral.
-    const mixWindowSamples = Math.round(session.sampleRate * 12)
-    let mixL: Float32Array | null = null
-    let mixR: Float32Array | null = null
-    for (const track of session.tracks) {
-      if (track.kind !== 'audio' || track.mute || track.role === 'click' || track.role === 'guide') continue
-      const firstClip = track.clips.find((c) => c.active)
-      if (!firstClip) continue
-      const seg = this.getClipSegmentChannels(firstClip)
-      if (!seg || seg.channels.length === 0) continue
-      const len = Math.min(mixWindowSamples, seg.channels[0].length)
-      if (!mixL || !mixR) {
-        mixL = new Float32Array(mixWindowSamples)
-        mixR = new Float32Array(mixWindowSamples)
+    const version = this.editCount
+    this.emit({ dspBusy: 'master' })
+    this.notify('info', 'Auto-Master: midiendo la mezcla y calibrando la cadena (varios renders)...')
+    try {
+      const calibration = await calibrateAutoMaster(session, { profile, tone, targetLufsOverride }, (candidate, pass) => this.measureRender(candidate, pass === 0))
+      if (this.editCount !== version) {
+        this.notify('warn', 'La sesión cambió mientras se calibraba el Auto-Master: no se aplicó. Vuelve a pulsarlo.')
+        return
       }
-      const gain = Math.pow(10, (track.volumeDb + firstClip.gainDb) / 20)
-      const chL = seg.channels[0]
-      const chR = seg.channels[seg.channels.length > 1 ? 1 : 0]
-      for (let i = 0; i < len; i++) {
-        mixL[i] += chL[i] * gain
-        mixR[i] += chR[i] * gain
-      }
-    }
-
-    if (mixL && mixR) {
-      if (measuredLufs === null || !Number.isFinite(measuredLufs)) {
-        const lufs = integratedLufs([mixL, mixR], session.sampleRate)
-        if (Number.isFinite(lufs)) measuredLufs = lufs
-      }
-      measuredBarkDb = barkBandEnergiesDb(downmixMono([mixL, mixR]), session.sampleRate)
-    }
-
-    let summary = ''
-    this.run('Auto-Master local', (cur) => {
-      const applied = applyAutoMasterToSession(cur, {
-        profile,
-        tone,
-        targetLufsOverride,
-        measuredLufs,
-        measuredBarkDb,
+      this.run('Auto-Master local', (cur) => ({ ...cur, master: calibration.master }))
+      const m = calibration.measured
+      this.emit({
+        masterLoudness: { lufs: m.lufs, truePeakDb: m.truePeakDb, lraLu: m.lraLu ?? 0, plrDb: m.plrDb ?? 0, version: this.editCount },
       })
-      summary = applied.result.summary
-      return applied.session
-    })
-    if (summary) this.notify('info', summary)
+      this.notify(calibration.converged ? 'info' : 'warn', calibration.summary)
+    } catch (err) {
+      this.fail(err, 'No se pudo calibrar el Auto-Master.')
+    } finally {
+      this.emit({ dspBusy: null })
+    }
+  }
+
+  /** MEDIR MASTER: LUFS, pico real, LRA y PLR del render con la cadena actual (sin cambiar nada). */
+  async measureMasterLoudness(): Promise<void> {
+    if (this.snap.dspBusy || this.snap.recording) return
+    const version = this.editCount
+    this.emit({ dspBusy: 'master' })
+    try {
+      const m = await this.measureRender(this.snap.session, false)
+      this.emit({ masterLoudness: { lufs: m.lufs, truePeakDb: m.truePeakDb, lraLu: m.lraLu ?? 0, plrDb: m.plrDb ?? 0, version } })
+    } catch (err) {
+      this.fail(err, 'No se pudo medir el master.')
+    } finally {
+      this.emit({ dspBusy: null })
+    }
   }
 
   /** Ejecuta el optimizador psicoacustico de 24 bandas Bark para desenmascarar pistas en colision. */
@@ -4122,7 +4182,7 @@ export class StudioController {
     this.apply(res.session, 'Desenmascarar mezcla (Bark)', { lastUnmaskResult: res })
     this.notify(
       'info',
-      `Desenmascarado Bark aplicado en ${res.actions.length} ${res.actions.length === 1 ? 'pista' : 'pistas'} (-${res.reductionPct}% solapamiento espectral).`,
+      `Desenmascarado Bark aplicado en ${res.actions.length} ${res.actions.length === 1 ? 'pista' : 'pistas'} (-${res.reductionPct}% de solapamiento espectral estimado por el modelo, no medido sobre la mezcla).`,
     )
     return res
   }

@@ -264,6 +264,7 @@ const TrackStrip: React.FC<StripProps> = React.memo(({ controller, track, index,
         <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="compressor" chain={track.fx} selected={picked === 'compressor'} onEditFx={onEditFx} />
         <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="de_esser" chain={track.fx} selected={picked === 'de_esser'} onEditFx={onEditFx} />
         <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="saturator" chain={track.fx} selected={picked === 'saturator'} onEditFx={onEditFx} />
+        <InsertSlot controller={controller} targetId={track.id} targetName={track.name} type="stereo_imager" chain={track.fx} selected={picked === 'stereo_imager'} onEditFx={onEditFx} />
       </div>
 
       <MiniSlider
@@ -374,6 +375,7 @@ const MasterStrip: React.FC<MasterProps> = ({ controller, session, selectedFx, r
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="eq" chain={master.fx} selected={picked === 'eq'} onEditFx={onEditFx} />
             {eq && eq.type === 'eq' ? <StudioEqCurve params={eq.params} sampleRate={session.sampleRate} bypass={eq.bypass} className="stu-eq-mini" /> : <span className="stu-eq-mini" data-empty="true" aria-hidden="true" />}
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="compressor" chain={master.fx} selected={picked === 'compressor'} onEditFx={onEditFx} />
+            <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="de_esser" chain={master.fx} selected={picked === 'de_esser'} onEditFx={onEditFx} />
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="saturator" chain={master.fx} selected={picked === 'saturator'} onEditFx={onEditFx} />
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="stereo_imager" chain={master.fx} selected={picked === 'stereo_imager'} onEditFx={onEditFx} />
             <InsertSlot controller={controller} targetId={STUDIO_MASTER_ID} targetName="Master" type="limiter" chain={master.fx} selected={picked === 'limiter'} onEditFx={onEditFx} />
@@ -538,9 +540,9 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport, o
           type="button"
           className="stu-btn"
           data-size="small"
-          disabled={snap.recording || !snap.ready}
-          onClick={() => controller.applyAutoMaster('streaming', 'balanced')}
-          title="Auto-Master DSP local instantáneo (-14 LUFS Streaming, 0 cuota IA)"
+          disabled={snap.recording || !snap.ready || snap.dspBusy !== null}
+          onClick={() => void controller.applyAutoMaster('streaming', 'balanced')}
+          title="Auto-Master DSP local medido sobre el render (-14 LUFS Streaming, pico real bajo -1 dBTP, 0 cuota IA)"
           data-testid="studio-automaster-btn"
         >
           <Wand2 size={12} />
@@ -556,7 +558,7 @@ export const StudioMixer: React.FC<Props> = ({ controller, onEditFx, onExport, o
             controller.toggleLabMode()
             if (!snap.labMode) onEditFx()
           }}
-          title="Mostrar u ocultar analizador científico LAB (FFT, STFT, Lissajous M/S, matriz Bark)"
+          title="Mostrar u ocultar analizador científico LAB (FFT, cascada espectral, Lissajous M/S, matriz Bark)"
           data-testid="studio-lab-toggle"
         >
           <Activity size={12} />

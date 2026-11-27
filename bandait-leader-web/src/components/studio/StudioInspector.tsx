@@ -38,6 +38,7 @@ import {
   withoutFx,
   type StudioController,
   type StudioFxSelection,
+  type StudioSnapshot,
   type StudioPanelProps,
 } from './studioState'
 
@@ -881,13 +882,22 @@ const FxSection: React.FC<{ controller: StudioController; session: StudioSession
 // Produccion, Masterizacion Local y Analizador Cientifico (0 cuota IA)
 // ---------------------------------------------------------------------------
 
-const ProductionMasterSection: React.FC<{ controller: StudioController; recording: boolean; labMode: boolean }> = ({
-  controller,
-  recording,
-  labMode,
-}) => {
+/** dB con un decimal, o un guion si no es finito (silencio). */
+function dbText(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(1) : '-'
+}
+
+const ProductionMasterSection: React.FC<{
+  controller: StudioController
+  recording: boolean
+  labMode: boolean
+  busy: StudioSnapshot['dspBusy']
+  loudness: StudioSnapshot['masterLoudness']
+  docVersion: number
+}> = ({ controller, recording, labMode, busy, loudness, docVersion }) => {
   const [profile, setProfile] = useState<AutoMasterProfile>('streaming')
   const [tone, setTone] = useState<AutoMasterTone>('balanced')
+  const stale = loudness !== null && loudness.version !== docVersion
 
   return (
     <section className="stu-section" aria-label="Producción y Masterización DSP" data-testid="studio-inspector-mastering">
@@ -900,7 +910,7 @@ const ProductionMasterSection: React.FC<{ controller: StudioController; recordin
           data-on={labMode}
           aria-pressed={labMode}
           onClick={() => controller.toggleLabMode()}
-          title="Activar telemetría científica (FFT, STFT, Lissajous, matriz Bark)"
+          title="Activar telemetría científica (FFT, cascada espectral, Lissajous, matriz Bark)"
         >
           <Activity size={11} />
           LAB
@@ -942,17 +952,37 @@ const ProductionMasterSection: React.FC<{ controller: StudioController; recordin
 
       <p className="stu-help">{AUTO_MASTER_PROFILES[profile].description}</p>
 
+      <p className="stu-help" data-testid="studio-master-loudness" aria-live="polite">
+        {busy === 'master'
+          ? 'Midiendo el render del master...'
+          : loudness
+            ? `${dbText(loudness.lufs)} LUFS · pico real ${dbText(loudness.truePeakDb)} dBTP · LRA ${loudness.lraLu.toFixed(1)} LU · PLR ${loudness.plrDb.toFixed(1)} dB${stale ? ' (la sesión cambió desde la medición)' : ''}`
+            : 'Sin medición del master: MEDIR mide el render (LUFS, pico real x4, LRA, PLR).'}
+      </p>
+
       <div className="stu-actions">
         <button
           type="button"
           className="stu-btn"
           data-tone="primary"
-          disabled={recording}
-          onClick={() => controller.applyAutoMaster(profile, tone)}
+          disabled={recording || busy !== null}
+          onClick={() => void controller.applyAutoMaster(profile, tone)}
           data-testid="studio-inspector-apply-master"
+          title="Mide la mezcla, arma la cadena del master y la ajusta midiendo hasta quedar a 0,5 LU del objetivo y bajo el techo de pico real"
         >
           <Wand2 size={13} />
           AUTO-MASTER
+        </button>
+        <button
+          type="button"
+          className="stu-btn"
+          disabled={recording || busy !== null}
+          onClick={() => void controller.measureMasterLoudness()}
+          data-testid="studio-inspector-measure-master"
+          title="Renderiza la mezcla con la cadena actual y mide LUFS integrado, pico real, LRA y PLR"
+        >
+          <Activity size={13} />
+          MEDIR
         </button>
         <button
           type="button"
@@ -977,9 +1007,9 @@ const ProductionMasterSection: React.FC<{ controller: StudioController; recordin
         <button
           type="button"
           className="stu-btn"
-          disabled={recording}
-          onClick={() => controller.detectLocalMusicalAnalysis()}
-          title="Detectar BPM, tonalidad y acordes en este dispositivo sin usar cuota IA"
+          disabled={recording || busy !== null}
+          onClick={() => void controller.detectLocalMusicalAnalysis()}
+          title="Detectar BPM, tonalidad y acordes en este dispositivo sin usar cuota IA (solo aplica lo que tenga confianza suficiente)"
         >
           DETECTAR BPM / TONO
         </button>
@@ -1012,7 +1042,14 @@ export const StudioInspector: React.FC<StudioPanelProps> = ({ controller }) => {
       {instrumentTrackId && <StudioInstrumentPanel controller={controller} trackId={instrumentTrackId} />}
       {hasInstrumentTracks && <StudioMidiDevicePanel controller={controller} />}
       <FxSection controller={controller} session={session} selection={selection} />
-      <ProductionMasterSection controller={controller} recording={snap.recording} labMode={snap.labMode} />
+      <ProductionMasterSection
+        controller={controller}
+        recording={snap.recording}
+        labMode={snap.labMode}
+        busy={snap.dspBusy}
+        loudness={snap.masterLoudness}
+        docVersion={controller.docVersion}
+      />
       <StudioAnalyzer controller={controller} />
     </>
   )
