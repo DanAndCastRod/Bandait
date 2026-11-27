@@ -151,7 +151,7 @@ export const PlaylistsHubView: React.FC = () => {
                 borderRadius: 'var(--b-radius-field)',
                 padding: '8px 12px',
                 color: 'var(--b-text)',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '12px',
                 fontWeight: 700,
                 outlineOffset: '1px',
@@ -179,7 +179,7 @@ export const PlaylistsHubView: React.FC = () => {
               padding: '8px 14px',
               color: 'var(--b-text)',
               fontSize: '12px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: mono,
               cursor: 'pointer',
             }}
           >
@@ -201,7 +201,7 @@ export const PlaylistsHubView: React.FC = () => {
               padding: '8px 16px',
               color: activePlaylist ? 'var(--b-on-accent)' : 'var(--b-muted)',
               fontSize: '12px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: mono,
               fontWeight: 700,
               cursor: activePlaylist ? 'pointer' : 'not-allowed',
               boxShadow: activePlaylist ? '0 0 12px color-mix(in srgb, var(--b-accent) 30%, transparent)' : 'none',
@@ -233,7 +233,7 @@ export const PlaylistsHubView: React.FC = () => {
               padding: '8px 14px',
               color: 'var(--b-text)',
               fontSize: '12px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: mono,
               cursor: activePlaylist && activePlaylist.songs.length >= 2 ? 'pointer' : 'not-allowed',
               opacity: activePlaylist && activePlaylist.songs.length >= 2 ? 1 : 0.5,
             }}
@@ -258,7 +258,7 @@ export const PlaylistsHubView: React.FC = () => {
               padding: '8px 14px',
               color: 'var(--b-text)',
               fontSize: '12px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: mono,
               cursor: activePlaylist ? 'pointer' : 'not-allowed',
               opacity: activePlaylist ? 1 : 0.5,
             }}
@@ -285,7 +285,7 @@ export const PlaylistsHubView: React.FC = () => {
               padding: '8px 14px',
               color: 'var(--b-text)',
               fontSize: '12px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: mono,
               cursor: activePlaylist ? 'pointer' : 'not-allowed',
               opacity: activePlaylist ? 1 : 0.5,
             }}
@@ -309,7 +309,7 @@ export const PlaylistsHubView: React.FC = () => {
               padding: '8px 14px',
               color: 'var(--b-danger-text)',
               fontSize: '12px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: mono,
               cursor: activePlaylist && sharing.activeCanEdit ? 'pointer' : 'not-allowed',
               opacity: activePlaylist && sharing.activeCanEdit ? 1 : 0.5,
             }}
@@ -324,7 +324,7 @@ export const PlaylistsHubView: React.FC = () => {
         <div
           role="status"
           data-testid="delete-setlist-result"
-          style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace", color: deleteMessage.ok ? 'var(--b-success)' : 'var(--b-danger-text)' }}
+          style={{ fontSize: '12px', fontFamily: mono, color: deleteMessage.ok ? 'var(--b-success)' : 'var(--b-danger-text)' }}
         >
           {deleteMessage.message}
         </div>
@@ -344,7 +344,7 @@ export const PlaylistsHubView: React.FC = () => {
             padding: '10px 14px',
             color: 'var(--b-warning-text)',
             fontSize: '12px',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: mono,
           }}
         >
           <Lock size={14} />
@@ -365,7 +365,7 @@ export const PlaylistsHubView: React.FC = () => {
             borderRadius: 'var(--b-radius-card)',
             padding: '12px 16px',
             fontSize: '12px',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: mono,
           }}
         >
           {copyTargets.length === 0 ? (
@@ -387,7 +387,7 @@ export const PlaylistsHubView: React.FC = () => {
                   borderRadius: 'var(--b-radius-field)',
                   padding: '6px 10px',
                   color: 'var(--b-text)',
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: mono,
                   fontSize: '12px',
                 }}
               >
@@ -407,7 +407,7 @@ export const PlaylistsHubView: React.FC = () => {
                   borderRadius: 'var(--b-radius-field)',
                   padding: '6px 14px',
                   color: 'var(--b-on-strong)',
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: mono,
                   fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -437,32 +437,32 @@ export const PlaylistsHubView: React.FC = () => {
         }}
       >
         <div style={{ background: 'var(--b-card)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
-          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>
             DURACIÓN ESTIMADA DEL SHOW
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
             <Clock size={18} style={{ color: 'var(--b-cobalt)' }} />
-            <span style={{ fontSize: '20px', fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }}>{formattedDuration}</span>
+            <span style={{ fontSize: '20px', fontWeight: 800, fontFamily: mono }}>{formattedDuration}</span>
           </div>
         </div>
 
         <div style={{ background: 'var(--b-card)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
-          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>
             TOTAL CANCIONES PROGRAMADAS
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
             <Music size={18} style={{ color: 'var(--b-accent)' }} />
-            <span style={{ fontSize: '20px', fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }}>{items.length} TEMAS</span>
+            <span style={{ fontSize: '20px', fontWeight: 800, fontFamily: mono }}>{items.length} TEMAS</span>
           </div>
         </div>
 
         <div style={{ background: 'var(--b-card)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px 16px' }}>
-          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>
             SINCRONIZACIÓN CON ESCENARIO
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
             <Radio size={18} style={{ color: 'var(--b-success)' }} />
-            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--b-success)', fontFamily: "'IBM Plex Mono', monospace" }}>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--b-success)', fontFamily: mono }}>
               LISTO // REPOSITORIO ACTIVO
             </span>
           </div>
@@ -487,7 +487,7 @@ export const PlaylistsHubView: React.FC = () => {
               style={{
                 borderBottom: '1px solid var(--b-border)',
                 background: 'var(--b-elevated)',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: mono,
                 fontSize: '10px',
                 color: 'var(--b-muted)',
                 letterSpacing: '1px',
@@ -853,12 +853,12 @@ export const PlaylistsHubView: React.FC = () => {
               overflowY: 'auto',
             }}
           >
-            <h3 style={{ margin: '0 0 16px 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: '16px' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontFamily: mono, fontSize: '16px' }}>
               NUEVO SETLIST PARA {activeBand?.name.toUpperCase()}
             </h3>
             <form onSubmit={handleCreateNewPlaylist} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label htmlFor="new-playlist-name" style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label htmlFor="new-playlist-name" style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: mono }}>
                   NOMBRE DEL SETLIST
                 </label>
                 <input

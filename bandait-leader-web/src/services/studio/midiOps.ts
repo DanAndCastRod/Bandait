@@ -34,7 +34,10 @@ import {
   StudioSessionError,
   compareNotes,
   roundBeat,
+  type StudioMidiClip,
   type StudioMidiNote,
+  type StudioSession,
+  type StudioTrack,
 } from './session.ts'
 import type {
   HumanizeOptions,
@@ -142,6 +145,19 @@ function editSelected(
     notes.map((note, i) => (set.has(i) ? { note: edit(note), tag: true } : { note, tag: false })),
     clipLen,
   )
+}
+
+/**
+ * Edicion generica de las notas elegidas (null = todas) con normalizacion y seleccion del
+ * resultado. La usan modulos hermanos (groove.ts) para no repetir la normalizacion.
+ */
+export function mapSelectedNotes(
+  notes: readonly StudioMidiNote[],
+  selection: NoteSelection | null,
+  clipLengthBeats: number,
+  edit: (note: StudioMidiNote) => StudioMidiNote,
+): MidiEditResult {
+  return editSelected(notes, selection, clipLength(clipLengthBeats), edit)
 }
 
 // ---------------------------------------------------------------------------
@@ -299,32 +315,50 @@ function triRandom(rng: () => number): number {
   return rng() + rng() - 1
 }
 
+/**
+ * Preset de humanizacion. Los tiempos van en milisegundos (no en beats) para que el "pulso" suene
+ * igual a cualquier tempo: 11 ms son 11 ms a 60 o a 160 BPM. `swing` es la fraccion del paso de la
+ * subdivision que se atrasa la nota impar (0.33 = tresillo 66 %, 0.5 = puntillo 75 %). Todos los
+ * valores son los de la intensidad de referencia `amount`; otra intensidad los escala en proporcion.
+ */
 export interface HumanizePresetSpec {
   id: HumanizePresetId
   label: string
   description: string
   amount: number
-  timingBeats: number
+  timingMs: number
   velocityRange: number
   lengthRatio: number
   swing: number
   swingGrid: '1/8' | '1/16'
-  strumBeats: number
+  strumMs: number
   accentStrength: number
 }
 
+/** Tope del swing: 0.5 = la nota impar cae en el 75 % del par (corchea con puntillo + semicorchea). */
+export const STUDIO_HUMANIZE_MAX_SWING = 0.5
+/** Topes de los parametros en milisegundos (contrato: humanize_midi_clip en studio_chat_tools_v2.json). */
+export const STUDIO_HUMANIZE_MAX_TIMING_MS = 60
+export const STUDIO_HUMANIZE_MAX_STRUM_MS = 60
+export const STUDIO_HUMANIZE_MAX_LAID_BACK_MS = 30
+/** Tempo con que se convierten ms <-> beats si la llamada no trae el de la sesion. */
+const DEFAULT_HUMANIZE_BPM = 120
+
+// Swing de los presets reescalado x2/3 el 2026-11-27: antes el desplazamiento era swing*paso*2/3;
+// ahora es swing*paso, asi que el preset suena exactamente igual que antes. Los ms salen de los
+// beats viejos a 120 BPM (0.022 beats = 11 ms).
 export const STUDIO_HUMANIZE_PRESETS: readonly HumanizePresetSpec[] = [
   {
     id: 'pocket',
     label: 'Pocket Batería',
     description: 'Groove ajustado con acento métrico y swing de semicorchea.',
     amount: 0.45,
-    timingBeats: 0.022,
+    timingMs: 11,
     velocityRange: 18,
     lengthRatio: 0.04,
-    swing: 0.14,
+    swing: 0.093,
     swingGrid: '1/16',
-    strumBeats: 0,
+    strumMs: 0,
     accentStrength: 0.45,
   },
   {
@@ -332,12 +366,12 @@ export const STUDIO_HUMANIZE_PRESETS: readonly HumanizePresetSpec[] = [
     label: 'Teclista Vivo',
     description: 'Micro-apertura en acordes, respiración de frase y dinámica natural.',
     amount: 0.5,
-    timingBeats: 0.032,
+    timingMs: 16,
     velocityRange: 20,
     lengthRatio: 0.1,
-    swing: 0.06,
+    swing: 0.04,
     swingGrid: '1/16',
-    strumBeats: 0.018,
+    strumMs: 9,
     accentStrength: 0.3,
   },
   {
@@ -345,12 +379,12 @@ export const STUDIO_HUMANIZE_PRESETS: readonly HumanizePresetSpec[] = [
     label: 'Rasgueo Guitarra',
     description: 'Desplazamiento progresivo grave-a-agudo en acordes simultáneos.',
     amount: 0.55,
-    timingBeats: 0.028,
+    timingMs: 14,
     velocityRange: 16,
     lengthRatio: 0.08,
-    swing: 0.08,
+    swing: 0.053,
     swingGrid: '1/8',
-    strumBeats: 0.045,
+    strumMs: 22.5,
     accentStrength: 0.35,
   },
   {
@@ -358,59 +392,191 @@ export const STUDIO_HUMANIZE_PRESETS: readonly HumanizePresetSpec[] = [
     label: 'Secuenciador Analógico',
     description: 'Pulso cálido con micro-deriva de reloj y acento sutil.',
     amount: 0.4,
-    timingBeats: 0.015,
+    timingMs: 7.5,
     velocityRange: 12,
     lengthRatio: 0.06,
-    swing: 0.18,
+    swing: 0.12,
     swingGrid: '1/16',
-    strumBeats: 0,
+    strumMs: 0,
     accentStrength: 0.25,
   },
 ]
+
+/** Valores sin preset (equivalen a los de antes: amount*0.04 beats a 120 BPM, amount*24, amount*0.08). */
+const DEFAULT_HUMANIZE_BASE: Omit<HumanizePresetSpec, 'id' | 'label' | 'description'> = {
+  amount: 0.5,
+  timingMs: 10,
+  velocityRange: 12,
+  lengthRatio: 0.04,
+  swing: 0,
+  swingGrid: '1/16',
+  strumMs: 0,
+  accentStrength: 0,
+}
 
 export function findHumanizePreset(id: unknown): HumanizePresetSpec | null {
   return typeof id === 'string' ? (STUDIO_HUMANIZE_PRESETS.find((p) => p.id === id) ?? null) : null
 }
 
+/** Parametros efectivos de una humanizacion (lo que muestra el popover y lo que aplica humanize). */
+export interface ResolvedHumanize {
+  amount: number
+  /** Desviacion maxima del inicio, en ms (si la llamada trajo timing_beats, su equivalente al tempo dado). */
+  timingMs: number
+  /** La misma desviacion en beats, la que se aplica. */
+  timingBeats: number
+  velocityRange: number
+  lengthRatio: number
+  swing: number
+  swingGrid: '1/8' | '1/16'
+  strumMs: number
+  strumBeats: number
+  accentStrength: number
+  beatsPerBar: number
+  bpm: number
+  clipStartBeat: number
+  drumKit: boolean
+  laidBackMs: number
+}
+
+const msToBeats = (ms: number, bpm: number): number => (ms * bpm) / 60000
+const beatsToMs = (beats: number, bpm: number): number => (beats * 60000) / bpm
+
+/**
+ * Resuelve las opciones: un valor explicito es absoluto; lo que no viene sale del preset (o de los
+ * valores por defecto) escalado por `amount / amount_del_preset`. Asi la intensidad escala tambien
+ * el swing, el rasgueo y el acento, no solo el micro-timing. Topes: swing 0..0.5, timing 0..60 ms
+ * (o 0..0.25 beats con timing_beats), strum -60..60 ms (o -0.12..0.12 beats), laid back 0..30 ms.
+ */
+export function resolveHumanize(options: HumanizeOptions): ResolvedHumanize {
+  const preset = findHumanizePreset(options.preset)
+  const base = preset ?? DEFAULT_HUMANIZE_BASE
+  const amount = options.amount !== undefined ? Math.min(1, Math.max(0, finite(options.amount, 'amount'))) : base.amount
+  const k = amount / Math.max(0.01, base.amount)
+  const bpm = options.bpm !== undefined && finite(options.bpm, 'bpm') > 0 ? options.bpm : DEFAULT_HUMANIZE_BPM
+  const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+  let timingBeats: number
+  let timingMs: number
+  if (options.timingMs !== undefined) {
+    timingMs = clampN(finite(options.timingMs, 'timing_ms'), 0, STUDIO_HUMANIZE_MAX_TIMING_MS)
+    timingBeats = msToBeats(timingMs, bpm)
+  } else if (options.timingBeats !== undefined) {
+    // Compatibilidad: timing_beats del asistente sigue siendo absoluto en beats.
+    timingBeats = clampN(finite(options.timingBeats, 'timing_beats'), 0, 0.25)
+    timingMs = beatsToMs(timingBeats, bpm)
+  } else {
+    timingMs = clampN(base.timingMs * k, 0, STUDIO_HUMANIZE_MAX_TIMING_MS)
+    timingBeats = msToBeats(timingMs, bpm)
+  }
+  let strumBeats: number
+  let strumMs: number
+  if (options.strumMs !== undefined) {
+    strumMs = clampN(finite(options.strumMs, 'strum_ms'), -STUDIO_HUMANIZE_MAX_STRUM_MS, STUDIO_HUMANIZE_MAX_STRUM_MS)
+    strumBeats = msToBeats(strumMs, bpm)
+  } else if (options.strumBeats !== undefined) {
+    strumBeats = clampN(finite(options.strumBeats, 'strum_beats'), -0.12, 0.12)
+    strumMs = beatsToMs(strumBeats, bpm)
+  } else {
+    strumMs = clampN(base.strumMs * k, -STUDIO_HUMANIZE_MAX_STRUM_MS, STUDIO_HUMANIZE_MAX_STRUM_MS)
+    strumBeats = msToBeats(strumMs, bpm)
+  }
+  const velocityRange =
+    options.velocityRange !== undefined ? clampN(finite(options.velocityRange, 'velocity_range'), 0, 64) : clampN(Math.round(base.velocityRange * k), 0, 64)
+  const lengthRatio = options.lengthRatio !== undefined ? clampN(finite(options.lengthRatio, 'length_ratio'), 0, 0.5) : clampN(base.lengthRatio * k, 0, 0.5)
+  const swing = options.swing !== undefined ? clampN(finite(options.swing, 'swing'), 0, STUDIO_HUMANIZE_MAX_SWING) : clampN(base.swing * k, 0, STUDIO_HUMANIZE_MAX_SWING)
+  const swingGrid = options.swingGrid === '1/8' ? '1/8' : options.swingGrid === '1/16' ? '1/16' : base.swingGrid
+  const accentStrength =
+    options.accentStrength !== undefined ? clampN(finite(options.accentStrength, 'accent_strength'), 0, 1) : clampN(base.accentStrength * k, 0, 1)
+  const beatsPerBar = options.beatsPerBar !== undefined ? Math.max(1, Math.round(finite(options.beatsPerBar, 'beats_per_bar'))) : 4
+  const clipStartBeat = options.clipStartBeat !== undefined ? finite(options.clipStartBeat, 'clip_start_beat') : 0
+  const laidBackMs = options.laidBackMs !== undefined ? clampN(finite(options.laidBackMs, 'laid_back_ms'), 0, STUDIO_HUMANIZE_MAX_LAID_BACK_MS) : 0
+  return {
+    amount,
+    timingMs,
+    timingBeats,
+    velocityRange,
+    lengthRatio,
+    swing,
+    swingGrid,
+    strumMs,
+    strumBeats,
+    accentStrength,
+    beatsPerBar,
+    bpm,
+    clipStartBeat,
+    drumKit: options.drumKit === true,
+    laidBackMs,
+  }
+}
+
+/** Papel de una nota de bateria General MIDI para la humanizacion por pieza. */
+export type DrumRole = 'kick' | 'snare' | 'hat' | 'tom' | 'cymbal' | 'perc'
+
+export function drumRoleForPitch(pitch: number): DrumRole {
+  if (pitch === 35 || pitch === 36) return 'kick'
+  if (pitch >= 37 && pitch <= 40) return 'snare'
+  if (pitch === 42 || pitch === 44 || pitch === 46) return 'hat'
+  if (pitch === 41 || pitch === 43 || pitch === 45 || pitch === 47 || pitch === 48 || pitch === 50) return 'tom'
+  if (pitch === 49 || pitch === 51 || pitch === 52 || pitch === 53 || pitch === 55 || pitch === 57 || pitch === 59) return 'cymbal'
+  return 'perc'
+}
+
+/**
+ * Cuanto de la desviacion de tiempo y de velocidad recibe cada pieza: bombo y caja mas ajustados
+ * (son el ancla del groove), hi-hat con mas variacion de velocidad (la mano derecha nunca pega
+ * dos veces igual), platos y toms intermedios.
+ */
+const DRUM_FEEL: Readonly<Record<DrumRole, { timing: number; velocity: number }>> = {
+  kick: { timing: 0.45, velocity: 0.55 },
+  snare: { timing: 0.6, velocity: 0.75 },
+  hat: { timing: 1, velocity: 1.6 },
+  tom: { timing: 0.8, velocity: 1 },
+  cymbal: { timing: 0.9, velocity: 0.8 },
+  perc: { timing: 1, velocity: 1 },
+}
+
+/** Caja "laid back": golpes de caja y palmas (38, 39, 40), no el aro (37). */
+const isLaidBackSnare = (pitch: number) => pitch === 38 || pitch === 39 || pitch === 40
+
+/**
+ * Posicion de swing de una nota: si cae en la subdivision impar (o donde ya la dejo un swing
+ * anterior), devuelve el beat de sesion donde debe quedar (`par + paso * (1 + swing)`); si no, null.
+ * Es idempotente: una nota ya movida al mismo swing vuelve al mismo sitio.
+ */
+export function swingTargetBeat(sessionBeat: number, swing: number, swingGrid: '1/8' | '1/16'): number | null {
+  if (!(swing > 0)) return null
+  const step = swingGrid === '1/8' ? 0.5 : 0.25
+  const pair = 2 * step
+  // La nota un poco adelantada (hasta 0.3 de paso) sigue perteneciendo a su par.
+  const pairIdx = Math.floor((sessionBeat + 0.3 * step) / pair + 1e-9)
+  const r = (sessionBeat - pairIdx * pair) / step
+  // Zona impar: desde 0.35 de paso antes de la recta hasta 0.15 de paso despues del swing maximo.
+  if (r < 0.65 || r >= 1 + STUDIO_HUMANIZE_MAX_SWING + 0.15) return null
+  return pairIdx * pair + step * (1 + swing)
+}
+
+/** Contexto de humanizacion de un clip: su posicion, el tempo, el compas y si es bateria. */
+export function humanizeClipContext(
+  session: Pick<StudioSession, 'bpm' | 'beatsPerBar'>,
+  loc: { clip: Pick<StudioMidiClip, 'startBeat'>; track: Pick<StudioTrack, 'instrument'> },
+): Pick<HumanizeOptions, 'clipStartBeat' | 'bpm' | 'beatsPerBar' | 'drumKit'> {
+  return {
+    clipStartBeat: loc.clip.startBeat,
+    bpm: session.bpm,
+    beatsPerBar: session.beatsPerBar,
+    drumKit: loc.track.instrument?.type === 'drums',
+  }
+}
+
 export function humanize(notes: readonly StudioMidiNote[], selection: NoteSelection | null, options: HumanizeOptions, clipLengthBeats: number): MidiEditResult {
   const clipLen = clipLength(clipLengthBeats)
-  const preset = findHumanizePreset(options.preset)
-  const amount =
-    options.amount !== undefined
-      ? Math.min(1, Math.max(0, finite(options.amount, 'amount')))
-      : (preset?.amount ?? 0.5)
-  const timingBeats =
-    options.timingBeats !== undefined
-      ? Math.min(0.25, Math.max(0, finite(options.timingBeats, 'timing_beats')))
-      : preset
-        ? preset.timingBeats * (amount / Math.max(0.01, preset.amount))
-        : amount * 0.04
-  const velocityRange =
-    options.velocityRange !== undefined
-      ? Math.min(64, Math.max(0, finite(options.velocityRange, 'velocity_range')))
-      : preset
-        ? Math.round(preset.velocityRange * (amount / Math.max(0.01, preset.amount)))
-        : Math.round(amount * 24)
-  const lengthRatio =
-    options.lengthRatio !== undefined
-      ? Math.min(0.5, Math.max(0, finite(options.lengthRatio, 'length_ratio')))
-      : preset
-        ? preset.lengthRatio * (amount / Math.max(0.01, preset.amount))
-        : amount * 0.08
-  const swing =
-    options.swing !== undefined
-      ? Math.min(0.75, Math.max(0, finite(options.swing, 'swing')))
-      : (preset?.swing ?? 0)
-  const swingGrid = options.swingGrid === '1/8' ? '1/8' : options.swingGrid === '1/16' ? '1/16' : (preset?.swingGrid ?? '1/16')
-  const strumBeats =
-    options.strumBeats !== undefined
-      ? Math.min(0.12, Math.max(-0.12, finite(options.strumBeats, 'strum_beats')))
-      : (preset?.strumBeats ?? 0)
-  const accentStrength =
-    options.accentStrength !== undefined
-      ? Math.min(1, Math.max(0, finite(options.accentStrength, 'accent_strength')))
-      : (preset?.accentStrength ?? 0)
-  const bpb = options.beatsPerBar !== undefined ? Math.max(1, Math.round(finite(options.beatsPerBar, 'beats_per_bar'))) : 4
+  const r = resolveHumanize(options)
+  const { timingBeats, velocityRange, lengthRatio, swing, swingGrid, accentStrength, clipStartBeat, drumKit } = r
+  // El rasgueo no tiene sentido en una bateria: bombo y hi-hat juntos no son un acorde.
+  const strumBeats = drumKit ? 0 : r.strumBeats
+  const laidBackBeats = drumKit ? msToBeats(r.laidBackMs, r.bpm) : 0
+  const bpb = r.beatsPerBar
 
   const rng = options.seed === undefined ? Math.random : mulberry32(Math.trunc(finite(options.seed, 'seed')))
   const lastStart = Math.max(0, clipLen - STUDIO_MIDI_MIN_NOTE_BEATS)
@@ -451,39 +617,44 @@ export function humanize(notes: readonly StudioMidiNote[], selection: NoteSelect
     }
   }
 
-  const swingStep = swingGrid === '1/8' ? 0.5 : 0.25
-
   return normalizeTagged(
     notes.map((n, i) => {
       if (!set.has(i)) return { note: n, tag: false }
+      // Fase musical: beat de la sesion, no del clip (un clip que empieza a mitad de compas o en
+      // un contratiempo acentua y swinguea los tiempos correctos).
+      const phase = clipStartBeat + n.start
+      const role: DrumRole | null = drumKit ? drumRoleForPitch(n.pitch) : null
+      const feel = role ? DRUM_FEEL[role] : { timing: 1, velocity: 1 }
 
-      // 1. Swing sobre subdivisiones impares (segunda semicorchea o segunda corchea).
-      let swingDelta = 0
-      if (swing > 0) {
-        const subIdx = Math.round(n.start / swingStep)
-        const dist = Math.abs(n.start - subIdx * swingStep)
-        if (subIdx % 2 === 1 && dist <= swingStep * 0.35) {
-          swingDelta = swing * swingStep * (2 / 3)
-        }
-      }
+      // 1. Swing idempotente: la subdivision impar se coloca en rejilla + swing (no se suma).
+      const swingAt = swingTargetBeat(phase, swing, swingGrid)
+      const base = swingAt === null ? n.start : swingAt - clipStartBeat
 
-      // 2. Micro-timing: combinacion de deriva de frase + jitter individual + strum.
+      // 2. Micro-timing: deriva de frase + jitter individual (en ms convertidos) + strum + laid back.
       const drift = groupDriftByIdx.get(i) ?? 0
-      const jitter = timingBeats > 0 ? (0.45 * drift + 0.55 * triRandom(rng)) * timingBeats : 0
+      const jitter = timingBeats > 0 ? (0.45 * drift + 0.55 * triRandom(rng)) * timingBeats * feel.timing : 0
       const strumDelta = strumOffsetByIdx.get(i) ?? 0
-      const start = Math.min(lastStart, Math.max(0, n.start + swingDelta + strumDelta + jitter))
+      const laidBack = laidBackBeats > 0 && isLaidBackSnare(n.pitch) ? laidBackBeats : 0
+      const start = Math.min(lastStart, Math.max(0, base + strumDelta + jitter + laidBack))
 
       // 3. Acento metrico + variacion organica de velocidad.
       let accentVel = 0
       if (accentStrength > 0) {
-        const inBar = ((n.start % bpb) + bpb) % bpb
-        const distDownbeat = Math.min(inBar, Math.abs(bpb - inBar))
-        const distHalf = bpb >= 2 ? Math.abs(inBar - bpb / 2) : 99
-        if (distDownbeat <= 0.08) accentVel = Math.round(accentStrength * 14)
-        else if (distHalf <= 0.08) accentVel = Math.round(accentStrength * 7)
-        else if (Math.abs(inBar - Math.round(inBar)) > 0.2) accentVel = -Math.round(accentStrength * 5)
+        const inBar = ((phase % bpb) + bpb) % bpb
+        if (role === 'hat') {
+          // Hi-hat: corcheas fuertes (mas aun en el tiempo), semicorcheas intermedias suaves.
+          const onEighth = Math.abs(inBar * 2 - Math.round(inBar * 2)) <= 0.16
+          const onBeat = Math.abs(inBar - Math.round(inBar)) <= 0.08
+          accentVel = onBeat ? Math.round(accentStrength * 12) : onEighth ? Math.round(accentStrength * 6) : -Math.round(accentStrength * 10)
+        } else {
+          const distDownbeat = Math.min(inBar, Math.abs(bpb - inBar))
+          const distHalf = bpb >= 2 ? Math.abs(inBar - bpb / 2) : 99
+          if (distDownbeat <= 0.08) accentVel = Math.round(accentStrength * 14)
+          else if (distHalf <= 0.08) accentVel = Math.round(accentStrength * 7)
+          else if (Math.abs(inBar - Math.round(inBar)) > 0.2) accentVel = -Math.round(accentStrength * 5)
+        }
       }
-      const deltaVel = (velocityRange > 0 ? triRandom(rng) * velocityRange : 0) + accentVel + (strumVelByIdx.get(i) ?? 0)
+      const deltaVel = (velocityRange > 0 ? triRandom(rng) * velocityRange * feel.velocity : 0) + accentVel + (strumVelByIdx.get(i) ?? 0)
       const velocity = clampInt(n.velocity + deltaVel, 1, 127)
 
       // 4. Duracion organica.

@@ -25,6 +25,32 @@
             var v = vars[k];
             if (/^--b-[a-z-]+$/.test(k) && typeof v === 'string' && /^[#0-9a-zA-Z.%(), -]{1,40}$/.test(v)) root.style.setProperty(k, v);
           }
+          // Tipografia (services/fonts.ts): ids conocidos y la hoja de Google Fonts si no es IBM Plex.
+          var GF = {
+            'inter': 'Inter:wght@400;500;600;700',
+            'dm-sans': 'DM+Sans:wght@400;500;600;700',
+            'jakarta': 'Plus+Jakarta+Sans:wght@400;500;600;700',
+            'manrope': 'Manrope:wght@400;500;600;700',
+            'geist': 'Geist:wght@400;500;600;700',
+            'geist-mono': 'Geist+Mono:wght@400;500;600;700'
+          };
+          var f = c.font && typeof c.font === 'object' ? c.font : {};
+          var fams = [];
+          if (typeof f.ui === 'string' && /^[a-z-]{1,20}$/.test(f.ui)) {
+            root.setAttribute('data-font-ui', f.ui);
+            if (GF.hasOwnProperty(f.ui) && f.ui !== 'geist-mono') fams.push(GF[f.ui]);
+          }
+          if (typeof f.labels === 'string' && /^[a-z-]{1,20}$/.test(f.labels)) {
+            root.setAttribute('data-font-labels', f.labels);
+            if (f.labels === 'geist-mono') fams.push(GF['geist-mono']);
+          }
+          if (fams.length) {
+            var l = document.createElement('link');
+            l.rel = 'stylesheet';
+            l.href = 'https://fonts.googleapis.com/css2?family=' + fams.join('&family=') + '&display=swap';
+            l.setAttribute('data-bandait-font', '1');
+            document.head.appendChild(l);
+          }
         } catch (e) {
           // cache danada o sin almacenamiento: queda Dark Grafito
         }

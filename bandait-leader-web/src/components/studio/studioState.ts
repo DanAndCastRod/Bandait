@@ -32,9 +32,9 @@ import { stemBaseName, stemExtension, type StemRole } from '../../services/stemN
 import { loadStemSong } from '../../services/stemStore'
 import type { SectionSpan } from '../../services/stemTiming'
 import { encodeWav24, parseWavHeader } from '../../services/wav'
-import { bounce, bounceRange, soloTrackSession } from '../../services/studio/bounce'
+import { bounce, bounceRange, renderMix, soloTrackSession } from '../../services/studio/bounce'
 import { COMPUTER_KEYBOARD_DEFAULT_OCTAVE } from '../../services/studio/computerKeyboard'
-import { StudioEngine, playbackStopS } from '../../services/studio/engine'
+import { StudioEngine, assetsInUse, playbackStopS } from '../../services/studio/engine'
 import { instrumentTailSeconds } from '../../services/studio/instruments/core'
 import { createHistory, STUDIO_HISTORY_LIMIT } from '../../services/studio/history'
 import { instrumentAvailability } from '../../services/studio/instruments/index'
@@ -51,12 +51,14 @@ import {
   normalizeNotes,
   quantize,
   humanize,
+  humanizeClipContext,
   removeNotes,
   resizeNotes,
   setVelocity,
   splitNotesAt,
   transpose,
 } from '../../services/studio/midiOps'
+import { applyGrooveTemplate, describeGroove, grooveFromAudio, type GrooveGrid, type StudioGrooveTemplate } from '../../services/studio/groove'
 import { computePeaks, peaksHaveRms, PEAKS_BASE_BUCKET } from '../../services/studio/peaks'
 import { StudioRecorder } from '../../services/studio/recorder'
 import { midiClipExportNotes, parseSmf, SMF_DRUM_CHANNEL, writeSmf } from '../../services/studio/smf'
@@ -155,6 +157,7 @@ import type {
   EngineLoadProgress,
   EngineState,
   HumanizeOptions,
+  HumanizePresetId,
   LoopRegionS,
   MidiAccessStatus,
   MidiEditResult,
@@ -187,13 +190,12 @@ import { measureMix, renderListenExcerpt, type MeasureMixOptions } from '../../s
 import {
   alignPhaseCrossCorrelation,
   barkBandEnergiesDb,
-  detectBpmLocal,
-  detectChordsViterbi,
-  detectKeyLocal,
   downmixMono,
+  planPhaseAlignment,
+  type LoudnessSummary,
 } from '../../services/studio/dspMath'
-import { integratedLufs } from '../../services/studio/loudness'
-import { applyAutoMasterToSession, type AutoMasterProfile, type AutoMasterTone } from '../../services/studio/mastering'
+import { analyzeMusicalAsync, measureLoudnessInChunks } from '../../services/studio/dspAnalysisClient'
+import { calibrateAutoMaster, type AutoMasterMeasurement, type AutoMasterProfile, type AutoMasterTone } from '../../services/studio/mastering'
 import { optimizeBarkMixUnmasking, type MixUnmaskResult, type TrackSpectralInput } from '../../services/studio/mixOptimizer'
 import {
   computeDefaultClickBars,
@@ -203,8 +205,10 @@ import {
 } from '../../services/studio/productionTools'
 import { applySongStructureToSession, songToStudioSeed } from '../../services/studio/songStudioBridge'
 import {
+  StudioMergeConflictError,
   createStudioCollabChannel,
   mergeCollaborativeSession,
+  mergeCollaborativeSessionDetailed,
   type RealtimeClientLike,
   type StudioCollabEvent,
   type StudioCollabHandle,
@@ -287,6 +291,10 @@ export interface PianoRollState {
   quantizeStrength: number
   /** Intensidad de humanizacion (tiempo, velocidad y duracion), 0..1. */
   humanizeAmount: number
+  /** Ultimo preset de humanizacion elegido en el popover (lo usa tambien H en la linea de tiempo). */
+  humanizePreset: HumanizePresetId | null
+  /** Plantilla de groove tomada de un clip de audio (en memoria, no viaja en la sesion). */
+  groove: StudioGrooveTemplate | null
   /** Largo de la nota que dibuja la herramienta de dibujar, en beats (el ultimo usado). */
   drawLength: number
 }
@@ -382,6 +390,10 @@ export interface StudioSnapshot {
   labMode: boolean
   /** Ultimo resultado del optimizador anti-enmascaramiento Bark (para matriz termica LAB). */
   lastUnmaskResult: MixUnmaskResult | null
+  /** Trabajo DSP local en curso (Auto-Master mide varios renders; el analisis corre en un Worker). */
+  dspBusy: 'master' | 'analysis' | null
+  /** Ultima medicion del master sobre el render (LUFS, pico real, LRA, PLR) y la version medida. */
+  masterLoudness: (LoudnessSummary & { version: number }) | null
 }
 
 /** Lo que recibe cada panel del Estudio (los de la parte 2 incluidos). */
@@ -849,6 +861,13 @@ export class StudioController {
   private lastCloudBase: StudioSession
   private vcsBundle: StudioVcsBundle = emptyStudioVcsBundle()
   private abWorkingBackup: StudioSession | null = null
+  /**
+   * Audios ya decodificados de la referencia B del A/B: el cambio a B no espera a leer ni a
+   * decodificar (resolveAudio los devuelve sin consumirlos). Se vacia al quitar la referencia.
+   */
+  private abPreloaded = new Map<string, AudioBuffer>()
+  /** Cambios de compañeros en serie: dos guardados seguidos no se fusionan a la vez. */
+  private collabQueue: Promise<void> = Promise.resolve()
   private widgetsToggleHandler: (() => void) | null = null
 
   constructor(options: StudioControllerOptions) {
@@ -869,7 +888,7 @@ export class StudioController {
       selectedTrackId: null,
       editor: 'timeline',
       pianoClipId: null,
-      piano: { tool: 'draw', grid: '1/16', triplets: false, snap: true, selection: [], quantizeStrength: 1, humanizeAmount: 0.4, drawLength: 0.25 },
+      piano: { tool: 'draw', grid: '1/16', triplets: false, snap: true, selection: [], quantizeStrength: 1, humanizeAmount: 0.4, humanizePreset: null, groove: null, drawLength: 0.25 },
       midi: {
         access: midiSupported() ? 'prompt' : 'unsupported',
         devices: [],
@@ -903,6 +922,8 @@ export class StudioController {
       collaborators: [],
       labMode: false,
       lastUnmaskResult: null,
+      dspBusy: null,
+      masterLoudness: null,
     }
   }
 
@@ -964,10 +985,11 @@ export class StudioController {
         selectedTrackId: this.snap.selectedTrackId,
       },
       onPeersChange: (peers) => {
-        this.emit({ collaborators: peers.filter((p) => p.sessionId === this.sessionId || p.sessionId === null) })
+        // Colabora en esta sesion quien la tiene abierta; quien mira la lista (sessionId null) no.
+        this.emit({ collaborators: peers.filter((p) => p.sessionId === this.sessionId) })
       },
       onEvent: (event) => {
-        void this.handleCollabEvent(event)
+        this.collabQueue = this.collabQueue.then(() => this.handleCollabEvent(event)).catch(() => undefined)
       },
     })
     void this.initVcs()
@@ -984,9 +1006,16 @@ export class StudioController {
 
   async dispose(): Promise<void> {
     if (this.disposed) return
+    // Un autoguardado a la nube que estaba esperando se hace ahora, no se pierde: sube en segundo
+    // plano (no usa el motor) y el canal de colaboracion se cierra cuando termina, para que los
+    // companeros reciban el aviso de session_saved.
+    let cloudFlush: Promise<void> | null = null
     if (this.cloudAutoSaveTimer) {
       clearTimeout(this.cloudAutoSaveTimer)
       this.cloudAutoSaveTimer = null
+      if (this.cloud && this.snap.canEditCloud && this.snap.save.dirty && !this.snap.recording && this.snap.save.cloud !== 'saving') {
+        cloudFlush = this.saveToCloud(false)
+      }
     }
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -997,8 +1026,17 @@ export class StudioController {
       clearTimeout(this.tapTimer)
       this.tapTimer = null
     }
-    this.collabHandle?.dispose()
-    this.collabHandle = null
+    const handle = this.collabHandle
+    if (cloudFlush) {
+      void cloudFlush.finally(() => {
+        handle?.dispose()
+        if (this.collabHandle === handle) this.collabHandle = null
+      })
+    } else {
+      handle?.dispose()
+      this.collabHandle = null
+    }
+    this.abPreloaded.clear()
     this.disposed = true
     this.listeners.clear()
     this.frameCallbacks.clear()
@@ -1061,6 +1099,8 @@ export class StudioController {
       this.decoded.delete(asset.id)
       return ready
     }
+    const preloaded = this.abPreloaded.get(asset.id)
+    if (preloaded) return preloaded
     let file: Blob | null = await studioStore.getAsset(this.sessionId, asset.file).catch(() => null)
     if (!file && this.cloud) {
       try {
@@ -1746,13 +1786,28 @@ export class StudioController {
     this.editNotes('Cuantizar notas', (notes, length) => (notes.length === 0 ? null : quantize(notes, selection, { grid, triplets, strength: quantizeStrength }, length)))
   }
 
+  /**
+   * Opciones por defecto de humanizar (boton del piano roll y H en la linea de tiempo): el ultimo
+   * preset elegido en el popover con la intensidad del deslizador.
+   */
+  private defaultHumanizeOptions(): HumanizeOptions {
+    const { humanizeAmount, humanizePreset } = this.snap.piano
+    return { amount: humanizeAmount, ...(humanizePreset ? { preset: humanizePreset } : {}) }
+  }
+
+  /** Recuerda el preset elegido en el popover (para H y el boton rapido). */
+  setHumanizePreset(preset: HumanizePresetId | null): void {
+    this.setPiano({ humanizePreset: preset })
+  }
+
   humanizeNotes(options?: HumanizeOptions): void {
-    const { humanizeAmount } = this.snap.piano
-    const opts: HumanizeOptions = options ?? { amount: humanizeAmount, beatsPerBar: this.snap.session.beatsPerBar }
+    const opts: HumanizeOptions = options ?? this.defaultHumanizeOptions()
     const selection = this.selectionOrAll()
-    this.editNotes('Humanizar notas', (notes, length) =>
-      notes.length === 0 ? null : humanize(notes, selection, { ...opts, beatsPerBar: opts.beatsPerBar ?? this.snap.session.beatsPerBar }, length),
-    )
+    const loc = this.pianoClip()
+    if (!loc) return
+    // Fase del clip en la sesion, tempo (ms -> beats), compas y bateria por instrumento.
+    const context = humanizeClipContext(this.snap.session, loc)
+    this.editNotes('Humanizar notas', (notes, length) => (notes.length === 0 ? null : humanize(notes, selection, { ...context, ...opts }, length)))
   }
 
   legatoNotes(): void {
@@ -1879,8 +1934,7 @@ export class StudioController {
       this.notify('info', 'Humanizar actúa sobre clips MIDI: elígelos en la línea de tiempo o abre uno en el piano roll.')
       return
     }
-    const { humanizeAmount } = this.snap.piano
-    const opts: HumanizeOptions = options ?? { amount: humanizeAmount, beatsPerBar: this.snap.session.beatsPerBar }
+    const opts: HumanizeOptions = options ?? this.defaultHumanizeOptions()
     this.run(midiIds.length === 1 ? 'Humanizar clip MIDI' : `Humanizar ${midiIds.length} clips MIDI`, (session) => {
       let next = session
       for (const clipId of midiIds) {
@@ -1888,8 +1942,112 @@ export class StudioController {
         if (!loc) continue
         next = updateMidiClip(next, {
           clipId,
-          patch: { notes: humanize(loc.clip.notes, null, { ...opts, beatsPerBar: opts.beatsPerBar ?? next.beatsPerBar }, loc.clip.lengthBeats).notes },
+          patch: { notes: humanize(loc.clip.notes, null, { ...humanizeClipContext(next, loc), ...opts }, loc.clip.lengthBeats).notes },
         })
+      }
+      return next
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // Groove de la banda: plantilla tomada de un clip de audio y aplicada a notas MIDI (groove.ts).
+
+  /** Clips de audio de la sesion de los que se puede tomar un groove (para el popover). */
+  grooveSourceClips(): Array<{ clipId: string; label: string }> {
+    const out: Array<{ clipId: string; label: string }> = []
+    const { session } = this.snap
+    for (const track of session.tracks) {
+      if (track.kind !== 'audio') continue
+      for (const clip of track.clips) {
+        if (clip.active === false) continue
+        const bar = Math.floor(secondsToBeats(clip.startS, session.bpm) / Math.max(1, session.beatsPerBar)) + 1
+        out.push({ clipId: clip.id, label: `${track.name} · compás ${bar} (${Math.round(clip.lengthS)} s)` })
+      }
+    }
+    return out
+  }
+
+  /**
+   * Toma el groove de un clip de audio (por id, o el clip de audio elegido en la linea de tiempo):
+   * ataques, desplazamiento mediano y velocidad relativa por paso de la rejilla, de hasta 60 s.
+   */
+  captureGrooveFromClip(clipId?: string, grid: GrooveGrid = '1/16'): StudioGrooveTemplate | null {
+    const session = this.snap.session
+    const id = clipId ?? this.selectedClips().find((c) => findClip(session, c) !== null)
+    const loc = id ? findClip(session, id) : null
+    if (!loc) {
+      this.notify('info', 'Elige un clip de audio (por ejemplo, la batería grabada) para tomar su groove.')
+      return null
+    }
+    const seg = this.getClipSegmentChannels(loc.clip)
+    if (!seg) {
+      this.notify('warn', 'El audio de ese clip todavía no está cargado.')
+      return null
+    }
+    const limit = Math.min(seg.channels[0].length, Math.round(seg.sampleRate * 60))
+    const mono = downmixMono(seg.channels.map((ch) => ch.subarray(0, limit)))
+    let template: StudioGrooveTemplate | null
+    try {
+      template = grooveFromAudio(mono, seg.sampleRate, {
+        clipStartS: loc.clip.startS,
+        bpm: session.bpm,
+        beatsPerBar: session.beatsPerBar,
+        grid,
+        label: loc.track.name,
+        sourceClipId: loc.clip.id,
+      })
+    } catch (err) {
+      this.fail(err)
+      return null
+    }
+    if (!template) {
+      this.notify('warn', 'No hay suficientes golpes claros en ese clip para tomar un groove (hacen falta al menos 8).')
+      return null
+    }
+    this.setPiano({ groove: template })
+    this.notify('info', `Groove tomado: ${describeGroove(template)}.`)
+    return template
+  }
+
+  /** Olvida la plantilla de groove. */
+  clearGroove(): void {
+    this.setPiano({ groove: null })
+  }
+
+  /**
+   * Aplica el groove tomado a las notas elegidas del piano roll (todas si no hay seleccion) o a
+   * los clips MIDI elegidos en la linea de tiempo. `strength` cuantiza hacia la plantilla (0..1).
+   */
+  applyGroove(options: { strength?: number; velocityStrength?: number } = {}): void {
+    const template = this.snap.piano.groove
+    if (!template) {
+      this.notify('info', 'Primero toma el groove de un clip de audio (Humanización > Groove de la banda).')
+      return
+    }
+    const strength = options.strength ?? 1
+    const velocityStrength = options.velocityStrength ?? 0.5
+    if (this.snap.editor === 'piano_roll') {
+      const loc = this.pianoClip()
+      if (!loc) return
+      const selection = this.selectionOrAll()
+      const bpm = this.snap.session.bpm
+      this.editNotes('Aplicar groove', (notes, length) =>
+        notes.length === 0 ? null : applyGrooveTemplate(notes, selection, template, { strength, velocityStrength, clipStartBeat: loc.clip.startBeat, bpm }, length),
+      )
+      return
+    }
+    const midiIds = this.selectedClips().filter((id) => findMidiClip(this.snap.session, id))
+    if (midiIds.length === 0) {
+      this.notify('info', 'El groove se aplica a clips MIDI: elígelos en la línea de tiempo o abre uno en el piano roll.')
+      return
+    }
+    this.run(midiIds.length === 1 ? 'Aplicar groove' : `Aplicar groove a ${midiIds.length} clips`, (session) => {
+      let next = session
+      for (const clipId of midiIds) {
+        const loc = findMidiClip(next, clipId)
+        if (!loc) continue
+        const notes = applyGrooveTemplate(loc.clip.notes, null, template, { strength, velocityStrength, clipStartBeat: loc.clip.startBeat, bpm: next.bpm }, loc.clip.lengthBeats).notes
+        next = updateMidiClip(next, { clipId, patch: { notes } })
       }
       return next
     })
@@ -3266,6 +3424,17 @@ export class StudioController {
   }
 
   /**
+   * Los audios que nombra un documento leido de la nube ya estan en la nube: no hay que subirlos
+   * (y quiza todavia no esten en este equipo, si los grabo otro integrante).
+   */
+  private markInCloud(session: StudioSession): void {
+    const files = this.uploadedFiles()
+    const before = files.size
+    for (const asset of session.assets) files.add(asset.file)
+    if (files.size !== before) this.storeUploaded(files)
+  }
+
+  /**
    * GUARDAR: sube los audios que falten y el documento. `overwrite` pisa la version de la nube
    * (tras un conflicto). En caso de colision 412 intenta primero una fusion colaborativa de 3 vias
    * (`mergeCollaborativeSession`) para que dos musicos editando distintas pistas nunca se pisen.
@@ -3286,7 +3455,7 @@ export class StudioController {
       this.saveTimer = null
     }
     await this.queueLocalSave()
-    const version = this.editCount
+    let version = this.editCount
     const workingSession = this.abWorkingBackup ?? this.snap.session
     const document = removeUnusedAssets(workingSession)
     this.emit({ save: { ...this.snap.save, cloud: 'saving', cloudDetail: null, uploading: { done: 0, total: document.assets.length } } })
@@ -3305,20 +3474,42 @@ export class StudioController {
           // Resolucion automatica de 3 vias por entidad antes de molestar al musico con un conflicto.
           const remote = await studioCloud.getSession(cloud, this.sessionId)
           if (!remote) throw err
-          const merged = mergeCollaborativeSession(this.lastCloudBase, workingSession, remote.session)
-          const mergedDoc = removeUnusedAssets(merged)
+          // Si no combina (StudioMergeConflictError) se muestra el conflicto y NO se sube nada.
+          const result = mergeCollaborativeSessionDetailed(this.lastCloudBase, workingSession, remote.session)
+          const mergedDoc = removeUnusedAssets(result.session)
+          // Los audios que agrego el otro ya estan en la nube: solo se suben los de este equipo.
+          this.markInCloud(remote.session)
           await this.uploadAssets(cloud, mergedDoc, false)
           saved = await studioCloud.putSession(cloud, mergedDoc, { ifMatch: remote.etag })
           this.lastCloudBase = saved.session
-          if (!this.abWorkingBackup) {
-            this.history.push(merged, 'Fusión colaborativa')
-            this.setSession(merged, false)
-          } else {
-            this.abWorkingBackup = merged
+          // Lo que el musico edito mientras se subia no se pierde: se vuelve a fusionar contra el
+          // estado vigente (base = lo que se fusiono, local = lo de ahora, remoto = lo subido).
+          const current = this.abWorkingBackup ?? this.snap.session
+          const editedMeanwhile = current !== workingSession
+          let next = result.session
+          if (editedMeanwhile) {
+            try {
+              next = mergeCollaborativeSession(workingSession, current, result.session)
+            } catch {
+              next = current
+            }
           }
-          await this.engine.load(this.snap.session, this.resolveAudio).catch(() => undefined)
-          void this.ensurePeaks()
-          this.notify('info', 'Cambios combinados en tiempo real con la banda.')
+          if (!this.abWorkingBackup) {
+            this.history.push(next, 'Fusión colaborativa')
+            // setSession sincroniza el motor en caliente (syncEngine): sin halt, sin cortar a quien escucha.
+            this.setSession(next, false)
+          } else {
+            this.abWorkingBackup = next
+          }
+          // Sin ediciones durante la subida, lo que queda en pantalla es lo que se guardo.
+          if (!editedMeanwhile) version = this.editCount
+          else if (!this.disposed) this.scheduleSave()
+          this.notify(
+            result.conflicts.length > 0 ? 'warn' : 'info',
+            result.conflicts.length > 0
+              ? `Cambios combinados con la banda. ${result.conflicts.length} ${result.conflicts.length === 1 ? 'ajuste chocó' : 'ajustes chocaron'} con los de otro integrante: se mantuvo tu versión.`
+              : 'Cambios combinados en tiempo real con la banda.',
+          )
         } else {
           throw err
         }
@@ -3340,12 +3531,17 @@ export class StudioController {
         updatedAt: saved.session.updatedAt,
       })
     } catch (err) {
-      const conflict = err instanceof StemCloudError && (err.code === 'session_conflict' || err.status === 412)
+      const mergeConflict = err instanceof StudioMergeConflictError
+      const conflict = mergeConflict || (err instanceof StemCloudError && (err.code === 'session_conflict' || err.status === 412))
       this.emit({
         save: {
           ...this.snap.save,
           cloud: conflict ? 'conflict' : 'error',
-          cloudDetail: conflict ? 'Alguien guardó esta sesión en la nube después de que la abriste.' : errorText(err, 'No se pudo guardar en la nube.'),
+          cloudDetail: mergeConflict
+            ? `${err.message} No se subió nada: recarga la versión de la nube o sobrescríbela.`
+            : conflict
+              ? 'Alguien guardó esta sesión en la nube después de que la abriste.'
+              : errorText(err, 'No se pudo guardar en la nube.'),
           uploading: null,
         },
       })
@@ -3386,6 +3582,7 @@ export class StudioController {
       }
       await this.saving.catch(() => undefined)
       await studioStore.saveSession(remote.session, { band: this.band, etag: remote.etag, dirty: false })
+      this.markInCloud(remote.session)
       if (remote.session.sampleRate !== this.snap.session.sampleRate) await this.closeInput()
       this.lastCloudBase = remote.session
       this.abWorkingBackup = null
@@ -3470,36 +3667,59 @@ export class StudioController {
       await this.refreshVcsFromCloud()
       return
     }
+    // Grabando o subiendo no se toca nada: el proximo guardado choca (412) y fusiona solo.
     if (event.type === 'session_saved' && this.cloud && !this.snap.recording && this.snap.save.cloud !== 'saving') {
       if (event.etag === this.snap.save.etag) return
-      if (this.snap.abState?.active === 'B') return
       try {
         const remote = await studioCloud.getSession(this.cloud, this.sessionId)
-        if (!remote) return
+        if (!remote || this.disposed || remote.etag === this.snap.save.etag) return
+        // Durante la descarga pudo empezar una toma o un guardado (la foto cambia tras el await).
+        const now = this.snapshot()
+        if (now.recording || now.save.cloud === 'saving') return
+        this.markInCloud(remote.session)
+        const peer = this.snap.collaborators.find((p) => p.userId === event.senderId)?.name ?? 'otro integrante'
+        // Con la referencia B sonando, lo de la banda va a la mezcla A (la que vuelve al soltar B).
+        const working = this.abWorkingBackup ?? this.snap.session
+        let next: StudioSession
+        let conflicts = 0
         if (!this.snap.save.dirty) {
-          this.lastCloudBase = remote.session
+          next = remote.session
           await studioStore.saveSession(remote.session, {
             band: this.band,
             etag: remote.etag,
             dirty: false,
             cloudUpdatedAt: remote.session.updatedAt,
           }).catch(() => undefined)
-          this.history.push(remote.session, 'Actualización en vivo')
-          this.setSession(remote.session, false, {
-            save: { ...this.snap.save, local: 'saved', dirty: false, etag: remote.etag, cloud: 'idle', cloudDetail: null },
-          })
-          await this.engine.load(remote.session, this.resolveAudio).catch(() => undefined)
-          void this.ensurePeaks()
         } else {
-          const merged = mergeCollaborativeSession(this.lastCloudBase, this.snap.session, remote.session)
-          this.lastCloudBase = remote.session
-          this.history.push(merged, 'Fusión en vivo')
-          this.setSession(merged, false, {
-            save: { ...this.snap.save, etag: remote.etag },
-          })
-          await this.engine.load(merged, this.resolveAudio).catch(() => undefined)
-          void this.ensurePeaks()
-          this.scheduleSave()
+          let result: ReturnType<typeof mergeCollaborativeSessionDetailed>
+          try {
+            result = mergeCollaborativeSessionDetailed(this.lastCloudBase, working, remote.session)
+          } catch (err) {
+            if (!(err instanceof StudioMergeConflictError)) throw err
+            this.emit({ save: { ...this.snap.save, cloud: 'conflict', cloudDetail: `${err.message} Cambios de ${peer} sin combinar: recarga la versión de la nube o sobrescríbela.` } })
+            return
+          }
+          next = result.session
+          conflicts = result.conflicts.length
+        }
+        if ((this.abWorkingBackup ?? this.snap.session) !== working) return // edito mientras tanto: lo resuelve el proximo guardado
+        this.lastCloudBase = remote.session
+        const dirty = this.snap.save.dirty
+        const save: StudioSnapshot['save'] = dirty
+          ? { ...this.snap.save, etag: remote.etag }
+          : { ...this.snap.save, local: 'saved', dirty: false, etag: remote.etag, cloud: 'idle', cloudDetail: null }
+        if (this.abWorkingBackup) {
+          this.abWorkingBackup = next
+          this.emit({ save })
+        } else {
+          this.history.push(next, dirty ? 'Fusión en vivo' : 'Actualización en vivo')
+          // setSession -> syncEngine: el motor aplica el cambio en caliente (los audios nuevos se
+          // resuelven en segundo plano) y la reproduccion sigue, sin el halt de engine.load().
+          this.setSession(next, false, { save })
+        }
+        if (dirty) this.scheduleSave()
+        if (conflicts > 0) {
+          this.notify('warn', `Cambios de ${peer} combinados. ${conflicts} ${conflicts === 1 ? 'ajuste chocó' : 'ajustes chocaron'} con los tuyos: se mantuvo tu versión.`)
         }
       } catch {
         // La sesion seguira sincronizandose en el proximo guardado.
@@ -3540,14 +3760,27 @@ export class StudioController {
     }
 
     try {
-      await this.uploadAssets(this.cloud, cleanDoc, false)
-      const { commit: remoteCommit, vcs: remoteVcs } = await studioCloud.postVcs(this.cloud, this.sessionId, {
-        branch: localCommit.branch,
-        message: localCommit.message,
-        authorName: this.actor.name,
-        parentId: localCommit.parentId,
-        session: cleanDoc,
-      })
+      const cloud = this.cloud
+      await this.uploadAssets(cloud, cleanDoc, false)
+      const post = (parentId: string | null) =>
+        studioCloud.postVcs(cloud, this.sessionId, {
+          branch: localCommit.branch,
+          message: localCommit.message,
+          authorName: this.actor.name,
+          parentId,
+          session: cleanDoc,
+        })
+      let posted: Awaited<ReturnType<typeof studioCloud.postVcs>>
+      try {
+        posted = await post(localCommit.parentId)
+      } catch (err) {
+        // Otro integrante movio la rama (o la cabeza local nunca llego a la nube): el snapshot es
+        // un documento completo, asi que basta con reintentar una vez sobre la cabeza vigente.
+        if (!(err instanceof StemCloudError && err.code === 'vcs_conflict')) throw err
+        const fresh = await studioCloud.getVcs(cloud, this.sessionId)
+        posted = await post(fresh.branches[localCommit.branch] ?? null)
+      }
+      const { commit: remoteCommit, vcs: remoteVcs } = posted
       const nextLocalCommits = { ...this.vcsBundle.localCommits }
       if (remoteCommit.id !== localCommit.id) {
         delete nextLocalCommits[localCommit.id]
@@ -3632,11 +3865,64 @@ export class StudioController {
     this.vcsBundle = { ...this.vcsBundle, activeBranch: branch }
     await studioStore.saveVcsBundle(this.sessionId, serializeVcsBundle(this.vcsBundle)).catch(() => undefined)
     this.collabHandle?.updatePresence({ branch })
+    // apply -> setSession -> syncEngine: el motor cambia en caliente, sin detener el transporte.
     this.apply(targetSession, `Cambiar a rama ${branch}`, {
       vcs: { activeBranch: branch, index: this.vcsBundle.index, saving: false },
     })
-    await this.engine.load(targetSession, this.resolveAudio).catch(() => undefined)
-    void this.ensurePeaks()
+  }
+
+  /** Owner y MusicDirector administran las ramas (borrar); el resto solo las usa. */
+  canManageVcsBranches(): boolean {
+    return this.actor.role === 'Owner' || this.actor.role === 'MusicDirector'
+  }
+
+  /**
+   * Borra una rama en la nube (solo Owner y MusicDirector; `main` no se borra) y la quita del
+   * indice local. Si era la activa, se vuelve a `main`.
+   */
+  async deleteVcsBranch(rawBranch: string): Promise<boolean> {
+    const branch = normalizeBranchName(rawBranch)
+    if (branch === 'main') {
+      this.notify('warn', 'La rama main no se puede borrar.')
+      return false
+    }
+    if (this.actor.role !== 'Owner' && this.actor.role !== 'MusicDirector') {
+      this.notify('warn', 'Solo el Owner de la banda o el director musical pueden borrar ramas.')
+      return false
+    }
+    if (this.snap.recording) return false
+    try {
+      let remoteIndex: StudioVcsIndex | null = null
+      if (this.cloud && this.vcsBundle.index.branches[branch]) {
+        try {
+          remoteIndex = await studioCloud.deleteVcsBranch(this.cloud, this.sessionId, branch)
+        } catch (err) {
+          // Una rama que solo existia en este equipo no esta en la nube: se borra igual aqui.
+          if (!(err instanceof StemCloudError && err.code === 'no_branch')) throw err
+        }
+      }
+      if (this.vcsBundle.activeBranch === branch) await this.switchVcsBranch('main')
+      const branches = { ...this.vcsBundle.index.branches }
+      delete branches[branch]
+      const keptIds = new Set(Object.values(branches))
+      const commits = this.vcsBundle.index.commits.filter((c) => c.branch !== branch || keptIds.has(c.id))
+      const localIndex: StudioVcsIndex = { ...this.vcsBundle.index, branches, commits }
+      const index = remoteIndex ? { ...mergeStudioVcsIndices(localIndex, remoteIndex), branches: { ...remoteIndex.branches } } : localIndex
+      const keep = new Set(index.commits.map((c) => c.id))
+      const localCommits = Object.fromEntries(Object.entries(this.vcsBundle.localCommits).filter(([id]) => keep.has(id)))
+      this.vcsBundle = { ...this.vcsBundle, index, localCommits }
+      await studioStore.saveVcsBundle(this.sessionId, serializeVcsBundle(this.vcsBundle)).catch(() => undefined)
+      const abGone = this.snap.abState && !keep.has(this.snap.abState.commitId)
+      this.emit({ vcs: { activeBranch: this.vcsBundle.activeBranch, index, saving: false }, ...(abGone ? { abState: null } : {}) })
+      if (this.cloud) {
+        this.collabHandle?.broadcast({ type: 'vcs_updated', sessionId: this.sessionId, branch, commitId: '', senderId: this.actor.userId })
+      }
+      this.notify('info', `Rama ${branch} borrada.`)
+      return true
+    } catch (err) {
+      this.fail(err, 'No se pudo borrar la rama.')
+      return false
+    }
   }
 
   /** Restaura cualquier commit previo en la rama actual como un paso de deshacer. */
@@ -3646,9 +3932,8 @@ export class StudioController {
     const targetSession = await this.loadVcsCommitSession(commitId)
     if (!targetSession) return
     const meta = this.vcsBundle.index.commits.find((c) => c.id === commitId)
+    // apply -> setSession -> syncEngine: sin halt; los audios que falten se resuelven en caliente.
     this.apply(targetSession, `Restaurar: ${meta?.message ?? commitId}`)
-    await this.engine.load(targetSession, this.resolveAudio).catch(() => undefined)
-    void this.ensurePeaks()
     this.notify('info', `Restaurada la versión "${meta?.message ?? commitId}".`)
   }
 
@@ -3656,19 +3941,43 @@ export class StudioController {
   async setAbReferenceCommit(commitId: string | null): Promise<void> {
     if (this.snap.abState?.active === 'B') await this.toggleAbListening()
     if (!commitId) {
+      this.abPreloaded.clear()
       this.emit({ abState: null })
       return
     }
     const meta = this.vcsBundle.index.commits.find((c) => c.id === commitId)
     if (!meta) return
-    // Pre-cargar el commit en cache local para que el boton A/B conmute en 0 ms reales.
+    // Pre-cargar el documento y los AUDIOS de B (no los de A, que ya suenan) sin tocar el
+    // transporte: al pulsar A/B el motor encuentra todo decodificado y conmuta sin corte.
     const refSession = await this.loadVcsCommitSession(commitId)
-    if (refSession) {
-      await this.engine.load(this.snap.session, this.resolveAudio).catch(() => undefined)
-    }
+    if (refSession) await this.preloadAbAudio(refSession)
     this.emit({
       abState: { active: 'A', commitId, label: meta.message || meta.branch },
     })
+  }
+
+  /** Decodifica los audios de `session` que el motor no tiene, sin aplicarla ni detener nada. */
+  private async preloadAbAudio(session: StudioSession): Promise<void> {
+    const wanted = assetsInUse(session)
+    const wantedIds = new Set(wanted.map((a) => a.id))
+    for (const id of [...this.abPreloaded.keys()]) if (!wantedIds.has(id)) this.abPreloaded.delete(id)
+    for (const asset of wanted) {
+      if (this.disposed) return
+      if (this.engine.getBuffer(asset.id) || this.abPreloaded.has(asset.id)) continue
+      try {
+        let file: Blob | null = await studioStore.getAsset(this.sessionId, asset.file).catch(() => null)
+        if (!file && this.cloud) {
+          file = await studioCloud.getAsset(this.cloud, this.sessionId, asset.file)
+          await studioStore.putAsset(this.sessionId, asset.file, file).catch(() => undefined)
+          this.markUploaded(asset.file)
+        }
+        if (!file) continue
+        const buffer = await this.engine.getContext().decodeAudioData(await file.arrayBuffer())
+        this.abPreloaded.set(asset.id, buffer)
+      } catch {
+        // Sin ese audio, B sonara sin el (igual que una sesion con un audio faltante).
+      }
+    }
   }
 
   /** Alterna en vivo (sin detener el cabezal ni ensuciar el historial) entre A (actual) y B (snapshot). */
@@ -3941,9 +4250,19 @@ export class StudioController {
     const refMono = downmixMono(refSeg.channels.map((ch) => ch.subarray(rFrom, rFrom + count)))
     const res = alignPhaseCrossCorrelation(refMono, targetMono, sr, 40)
 
-    const newStartS = Math.max(0, Math.min(STUDIO_MAX_SESSION_SECONDS - targetLoc.clip.lengthS, targetLoc.clip.startS - res.lagSeconds))
+    // La polaridad se fija en absoluto respecto de como SUENA la referencia (su phaseInvert
+    // incluido): repetir la accion deja todo igual en vez de deshacer la correccion.
+    const plan = planPhaseAlignment({
+      targetStartS: targetLoc.clip.startS,
+      targetLengthS: targetLoc.clip.lengthS,
+      referencePhaseInvert: refClip.phaseInvert === true,
+      lagSeconds: res.lagSeconds,
+      polarity: res.polarity,
+      maxSessionS: STUDIO_MAX_SESSION_SECONDS,
+    })
+    const newStartS = plan.startS
     const currentInverted = targetLoc.clip.phaseInvert === true
-    const nextInverted = res.polarity === -1 ? !currentInverted : currentInverted
+    const nextInverted = plan.phaseInvert
 
     this.run('Alinear fase GCC-PHAT', (cur) => {
       let next: StudioSession = {
@@ -3959,17 +4278,26 @@ export class StudioController {
       }
       return next
     })
-    const polTxt = res.polarity === -1 ? ' + polaridad invertida 180°' : ''
+    const polTxt = nextInverted !== currentInverted ? (nextInverted ? ' + polaridad invertida 180°' : ' + polaridad restituida') : ''
     this.notify('info', `Fase alineada con "${refTrack.name}": ${res.lagMs >= 0 ? '-' : '+'}${Math.abs(res.lagMs).toFixed(2)} ms (${res.lagSamples} muestras)${polTxt}.`)
   }
 
-  /** Detecta localmente BPM, Tonalidad (Krumhansl-Schmuckler) y Acordes (HMM Viterbi) sin usar cuota IA. */
-  detectLocalMusicalAnalysis(clipId?: string): { bpm: number | null; key: string | null; chordsCount: number } | null {
+  /**
+   * Detecta localmente BPM, Tonalidad (Krumhansl-Schmuckler) y Acordes (HMM Viterbi) sin usar
+   * cuota IA. El calculo corre en un Web Worker (no bloquea la interfaz). Solo se ESCRIBE en la
+   * sesion lo que supera su umbral de confianza (BPM_APPLY_MIN_CONFIDENCE, KEY_APPLY_MIN_CONFIDENCE);
+   * lo demas se propone en el aviso para que la persona lo fije a mano.
+   */
+  async detectLocalMusicalAnalysis(clipId?: string): Promise<{ bpm: number | null; key: string | null; chordsCount: number; applied: { bpm: boolean; key: boolean } } | null> {
+    if (this.snap.dspBusy) {
+      this.notify('info', 'Espera a que termine el análisis DSP en curso.')
+      return null
+    }
     const session = this.snap.session
     const targetId = clipId ?? this.snap.selectedClipId
     let mono: Float32Array | null = null
     let sr = session.sampleRate
-    let startBeatOffset = 0
+    let startS = 0
 
     if (targetId) {
       const loc = findClip(session, targetId)
@@ -3979,7 +4307,7 @@ export class StudioController {
           const limit = Math.min(seg.channels[0].length, Math.round(seg.sampleRate * 45))
           mono = downmixMono(seg.channels.map((ch) => ch.subarray(0, limit)))
           sr = seg.sampleRate
-          startBeatOffset = secondsToBeats(loc.clip.startS, session.bpm)
+          startS = loc.clip.startS
         }
       }
     }
@@ -3997,7 +4325,7 @@ export class StudioController {
           const clipMono = downmixMono(seg.channels.map((ch) => ch.subarray(0, limit)))
           if (!mono) {
             mono = new Float32Array(clipMono)
-            startBeatOffset = secondsToBeats(clip.startS, session.bpm)
+            startS = clip.startS
           } else {
             const n = Math.min(mono.length, clipMono.length)
             for (let i = 0; i < n; i++) mono[i] += clipMono[i]
@@ -4012,87 +4340,123 @@ export class StudioController {
       return null
     }
 
-    const bpmRes = detectBpmLocal(mono, sr)
-    const keyRes = detectKeyLocal(mono, sr)
-    const effectiveBpm = bpmRes?.bpm ?? session.bpm
-    const chords = detectChordsViterbi(mono, sr, effectiveBpm, { stepBeats: 2, startBeatOffset: roundBeat(startBeatOffset) })
+    this.emit({ dspBusy: 'analysis' })
+    this.notify('info', 'Analizando BPM, tonalidad y acordes en este equipo...')
+    let analysis: Awaited<ReturnType<typeof analyzeMusicalAsync>>
+    try {
+      analysis = await analyzeMusicalAsync(mono, sr, { sessionBpm: session.bpm, startS })
+    } catch (err) {
+      this.fail(err, 'No se pudo analizar el audio.')
+      return null
+    } finally {
+      this.emit({ dspBusy: null })
+    }
 
+    const { bpm: bpmRes, key: keyRes, bpmReliable, keyReliable } = analysis
+    // Los acordes van en beats de la rejilla con que se calcularon: si el BPM detectado no se
+    // aplica y la persona cambio el BPM mientras tanto, caerian corridos; tambien se descartan
+    // sin contenido tonal fiable (con ruido el Viterbi igual devuelve algo).
+    let chordsApplied = 0
     this.run('Detección musical local', (cur) => {
       let next = updateSessionMeta(cur, {
         patch: {
-          ...(bpmRes ? { bpm: bpmRes.bpm } : {}),
-          ...(keyRes ? { key: keyRes.key } : {}),
+          ...(bpmReliable && bpmRes ? { bpm: bpmRes.bpm } : {}),
+          ...(keyReliable && keyRes ? { key: keyRes.key } : {}),
         },
       })
-      if (chords.length > 0) {
-        next = setChords(next, { chords })
+      const gridOk = bpmReliable || cur.bpm === analysis.gridBpm
+      if (keyReliable && gridOk && analysis.chords.length > 0) {
+        next = setChords(next, { chords: analysis.chords })
+        chordsApplied = analysis.chords.length
       }
       return next
     })
 
+    const pct = (c: number) => `${Math.round(c * 100)} %`
+    const applied: string[] = []
+    const proposed: string[] = []
+    if (bpmRes) (bpmReliable ? applied : proposed).push(`${bpmRes.bpm} BPM (confianza ${pct(bpmRes.confidence)})`)
+    if (keyRes) (keyReliable ? applied : proposed).push(`tono ${keyRes.key} / ${keyRes.camelot} (confianza ${pct(keyRes.confidence)})`)
+    if (chordsApplied > 0) applied.push(`${chordsApplied} acordes`)
     const parts: string[] = []
-    if (bpmRes) parts.push(`${bpmRes.bpm} BPM`)
-    if (keyRes) parts.push(`Tono ${keyRes.key} (${keyRes.camelot})`)
-    if (chords.length > 0) parts.push(`${chords.length} acordes detectados`)
-    this.notify('info', `Análisis DSP local (0 cuota IA): ${parts.join(' · ')}.`)
+    if (applied.length > 0) parts.push(`aplicado: ${applied.join(' · ')}`)
+    if (proposed.length > 0) parts.push(`propuesto sin aplicar (confianza baja, revísalo y fíjalo a mano): ${proposed.join(' · ')}`)
+    if (parts.length === 0) parts.push('no se encontró un pulso ni un centro tonal medibles')
+    this.notify(applied.length > 0 ? 'info' : 'warn', `Análisis DSP local (0 cuota IA): ${parts.join('. ')}.`)
     return {
       bpm: bpmRes?.bpm ?? null,
       key: keyRes?.key ?? null,
-      chordsCount: chords.length,
+      chordsCount: chordsApplied,
+      applied: { bpm: bpmReliable, key: keyReliable },
     }
   }
 
-  /** Calibra al instante la cadena completa del Bus Master hacia un objetivo LUFS / True Peak local. */
-  applyAutoMaster(profile: AutoMasterProfile = 'streaming', tone: AutoMasterTone = 'balanced', targetLufsOverride?: number): void {
+  /**
+   * Renderiza `session` igual que el export (mismo grafo, sin tiempo real) y la mide en trozos
+   * sin bloquear la interfaz: LUFS integrado, pico real x4, LRA y PLR (y el balance Bark de los
+   * primeros 12 s si `withBark`).
+   */
+  private async measureRender(session: StudioSession, withBark: boolean): Promise<AutoMasterMeasurement> {
+    const rendered = await renderMix(session, this.engine.getBuffers(), { sampleRate: session.sampleRate })
+    const loudness = await measureLoudnessInChunks(rendered)
+    let barkDb: Float32Array | null = null
+    if (withBark) {
+      const n = Math.min(rendered.length, Math.round(rendered.sampleRate * 12))
+      const channels = [rendered.getChannelData(0).subarray(0, n)]
+      if (rendered.numberOfChannels > 1) channels.push(rendered.getChannelData(1).subarray(0, n))
+      barkDb = barkBandEnergiesDb(downmixMono(channels), rendered.sampleRate)
+    }
+    return { ...loudness, barkDb }
+  }
+
+  /**
+   * Auto-Master calibrado midiendo: render sin la cadena del master, cadena inicial y hasta 3
+   * renders con la cadena corrigiendo volumen y techo hasta +-0,5 LU del objetivo y el pico real
+   * bajo el techo (mastering.calibrateAutoMaster). Idempotente. Los renders son offline y la
+   * medicion va por trozos: la interfaz no se congela.
+   */
+  async applyAutoMaster(profile: AutoMasterProfile = 'streaming', tone: AutoMasterTone = 'balanced', targetLufsOverride?: number): Promise<void> {
+    if (this.snap.recording) return
+    if (this.snap.dspBusy) {
+      this.notify('info', 'Espera a que termine el trabajo DSP en curso.')
+      return
+    }
     const session = this.snap.session
-    let measuredLufs: number | null = this.mixMeasurement?.metrics.master.lufs ?? null
-    let measuredBarkDb: Float32Array | null = null
-
-    // Si hay buffers de audio cargados, tomar una ventana representativa rapida para medir balance espectral.
-    const mixWindowSamples = Math.round(session.sampleRate * 12)
-    let mixL: Float32Array | null = null
-    let mixR: Float32Array | null = null
-    for (const track of session.tracks) {
-      if (track.kind !== 'audio' || track.mute || track.role === 'click' || track.role === 'guide') continue
-      const firstClip = track.clips.find((c) => c.active)
-      if (!firstClip) continue
-      const seg = this.getClipSegmentChannels(firstClip)
-      if (!seg || seg.channels.length === 0) continue
-      const len = Math.min(mixWindowSamples, seg.channels[0].length)
-      if (!mixL || !mixR) {
-        mixL = new Float32Array(mixWindowSamples)
-        mixR = new Float32Array(mixWindowSamples)
+    const version = this.editCount
+    this.emit({ dspBusy: 'master' })
+    this.notify('info', 'Auto-Master: midiendo la mezcla y calibrando la cadena (varios renders)...')
+    try {
+      const calibration = await calibrateAutoMaster(session, { profile, tone, targetLufsOverride }, (candidate, pass) => this.measureRender(candidate, pass === 0))
+      if (this.editCount !== version) {
+        this.notify('warn', 'La sesión cambió mientras se calibraba el Auto-Master: no se aplicó. Vuelve a pulsarlo.')
+        return
       }
-      const gain = Math.pow(10, (track.volumeDb + firstClip.gainDb) / 20)
-      const chL = seg.channels[0]
-      const chR = seg.channels[seg.channels.length > 1 ? 1 : 0]
-      for (let i = 0; i < len; i++) {
-        mixL[i] += chL[i] * gain
-        mixR[i] += chR[i] * gain
-      }
-    }
-
-    if (mixL && mixR) {
-      if (measuredLufs === null || !Number.isFinite(measuredLufs)) {
-        const lufs = integratedLufs([mixL, mixR], session.sampleRate)
-        if (Number.isFinite(lufs)) measuredLufs = lufs
-      }
-      measuredBarkDb = barkBandEnergiesDb(downmixMono([mixL, mixR]), session.sampleRate)
-    }
-
-    let summary = ''
-    this.run('Auto-Master local', (cur) => {
-      const applied = applyAutoMasterToSession(cur, {
-        profile,
-        tone,
-        targetLufsOverride,
-        measuredLufs,
-        measuredBarkDb,
+      this.run('Auto-Master local', (cur) => ({ ...cur, master: calibration.master }))
+      const m = calibration.measured
+      this.emit({
+        masterLoudness: { lufs: m.lufs, truePeakDb: m.truePeakDb, lraLu: m.lraLu ?? 0, plrDb: m.plrDb ?? 0, version: this.editCount },
       })
-      summary = applied.result.summary
-      return applied.session
-    })
-    if (summary) this.notify('info', summary)
+      this.notify(calibration.converged ? 'info' : 'warn', calibration.summary)
+    } catch (err) {
+      this.fail(err, 'No se pudo calibrar el Auto-Master.')
+    } finally {
+      this.emit({ dspBusy: null })
+    }
+  }
+
+  /** MEDIR MASTER: LUFS, pico real, LRA y PLR del render con la cadena actual (sin cambiar nada). */
+  async measureMasterLoudness(): Promise<void> {
+    if (this.snap.dspBusy || this.snap.recording) return
+    const version = this.editCount
+    this.emit({ dspBusy: 'master' })
+    try {
+      const m = await this.measureRender(this.snap.session, false)
+      this.emit({ masterLoudness: { lufs: m.lufs, truePeakDb: m.truePeakDb, lraLu: m.lraLu ?? 0, plrDb: m.plrDb ?? 0, version } })
+    } catch (err) {
+      this.fail(err, 'No se pudo medir el master.')
+    } finally {
+      this.emit({ dspBusy: null })
+    }
   }
 
   /** Ejecuta el optimizador psicoacustico de 24 bandas Bark para desenmascarar pistas en colision. */
@@ -4122,7 +4486,7 @@ export class StudioController {
     this.apply(res.session, 'Desenmascarar mezcla (Bark)', { lastUnmaskResult: res })
     this.notify(
       'info',
-      `Desenmascarado Bark aplicado en ${res.actions.length} ${res.actions.length === 1 ? 'pista' : 'pistas'} (-${res.reductionPct}% solapamiento espectral).`,
+      `Desenmascarado Bark aplicado en ${res.actions.length} ${res.actions.length === 1 ? 'pista' : 'pistas'} (-${res.reductionPct}% de solapamiento espectral estimado por el modelo, no medido sobre la mezcla).`,
     )
     return res
   }

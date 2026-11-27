@@ -1345,27 +1345,52 @@ export interface QuantizeOptions {
 
 export type HumanizePresetId = 'pocket' | 'keys' | 'strum' | 'analog'
 
+/**
+ * Opciones de midiOps.humanize. Un valor explicito es absoluto; lo que falta sale del preset (o de
+ * los valores por defecto) escalado por `amount`. Ver midiOps.resolveHumanize.
+ */
 export interface HumanizeOptions {
   /** Preset musical opcional que fija valores base antes de aplicar overrides explicitos. */
   preset?: HumanizePresetId
-  /** 0..1: intensidad general (escala micro-timing, velocidad y duracion). Por defecto 0.5. */
+  /**
+   * 0..1: intensidad general. Escala micro-timing, velocidad, duracion, swing, strum y acento que
+   * vienen del preset (amount / amount_del_preset). Por defecto la del preset (o 0.5).
+   */
   amount?: number
-  /** Desviacion maxima en beats del inicio de cada nota (0..0.25). Por defecto amount * 0.04. */
+  /** Desviacion maxima del inicio de cada nota en ms (0..60). Gana sobre timingBeats. */
+  timingMs?: number
+  /** Compatibilidad (asistente): desviacion maxima en beats (0..0.25), absoluta. */
   timingBeats?: number
   /** Variacion maxima de velocidad MIDI (0..64). Por defecto round(amount * 24). */
   velocityRange?: number
   /** Variacion proporcional maxima de duracion (0..0.5). Por defecto amount * 0.08. */
   lengthRatio?: number
-  /** Swing ritmico en la subdivision par (0..0.75; 0 = recto, 0.33 = tresillo). */
+  /**
+   * Swing: fraccion del paso de la subdivision que se atrasa la nota impar (0..0.5; 0 = recto,
+   * 0.33 = tresillo 66 %, 0.5 = puntillo 75 %). Idempotente: aplicarlo dos veces no lo suma.
+   */
   swing?: number
-  /** Subdivision de swing ('1/8' o '1/16'). Por defecto '1/16'. */
+  /** Subdivision de swing ('1/8' o '1/16'). Por defecto la del preset o '1/16'. */
   swingGrid?: '1/8' | '1/16'
-  /** Micro-strum direccional en acordes simultaneos (-0.12..0.12 beats; >0 grave a agudo). */
+  /** Rasgueo direccional en acordes simultaneos, en ms (-60..60; >0 grave a agudo). Gana sobre strumBeats. */
+  strumMs?: number
+  /** Compatibilidad (asistente): rasgueo en beats (-0.12..0.12), absoluto. */
   strumBeats?: number
   /** Acento metrico en tiempo fuerte y medio compas (0..1). */
   accentStrength?: number
   /** Compas de referencia para acentos metricos (por defecto 4). */
   beatsPerBar?: number
+  /**
+   * Posicion del clip en la sesion, en beats. La fase del acento y del swing es
+   * clipStartBeat + nota.start (por defecto 0 = el clip empieza en un compas).
+   */
+  clipStartBeat?: number
+  /** Tempo de la sesion para convertir ms a beats (por defecto 120). */
+  bpm?: number
+  /** Pista de bateria (instrumento `drums`): humanizacion por pieza General MIDI, sin rasgueo. */
+  drumKit?: boolean
+  /** Solo con drumKit: la caja (38, 39, 40) toca atras del tiempo estos ms (0..30). */
+  laidBackMs?: number
   /** Semilla entera opcional para reproducibilidad determinista. */
   seed?: number
 }
@@ -2197,5 +2222,6 @@ export interface StudioCloudVcsApi {
   getVcs(target: CloudTarget, sessionId: string): Promise<StudioVcsIndex>
   postVcs(target: CloudTarget, sessionId: string, options: PostStudioVcsOptions): Promise<{ commit: StudioVcsCommitMeta; vcs: StudioVcsIndex }>
   getCommit(target: CloudTarget, sessionId: string, commitId: string): Promise<StudioSession>
+  deleteVcsBranch(target: CloudTarget, sessionId: string, branch: string): Promise<StudioVcsIndex>
 }
 

@@ -7,6 +7,7 @@ import {
   type UiPreferences,
 } from './appearance'
 import { defaultWaveformPreferences, normalizeWaveformPreferences, waveformPreferencesEqual, type WaveformPreferences } from './waveform'
+import { googleFontsUrl, normalizeFontPreferences, type FontPreferences } from './fonts'
 
 /**
  * Evento en `window` cuando cambian el tema o el acento aplicados (no la redondez). Lo escuchan
@@ -26,8 +27,11 @@ export interface AppearanceEventDetail {
  * dispositivo que lee el script de index.html para no parpadear en la proxima carga.
  */
 export function applyAppearance(prefs: UiPreferences, doc: Document = document): void {
-  const { theme, vars } = appearanceVars(prefs)
+  const { theme, vars, font } = appearanceVars(prefs)
   const root = doc.documentElement
+  if (root.dataset.fontUi !== font.ui) root.dataset.fontUi = font.ui
+  if (root.dataset.fontLabels !== font.labels) root.dataset.fontLabels = font.labels
+  ensureFontsLoaded(prefs.font, doc)
   const before = `${root.dataset.theme ?? ''}|${root.style.getPropertyValue('--b-accent')}`
   if (root.dataset.theme !== theme) root.dataset.theme = theme
   for (const [name, value] of Object.entries(vars)) {
@@ -47,6 +51,23 @@ export function applyAppearance(prefs: UiPreferences, doc: Document = document):
     // sin almacenamiento (modo privado o bloqueado) la apariencia igual queda aplicada
   }
   setWaveformPreferences(prefs.waveform)
+}
+
+/**
+ * Baja de Google Fonts las familias elegidas que no carga index.html (IBM Plex ya viene). Una
+ * hoja por combinacion, una sola vez; sin red queda la pila de respaldo del sistema.
+ */
+export function ensureFontsLoaded(prefs: FontPreferences | undefined, doc: Document = document): void {
+  const url = googleFontsUrl(normalizeFontPreferences(prefs))
+  if (!url || !doc.head) return
+  for (const link of Array.from(doc.head.querySelectorAll('link[data-bandait-font]'))) {
+    if (link.getAttribute('href') === url) return
+  }
+  const link = doc.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = url
+  link.dataset.bandaitFont = '1'
+  doc.head.appendChild(link)
 }
 
 // ---------------------------------------------------------------------------

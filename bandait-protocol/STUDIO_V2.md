@@ -861,7 +861,7 @@ datos, reproduce, graba, exporta, guarda, borra la sesión ni lanza trabajos con
 | `replace_midi_notes` | `midi.replace_notes` | Reemplaza todas las notas de un clip MIDI |
 | `transpose_midi_clip` | `midi.transpose` | Transpone las notas de un clip MIDI |
 | `quantize_midi_clip` | `midi.quantize` | Cuantiza las notas de un clip MIDI |
-| `humanize_midi_clip` | `midi.humanize` | Humaniza las notas de un clip MIDI en tiempo (micro-timing), velocidad, duración, swing, acento métrico y strum |
+| `humanize_midi_clip` | `midi.humanize` | Humaniza las notas de un clip MIDI en tiempo (micro-timing), velocidad, duración, swing, acento métrico y strum (semántica en 7.4) |
 | `move_clip` | `clip.move` | Mueve un clip (audio o MIDI) a un beat y, opcionalmente, a otra pista del mismo `kind` |
 | `duplicate_clip` | `clip.duplicate` | Duplica un clip (por defecto, justo después del original) |
 | `split_clip` | `clip.split` | Divide un clip en un beat |
@@ -1054,13 +1054,53 @@ para generar. El cuerpo de `POST .../jobs` no cambia.
 ### 7.1 Permisos colaborativos en `/v1/bands/{band}/studio`
 - **Lectura** (`GET .../studio`, `GET .../session`, `GET .../assets/{asset}`, `GET .../jobs/{job}`, `GET .../vcs`, `GET .../commits/{commit}`, `GET .../_cleanup`): cualquier integrante de la banda.
 - **Edición colaborativa de estudio** (`PUT .../session`, `PUT .../assets/{asset}`, `POST .../vcs`): roles `Owner`, `MusicDirector`, `Musician` y `SoundEngineer` (`STUDIO_COLLABORATORS`). El rol `Substitute` permanece en solo lectura.
-- **Administración y gasto de IA** (`DELETE .../studio/{session}`, `POST .../_cleanup`, `POST .../jobs`): exclusivo de `Owner` y `MusicDirector` (`EDITORS`).
+- **Administración y gasto de IA** (`DELETE .../studio/{session}`, `DELETE .../vcs/branches/{branch}`, `POST .../_cleanup`, `POST .../jobs`): exclusivo de `Owner` y `MusicDirector` (`EDITORS`).
 
 ### 7.2 Control de versiones en R2 (`vcs.json` y `commits/`)
-- `GET /v1/bands/{band}/studio/{session}/vcs`: devuelve `{ branches: Record<string, string>, commits: VcsCommitMeta[], protected_assets: string[] }` (o un grafo vacío si aún no hay commits), con cabecera `ETag`.
-- `POST /v1/bands/{band}/studio/{session}/vcs`: cuerpo `{ branch: string, message: string, author_name?: string, session: SessionDocument }`. Valida `session`, verifica que sus `assets` existan en R2, escribe el snapshot inmutable en `studio/<session>/commits/<commit_id>.json` y actualiza `studio/<session>/vcs.json` acumulando en `protected_assets` los nombres de archivo e ids de `assets` referenciados por todos los commits retenidos (máximo 128 commits por sesión).
-- `GET /v1/bands/{band}/studio/{session}/commits/{commit}`: devuelve el `SessionDocument` guardado en ese commit.
-- `studioCleanup.ts` lee `studio/<session>/vcs.json` (1 operación R2 adicional por sesión) y protege todos los `protected_assets` contra el barrido de huérfanos.
+
+Cambios del Worker 1.5.1 (2026-11-27): `parent_id` normativo, tope de ramas, borrado de rama,
+`retired_assets`, autor verificado y `vcs_conflict` pasa de 412 a 409.
+
+```
+VcsIndex {
+  version           1
+  branches          { [rama]: commit_id }      rama ^[A-Za-z0-9_-]{1,40}$, hasta 16
+  commits           VcsCommitMeta[]            del más nuevo al más viejo
+  protected_assets  string[]                   NOMBRES de archivo de assets/ (no ids)
+  retired_assets    { file, until }[]          1.5.1; ausente en índices anteriores = []
+}
+
+VcsCommitMeta {
+  id, branch, parent_id (string | null), message, author_id (sub del token | null),
+  author_name, created_at, track_count, bpm, key (string | null), asset_files string[]
+}
+```
+
+- `GET /v1/bands/{band}/studio/{session}/vcs`: devuelve el `VcsIndex` (vacío si aún no hay commits), con cabecera `ETag` cuando existe. Un lector viejo ignora `retired_assets`.
+- `POST /v1/bands/{band}/studio/{session}/vcs`: cuerpo `{ branch: string, message: string, parent_id?: string | null, author_name?: string, session: SessionDocument }` (hasta 1 MiB + 64 KiB; más es 413 `session_too_large`). Valida `session` (400 `bad_session`), verifica que sus `assets` existan en R2 con su tamaño (409 `missing_asset`), escribe el snapshot inmutable en `studio/<session>/commits/<commit_id>.json` (409 `commit_conflict` si el id ya existe) y actualiza `vcs.json` con escritura condicional (`etagMatches`). Responde 201 `{ commit, vcs }`.
+  - **`parent_id`**: ausente, el commit se encadena a la cabeza actual de la rama. Presente, debe ser la cabeza actual (`null` = la rama todavía no existe); si no, 409 `vcs_conflict` y no se escribe nada. El Hub, ante 409 `vcs_conflict`, vuelve a leer el índice y reintenta una vez con la cabeza nueva.
+  - **Carreras**: si `vcs.json` cambió entre la lectura y la escritura, el Worker relee y reintenta hasta 3 veces; si sigue perdiendo, 409 `vcs_conflict` y borra el snapshot que había escrito.
+  - **`author_name`**: sale de la identidad verificada (token de Supabase: `user_metadata.full_name`, `user_metadata.name` o la parte local del correo; `Integrante` si no hay nada). El campo del cuerpo se acepta y se ignora.
+  - **Topes**: se retienen 128 commits; las cabezas de rama nunca se expulsan (como mucho 128 + 16 entradas). Hasta 16 ramas: un commit que crearía la 17.ª es 409 `too_many_branches`. Si el índice pasa de 1 MiB se expulsan commits viejos que no son cabeza hasta que quepa. Los documentos de los commits expulsados se borran.
+- `DELETE /v1/bands/{band}/studio/{session}/vcs/branches/{branch}` (Owner / MusicDirector): quita la rama y los commits de esa rama que ninguna otra cabeza alcanza por `parent_id`; borra sus documentos. Responde 200 `{ deleted_commits, vcs }`. `main` no se borra (409 `branch_protected`); rama inexistente 404 `no_branch`; nombre inválido 400 `bad_vcs`; carrera perdida 3 veces 409 `vcs_conflict`.
+- `GET /v1/bands/{band}/studio/{session}/commits/{commit}`: devuelve el `SessionDocument` guardado en ese commit. `{commit}` sin el patrón de id es 400 `bad_commit`; inexistente 404 `no_commit`.
+- **Protección de audios**: `protected_assets` = archivos de todos los commits retenidos ∪ `retired_assets` vigentes. Un audio que deja de estar en algún commit retenido (commit expulsado o rama borrada) entra en `retired_assets` con `until` = ahora + 30 días (hasta 4096 entradas; si sobran, salen primero las que vencen antes) y se suelta en la primera escritura del índice después de vencer.
+- `studioCleanup.ts` lee `vcs.json` solo en sesiones con candidatos (1 operación R2) y no borra ningún archivo de `protected_assets` (por nombre, y por id = nombre sin extensión). Antes de borrar vuelve a pedir el etag de `session.json` **y** de `vcs.json`; si cualquiera cambió, salta esa sesión. La limpieza oportunista disparada por el guardado de un `Musician` o `SoundEngineer` es conservadora: protege además todo `retired_assets`, aunque haya vencido.
+- Un `vcs.json` ilegible es 500 `vcs_corrupt` en `GET`/`POST`/`DELETE` y deja la sesión sin limpiar (`session_unreadable`).
+
+Códigos (se suman a la tabla de errores de v1 7):
+
+| HTTP | `error` | Ruta | Cuándo |
+|---|---|---|---|
+| 400 | `bad_vcs` | `POST .../vcs`, `DELETE .../vcs/branches/{branch}` | cuerpo no es objeto, rama o mensaje inválidos, `parent_id` mal formado, nombre de rama inválido |
+| 400 | `bad_commit` | `GET .../commits/{commit}` | `{commit}` no cumple el patrón de id |
+| 404 | `no_commit` | `GET .../commits/{commit}` | el snapshot no existe |
+| 404 | `no_branch` | `DELETE .../vcs/branches/{branch}` | la rama no existe |
+| 409 | `vcs_conflict` | `POST .../vcs`, `DELETE .../vcs/branches/{branch}` | `parent_id` no es la cabeza actual, o `vcs.json` siguió cambiando tras 3 intentos |
+| 409 | `commit_conflict` | `POST .../vcs` | colisión de id al escribir el snapshot |
+| 409 | `too_many_branches` | `POST .../vcs` | la sesión ya tiene 16 ramas |
+| 409 | `branch_protected` | `DELETE .../vcs/branches/{branch}` | `main` no se borra |
+| 500 | `vcs_corrupt` | `GET`/`POST .../vcs`, `DELETE .../vcs/branches/{branch}` | `vcs.json` ilegible o fuera del esquema v1 |
 
 ### 7.3 Efectos DSP adicionales, polaridad/curvas de clip y `analog_drift` (solo `version: 2`)
 - Nuevos tipos de `fx` admitidos en `version: 2` (hasta 5 efectos en pista, hasta 6 en master con `limiter` de último):
@@ -1069,7 +1109,34 @@ para generar. El cuerpo de `POST .../jobs` no cambia.
   - `stereo_imager`: `width` (`0..2`, def `1`), `mono_bass_hz` (`0..300`, def `120`).
 - Campos opcionales en clips de audio (`version: 2`, omitidos en el cable cuando valen el valor por defecto):
   - `phase_invert`: `true` (ausente cuando es `false`).
-  - `fade_shape`: `'exp' | 'scurve'` (ausente cuando es `'linear'`).
+  - `fade_shape`: `'exp' | 'scurve'` (ausente cuando es `'linear'`). Curva de ganancia del fundido
+    para `u` en `[0, 1]` (`u = 0` silencio, `u = 1` ganancia del clip; en el fundido de entrada
+    `u = t / fade_in_s`, en el de salida `u = (length_s - t) / fade_out_s`):
+    - `'linear'`: `g(u) = u`.
+    - `'exp'`: `g(u) = u^2.2`.
+    - `'scurve'` (coseno elevado): `g(u) = 0.5 - 0.5 * cos(pi * u)`.
+    Si los dos fundidos se solapan manda el menor. El motor, el export y el dibujo del clip usan la
+    misma curva.
+- Procesado de los efectos (no viaja: fija como deben sonar igual en vivo y en el export):
+  - `de_esser`: bandas complementarias en `freq_hz` (grave = pasa bajos Butterworth de 2o orden;
+    aguda = entrada menos grave) y compresor solo en la aguda, con su ganancia automatica restada.
+    Con `reduction_db` 0 la respuesta es plana.
+  - `saturator`: curva con pendiente 1 en el origen y nivel compensado (con `drive_db` 0 una senal
+    chica pasa a 0 dB), `mix` mezclado dentro de la curva (seco y humedo con el mismo retardo),
+    pasa altos de 10 Hz contra la continua y el retardo del sobremuestreo declarado en la
+    compensacion entre pistas.
+  - `stereo_imager`: graves en mono por cruce Linkwitz-Riley de 4o orden en `mono_bass_hz` (lado por
+    pasa altos LR4, medio por el pasa todo equivalente); con `width` 1 la imagen no cambia sobre el
+    corte y con `mono_bass_hz` 0 es la identidad.
 - Parámetro opcional en instrumentos `synth` y `drums` (`version: 2`):
   - `analog_drift`: `0..1` (def `0`; se omite en el cable cuando vale `0` para identidad exacta con documentos previos).
+  - Determinismo de `analog_drift` (cliente, sin cambio en el cable): la deriva de cada nota de un clip se siembra con su posición musical (segundo de sesión de la nota y id de la pista), nunca con la hora del `AudioContext`, así la reproducción y el export suenan igual. Tiene dos capas: tolerancia estática por nota (afinación, corte, decaimiento) y vagabundeo lento continuo de afinación y corte (unos pocos cents a lo largo de segundos), función del tiempo de sesión. Las notas tocadas en vivo, que no tienen posición musical, usan la hora del contexto.
+
+### 7.4 Humanización MIDI y groove (`humanize_midi_clip`)
+- `swing` (`0..0.5`): fracción del paso de `swing_grid` (`'1/8'` o `'1/16'`, def la del preset o `'1/16'`) que se atrasa la subdivisión impar: `0.33` = tresillo (66 %), `0.5` = puntillo (75 %). La subdivisión impar se coloca en `rejilla + swing * paso` (idempotente: aplicarlo dos veces no lo suma).
+- La fase del acento métrico y del swing es el beat de la sesión (`start_beat` del clip + `start` de la nota), con el compás de la sesión desde el beat 0.
+- Tiempos en milisegundos al tempo de la sesión: `timing_ms` (`0..60`) y `strum_ms` (`-60..60`). `timing_beats` y `strum_beats` siguen aceptándose (absolutos en beats); si llegan las dos formas, gana la de ms.
+- `amount` escala todo lo que sale del preset (micro-timing, velocidad, duración, swing, strum y acento) en proporción `amount / amount_del_preset`; un valor explícito es absoluto.
+- Pista con instrumento `drums`: humanización por pieza General MIDI (bombo y caja más ajustados, hi-hat con más variación de velocidad y acento en corcheas, sin strum). `laid_back_ms` (`0..30`, def `0`) atrasa la caja (notas 38, 39 y 40).
+- El "groove de la banda" (plantilla tomada de un clip de audio y aplicada a notas MIDI) es una herramienta local del editor: no viaja ni se guarda en la sesión; lo que queda en el documento son las notas ya movidas.
 

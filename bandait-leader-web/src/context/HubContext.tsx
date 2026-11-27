@@ -79,6 +79,7 @@ import {
   emptyBandVcs,
   findEntityCommit,
   getBandVcs,
+  pruneWorkspaceVcs,
   withPlaylistHistory,
   withSongHistory,
 } from '../services/versionControl'
@@ -1158,10 +1159,13 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = playlists.find((p) => p.id === playlistId)
     if (!target) return { ok: false, message: 'Setlist no encontrado.' }
     const remaining = playlists.filter((p) => p.id !== playlistId)
-    setWorkspace((prev) => ({
-      ...prev,
-      playlistsMap: { ...prev.playlistsMap, [bandId]: (prev.playlistsMap[bandId] || []).filter((p) => p.id !== playlistId) },
-    }))
+    // pruneWorkspaceVcs quita tambien el historial de versiones del setlist borrado (WORKSPACE_V2.md 9).
+    setWorkspace((prev) =>
+      pruneWorkspaceVcs({
+        ...prev,
+        playlistsMap: { ...prev.playlistsMap, [bandId]: (prev.playlistsMap[bandId] || []).filter((p) => p.id !== playlistId) },
+      })
+    )
     if (activePlaylist?.id === playlistId) setActivePlaylistId(remaining[0]?.id ?? '')
     return { ok: true, message: `Setlist "${target.name}" borrado. Sus canciones siguen en la librería.` }
   }
@@ -1240,6 +1244,30 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateActivePlaylist((pl) => ({
       ...pl,
       songs: [...pl.songs, { ...songData, id: `song_${Date.now()}`, orderIndex: pl.songs.length + 1 }],
+    }))
+  }
+
+  /**
+   * Agrega un item al setlist `playlistId` de la banda activa SIN cambiar el setlist activo
+   * (addSongToPlaylist usa el activo del render, que no sirve justo despues de cambiarlo).
+   */
+  const addSongToPlaylistById = (playlistId: string, songData: Omit<PlaylistSong, 'id' | 'orderIndex'>) => {
+    if (!activeBand || blockIfReadOnly()) return
+    const bandId = activeBand.id
+    setWorkspace((prev) => ({
+      ...prev,
+      playlistsMap: {
+        ...prev.playlistsMap,
+        [bandId]: (prev.playlistsMap[bandId] || []).map((pl) =>
+          pl.id === playlistId
+            ? {
+                ...pl,
+                songs: [...pl.songs, { ...songData, id: `song_${Date.now()}`, orderIndex: pl.songs.length + 1 }],
+                updatedAt: new Date().toISOString().slice(0, 10),
+              }
+            : pl
+        ),
+      },
     }))
   }
 
@@ -1331,11 +1359,12 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           updatedAt: today(),
         }
       })
-      return {
+      // pruneWorkspaceVcs quita tambien el historial de versiones de la cancion borrada.
+      return pruneWorkspaceVcs({
         ...prev,
         songsMap: { ...prev.songsMap, [bandId]: (prev.songsMap?.[bandId] ?? []).filter((s) => s.id !== songId) },
         playlistsMap: playlistsChanged ? { ...prev.playlistsMap, [bandId]: nextPlaylists } : prev.playlistsMap,
-      }
+      })
     })
     if (activeSongIdState === songId) setActiveSongIdState(null)
   }
@@ -1647,6 +1676,7 @@ export const HubProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reorderSongs,
     replaceActivePlaylistSongs,
     addSongToPlaylist,
+    addSongToPlaylistById,
     removeSongFromPlaylist,
     updateStemTrackVolume,
     registerSongStemsInWorkspace,

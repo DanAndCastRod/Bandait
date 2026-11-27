@@ -8,22 +8,31 @@
  * El corte se mueve por `detune` del filtro (cents): sumar cents es multiplicar hertz, que es lo
  * que pide la formula del contrato (`cutoff * 2^(env * octavas + lfo)`). Los parametros nuevos
  * valen para las notas siguientes; gain_db cambia en caliente (PolyInstrument.update).
+ *
+ * analog_drift (analogDrift.ts): tolerancia por nota (afinacion, corte, decaimiento) y vagabundeo
+ * lento continuo de afinacion y corte, ambos con semilla en la posicion musical de la nota
+ * (`voice.musical`), asi el export suena igual que la reproduccion.
  */
 import { type StudioInstrument, type StudioSynthInstrument, type SynthParams } from '../session.ts'
 import { FILTER_MAX_HZ, FILTER_MIN_HZ, adsrFromMs, biquadQ, envelopeSilentAfterS, envelopeTau, filterEnvelopeCents, noteFrequency, noiseOffsetS, velocityGain } from './core.ts'
 import { noiseBuffer } from './noise.ts'
+import { noteDriftBipolar, scheduleWander, type WanderLayer } from './analogDrift.ts'
 import type { Voice, VoiceEngine } from './voices.ts'
 
 /** Con lfo_depth 1: +/-100 cents de pitch, +/-2 octavas de filtro (STUDIO_V2.md 2.3.1). */
 const LFO_PITCH_CENTS = 100
 const LFO_FILTER_CENTS = 2400
 
-/** Hash determinista en [-1, 1] por voz/oscilador para tolerancia analogica reproducible en bounce offline. */
-function voiceDriftBipolar(pitch: number, startS: number, salt: number): number {
-  let h = (Math.imul(pitch | 0, 374761393) ^ Math.imul(Math.round(startS * 1000), 668265263) ^ Math.imul(salt, 2246822519)) >>> 0
-  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0
-  return ((h ^ (h >>> 16)) >>> 0) / 2147483648 - 1
-}
+/** analog_drift 1: tolerancia por nota de los osciladores (+/- cents). */
+const DRIFT_OSC_CENTS = 9
+/** analog_drift 1: tolerancia por nota del corte del filtro (+/- cents). */
+const DRIFT_FILTER_CENTS = 110
+/** analog_drift 1: vagabundeo lento de afinacion de la voz (+/- cents), comun a los dos osciladores en un 70 %. */
+const WANDER_PITCH_CENTS = 6
+/** analog_drift 1: vagabundeo lento del corte (+/- cents). */
+const WANDER_FILTER_CENTS = 80
+/** Voz en vivo sin fin conocido: cuanto se sigue la curva de vagabundeo. */
+const LIVE_WANDER_S = 8
 
 export class SynthEngine implements VoiceEngine {
   readonly type = 'synth' as const
@@ -50,7 +59,13 @@ export class SynthEngine implements VoiceEngine {
     const p = this.params
     if (!(p.osc1Level > 0) && !(p.osc2Level > 0) && !(p.noiseLevel > 0)) return false
     const drift = Math.max(0, Math.min(1, p.analogDrift ?? 0))
-    const decayScale = drift > 0 ? 1 + voiceDriftBipolar(voice.pitch, start, 7) * drift * 0.12 : 1
+    // Semilla de la deriva: la posicion musical de la nota (igual en vivo y en el export); en
+    // vivo, la hora del contexto. `wanderS` es el segundo de sesion (o de contexto) del inicio.
+    const seedS = voice.musical ? voice.musical.seedS : start
+    const wanderS = voice.musical ? voice.musical.sessionS : start
+    const trackSalt = voice.musical ? voice.musical.salt : 0
+    const nd = (salt: number) => noteDriftBipolar(voice.pitch, seedS, salt ^ trackSalt)
+    const decayScale = drift > 0 ? 1 + nd(7) * drift * 0.12 : 1
     const amp = adsrFromMs(p.ampAttackMs, p.ampDecayMs * decayScale, p.ampSustain, p.ampReleaseMs)
     const fenv = adsrFromMs(p.filterAttackMs, p.filterDecayMs * decayScale, p.filterSustain, p.filterReleaseMs)
     const peak = velocityGain(voice.velocity, p.velocitySens)
@@ -58,11 +73,14 @@ export class SynthEngine implements VoiceEngine {
     // --- filtro ---
     const filter = ctx.createBiquadFilter()
     filter.type = p.filterType
-    const filterDriftRatio = drift > 0 ? Math.pow(2, (voiceDriftBipolar(voice.pitch, start, 3) * drift * 110) / 1200) : 1
+    const filterDriftRatio = drift > 0 ? Math.pow(2, (nd(3) * drift * DRIFT_FILTER_CENTS) / 1200) : 1
     const cutoff = Math.min(FILTER_MAX_HZ, Math.max(FILTER_MIN_HZ, p.filterCutoffHz * filterDriftRatio))
     filter.frequency.value = Math.min(cutoff, ctx.sampleRate / 2)
     filter.Q.value = biquadQ(p.filterType, p.filterResonance)
     voice.addNode(filter)
+    // Duracion que recorre la curva de vagabundeo: la nota y su relajacion.
+    const wanderDurS = (end === null ? LIVE_WANDER_S : Math.max(0, end - start)) + amp.releaseS * 4 + 0.1
+    if (drift > 0) scheduleWander(filter.detune, 0, [[drift * WANDER_FILTER_CENTS, trackSalt ^ 0x3f]], start, wanderS, wanderDurS)
 
     // --- amplitud: envolvente (ataque, decaimiento, sustain) y relajacion en etapas separadas ---
     const ampEnv = ctx.createGain()
@@ -118,8 +136,16 @@ export class SynthEngine implements VoiceEngine {
       const osc = ctx.createOscillator()
       osc.type = wave
       osc.frequency.value = noteFrequency(voice.pitch) * Math.pow(2, octave)
-      const driftCents = drift > 0 ? voiceDriftBipolar(voice.pitch, start, salt) * drift * 9 : 0
+      const driftCents = drift > 0 ? nd(salt) * drift * DRIFT_OSC_CENTS : 0
       osc.detune.value = detune + driftCents
+      if (drift > 0) {
+        // Vagabundeo lento: 70 % comun a la voz (la "temperatura" del sinte) y 30 % propio del oscilador.
+        const layers: WanderLayer[] = [
+          [drift * WANDER_PITCH_CENTS * 0.7, trackSalt],
+          [drift * WANDER_PITCH_CENTS * 0.3, trackSalt ^ (salt * 0x9e37)],
+        ]
+        scheduleWander(osc.detune, detune + driftCents, layers, start, wanderS, wanderDurS)
+      }
       if (lfoGain && p.lfoTarget === 'pitch') lfoGain.connect(osc.detune)
       const gain = ctx.createGain()
       gain.gain.value = level

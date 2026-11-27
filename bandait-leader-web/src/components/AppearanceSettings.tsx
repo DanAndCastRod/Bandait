@@ -23,6 +23,7 @@ import {
 } from '../services/appearance'
 import { cardStyle, colors, headerBarStyle, labelStyle, mono, radius, viewStyle } from './hubStyles'
 import { WaveformSettings } from './WaveformSettings'
+import { FontSettings } from './FontSettings'
 
 const sectionTitle: React.CSSProperties = {
   margin: 0,
@@ -132,7 +133,7 @@ export const AppearanceSettings: React.FC = () => {
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' }}>Apariencia</h2>
           </div>
           <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: colors.muted }}>
-            Tema, acento, redondez y forma de onda del Hub y del Estudio.{' '}
+            Tema, acento, redondez, tipografía y forma de onda del Hub y del Estudio.{' '}
             {user ? 'Es tuya: se guarda en tu cuenta y no cambia nada de la banda.' : 'Sin sesión se guarda solo en este navegador.'}
           </p>
         </div>
@@ -401,6 +402,14 @@ export const AppearanceSettings: React.FC = () => {
               </span>
             </span>
           </div>
+        </section>
+
+        {/* TIPOGRAFIA */}
+        <section style={{ ...sectionStyle, gridColumn: '1 / -1' }} aria-labelledby="appearance-font-title" data-testid="appearance-font-section">
+          <h3 id="appearance-font-title" style={sectionTitle}>
+            TIPOGRAFÍA
+          </h3>
+          <FontSettings value={prefs.font} onChange={(font) => update({ font })} />
         </section>
 
         {/* FORMA DE ONDA */}

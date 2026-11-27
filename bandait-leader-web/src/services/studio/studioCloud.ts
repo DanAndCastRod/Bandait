@@ -158,6 +158,9 @@ const MESSAGES: Record<string, string> = {
   vcs_corrupt: 'El índice de versiones de la nube está dañado.',
   vcs_conflict: 'Otro integrante creó una versión al mismo tiempo. Reintenta para integrar tu snapshot.',
   commit_conflict: 'Ya existe un snapshot con ese identificador.',
+  too_many_branches: 'La sesión ya tiene 16 ramas en la nube. Borra una rama que no uses antes de crear otra.',
+  no_branch: 'Esa rama ya no existe en la nube.',
+  branch_protected: 'La rama main no se puede borrar.',
 }
 
 export function studioCloudErrorMessage(code: string, status = 0): string {
@@ -1089,7 +1092,19 @@ export async function getCommit(target: CloudTarget, sessionId: string, commitId
   return parseCloudSession(await jsonBody(res), res.status)
 }
 
-void ({ getVcs, postVcs, getCommit } satisfies StudioCloudVcsApi)
+/** DELETE .../vcs/branches/{branch} (Owner / MusicDirector). Devuelve el indice que queda. */
+export async function deleteVcsBranch(target: CloudTarget, sessionId: string, branch: string): Promise<StudioVcsIndex> {
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(branch)) throw studioError('bad_vcs', 400)
+  const url = `${sessionUrl(target, sessionId)}/vcs/branches/${encodeURIComponent(branch)}`
+  const headers = await auth(target)
+  const res = await request(target, url, { method: 'DELETE', headers })
+  if (!res.ok) throw await failure(res)
+  const body = await jsonBody(res)
+  if (!isObject(body)) throw studioError('bad_response', res.status)
+  return parseVcsIndexWire(body.vcs, res.headers.get('ETag'), res.status)
+}
+
+void ({ getVcs, postVcs, getCommit, deleteVcsBranch } satisfies StudioCloudVcsApi)
 
 void ({
   studioUrl,

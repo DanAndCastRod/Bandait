@@ -7,6 +7,7 @@
 import { STUDIO_DRUM_VOICES, drumVoiceForPitch, type DrumsParams, type StudioDrumsInstrument, type StudioInstrument } from '../session.ts'
 import { DRUM_ATTACK_S, DRUM_VOICE_SPECS, biquadQ, drumChokes, drumDecayS, drumHitGain, drumHitSeconds, drumTuneRatio, noiseOffsetS } from './core.ts'
 import { noiseBuffer } from './noise.ts'
+import { analogWander, noteDriftBipolar } from './analogDrift.ts'
 import type { Voice, VoiceEngine } from './voices.ts'
 
 /** ln(1000): la caida de referencia es el tiempo hasta -60 dB. */
@@ -14,11 +15,8 @@ const LN_1000 = Math.log(1000)
 /** Caida de cada rafaga de las palmas antes de la siguiente. */
 const BURST_TAU_S = 0.003
 
-function hitDriftBipolar(pitch: number, startS: number, salt: number): number {
-  let h = (Math.imul(pitch | 0, 374761393) ^ Math.imul(Math.round(startS * 1000), 668265263) ^ Math.imul(salt, 2246822519)) >>> 0
-  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0
-  return ((h ^ (h >>> 16)) >>> 0) / 2147483648 - 1
-}
+/** analog_drift 1: vagabundeo lento de la afinacion de la caja (+/- cents), muestreado al golpe. */
+const WANDER_TUNE_CENTS = 14
 
 export class DrumsEngine implements VoiceEngine {
   readonly type = 'drums' as const
@@ -53,9 +51,14 @@ export class DrumsEngine implements VoiceEngine {
     if (!(gain > 0)) return false
     const spec = DRUM_VOICE_SPECS[drum]
     const drift = Math.max(0, Math.min(1, p.analogDrift ?? 0))
-    const decayVar = drift > 0 ? 1 + hitDriftBipolar(voice.pitch, start, 5) * drift * 0.1 : 1
-    const tuneVar = drift > 0 ? 1 + hitDriftBipolar(voice.pitch, start, 13) * drift * 0.025 : 1
-    const filterVar = drift > 0 ? 1 + hitDriftBipolar(voice.pitch, start, 23) * drift * 0.08 : 1
+    // Semilla: posicion musical del golpe (igual en vivo y en el export); en vivo, la hora del contexto.
+    const seedS = voice.musical ? voice.musical.seedS : start
+    const trackSalt = voice.musical ? voice.musical.salt : 0
+    const hd = (salt: number) => noteDriftBipolar(voice.pitch, seedS, salt ^ trackSalt)
+    const wander = drift > 0 ? analogWander(voice.musical ? voice.musical.sessionS : start, trackSalt ^ 0x51) : 0
+    const decayVar = drift > 0 ? 1 + hd(5) * drift * 0.1 : 1
+    const tuneVar = drift > 0 ? (1 + hd(13) * drift * 0.025) * Math.pow(2, (wander * drift * WANDER_TUNE_CENTS) / 1200) : 1
+    const filterVar = drift > 0 ? 1 + hd(23) * drift * 0.08 : 1
     const decay = drumDecayS(p, drum) * decayVar
     const tune = drumTuneRatio(p, drum) * tuneVar
     const nyquist = ctx.sampleRate / 2
@@ -104,7 +107,7 @@ export class DrumsEngine implements VoiceEngine {
       voice.addNode(level)
       // Semilla determinista por voz (+ ligero offset de ruido cuando analogDrift > 0).
       const baseOffset = noiseOffsetS(1000 + STUDIO_DRUM_VOICES.indexOf(drum))
-      const driftOffset = drift > 0 ? Math.abs(hitDriftBipolar(voice.pitch, start, 31)) * 0.35 : 0
+      const driftOffset = drift > 0 ? Math.abs(hd(31)) * 0.35 : 0
       noise.start(start, (baseOffset + driftOffset) % 2)
       voice.addSource(noise)
     }

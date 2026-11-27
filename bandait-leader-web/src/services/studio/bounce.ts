@@ -22,6 +22,7 @@
  * Funciones puras exportadas (se prueban con node): bounceRange, bounceTrackIds, soloTrackSession.
  */
 import { encodeWavPcm } from '../wav.ts'
+import { measureWaveShaperLatency } from './fx.ts'
 import { buildGraph, graphLatency, prepareGraphContext, reverbTailSeconds, scheduleClips, trackHasSound } from './graph.ts'
 import { instrumentTailSeconds } from './instruments/core.ts'
 import { prepareInstruments, releaseInstruments } from './instruments/factory.ts'
@@ -105,6 +106,8 @@ async function renderOffline(
   const rate = Math.round(sampleRate)
   if (!(rate > 0)) throw new Error('Frecuencia de muestreo inválida para exportar.')
   const frames = Math.max(1, Math.round((range.endS - range.startS) * rate))
+  // El retardo del saturador se mide una vez por frecuencia; tiene que estar antes de la holgura.
+  await measureWaveShaperLatency(rate)
   // Holgura para el retardo del grafo: el peor caso es el limitador de respaldo.
   const reserve = Math.ceil(graphLatency(session, rate, false).totalS * rate) + 8
   const offline = new OfflineAudioContext({ numberOfChannels: 2, length: frames + reserve, sampleRate: rate })

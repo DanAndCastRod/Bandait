@@ -19,6 +19,7 @@ import type { StudioClip, StudioSession, StudioTrack } from '../session.ts'
 import type { ScheduleMidiOptions, ScheduledClips, StudioBuffers, StudioGraph, StudioInstrumentNode } from '../types.ts'
 import { midiEndSeconds, planMidiNotes } from './core.ts'
 import { PolyInstrument } from './voices.ts'
+import { trackDriftSalt } from './analogDrift.ts'
 
 /** Con cuanta anticipacion se programan las notas en tiempo real. */
 export const MIDI_LOOKAHEAD_S = 1
@@ -90,6 +91,15 @@ export function scheduleMidiClips(ctx: BaseAudioContext, graph: StudioGraph, ses
   const notBefore = options.nowCtxTime ?? (offline ? 0 : ctx.currentTime)
   const endS = Math.min(untilS, midiEndSeconds(session, playing))
   const toCtx = (s: number) => (baseFrame + Math.round((s - fromS) * sampleRate)) / sampleRate
+  const salts = new Map<string, number>()
+  const saltFor = (trackId: string) => {
+    let salt = salts.get(trackId)
+    if (salt === undefined) {
+      salt = trackDriftSalt(trackId)
+      salts.set(trackId, salt)
+    }
+    return salt
+  }
   let cursor = fromS
   let chase = true
   let stopped = false
@@ -112,11 +122,16 @@ export function scheduleMidiClips(ctx: BaseAudioContext, graph: StudioGraph, ses
     for (const note of notes) {
       const node = nodes.get(note.trackId)
       if (!node) continue
-      const start = Math.max(toCtx(Math.max(note.startS, fromS)), notBefore)
+      const audibleFromS = Math.max(note.startS, fromS)
+      const start = Math.max(toCtx(audibleFromS), notBefore)
       const end = toCtx(note.endS)
       if (!(end - start > MIN_NOTE_S)) continue
-      if (node instanceof PolyInstrument) node.playNoteOwned(note.pitch, note.velocity, start, end, owner)
-      else node.playNote(note.pitch, note.velocity, start, end)
+      if (node instanceof PolyInstrument) {
+        // Semilla de analog_drift = posicion musical (no la hora del contexto): suena igual en
+        // cada reproduccion y en el bounce. sessionS = segundo de sesion que suena en `start`.
+        const musical = { seedS: note.startS, sessionS: audibleFromS + (start - toCtx(audibleFromS)), salt: saltFor(note.trackId) }
+        node.playNoteOwned(note.pitch, note.velocity, start, end, owner, musical)
+      } else node.playNote(note.pitch, note.velocity, start, end)
     }
   }
 

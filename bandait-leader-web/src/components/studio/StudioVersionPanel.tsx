@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Check, GitBranch, GitCommit, Headphones, Plus, RotateCcw } from 'lucide-react'
+import { Check, GitBranch, GitCommit, Headphones, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { DEFAULT_STUDIO_BRANCHES, diffStudioSessions, type StudioSessionDiff } from '../../services/studio/studioVcs'
 import { useStudio, type StudioPanelProps } from './studioState'
 
@@ -38,6 +38,15 @@ export const StudioVersionPanel: React.FC<StudioPanelProps> = ({ controller }) =
     setCreatingBranch(false)
     setNewBranch('')
     await controller.switchVcsBranch(clean)
+  }
+
+  // Borrar una rama guardada es de Owner y MusicDirector; main no se borra (STUDIO_V2.md 7.2).
+  const canDeleteBranch = controller.canManageVcsBranches() && vcs.activeBranch !== 'main' && Boolean(vcs.index.branches[vcs.activeBranch])
+
+  const handleDeleteBranch = async () => {
+    const branch = vcs.activeBranch
+    if (!window.confirm(`¿Borrar la rama "${branch}" y sus versiones? Los audios quedan protegidos 30 días en la nube.`)) return
+    await controller.deleteVcsBranch(branch)
   }
 
   const toggleDiff = async (commitId: string) => {
@@ -109,6 +118,21 @@ export const StudioVersionPanel: React.FC<StudioPanelProps> = ({ controller }) =
             <Plus size={12} />
             RAMA
           </button>
+          {canDeleteBranch && (
+            <button
+              type="button"
+              className="stu-btn"
+              data-size="small"
+              data-tone="danger"
+              disabled={recording || vcs.saving}
+              onClick={() => void handleDeleteBranch()}
+              title={`Borrar la rama "${vcs.activeBranch}" y sus versiones (solo Owner o director musical)`}
+              data-testid="studio-vcs-branch-delete"
+            >
+              <Trash2 size={12} />
+              BORRAR
+            </button>
+          )}
         </div>
 
         {creatingBranch && (

@@ -18,7 +18,7 @@ import {
   type StudioCommandHandler,
   type StudioCommandId,
 } from '../../services/studio/commands'
-import { humanize, normalizeNotes, quantize, transpose } from '../../services/studio/midiOps'
+import { humanize, humanizeClipContext, normalizeNotes, quantize, transpose } from '../../services/studio/midiOps'
 import {
   beatsToSeconds,
   defaultInstrument,
@@ -372,6 +372,9 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     'edit.split': { run: () => controller.splitSelection(), ...editing },
     'edit.quantize': { run: () => controller.quantizeSelection(), ...editing },
     'edit.humanize': { run: () => controller.humanizeSelection(), ...editing },
+    // Groove de la banda: tomarlo del clip de audio elegido y aplicarlo a las notas o clips MIDI.
+    'midi.groove_capture': { run: () => void controller.captureGrooveFromClip(), isEnabled: () => inTimeline() },
+    'midi.groove_apply': { run: () => controller.applyGroove(), isEnabled: () => notRecording() && snap().piano.groove !== null },
 
     // ---- pistas ----
     'track.toggle_mute': { run: () => controller.toggleTrackMute() },
@@ -650,19 +653,25 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
         if (!loc) throw new Error(`No existe el clip MIDI "${clipId}".`)
         const rawPreset = str(args, 'preset')
         const preset = rawPreset && HUMANIZE_PRESETS.includes(rawPreset as HumanizePresetId) ? (rawPreset as HumanizePresetId) : undefined
+        const rawGrid = str(args, 'swing_grid')
         const notes = humanize(
           loc.clip.notes,
           null,
           {
+            // Fase del clip en la sesion, tempo, compas y bateria (por instrumento de la pista).
+            ...humanizeClipContext(session, loc),
             preset,
             amount: num(args, 'amount'),
+            timingMs: num(args, 'timing_ms'),
             timingBeats: num(args, 'timing_beats'),
             velocityRange: num(args, 'velocity_range'),
             lengthRatio: num(args, 'length_ratio'),
             swing: num(args, 'swing'),
+            swingGrid: rawGrid === '1/8' || rawGrid === '1/16' ? rawGrid : undefined,
+            strumMs: num(args, 'strum_ms'),
             strumBeats: num(args, 'strum_beats'),
             accentStrength: num(args, 'accent_strength'),
-            beatsPerBar: session.beatsPerBar,
+            laidBackMs: num(args, 'laid_back_ms'),
             seed: num(args, 'seed'),
           },
           loc.clip.lengthBeats,
@@ -717,13 +726,13 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     },
     'master.auto': {
       ...editing,
-      run: (_ctx, args) => {
+      run: async (_ctx, args) => {
         const rawProfile = str(args, 'profile')
         const profile = isAutoMasterProfile(rawProfile) ? rawProfile : 'streaming'
         const rawTone = str(args, 'tone')
         const tone = isAutoMasterTone(rawTone) ? rawTone : 'balanced'
         const targetLufs = num(args, 'target_lufs')
-        controller.applyAutoMaster(profile, tone, targetLufs)
+        await controller.applyAutoMaster(profile, tone, targetLufs)
       },
     },
     'mix.unmask': {
@@ -744,8 +753,8 @@ export function createStudioCommandRegistry(controller: StudioController, ui: St
     },
     'studio.detect_local': {
       ...editing,
-      run: () => {
-        controller.detectLocalMusicalAnalysis()
+      run: async () => {
+        await controller.detectLocalMusicalAnalysis()
       },
     },
     'session.set_meta': {

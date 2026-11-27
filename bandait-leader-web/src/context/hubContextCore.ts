@@ -140,6 +140,8 @@ export interface HubContextType {
   reorderSongs: (fromIndex: number, toIndex: number) => void
   replaceActivePlaylistSongs: (songs: PlaylistSong[]) => void
   addSongToPlaylist: (song: Omit<PlaylistSong, 'id' | 'orderIndex'>) => void
+  /** Agrega al setlist `playlistId` sin cambiar el setlist activo. */
+  addSongToPlaylistById: (playlistId: string, song: Omit<PlaylistSong, 'id' | 'orderIndex'>) => void
   removeSongFromPlaylist: (songId: string) => void
   updateStemTrackVolume: (channel: number, volumeDb: number) => void
   registerSongStemsInWorkspace: (songId: string, title: string, bpm: number, tracks: Array<{ label: string; role: string }>) => void

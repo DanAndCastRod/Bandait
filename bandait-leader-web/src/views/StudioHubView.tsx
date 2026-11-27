@@ -9,7 +9,6 @@ import {
   Headphones,
   Keyboard,
   Mic,
-  Music2,
   PanelBottom,
   PanelRight,
   PanelRightClose,
@@ -76,7 +75,7 @@ import {
   type StudioPanelLayout,
   type StudioSideTab,
 } from '../services/studio/panelLayout'
-import { sessionToNewSong, studioToSongPatch } from '../services/studio/songStudioBridge'
+import { StudioSongBridgeDialog } from '../components/studio/StudioSongBridgeDialog'
 import { createStudioCollabChannel, type RealtimeClientLike } from '../services/studio/studioCollab'
 import { listStemSongs } from '../services/stemStore'
 import { sectionSpans, type SectionSpan } from '../services/stemTiming'
@@ -88,7 +87,6 @@ import type { CommandContext, Keymap } from '../services/studio/types'
 import * as studioCloud from '../services/studio/studioCloud'
 import * as studioStore from '../services/studio/studioStore'
 import { readStudioPrefs, shouldStopRecordingOnLeave } from '../services/studio/studioPrefs'
-import { playlistItemFromSong } from '../services/workspaceSchema'
 import type { Playlist, Song } from '../types/hub'
 import '../styles/studio.css'
 
@@ -159,7 +157,6 @@ interface WorkspaceProps {
 }
 
 const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, playlists, onClose }) => {
-  const { sharing, saveSong, setActivePlaylist, addSongToPlaylist, setActiveSongId } = useHub()
   const snap = useStudio(controller)
   const { session, save, recording } = snap
   const mobile = useMobileScreen()
@@ -174,8 +171,6 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, playlist
   const [probeOpen, setProbeOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [songBridgeOpen, setSongBridgeOpen] = useState(false)
-  const [promoteArtist, setPromoteArtist] = useState('')
-  const [promotePlaylistId, setPromotePlaylistId] = useState('')
 
   const showPanel = useCallback((tab: StudioSideTab) => {
     setVersionsOpen(false)
@@ -364,39 +359,9 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, playlist
     void controller.closeInput().then(() => setProbeOpen(true))
   }
 
-  const songSyncPreview = useMemo(() => (song ? studioToSongPatch(song, session) : null), [song, session])
-
-  const handleApplyStudioToSong = () => {
-    if (!songSyncPreview || !sharing.activeCanEdit) return
-    saveSong(songSyncPreview.updatedSong)
-    setSongBridgeOpen(false)
-    controller.notify('info', `Ficha de «${songSyncPreview.updatedSong.title}» actualizada con el arreglo del Estudio.`)
-  }
-
-  const handleImportFromSong = () => {
-    if (!song) return
-    controller.syncStructureFromSong(song)
-    setSongBridgeOpen(false)
-  }
-
-  const handlePromoteFreeDemo = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!sharing.activeCanEdit) return
-    const created = sessionToNewSong(session, { artist: promoteArtist.trim() })
-    saveSong(created)
-    if (promotePlaylistId) {
-      const targetPl = playlists.find((p) => p.id === promotePlaylistId)
-      if (targetPl) setActivePlaylist(targetPl)
-      addSongToPlaylist(playlistItemFromSong(created))
-    }
-    controller.linkSongId(created.id)
-    setActiveSongId(created.id)
-    setSongBridgeOpen(false)
-    controller.notify('info', `Maqueta promovida a canción oficial: «${created.title}».`)
-  }
-
   const activePeers = useMemo(
-    () => snap.collaborators.filter((peer) => !peer.sessionId || peer.sessionId === session.id),
+    // Solo quien tiene ESTA sesion abierta; quien mira la lista de sesiones no colabora aqui.
+    () => snap.collaborators.filter((peer) => peer.sessionId === session.id),
     [snap.collaborators, session.id],
   )
 
@@ -847,98 +812,7 @@ const StudioWorkspace: React.FC<WorkspaceProps> = ({ controller, songs, playlist
       {exportOpen && <StudioExportDialog controller={controller} song={song ? { id: song.id, title: song.title } : null} onClose={() => setExportOpen(false)} />}
 
       {songBridgeOpen && (
-        <HubModal
-          title={song ? 'PUENTE ESTUDIO <-> CANCIÓN' : 'PROMOVER MAQUETA A CANCIÓN'}
-          onClose={() => setSongBridgeOpen(false)}
-          maxWidth="540px"
-          testId="studio-song-bridge-modal"
-        >
-          <div className="stu" style={{ padding: 0 }}>
-            {song && songSyncPreview ? (
-              <>
-                <div className="stu-section">
-                  <span className="stu-label">Sincronizar hacia Librería ({song.title})</span>
-                  <p className="stu-help">
-                    Envía tempo, compás, tonalidad, marcadores de sección y acordes del Estudio a la ficha oficial de la canción (preservando letras existentes).
-                  </p>
-                  <div className="stu-result">
-                    <strong>VISTA PREVIA DE CAMBIOS</strong>
-                    <p>{songSyncPreview.diff.summary}</p>
-                  </div>
-                  <div className="stu-actions" data-align="end">
-                    <button
-                      type="button"
-                      className="stu-btn"
-                      data-tone="primary"
-                      disabled={!sharing.activeCanEdit || !songSyncPreview.diff.changed}
-                      onClick={handleApplyStudioToSong}
-                      data-testid="studio-bridge-push-song"
-                    >
-                      <Check size={13} />
-                      ACTUALIZAR FICHA DE CANCIÓN
-                    </button>
-                  </div>
-                  {!sharing.activeCanEdit && (
-                    <p className="stu-help">Solo Owner o Director Musical pueden sobrescribir la ficha oficial del repertorio.</p>
-                  )}
-                </div>
-                <div className="stu-section">
-                  <span className="stu-label">Traer estructura desde Librería al Estudio</span>
-                  <p className="stu-help">
-                    Importa las {song.sections.length} secciones y acordes ChordPro actuales de «{song.title}» como marcadores y pista armónica en esta sesión (con opción de Deshacer).
-                  </p>
-                  <div className="stu-actions" data-align="end">
-                    <button type="button" className="stu-btn" onClick={handleImportFromSong} data-testid="studio-bridge-pull-song">
-                      <ArrowLeftRight size={13} />
-                      IMPORTAR DESDE CANCIÓN
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <form className="stu-section" onSubmit={handlePromoteFreeDemo}>
-                <span className="stu-label">Promover Maqueta Libre al Repertorio</span>
-                <p className="stu-help">
-                  Crea una canción oficial en la Librería heredando título ({session.title}), {session.bpm} BPM, tonalidad ({session.key || 'C'}), marcadores como secciones y acordes como ChordPro.
-                </p>
-                <label className="stu-form-row">
-                  <span className="stu-label">Artista / Autor (opcional)</span>
-                  <input
-                    className="stu-field"
-                    value={promoteArtist}
-                    onChange={(e) => setPromoteArtist(e.target.value)}
-                    placeholder="Nombre de la banda o compositor"
-                  />
-                </label>
-                {playlists.length > 0 && (
-                  <label className="stu-form-row">
-                    <span className="stu-label">Agregar también a Setlist (opcional)</span>
-                    <select className="stu-field" value={promotePlaylistId} onChange={(e) => setPromotePlaylistId(e.target.value)}>
-                      <option value="">No agregar a ningún setlist por ahora</option>
-                      {playlists.map((pl) => (
-                        <option key={pl.id} value={pl.id}>
-                          {pl.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <div className="stu-actions" data-align="end">
-                  <button type="button" className="stu-btn" data-tone="ghost" onClick={() => setSongBridgeOpen(false)}>
-                    CANCELAR
-                  </button>
-                  <button type="submit" className="stu-btn" data-tone="primary" disabled={!sharing.activeCanEdit} data-testid="studio-bridge-promote">
-                    <Music2 size={13} />
-                    CREAR CANCIÓN OFICIAL
-                  </button>
-                </div>
-                {!sharing.activeCanEdit && (
-                  <p className="stu-help">Solo Owner o Director Musical pueden crear canciones oficiales en una banda compartida.</p>
-                )}
-              </form>
-            )}
-          </div>
-        </HubModal>
+        <StudioSongBridgeDialog controller={controller} session={session} song={song} playlists={playlists} onClose={() => setSongBridgeOpen(false)} />
       )}
 
       {probeOpen && (

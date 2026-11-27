@@ -11,6 +11,9 @@
  * Version 2 (2026-11-26): agrega el bloque `waveform` (forma de onda, `waveform.ts`). Un
  * documento v1 sin el bloque se lee con la forma de onda por defecto; un hub v1 lee un v2 con
  * los campos que conoce.
+ *
+ * 2026-11-27: bloque opcional `font` (tipografia de interfaz y de etiquetas, `fonts.ts`), sin
+ * cambiar la version: si falta se usa la tipografia de fabrica.
  */
 import {
   WAVEFORM_KEY_COUNT,
@@ -20,8 +23,18 @@ import {
   waveformPreferencesWarnings,
   type WaveformPreferences,
 } from './waveform.ts'
+import {
+  FONT_KEY_COUNT,
+  defaultFontPreferences,
+  fontPreferencesEqual,
+  fontPreferencesWarnings,
+  parseFontPreferences,
+  type FontPreferences,
+  type LabelFontId,
+  type UiFontId,
+} from './fonts.ts'
 
-export type { WaveformPreferences }
+export type { WaveformPreferences, FontPreferences }
 
 export const UI_PREFERENCES_VERSION = 2
 
@@ -48,6 +61,8 @@ export interface UiPreferences {
   radius: number
   /** Forma de onda de los clips de audio (estilo, datos, escala, color, zoom vertical). */
   waveform: WaveformPreferences
+  /** Tipografia de interfaz y de etiquetas. */
+  font: FontPreferences
 }
 
 export const RADIUS_MIN = 8
@@ -80,7 +95,14 @@ export const ACCENT_PRESETS: ReadonlyArray<{ hex: string; name: string }> = [
 ]
 
 export function defaultUiPreferences(): UiPreferences {
-  return { version: UI_PREFERENCES_VERSION, theme: DEFAULT_THEME, accent: null, radius: RADIUS_DEFAULT, waveform: defaultWaveformPreferences() }
+  return {
+    version: UI_PREFERENCES_VERSION,
+    theme: DEFAULT_THEME,
+    accent: null,
+    radius: RADIUS_DEFAULT,
+    waveform: defaultWaveformPreferences(),
+    font: defaultFontPreferences(),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +406,7 @@ export function parseUiPreferences(raw: unknown): UiPreferences | null {
     accent: normalizeHex(raw.accent),
     radius: raw.radius === undefined ? d.radius : clampRadius(raw.radius),
     waveform: parseWaveformPreferences(raw.waveform),
+    font: parseFontPreferences(raw.font),
   }
 }
 
@@ -404,6 +427,7 @@ export function uiPreferencesWarnings(raw: unknown, path = 'uiPreferences'): str
     if (!ok) out.push(`${path}.radius: debe ir de ${RADIUS_MIN} a ${RADIUS_MAX} px.`)
   }
   out.push(...waveformPreferencesWarnings(raw.waveform, `${path}.waveform`))
+  out.push(...fontPreferencesWarnings(raw.font, `${path}.font`))
   return out
 }
 
@@ -419,7 +443,8 @@ export function uiPreferencesEqual(a: UiPreferences | null | undefined, b: UiPre
     a.theme === b.theme &&
     a.accent === b.accent &&
     a.radius === b.radius &&
-    waveformPreferencesEqual(a.waveform, b.waveform)
+    waveformPreferencesEqual(a.waveform, b.waveform) &&
+    fontPreferencesEqual(a.font, b.font)
   )
 }
 
@@ -428,7 +453,12 @@ const UI_PREFERENCES_KEY_COUNT = Object.keys(defaultUiPreferences()).length
 
 function hasCleanShape(raw: unknown): boolean {
   if (!isPlainObject(raw) || Object.keys(raw).length !== UI_PREFERENCES_KEY_COUNT) return false
-  return isPlainObject(raw.waveform) && Object.keys(raw.waveform).length === WAVEFORM_KEY_COUNT
+  return (
+    isPlainObject(raw.waveform) &&
+    Object.keys(raw.waveform).length === WAVEFORM_KEY_COUNT &&
+    isPlainObject(raw.font) &&
+    Object.keys(raw.font).length === FONT_KEY_COUNT
+  )
 }
 
 /** Preferencias vigentes: las del workspace si las trae, si no las de respaldo, si no las de fabrica. */
@@ -471,6 +501,8 @@ export interface AppearanceVars {
   /** Variables que se escriben en <html style>: acento, tinta y redondez. */
   vars: Record<string, string>
   accent: AccentContrast
+  /** `data-font-ui` y `data-font-labels` de <html> (global.css asigna las familias). */
+  font: { ui: UiFontId; labels: LabelFontId }
 }
 
 /** Lo que el DOM necesita para aplicar unas preferencias. */
@@ -480,6 +512,7 @@ export function appearanceVars(prefs: UiPreferences): AppearanceVars {
   return {
     theme: clean.theme,
     accent,
+    font: { ui: clean.font.ui, labels: clean.font.labels },
     vars: {
       '--b-accent': accent.accent,
       '--b-on-accent': accent.ink,
@@ -495,12 +528,14 @@ export interface AppearanceCache {
   v: 1
   theme: ThemeId
   vars: Record<string, string>
+  /** Tipografia para el script de index.html (ids, con FONT_ID_RE). */
+  font: { ui: UiFontId; labels: LabelFontId }
   prefs: UiPreferences
 }
 
 export function serializeAppearanceCache(prefs: UiPreferences): string {
-  const { theme, vars } = appearanceVars(prefs)
-  const cache: AppearanceCache = { v: 1, theme, vars, prefs: normalizeUiPreferences(prefs) }
+  const { theme, vars, font } = appearanceVars(prefs)
+  const cache: AppearanceCache = { v: 1, theme, vars, font, prefs: normalizeUiPreferences(prefs) }
   return JSON.stringify(cache)
 }
 
@@ -526,5 +561,5 @@ export function parseAppearanceCache(raw: string | null | undefined): Appearance
       if (CACHE_VAR_NAME_RE.test(k) && typeof v === 'string' && CACHE_VAR_VALUE_RE.test(v)) vars[k] = v
     }
   }
-  return { v: 1, theme, vars, prefs }
+  return { v: 1, theme, vars, font: { ui: prefs.font.ui, labels: prefs.font.labels }, prefs }
 }

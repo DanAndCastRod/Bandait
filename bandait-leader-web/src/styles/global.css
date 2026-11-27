@@ -115,6 +115,17 @@
   --radius-lg: var(--b-radius-card);
 }
 
+/* Tipografia elegida en AJUSTES > APARIENCIA (services/fonts.ts). services/appearanceDom.ts pone
+   data-font-ui y data-font-labels en <html> y baja la familia de Google Fonts si hace falta. */
+html[data-font-ui='inter'] { --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='dm-sans'] { --font-ui: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='jakarta'] { --font-ui: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='manrope'] { --font-ui: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-ui='geist'] { --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+html[data-font-labels='geist-mono'] { --font-mono: 'Geist Mono', 'SF Mono', Menlo, Consolas, monospace; }
+/* Etiquetas con la misma letra de la interfaz: las cifras siguen alineadas (tabulares). */
+html[data-font-labels='sans'] { --font-mono: var(--font-ui); font-variant-numeric: tabular-nums; }
+
 [data-theme='light-estudio'] {
   --b-overlay: color-mix(in srgb, #15181C 40%, transparent);
   --b-shadow: 0 14px 36px color-mix(in srgb, #15181C 18%, transparent);
@@ -304,11 +315,20 @@ input, select, textarea {
 .hub-shell[data-layout='desktop'][data-mini='true'] .hub-main {
   padding-bottom: 112px;
 }
+/* Movil: barra inferior + boton flotante HERRAMIENTAS (MobileWidgetTray, 44 px sobre la barra o
+   sobre el mini reproductor). El contenido deja ese alto libre al final y scroll-padding-bottom
+   hace que scrollIntoView (confirmaciones, foco) no deje un boton debajo de los flotantes. */
 .hub-shell[data-layout='mobile'] .hub-main {
-  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(124px + env(safe-area-inset-bottom, 0px));
 }
 .hub-shell[data-layout='mobile'][data-mini='true'] .hub-main {
-  padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(184px + env(safe-area-inset-bottom, 0px));
+}
+html:has(.hub-shell[data-layout='mobile']) {
+  scroll-padding-bottom: calc(124px + env(safe-area-inset-bottom, 0px));
+}
+html:has(.hub-shell[data-layout='mobile'][data-mini='true']) {
+  scroll-padding-bottom: calc(184px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Rail */
@@ -810,7 +830,7 @@ input, select, textarea {
   background: var(--b-card);
 }
 
-/* Movil: barra inferior de pildoras fijas + Mas. Arriba en 56 px desde el borde (lo que reserva studio.css). */
+/* Movil: barra inferior de 4 pildoras (Ensayo, Canciones, Setlists, Mas). Arriba en 56 px desde el borde (lo que reserva studio.css). */
 .hub-mobile-nav {
   position: fixed;
   left: 8px;
@@ -839,7 +859,7 @@ input, select, textarea {
   border: 0;
   background: transparent;
   color: var(--b-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
 }
 .hub-pill-tab > span {
@@ -1378,7 +1398,7 @@ input, select, textarea {
   display: inline-block;
   min-width: 18px;
   text-align: center;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
   padding: 2px 6px;

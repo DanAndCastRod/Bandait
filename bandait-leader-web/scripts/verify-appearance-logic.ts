@@ -64,6 +64,7 @@ import {
 } from '../src/services/studioCanvasPalette.ts'
 import { loadWorkspaceDocument, migrateWorkspace, parseImportedWorkspace, validateWorkspace } from '../src/services/workspaceSchema.ts'
 import { defaultWaveformPreferences } from '../src/services/waveform.ts'
+import { FONT_ID_RE, LABEL_FONTS, LABEL_FONT_IDS, UI_FONTS, UI_FONT_IDS, defaultFontPreferences, googleFontsUrl } from '../src/services/fonts.ts'
 import { mergeWorkspace, personalPart, sliceBand, type SharedBand } from '../src/services/sharedBands.ts'
 import { stableStringify } from '../src/services/workspaceSync.ts'
 import type { WorkspaceStore } from '../src/types/hub.ts'
@@ -473,6 +474,7 @@ check('parseUiPreferences: ausente o no-objeto da null; campos danados toman el 
     accent: '#AABBCC',
     radius: 8,
     waveform: defaultWaveformPreferences(),
+    font: defaultFontPreferences(),
   })
   assert.deepEqual(parseUiPreferences({ version: 7, theme: 'dark-grafito', accent: null, radius: 2000, futuro: true }), {
     version: 2,
@@ -480,6 +482,7 @@ check('parseUiPreferences: ausente o no-objeto da null; campos danados toman el 
     accent: null,
     radius: 999,
     waveform: defaultWaveformPreferences(),
+    font: defaultFontPreferences(),
   })
   assert.deepEqual(parseUiPreferences({}), defaultUiPreferences())
 })
@@ -524,9 +527,9 @@ check('withUiPreferences: mismo objeto si no cambia (sin escritura), nuevo objet
   assert.notEqual(next, fx)
   assert.equal(next.bands, fx.bands)
   assert.equal(next.songsMap, fx.songsMap)
-  assert.deepEqual(next.uiPreferences, { version: 2, theme: 'dark-grafito', accent: null, radius: 999, waveform: defaultWaveformPreferences() })
+  assert.deepEqual(next.uiPreferences, { version: 2, theme: 'dark-grafito', accent: null, radius: 999, waveform: defaultWaveformPreferences(), font: defaultFontPreferences() })
   const dirty = withUiPreferences({ ...fx, uiPreferences: { ...fx.uiPreferences!, extra: 1 } as unknown as UiPreferences }, fx.uiPreferences!)
-  assert.equal(Object.keys(dirty.uiPreferences!).length, 5, 'limpia campos sobrantes')
+  assert.equal(Object.keys(dirty.uiPreferences!).length, 6, 'limpia campos sobrantes')
   const dirtyWave = withUiPreferences({ ...fx, uiPreferences: { ...fx.uiPreferences!, waveform: { ...fx.uiPreferences!.waveform, extra: 1 } } as unknown as UiPreferences }, fx.uiPreferences!)
   assert.notEqual(dirtyWave.uiPreferences, fx.uiPreferences)
   assert.equal(Object.keys(dirtyWave.uiPreferences!.waveform).length, 9, 'limpia campos sobrantes del bloque waveform')
@@ -567,7 +570,7 @@ check('banda compartida: uiPreferences queda en la parte personal y nunca en el 
   assert.equal('uiPreferences' in (slice as object), false, 'el documento de la banda no lleva apariencia')
   assert.equal(stableStringify(slice), stableStringify(sliceBand(merged, bandId)), 'la banda compartida no cambia: nada que bloquear ni escribir')
   const mine = personalPart(edited, new Set([bandId]), personal.activeBandId)
-  assert.deepEqual(mine.uiPreferences, { version: 2, theme: 'dark-grafito', accent: '#B48EDB', radius: 24, waveform: defaultWaveformPreferences() })
+  assert.deepEqual(mine.uiPreferences, { version: 2, theme: 'dark-grafito', accent: '#B48EDB', radius: 24, waveform: defaultWaveformPreferences(), font: defaultFontPreferences() })
   assert.notEqual(stableStringify(mine), stableStringify(personalPart(merged, new Set([bandId]), personal.activeBandId)), 'la parte personal si cambia')
 })
 
@@ -624,6 +627,62 @@ check('el script de index.html usa la misma clave y el mismo filtro que parseApp
   assert.match(indexHtml, /<html lang="es" data-theme="dark-grafito">/, 'Dark Grafito por defecto sin JS')
   assert.ok(indexHtml.indexOf('bandait_ui_appearance') < indexHtml.indexOf('/src/main.tsx'), 'corre antes del bundle')
   assert.ok(indexHtml.includes(THEME_TOKENS['light-estudio'].bg) && indexHtml.includes(THEME_TOKENS['dark-grafito'].bg), 'theme-color de cada tema')
+})
+
+console.log('Tipografia (uiPreferences.font)')
+
+check('por defecto IBM Plex Sans y Plex Mono; lectura tolerante campo por campo', () => {
+  assert.deepEqual(defaultUiPreferences().font, { version: 1, ui: 'plex', labels: 'mono' })
+  assert.deepEqual(parseUiPreferences({ theme: 'dark-grafito' })?.font, defaultFontPreferences())
+  assert.deepEqual(parseUiPreferences({ font: { ui: 'manrope', labels: 'comic' } })?.font, { version: 1, ui: 'manrope', labels: 'mono' })
+  assert.deepEqual(parseUiPreferences({ font: 'inter' })?.font, defaultFontPreferences())
+  assert.equal(uiPreferencesWarnings({ font: { ui: 'papyrus' } }).length, 1)
+  assert.deepEqual(uiPreferencesWarnings({ font: { ui: 'geist', labels: 'sans' } }), [])
+})
+
+check('withUiPreferences no reescribe un workspace que ya trae la misma tipografia', () => {
+  const prefs = { ...defaultUiPreferences(), font: { version: 1, ui: 'inter' as const, labels: 'sans' as const } }
+  const ws = withUiPreferences({ bands: [] }, prefs)
+  assert.equal(withUiPreferences(ws, prefs), ws)
+  assert.notEqual(withUiPreferences(ws, defaultUiPreferences()), ws)
+})
+
+check('cache: lleva la tipografia y el script de index.html la aplica con los mismos ids', () => {
+  const prefs = { ...defaultUiPreferences(), font: { version: 1, ui: 'jakarta' as const, labels: 'geist-mono' as const } }
+  const cache = parseAppearanceCache(serializeAppearanceCache(prefs))
+  assert.deepEqual(cache?.font, { ui: 'jakarta', labels: 'geist-mono' })
+  assert.ok(indexHtml.includes("setAttribute('data-font-ui'") && indexHtml.includes("setAttribute('data-font-labels'"))
+  for (const id of [...UI_FONT_IDS, ...LABEL_FONT_IDS]) assert.match(id, FONT_ID_RE)
+  for (const f of [...UI_FONTS, ...LABEL_FONTS]) {
+    if (f.googleFamily) assert.ok(indexHtml.includes(`'${f.id}': '${f.googleFamily}'`), `index.html sabe bajar ${f.family}`)
+  }
+})
+
+check('global.css define la familia de cada opcion y la URL de Google Fonts es la que dedup espera', () => {
+  for (const f of UI_FONTS) {
+    if (f.id === 'plex') continue
+    assert.ok(globalCss.includes(`html[data-font-ui='${f.id}'] { --font-ui: '${f.family}'`), `regla de ${f.family}`)
+  }
+  assert.ok(globalCss.includes("html[data-font-labels='geist-mono'] { --font-mono: 'Geist Mono'"))
+  assert.ok(globalCss.includes("html[data-font-labels='sans'] { --font-mono: var(--font-ui)"))
+  assert.equal(googleFontsUrl(defaultFontPreferences()), null)
+  assert.equal(
+    googleFontsUrl({ version: 1, ui: 'inter', labels: 'geist-mono' }),
+    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap',
+  )
+})
+
+check('ninguna letra fija de IBM Plex Mono fuera de global.css (usa var(--font-mono) o el token mono)', () => {
+  const files = [
+    '../src/components/hubStyles.ts',
+    '../src/components/AuthScreen.tsx',
+    '../src/components/SupabaseConfigModal.tsx',
+    '../src/components/SyncNoticeBanner.tsx',
+    '../src/components/UserManualModal.tsx',
+    '../src/views/BandMembersHubView.tsx',
+    '../src/styles/audio.css',
+  ]
+  for (const file of files) assert.ok(!read(file).includes("'IBM Plex Mono', monospace"), `${file} todavia fija IBM Plex Mono`)
 })
 
 console.log(`\n${passed} ok, ${failures.length} fallas`)

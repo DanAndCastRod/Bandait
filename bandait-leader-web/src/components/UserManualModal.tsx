@@ -80,7 +80,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
             <div>
               <div
                 style={{
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: 'var(--font-mono)',
                   fontWeight: 800,
                   fontSize: '14px',
                   letterSpacing: '1px',
@@ -143,7 +143,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                 border: activeSection === tab.id ? '1px solid var(--b-cobalt)' : '1px solid transparent',
                 borderRadius: 'var(--b-radius-field)',
                 color: activeSection === tab.id ? 'var(--b-text)' : 'var(--b-muted)',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: 'var(--font-mono)',
                 fontSize: '11px',
                 fontWeight: activeSection === tab.id ? 700 : 400,
                 cursor: 'pointer',
@@ -210,7 +210,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   >
                     <span
                       style={{
-                        fontFamily: "'IBM Plex Mono', monospace",
+                        fontFamily: 'var(--font-mono)',
                         fontSize: '11px',
                         color: 'var(--b-accent)',
                         fontWeight: 800,
@@ -244,7 +244,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   border: '1px solid transparent',
                   borderRadius: 'var(--b-radius-card)',
                   padding: '16px',
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: 'var(--font-mono)',
                   fontSize: '12px',
                   color: 'var(--b-text)',
                   lineHeight: 1.6,
@@ -296,11 +296,11 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                 ].map((track, i) => (
                   <div key={i} style={{ background: 'var(--b-modal)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: 'var(--b-cobalt)', fontWeight: 700 }}>{track.ch}</span>
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '9px', background: 'color-mix(in srgb, var(--b-success) 10%, transparent)', color: 'var(--b-success)', padding: '2px 5px', borderRadius: 'var(--b-radius-field)' }}>-0.5 dBFS OK</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--b-cobalt)', fontWeight: 700 }}>{track.ch}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', background: 'color-mix(in srgb, var(--b-success) 10%, transparent)', color: 'var(--b-success)', padding: '2px 5px', borderRadius: 'var(--b-radius-field)' }}>-0.5 dBFS OK</span>
                     </div>
                     <strong style={{ fontSize: '13px', color: 'var(--b-text)' }}>{track.name}</strong>
-                    <div style={{ fontSize: '11px', color: 'var(--b-accent)', fontFamily: "'IBM Plex Mono', monospace" }}>{track.dest}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--b-accent)', fontFamily: 'var(--font-mono)' }}>{track.dest}</div>
                     <p style={{ margin: 0, fontSize: '11px', color: 'var(--b-muted)' }}>{track.notes}</p>
                   </div>
                 ))}
@@ -364,7 +364,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
                   { role: 'Director Musical', focus: 'Mando dual y saltos de tema', detail: 'Botones grandes para disparar temas imprevistos con alerta general a la banda.' },
                 ].map((item, idx) => (
                   <div key={idx} style={{ background: 'var(--b-modal)', border: '1px solid transparent', borderRadius: 'var(--b-radius-card)', padding: '14px' }}>
-                    <div style={{ color: 'var(--b-violet)', fontWeight: 800, fontSize: '13px', fontFamily: "'IBM Plex Mono', monospace" }}>{item.role}</div>
+                    <div style={{ color: 'var(--b-violet)', fontWeight: 800, fontSize: '13px', fontFamily: 'var(--font-mono)' }}>{item.role}</div>
                     <div style={{ color: 'var(--b-text)', fontWeight: 700, fontSize: '12px', marginTop: '4px' }}>{item.focus}</div>
                     <div style={{ color: 'var(--b-muted)', fontSize: '11px', marginTop: '4px', lineHeight: 1.4 }}>{item.detail}</div>
                   </div>
@@ -387,7 +387,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
             gap: '10px',
           }}
         >
-          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+          <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: 'var(--font-mono)' }}>
             BANDAI SYSTEM SPEC V3.0 // 0 EMOJIS // SWISS BAUHAUS LAB
           </div>
           <button
@@ -398,7 +398,7 @@ export const UserManualModal: React.FC<Props> = ({ onClose }) => {
               color: 'var(--b-on-strong)',
               borderRadius: 'var(--b-radius-field)',
               padding: '8px 20px',
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: 'var(--font-mono)',
               fontSize: '12px',
               fontWeight: 700,
               cursor: 'pointer',

@@ -3,7 +3,7 @@ import { useHub, type HubActionResult } from '../context/hubContextCore'
 import type { MemberRole } from '../types/hub'
 import { Users, UserPlus, Shield, Mail, Phone, CheckCircle2, Share2, Copy, LogOut, UserMinus, Trash2 } from 'lucide-react'
 
-const MONO = "'IBM Plex Mono', monospace"
+const MONO = 'var(--font-mono)'
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -219,7 +219,7 @@ export const BandMembersHubView: React.FC = () => {
             borderRadius: 'var(--b-radius-field)',
             padding: '10px 18px',
             color: 'var(--b-on-strong)',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: 'var(--font-mono)',
             fontSize: '12px',
             fontWeight: 700,
             cursor: canInvite ? 'pointer' : 'not-allowed',
@@ -241,7 +241,7 @@ export const BandMembersHubView: React.FC = () => {
           padding: '10px 14px',
           fontSize: '11px',
           color: 'var(--b-muted)',
-          fontFamily: "'IBM Plex Mono', monospace",
+          fontFamily: 'var(--font-mono)',
           lineHeight: 1.5,
         }}
       >
@@ -368,7 +368,7 @@ export const BandMembersHubView: React.FC = () => {
             padding: '10px 14px',
             color: 'var(--b-danger-text)',
             fontSize: '12px',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: 'var(--font-mono)',
           }}
         >
           [ROLES]: {roleError}
@@ -392,7 +392,7 @@ export const BandMembersHubView: React.FC = () => {
               style={{
                 borderBottom: '1px solid var(--b-border)',
                 background: 'var(--b-elevated)',
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: 'var(--font-mono)',
                 fontSize: '10px',
                 color: 'var(--b-muted)',
                 letterSpacing: '1px',
@@ -420,7 +420,7 @@ export const BandMembersHubView: React.FC = () => {
                 {/* NAME */}
                 <td style={{ padding: '14px 16px' }}>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--b-text)' }}>{member.name}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  <div style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: 'var(--font-mono)' }}>
                     {member.email}
                   </div>
                 </td>
@@ -431,7 +431,7 @@ export const BandMembersHubView: React.FC = () => {
                 </td>
 
                 {/* CONTACT */}
-                <td style={{ padding: '14px 16px', fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: 'var(--b-muted)' }}>
+                <td style={{ padding: '14px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--b-muted)' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Mail size={11} /> {member.email}
@@ -459,7 +459,7 @@ export const BandMembersHubView: React.FC = () => {
                       borderRadius: 'var(--b-radius-field)',
                       padding: '6px 10px',
                       color: roleColors[member.role] || 'var(--b-text)',
-                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontFamily: 'var(--font-mono)',
                       fontSize: '11px',
                       fontWeight: 700,
                       outlineOffset: '1px',
@@ -481,7 +481,7 @@ export const BandMembersHubView: React.FC = () => {
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '4px',
-                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontFamily: 'var(--font-mono)',
                       fontSize: '10px',
                       whiteSpace: 'nowrap',
                       color: isShared ? 'var(--b-success)' : 'var(--b-muted)',
@@ -537,7 +537,7 @@ export const BandMembersHubView: React.FC = () => {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
           <Shield size={16} style={{ color: 'var(--b-cobalt)' }} />
-          <h4 style={{ margin: 0, fontSize: '13px', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '1px' }}>
+          <h4 style={{ margin: 0, fontSize: '13px', fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}>
             MATRIZ DE PRIVILEGIOS POR ROL
           </h4>
         </div>
@@ -631,7 +631,7 @@ export const BandMembersHubView: React.FC = () => {
               overflowY: 'auto',
             }}
           >
-            <h3 style={{ margin: '0 0 16px 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: '16px' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontFamily: 'var(--font-mono)', fontSize: '16px' }}>
               INVITAR INTEGRANTE A {activeBand?.name.toUpperCase()}
             </h3>
 
@@ -644,7 +644,7 @@ export const BandMembersHubView: React.FC = () => {
                 </div>
               )}
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: 'var(--font-mono)' }}>
                   NOMBRE COMPLETO
                 </label>
                 <input
@@ -667,7 +667,7 @@ export const BandMembersHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: 'var(--font-mono)' }}>
                   CORREO ELECTRÓNICO (GOOGLE ACCOUNT)
                 </label>
                 <input
@@ -690,7 +690,7 @@ export const BandMembersHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: 'var(--font-mono)' }}>
                   INSTRUMENTO O FUNCIÓN
                 </label>
                 <input
@@ -713,7 +713,7 @@ export const BandMembersHubView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                <label style={{ fontSize: '11px', color: 'var(--b-muted)', fontFamily: 'var(--font-mono)' }}>
                   ROL ASIGNADO
                 </label>
                 <select
@@ -730,9 +730,9 @@ export const BandMembersHubView: React.FC = () => {
                     boxSizing: 'border-box',
                   }}
                 >
-                  <option value="Musician">Músico (solo lectura)</option>
+                  <option value="Musician">Músico (lectura; colabora en el Estudio)</option>
                   <option value="MusicDirector">Director Musical (edita)</option>
-                  <option value="SoundEngineer">Ingeniero FOH (solo lectura)</option>
+                  <option value="SoundEngineer">Ingeniero FOH (lectura; colabora en el Estudio)</option>
                   <option value="Substitute">Músico Suplente (solo lectura)</option>
                   {isShared && activeBandRole === 'Owner' && <option value="Owner">Dueño (Owner)</option>}
                 </select>

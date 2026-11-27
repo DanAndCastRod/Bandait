@@ -31,6 +31,7 @@ function wav(seconds: number, freq: number, rate = 8000): Buffer {
 
 /** uiPreferences.waveform por defecto (WORKSPACE_V2.md seccion 8): el aspecto de siempre. */
 const DEFAULT_WAVEFORM = { version: 1, style: 'filled', layout: 'mirrored', data: 'peak', scale: 'linear', color: 'track', gain: 1, barWidth: 2, barGap: 1 };
+const DEFAULT_FONT = { version: 1, ui: 'plex', labels: 'mono' };
 
 async function enterDemo(page: Page) {
   await page.goto('/');
@@ -142,7 +143,7 @@ test.describe('Web Admin Hub - apariencia', () => {
       const key = Object.keys(localStorage).find((k) => k.startsWith('bandait_workspace_'));
       return key ? JSON.parse(localStorage.getItem(key) || '{}').uiPreferences : null;
     });
-    expect(stored).toEqual({ version: 2, theme: 'light-estudio', accent: '#E06C9F', radius: 16, waveform: DEFAULT_WAVEFORM });
+    expect(stored).toEqual({ version: 2, theme: 'light-estudio', accent: '#E06C9F', radius: 16, waveform: DEFAULT_WAVEFORM, font: DEFAULT_FONT });
 
     // Sin el bundle (main.tsx bloqueado) el script de index.html ya aplico tema, acento y redondez.
     await page.route('**/src/main.tsx*', (route) => route.abort());
@@ -257,6 +258,44 @@ test.describe('Web Admin Hub - apariencia', () => {
     await expect(page.getByTestId('appearance-waveform-reset')).toBeDisabled();
   });
 
+  test('tipografia: interfaz y etiquetas se eligen en APARIENCIA, se aplican a todo el Hub y sobreviven a la recarga', async ({ page }) => {
+    // Sin red hacia Google Fonts en la prueba: se comprueba la familia pedida, no el archivo.
+    await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+    await enterDemo(page);
+    await openAppearance(page);
+    const bodyFont = () => page.evaluate(() => getComputedStyle(document.body).fontFamily);
+    const monoVar = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim());
+    // Por defecto: IBM Plex Sans y Plex Mono.
+    await expect(page.getByTestId('appearance-font-ui-plex')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('appearance-font-labels-mono')).toHaveAttribute('aria-checked', 'true');
+    expect(await bodyFont()).toContain('IBM Plex Sans');
+
+    await page.getByTestId('appearance-font-ui-manrope').click();
+    await page.getByTestId('appearance-font-labels-sans').click();
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.fontUi)).toBe('manrope');
+    await expect.poll(bodyFont).toContain('Manrope');
+    // Las etiquetas usan la misma letra de la interfaz.
+    expect(await monoVar()).toContain('Manrope');
+    // La hoja de Google Fonts de la eleccion se pide una sola vez.
+    await expect(page.locator('link[data-bandait-font]')).toHaveCount(1);
+    await expect(page.locator('link[data-bandait-font]')).toHaveAttribute('href', /family=Manrope/);
+
+    const stored = () =>
+      page.evaluate(() => {
+        const key = Object.keys(localStorage).find((k) => k.startsWith('bandait_workspace_'));
+        return key ? JSON.parse(localStorage.getItem(key) || '{}').uiPreferences?.font : null;
+      });
+    await expect.poll(stored).toEqual({ version: 1, ui: 'manrope', labels: 'sans' });
+
+    // Al recargar se aplica antes del primer render (script de index.html).
+    await page.reload();
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.fontLabels)).toBe('sans');
+    await expect.poll(bodyFont).toContain('Manrope');
+    await openAppearance(page);
+    await page.getByTestId('appearance-font-labels-geist-mono').click();
+    await expect.poll(monoVar).toContain('Geist Mono');
+  });
+
   test('lienzos del Estudio con Light Estudio: carriles y regla claros; repinta al cambiar el tema', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('bandait_studio', '1'));
     await enterDemo(page);
@@ -336,7 +375,7 @@ test.describe('Web Admin Hub - apariencia', () => {
 
     await expect
       .poll(() => fake.workspaces[0].workspace.uiPreferences, { timeout: 10000 })
-      .toEqual({ version: 2, theme: 'light-estudio', accent: null, radius: 24, waveform: DEFAULT_WAVEFORM });
+      .toEqual({ version: 2, theme: 'light-estudio', accent: null, radius: 24, waveform: DEFAULT_WAVEFORM, font: DEFAULT_FONT });
     expect(JSON.stringify(fake.bands[0].content)).toBe(bandBefore);
     expect(fake.bands[0].content.uiPreferences).toBeUndefined();
     expect(patches.filter((p) => p.endsWith('/bandait_bands'))).toEqual([]);

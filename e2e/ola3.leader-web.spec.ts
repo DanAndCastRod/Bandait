@@ -45,6 +45,8 @@ test.describe('Web Admin Hub - Ola 3 (VCS, Optimizador IO, Universo Canción, DS
     await page.getByTestId('studio-new-title').fill('Sesión Ola 3 E2E');
     await page.getByTestId('studio-create').click();
     await expect(page.getByTestId('studio-workspace')).toBeVisible();
+    // En escritorio no hay boton flotante de herramientas (solo movil).
+    await expect(page.getByTestId('mobile-widget-fab')).toHaveCount(0);
 
     // Abrir panel de Versiones, guardar un snapshot y alternar escucha A/B 0 ms
     await page.getByTestId('studio-versions-open').click();
@@ -81,5 +83,34 @@ test.describe('Web Admin Hub - Ola 3 (VCS, Optimizador IO, Universo Canción, DS
     await tray.getByTestId('mobile-widget-tab-ab').click();
     await expect(tray.getByTestId('widget-ab')).toBeVisible();
     await tray.getByTestId('mobile-widget-close').click();
+    await expect(tray).toHaveCount(0);
+  });
+
+  test('Promover maqueta: agrega al setlist elegido sin cambiar el setlist activo', async ({ page }) => {
+    await enterDemo(page);
+    await openView(page, 'setlists');
+    const activeSelect = page.getByLabel('Setlist activo');
+    await expect(activeSelect).toBeVisible();
+    const activeId = await activeSelect.inputValue();
+    const ids = await activeSelect.locator('option').evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value));
+    test.skip(ids.length < 2, 'la demo necesita dos setlists');
+    const targetId = ids.find((id) => id !== activeId)!;
+    const rowsBefore = await page.getByTestId('setlist-row').count();
+
+    await openView(page, 'studio');
+    await page.getByTestId('studio-new-title').fill('Maqueta Promovida E2E');
+    await page.getByTestId('studio-create').click();
+    await expect(page.getByTestId('studio-workspace')).toBeVisible();
+    await page.getByTestId('studio-song-bridge-open').click();
+    const modal = page.getByTestId('studio-song-bridge-modal');
+    await modal.getByTestId('studio-bridge-promote-playlist').selectOption(targetId);
+    await modal.getByTestId('studio-bridge-promote').click();
+    await expect(modal).toHaveCount(0);
+
+    await openView(page, 'setlists');
+    await expect(activeSelect).toHaveValue(activeId);
+    await expect(page.getByTestId('setlist-row')).toHaveCount(rowsBefore);
+    await activeSelect.selectOption(targetId);
+    await expect(page.getByTestId('setlist-row').filter({ hasText: 'Maqueta Promovida E2E' })).toHaveCount(1);
   });
 });
